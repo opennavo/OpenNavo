@@ -66,7 +66,13 @@ jobs:
           password: ${{ github.token }}
       - id: image
         uses: docker/build-push-action@v7
+        # Keep GitHub event data out of logs and downloadable build records.
+        env:
+          BUILDX_METADATA_PROVENANCE: disabled
+          DOCKER_BUILD_RECORD_UPLOAD: false
+          DOCKER_BUILD_SUMMARY: false
         with:
+          provenance: false
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           target: ${{ matrix.target }}

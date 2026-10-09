@@ -42,7 +42,13 @@ jobs:
             type=ref,event=tag
             type=raw,value=local,enable=${{ github.event_name == 'workflow_dispatch' }}
       - uses: docker/build-push-action@v7
+        # Keep GitHub event data out of logs and downloadable build records.
+        env:
+          BUILDX_METADATA_PROVENANCE: disabled
+          DOCKER_BUILD_RECORD_UPLOAD: false
+          DOCKER_BUILD_SUMMARY: false
         with:
+          provenance: false
           context: apps/mcp
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
