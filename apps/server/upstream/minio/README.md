@@ -3,7 +3,7 @@
 These manifests belong to the upstream MinIO source at
 `RELEASE.2025-10-15T17-29-55Z` (`9e49d5e7a648`), not the OpenNavo server module.
 `ops/Dockerfile.minio` retrieves that source, overlays these exact manifests,
-and builds with `-mod=readonly` using Go 1.27.1.
+and builds with `-mod=readonly` using Go 1.27.2.
 
 The reviewed dependency upgrades include thrift, jsonparser, go-jose,
 Prometheus, AMQP, OpenTelemetry, x/crypto, x/net, x/text, gRPC, protobuf,
