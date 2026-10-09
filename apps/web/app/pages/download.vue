@@ -7,7 +7,7 @@ import { DESKTOP_BREW_COMMAND } from '~/utils/download';
 const { locale: useI18nLocale } = useI18n();
 const formattingLocale = computed(() => toAppLocale(useI18nLocale.value));
 
-// Download (05 §7.4, 08 §10.14): title, glow, Universal DMG, Homebrew command, three feature columns, latest notes.
+// Download (05 §7.4, 08 §10.14): title, glow, Universal DMG, three feature columns, latest notes.
 const { t, locale } = useI18n();
 const api = useApi();
 const toasts = useToasts();

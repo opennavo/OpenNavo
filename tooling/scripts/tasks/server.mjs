@@ -158,6 +158,7 @@ export function runTask(task) {
       return;
     case 'deploy-lint':
       run('python3', ['-I', 'ops/lint.py']);
+      run('python3', ['-I', 'ops/test_github_deploy.py']);
       return;
     case 'prod-verify':
       run('python3', ['-I', 'ops/verify-production.py', ...process.argv.slice(3)]);

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths: &backend-paths
+      - '.github/**'
       - 'apps/server/**'
       - 'apps/mcp/**'
       - 'packages/shared/src/locales.json'
@@ -54,7 +55,7 @@ jobs:
       - run: pnpm exec redocly lint apps/server/api/public.openapi.yaml apps/server/api/admin.openapi.yaml --config apps/server/api/redocly.yaml
       - run: make gen-server
       - run: git diff --exit-code
-      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 ../../.github/workflows/ci-server.yml ../../.github/workflows/release-server.yml ../../.github/workflows/ci-mcp.yml ../../.github/workflows/release-mcp.yml
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 ../../.github/workflows/*.yml
         working-directory: apps/server
 
   server:

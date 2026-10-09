@@ -348,7 +348,7 @@
     "shaCopied": "SHA-256 copied",
     "comingTitle": "The app is coming soon",
     "comingDescription": "Download it here once it’s released. Meanwhile, copy the brew commands on this site to install software.",
-    "brewTitle": "Or install with Homebrew",
+    "brewTitle": "Or install with Homebrew (Not yet available)",
     "features": {
       "install": {
         "title": "One-click installs",
@@ -397,41 +397,7 @@
     "title": "About OpenNavo",
     "metaTitle": "About & Privacy · OpenNavo",
     "description": "What OpenNavo is, where its data comes from, and how we treat your information.",
-    "draft": "Draft",
-    "about": {
-      "title": "What is OpenNavo",
-      "body": [
-        "OpenNavo is the Homebrew app store for macOS: browse and search the apps in Homebrew on the web, then install and update them in one click with the macOS app.",
-        "OpenNavo doesn’t host any software. Every install is performed by Homebrew on your Mac, and the exact commands are always shown."
-      ]
-    },
-    "data": {
-      "title": "Where the data comes from",
-      "body": [
-        "The catalog and install statistics come from the official public Homebrew API (formulae.brew.sh), synced daily. Release notes come from GitHub Releases, app update feeds, release notes pages, and Homebrew commits.",
-        "Descriptions and translated release notes are prepared automatically and spot-checked by people, with links to the originals."
-      ]
-    },
-    "privacy": {
-      "title": "Privacy",
-      "body": [
-        "The website needs no account and never collects which software you have installed. Search terms are logged anonymously to improve results, without IP addresses. Your Brewfile list stays in your browser.",
-        "Usage statistics in the macOS app are off by default, and anonymous crash reports are sent only with your consent. Contact details you leave with feedback are used only to reply to you."
-      ]
-    },
-    "terms": {
-      "title": "Terms of use",
-      "body": [
-        "OpenNavo is provided “as is”. Software is published by its own authors and governed by its own licenses; make sure a source is trustworthy before installing.",
-        "OpenNavo only asks Homebrew to perform actions you have confirmed, and never installs software behind your back."
-      ]
-    },
-    "contact": {
-      "title": "Open source & contact",
-      "body": [
-        "OpenNavo is open source. If you find wrong information, hit a failed install, or want something listed, tell us on the Feedback page."
-      ]
-    }
+    "draft": "Draft"
   },
   "og": {
     "footer": "OpenNavo · The Homebrew App Store"
@@ -451,6 +417,7 @@
       "ledeFallback": "Browse apps with descriptions and release notes, then **install and update in one click** with the macOS app. Homebrew does the installing, and every step stays visible.",
       "download": "Download for Mac",
       "browse": "Browse Apps",
+      "github": "Open source on GitHub",
       "followOnX": "Follow {account}",
       "meta": "Free · macOS 13 or later · Apple silicon and Intel"
     },

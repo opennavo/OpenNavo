@@ -141,20 +141,37 @@ useLandingParallax(root);
       <p class="m-0 mt-16px text-caption text-ink-tertiary">
         {{ t('landing.hero.meta') }}
       </p>
-      <a
-        href="https://x.com/opennavo"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="mt-12px inline-flex min-h-44px items-center gap-10px rounded-tiny text-14px text-ink-secondary no-underline outline-none transition-colors duration-fast ease-standard hover:text-ink-primary focus-visible:shadow-focus-ring active:text-ink-primary"
-      >
-        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path
-            d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.64 7.584H.47l8.6-9.835L0 1.154h7.594l5.243 6.932 6.064-6.933Zm-1.29 19.49h2.039L6.487 3.24H4.3l13.31 17.403Z"
-          />
-        </svg>
-        <span>{{ t('landing.hero.followOnX', { account: '@opennavo' }) }}</span>
-        <OnIcon name="arrow-up-right" :size="14" />
-      </a>
+      <div class="mt-12px flex flex-col items-center gap-0 sm:flex-row sm:gap-24px">
+        <a
+          href="https://github.com/opennavo/OpenNavo"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex min-h-44px items-center gap-10px whitespace-nowrap rounded-tiny text-14px text-ink-primary no-underline outline-none transition-colors duration-fast ease-standard hover:text-ink-secondary focus-visible:shadow-focus-ring active:text-ink-secondary"
+        >
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="shrink-0">
+            <path
+              d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.726-4.043-1.416-4.043-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.729.083-.729 1.205.085 1.839 1.237 1.839 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.776.418-1.305.762-1.605-2.665-.305-5.467-1.334-5.467-5.931 0-1.31.469-2.381 1.236-3.221-.124-.303-.536-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.52 11.52 0 0 1 12 6.301c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.655 1.652.243 2.873.12 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .32.216.694.825.576C20.565 22.296 24 17.798 24 12.5c0-6.63-5.373-12-12-12Z"
+            />
+          </svg>
+          <span>{{ t('landing.hero.github') }}</span>
+          <OnIcon name="arrow-up-right" :size="14" />
+        </a>
+        <span aria-hidden="true" class="hidden h-16px w-1px bg-ink-tertiary sm:block"></span>
+        <a
+          href="https://x.com/opennavo"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex min-h-44px items-center gap-10px whitespace-nowrap rounded-tiny text-14px text-ink-secondary no-underline outline-none transition-colors duration-fast ease-standard hover:text-ink-primary focus-visible:shadow-focus-ring active:text-ink-primary"
+        >
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.64 7.584H.47l8.6-9.835L0 1.154h7.594l5.243 6.932 6.064-6.933Zm-1.29 19.49h2.039L6.487 3.24H4.3l13.31 17.403Z"
+            />
+          </svg>
+          <span>{{ t('landing.hero.followOnX', { account: '@opennavo' }) }}</span>
+          <OnIcon name="arrow-up-right" :size="14" />
+        </a>
+      </div>
     </div>
 
     <div v-if="apps.length >= 3" class="landing-window-stage relative mx-auto mt-16px box-border max-w-1168px px-24px">

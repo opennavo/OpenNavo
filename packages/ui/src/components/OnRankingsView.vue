@@ -7,7 +7,7 @@ import OnSegmented from './OnSegmented.vue';
 import OnSkeleton from './OnSkeleton.vue';
 import type { OnSegmentedOption } from '../types';
 
-// Rankings (08 §10.3, ADR-017): title/period selector with optional filters, rows in two columns at xl+, host actions right.
+// Rankings (08 §10.3, ADR-017): title/period selector with optional filters, ranks flow down the left column then the right at xl+.
 // Shared desktop/web; host supplies data, links, buttons, formatted install counts.
 export interface OnRankingsEntry {
   rank: number;
@@ -62,7 +62,11 @@ defineSlots<{
     <div v-if="entries === null" class="grid grid-cols-1 gap-8px xl:grid-cols-2" aria-hidden="true">
       <OnSkeleton v-for="index in 10" :key="index" height="58px" radius="default" />
     </div>
-    <ol v-else-if="entries.length" class="m-0 grid list-none grid-cols-1 gap-8px p-0 xl:grid-cols-2">
+    <ol
+      v-else-if="entries.length"
+      class="m-0 grid list-none grid-cols-1 gap-8px p-0 xl:grid-flow-col xl:grid-cols-2 xl:grid-rows-[repeat(var(--ranking-rows),auto)]"
+      :style="{ '--ranking-rows': Math.ceil(entries.length / 2) }"
+    >
       <li v-for="entry in entries" :key="entry.pkg.token" class="flex items-center gap-10px">
         <OnRankRow
           class="min-w-0 flex-1"

@@ -2,11 +2,11 @@
 import { OnButton, OnIcon, OnInstallCommand } from '@opennavo/ui';
 import { DESKTOP_BREW_COMMAND } from '~/utils/download';
 
-// Landing conclusion (08 §10.14): glowing client icon, heading/copy, download/browse, Homebrew install command.
+// Landing conclusion (08 §10.14): glowing client icon, heading/copy, download/browse.
 const { t } = useI18n();
 const localePath = useLocalePath();
-const toasts = useToasts();
 const NuxtLink = resolveComponent('NuxtLink');
+const toasts = useToasts();
 
 function onCopied(command: string) {
   toasts.push({ tone: 'success', title: t('toast.copied'), description: command });

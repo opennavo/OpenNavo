@@ -194,10 +194,90 @@ impl Router {
         }
     }
 }
+struct WindowFit {
+    minimum: tauri::LogicalSize<f64>,
+    target: tauri::LogicalSize<f64>,
+    position: tauri::LogicalPosition<f64>,
+}
+
+fn main_window_fit(
+    inner: tauri::LogicalSize<f64>,
+    outer: tauri::LogicalSize<f64>,
+    area: tauri::LogicalSize<f64>,
+    origin: tauri::LogicalPosition<f64>,
+    position: tauri::LogicalPosition<f64>,
+    welcome: bool,
+) -> WindowFit {
+    let frame_width = (outer.width - inner.width).max(0.0);
+    let frame_height = (outer.height - inner.height).max(0.0);
+    let max_width = (area.width - frame_width).floor().max(1.0);
+    let max_height = (area.height - frame_height).floor().max(1.0);
+    let (min_width, min_height): (f64, f64) = if welcome {
+        (540.0, 600.0)
+    } else {
+        (1100.0, 700.0)
+    };
+    let minimum = tauri::LogicalSize::new(min_width.min(max_width), min_height.min(max_height));
+    let requested = if welcome {
+        tauri::LogicalSize::new(604.0, 820.0)
+    } else {
+        inner
+    };
+    let target = tauri::LogicalSize::new(
+        requested.width.clamp(minimum.width, max_width),
+        requested.height.clamp(minimum.height, max_height),
+    );
+    let remaining_width = (area.width - target.width - frame_width).max(0.0);
+    let remaining_height = (area.height - target.height - frame_height).max(0.0);
+    let position = if welcome {
+        tauri::LogicalPosition::new(
+            origin.x + remaining_width / 2.0,
+            origin.y + remaining_height / 2.0,
+        )
+    } else {
+        tauri::LogicalPosition::new(
+            position.x.clamp(origin.x, origin.x + remaining_width),
+            position.y.clamp(origin.y, origin.y + remaining_height),
+        )
+    };
+    WindowFit {
+        minimum,
+        target,
+        position,
+    }
+}
+
+// Calculate final bounds before any setters: macOS may apply window changes asynchronously.
+fn fit_main_to_work_area(window: &tauri::WebviewWindow, welcome: bool) -> tauri::Result<()> {
+    let Some(monitor) = window.current_monitor()?.or(window.primary_monitor()?) else {
+        return Ok(());
+    };
+    let scale = window.scale_factor()?;
+    let area = monitor.work_area();
+    let inner = window.inner_size()?.to_logical::<f64>(scale);
+    let position = window.outer_position()?.to_logical::<f64>(scale);
+    let fit = main_window_fit(
+        inner,
+        window.outer_size()?.to_logical::<f64>(scale),
+        area.size.to_logical::<f64>(monitor.scale_factor()),
+        area.position.to_logical::<f64>(monitor.scale_factor()),
+        position,
+        welcome,
+    );
+    window.set_min_size(Some(fit.minimum))?;
+    if welcome || fit.target != inner {
+        window.set_size(fit.target)?;
+    }
+    if welcome || fit.position != position {
+        window.set_position(fit.position)?;
+    }
+    Ok(())
+}
+
 pub fn show_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         // Resize to Welcome before first display to avoid flashing the full app frame.
-        if app
+        let welcome = app
             .try_state::<std::sync::Arc<crate::core::DesktopCore>>()
             .and_then(|core| {
                 core.settings
@@ -205,14 +285,14 @@ pub fn show_main(app: &tauri::AppHandle) {
                     .ok()
                     .map(|settings| !settings.onboarding_completed)
             })
-            .unwrap_or(false)
-        {
-            let _ = window.set_min_size(Some(tauri::LogicalSize::new(540.0, 600.0)));
+            .unwrap_or(false);
+        if welcome {
             let _ = window.unmaximize();
-            let _ = window.set_size(tauri::LogicalSize::new(604.0, 820.0));
-            let _ = window.center();
         }
         let _ = window.unminimize();
+        if let Err(error) = fit_main_to_work_area(&window, welcome) {
+            log::warn!("Could not fit main window to monitor work area: {error}");
+        }
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -235,5 +315,55 @@ pub fn install(app: &tauri::AppHandle, sink: EventSink) {
     }
     for arg in std::env::args().filter(|arg| arg.starts_with("opennavo:")) {
         router.receive(&arg);
+    }
+}
+
+#[cfg(test)]
+mod window_fit_tests {
+    use super::main_window_fit;
+    use tauri::{LogicalPosition, LogicalSize};
+
+    #[test]
+    fn welcome_redisplay_keeps_the_requested_size_inside_the_work_area() {
+        let fit = main_window_fit(
+            LogicalSize::new(604.0, 750.0),
+            LogicalSize::new(604.0, 750.0),
+            LogicalSize::new(1512.0, 750.0),
+            LogicalPosition::new(0.0, 24.0),
+            LogicalPosition::new(454.0, 24.0),
+            true,
+        );
+        assert_eq!(fit.target, LogicalSize::new(604.0, 750.0));
+        assert_eq!(fit.position, LogicalPosition::new(454.0, 24.0));
+    }
+
+    #[test]
+    fn restoring_minimum_size_moves_the_expanded_window_inside_the_work_area() {
+        let fit = main_window_fit(
+            LogicalSize::new(1000.0, 650.0),
+            LogicalSize::new(1000.0, 650.0),
+            LogicalSize::new(1512.0, 900.0),
+            LogicalPosition::new(0.0, 0.0),
+            LogicalPosition::new(512.0, 250.0),
+            false,
+        );
+        assert_eq!(fit.minimum, LogicalSize::new(1100.0, 700.0));
+        assert_eq!(fit.target, LogicalSize::new(1100.0, 700.0));
+        assert_eq!(fit.position, LogicalPosition::new(412.0, 200.0));
+    }
+
+    #[test]
+    fn tiny_work_area_caps_minimum_and_reserves_native_frame_space() {
+        let fit = main_window_fit(
+            LogicalSize::new(1400.0, 820.0),
+            LogicalSize::new(1410.0, 840.0),
+            LogicalSize::new(1000.0, 650.0),
+            LogicalPosition::new(-1000.0, 30.0),
+            LogicalPosition::new(0.0, 0.0),
+            false,
+        );
+        assert_eq!(fit.minimum, LogicalSize::new(990.0, 630.0));
+        assert_eq!(fit.target, fit.minimum);
+        assert_eq!(fit.position, LogicalPosition::new(-1000.0, 30.0));
     }
 }

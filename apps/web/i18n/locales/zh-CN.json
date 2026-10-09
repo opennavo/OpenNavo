@@ -348,7 +348,7 @@
     "shaCopied": "已复制 SHA-256",
     "comingTitle": "客户端即将发布",
     "comingDescription": "正式版发布后可以在这里下载；现在可以先复制网页上的 brew 命令安装软件。",
-    "brewTitle": "或用 Homebrew 安装",
+    "brewTitle": "或用 Homebrew 安装（未上线）",
     "features": {
       "install": {
         "title": "一键安装",
@@ -397,39 +397,7 @@
     "title": "关于 OpenNavo",
     "metaTitle": "关于与隐私 · OpenNavo",
     "description": "OpenNavo 是什么、数据从哪里来、我们如何对待你的信息。",
-    "draft": "待审",
-    "about": {
-      "title": "OpenNavo 是什么",
-      "body": [
-        "OpenNavo 是 macOS 上的 Homebrew 应用商店：在网页上浏览与搜索 Homebrew 收录的 App，用 macOS 客户端一键安装与更新。",
-        "OpenNavo 不托管任何软件，所有安装都由你电脑上的 Homebrew 完成，执行的命令都会如实显示。"
-      ]
-    },
-    "data": {
-      "title": "数据来源",
-      "body": [
-        "目录与安装统计来自 Homebrew 官方公开 API（formulae.brew.sh），每天同步。版本记录来自 GitHub Releases、应用内更新源、官网更新页和 Homebrew 提交记录。",
-        "中文介绍与版本说明由程序整理并经人工抽查，原文链接始终保留。"
-      ]
-    },
-    "privacy": {
-      "title": "隐私说明",
-      "body": [
-        "网页端不需要账号，也不会收集你安装了哪些软件。搜索关键词会匿名记录用于改进搜索结果，不保存 IP 地址；Brewfile 清单只保存在你的浏览器本地。",
-        "macOS 客户端的使用统计默认关闭，匿名崩溃报告需要你同意后才会发送。反馈时留下的联系方式只用于回复你。"
-      ]
-    },
-    "terms": {
-      "title": "使用条款",
-      "body": [
-        "OpenNavo 按「现状」提供。软件由各自的作者发布，安装与使用遵循它们自己的许可协议；请在安装前确认来源可信。",
-        "OpenNavo 只调用 Homebrew 执行你确认过的操作，不会在后台替你安装软件。"
-      ]
-    },
-    "contact": {
-      "title": "开源与联系",
-      "body": ["OpenNavo 是开源项目。发现信息有误、安装失败或想推荐收录，可以在「反馈」页告诉我们。"]
-    }
+    "draft": "待审"
   },
   "og": {
     "footer": "OpenNavo · Homebrew 应用商店"
@@ -449,6 +417,7 @@
       "ledeFallback": "浏览 App 的介绍和版本记录，用 macOS 客户端**一键安装、一键更新**。安装由 Homebrew 完成，每一步都看得见。",
       "download": "下载 Mac 版",
       "browse": "浏览 App",
+      "github": "GitHub 开源",
       "followOnX": "关注 {account}",
       "meta": "免费 · macOS 13 及以上 · Apple 芯片与 Intel"
     },

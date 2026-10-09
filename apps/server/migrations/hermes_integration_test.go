@@ -45,7 +45,11 @@ func TestHermesMigrationsPreserveDataAndEnforceCredentialBounds(t *testing.T) {
 	require.NoError(t, goose.UpContext(ctx, db, "."), "appending migrations remains idempotent")
 	version, err := goose.GetDBVersionContext(ctx, db)
 	require.NoError(t, err)
-	require.EqualValues(t, 12, version)
+	available, err := goose.CollectMigrations(".", 0, goose.MaxVersion)
+	require.NoError(t, err)
+	latest, err := available.Last()
+	require.NoError(t, err)
+	require.Equal(t, latest.Version, version, "all embedded migrations must be applied")
 	var count int
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM admin_permissions WHERE code IN ('changelog:source:edit','changelog:fetch')").Scan(&count))
 	require.Zero(t, count)

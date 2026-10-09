@@ -5,11 +5,17 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: release-backend-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  gate:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/release-gate.yml
   images:
+    needs: gate
+    if: always() && (needs.gate.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.gate.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -60,6 +66,8 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,scope=${{ matrix.target }},mode=max
   deployment-bundle:
+    needs: gate
+    if: always() && (needs.gate.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.gate.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

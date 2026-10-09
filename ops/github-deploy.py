@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+"""Restricted SSH receiver for GitHub builds; configuration and secrets stay on the host.
+
+Install with a root-owned /etc/opennavo/github-deploy.json. This receiver is
+intended for the existing versioned Compose/Caddy deployment, not first install.
+"""
+import base64
+import copy
+import fcntl
+import hashlib
+import io
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.request
+
+MAX_ARCHIVE = 40 * 1024 * 1024
+
+
+def validate(payload, registry):
+    if not re.fullmatch(r'[0-9a-f]{40}', payload.get('sha', '')):
+        raise ValueError('invalid source revision')
+    if not re.fullmatch(r'[0-9]{1,20}', payload.get('run_id', '')):
+        raise ValueError('invalid workflow run')
+    if not re.fullmatch(r'[0-9]{1,4}', payload.get('run_attempt', '1')):
+        raise ValueError('invalid workflow attempt')
+    if set(payload.get('images', {})) != {'server', 'web', 'mcp'}:
+        raise ValueError('all three application images are required')
+    for kind, image in payload['images'].items():
+        if not re.fullmatch(re.escape(f'{registry}/opennavo-{kind}@sha256:') + r'[0-9a-f]{64}', image):
+            raise ValueError('images must use approved registry digests')
+    archive = base64.b64decode(payload['admin_archive'], validate=True)
+    if len(archive) > MAX_ARCHIVE or hashlib.sha256(archive).hexdigest() != payload.get('admin_sha256'):
+        raise ValueError('invalid admin archive checksum or size')
+    return archive
+
+
+def extract_admin(data, destination):
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+        members = archive.getmembers()
+        if sum(m.size for m in members) > 160 * 1024 * 1024:
+            raise ValueError('admin archive expands beyond the limit')
+        for member in members:
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or '..' in path.parts or not (member.isfile() or member.isdir()):
+                raise ValueError('unsafe admin archive member')
+        archive.extractall(destination, members=members, filter='data')
+    if not (destination / 'index.html').is_file():
+        raise ValueError('admin index is missing')
+
+
+def command(args, output=None):
+    result = subprocess.run(args, stdout=output or subprocess.PIPE, stderr=subprocess.PIPE, timeout=1200)
+    if result.returncode:
+        # Docker/Compose diagnostics can contain expanded credentials.
+        raise RuntimeError(f'command failed: {args[0]} (exit {result.returncode}); inspect privately on host')
+    return result.stdout.decode().strip() if output is None else ''
+
+
+def write_private(path, value):
+    path.write_text(json.dumps(value, indent=2) + '\n')
+    path.chmod(0o600)
+
+
+def update_env(source, updates):
+    lines = []
+    remaining = dict(updates)
+    for line in source.splitlines():
+        key = line.split('=', 1)[0]
+        if key in remaining:
+            line = key + '=' + remaining.pop(key)
+        lines.append(line)
+    lines.extend(key + '=' + value for key, value in remaining.items())
+    return '\n'.join(lines) + '\n'
+
+
+class Deployment:
+    def __init__(self, config, payload):
+        self.config, self.payload = config, payload
+        self.root = Path(config['root'])
+        self.state_path = self.root / 'deploy/github-state.json'
+        self.state = json.loads(self.state_path.read_text())
+        self.release = 'gh-' + payload['sha'][:12] + '-' + payload['run_id'] + '-' + payload.get('run_attempt', '1')
+        self.directory = self.root / 'releases' / self.release
+        self.live_caddy = self.root / config['caddy_file']
+        self.rolling = self.root / 'deploy/rolling.compose.json'
+        self.env = self.root / 'current-release.env'
+        self.services = {kind: kind + '_' + self.release.replace('-', '_') for kind in ['api', 'web', 'mcp', 'admin']}
+        self.aliases = {}
+
+    def compose(self, *args, candidate=True):
+        directory = self.directory if candidate else self.root
+        return command(['docker', 'compose', '--project-directory', str(self.root), '-p', self.config['project'],
+                        '--env-file', str(self.root / '.env'), '--env-file', str(directory / ('release.env' if candidate else 'current-release.env')),
+                        '-f', str(self.root / self.config['compose_file']),
+                        '-f', str(self.directory / 'rolling.compose.json' if candidate else self.rolling),
+                        '--profile', 'ops', '--profile', 'automation', *args])
+
+    def prepare(self, archive):
+        self.directory.mkdir(mode=0o700)
+        for source, name in [(self.live_caddy, 'before-caddy'), (self.rolling, 'before-rolling.json'), (self.env, 'before-release.env'), (self.state_path, 'before-state.json')]:
+            shutil.copyfile(source, self.directory / name)
+        overlay = json.loads(self.rolling.read_text())
+        routes = self.live_caddy.read_text()
+        for kind, new in self.services.items():
+            old = self.state['services'][kind]
+            service = copy.deepcopy(overlay['services'][old])
+            for network, options in service.get('networks', {}).items():
+                if not options:
+                    continue
+                aliases = options.get('aliases', [])
+                for index, alias in enumerate(aliases):
+                    replacement = f'{kind}-{network}-{self.release}'
+                    if kind == 'admin':
+                        replacement = 'admin-static-' + self.release
+                    self.aliases[alias] = replacement
+                    aliases[index] = replacement
+            if kind != 'admin':
+                service['image'] = self.payload['images']['server' if kind == 'api' else kind]
+            for mount in service.get('volumes', []):
+                if isinstance(mount, dict) and '/releases/' in mount.get('source', ''):
+                    mount['source'] = str(self.directory / Path(mount['source']).name)
+            service.setdefault('labels', {})['org.opencontainers.image.revision'] = self.payload['sha']
+            overlay['services'][new] = service
+        for kind, new in self.services.items():
+            service = overlay['services'][new]
+            for key in ['NUXT_API_BASE_INTERNAL', 'OPENNAVO_AGENT_API_BASE']:
+                if key in service.get('environment', {}):
+                    for old, replacement in self.aliases.items():
+                        service['environment'][key] = service['environment'][key].replace(old, replacement)
+        for old, replacement in self.aliases.items():
+            routes = routes.replace(old, replacement)
+        routes = re.sub(r'X-OpenNavo-Release "[^"]+"', f'X-OpenNavo-Release "{self.payload["sha"][:12]}"', routes)
+        overlay['services'].setdefault('worker', {})['image'] = self.payload['images']['server']
+        write_private(self.directory / 'rolling.compose.json', overlay)
+        (self.directory / 'release.env').write_text(update_env(self.env.read_text(), {
+            'SERVER_IMAGE': self.payload['images']['server'], 'WEB_IMAGE': self.payload['images']['web'],
+            'MCP_IMAGE': self.payload['images']['mcp'], 'ADMIN_DIST': str(self.directory / 'admin')}))
+        (self.directory / 'Caddyfile.next').write_text(routes)
+        old_admin = overlay['services'][self.state['services']['admin']]
+        old_web = overlay['services'][self.state['services']['web']]
+        def mount_source(service, target):
+            return Path(next(m['source'] for m in service['volumes'] if m['target'] == target))
+        shutil.copyfile(mount_source(old_admin, '/etc/caddy/Caddyfile'), self.directory / 'Caddyfile.admin')
+        extract_admin(archive, self.directory / 'admin')
+        old_assets = mount_source(old_admin, '/srv/admin') / 'assets'
+        if old_assets.exists():
+            for source in old_assets.rglob('*'):
+                if source.is_file():
+                    target = self.directory / 'admin/assets' / source.relative_to(old_assets)
+                    if not target.exists():
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(source, target)
+        shutil.copytree(mount_source(old_web, '/app/.output/public/_nuxt'), self.directory / 'web-assets')
+        container = command(['docker', 'create', self.payload['images']['web']])
+        try:
+            command(['docker', 'cp', container + ':/app/.output/public/_nuxt/.', str(self.directory / 'web-assets')])
+        finally:
+            command(['docker', 'rm', container])
+        # Release directories are private; bind-mounted public assets must be readable by container users.
+        for public in [self.directory / 'admin', self.directory / 'web-assets']:
+            for path in [public, *public.rglob('*')]:
+                path.chmod(0o755 if path.is_dir() else 0o644)
+        (self.directory / 'Caddyfile.admin').chmod(0o644)
+        self.compose('config', '--quiet')
+
+    def backup(self):
+        dump = self.directory / 'before-migration.dump'
+        with dump.open('wb') as output:
+            command(['docker', 'exec', self.config['postgres_container'], 'pg_dump', '-U', self.config['postgres_user'], '-d', self.config['postgres_database'], '-Fc'], output=output)
+        if dump.stat().st_size < 1024:
+            raise RuntimeError('database backup is unexpectedly small')
+        with dump.open('rb') as source:
+            result = subprocess.run(['docker', 'exec', '-i', self.config['postgres_container'], 'pg_restore', '--list'], stdin=source, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120)
+        if result.returncode:
+            raise RuntimeError('database backup archive validation failed')
+        print('Database backup created and archive validated.', flush=True)
+
+    def reload(self):
+        command(['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'])
+        command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
+
+    def verify(self):
+        last_error = None
+        for _ in range(30):
+            try:
+                for check in self.config['checks']:
+                    request = urllib.request.Request(self.config['local_origin'] + check['path'], headers={'Host': check['host']})
+                    with urllib.request.urlopen(request, timeout=15) as response:
+                        if response.status != 200 or response.headers.get('X-OpenNavo-Release') != self.payload['sha'][:12]:
+                            raise RuntimeError('route is not serving the new release')
+                return
+            except Exception as error:
+                last_error = type(error).__name__
+                time.sleep(2)
+        raise RuntimeError('post-deployment route checks failed: ' + str(last_error))
+
+    def rollback(self):
+        self.live_caddy.write_bytes((self.directory / 'before-caddy').read_bytes())
+        self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
+        self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
+        self.reload()
+        self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180', 'worker', candidate=False)
+        self.compose('stop', *self.services.values())
+        print('Previous routes and worker restored; database was not rolled back.', flush=True)
+
+    def apply(self, archive):
+        if self.state.get('sha') == self.payload['sha']:
+            print('This source revision is already deployed.'); return
+        with tempfile.TemporaryDirectory() as auth:
+            token = self.payload.get('registry_token', '')
+            if token:
+                result = subprocess.run(['docker', '--config', auth, 'login', 'ghcr.io', '--username', self.payload['registry_username'], '--password-stdin'], input=token.encode(), capture_output=True, timeout=60)
+                if result.returncode:
+                    raise RuntimeError('registry authentication failed')
+            for image in self.payload['images'].values():
+                command(['docker', '--config', auth, 'pull', image])
+                labels = json.loads(command(['docker', 'image', 'inspect', '--format', '{{json .Config.Labels}}', image]))
+                if labels.get('org.opencontainers.image.revision') != self.payload['sha']:
+                    raise RuntimeError('image source revision does not match the deployment')
+        self.prepare(archive)
+        self.backup()
+        print('Applying migrations and starting isolated candidates.', flush=True)
+        self.compose('run', '--rm', '--no-deps', 'migrate', 'up')
+        self.compose('run', '--rm', '--no-deps', 'db-permissions')
+        self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240', *self.services.values())
+        print('All candidates healthy; switching routes.', flush=True)
+        try:
+            # Preserve the inode because Caddy bind-mounts this file.
+            self.live_caddy.write_bytes((self.directory / 'Caddyfile.next').read_bytes())
+            self.reload()
+            self.verify()
+            self.env.write_bytes((self.directory / 'release.env').read_bytes())
+            self.rolling.write_bytes((self.directory / 'rolling.compose.json').read_bytes())
+            self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180', 'worker', candidate=False)
+            self.verify()
+        except Exception:
+            self.rollback()
+            raise
+        write_private(self.state_path, {'sha': self.payload['sha'], 'release': self.release, 'services': self.services, 'previous': self.state})
+        write_private(self.directory / 'manifest.json', {key: value for key, value in self.payload.items() if key not in ['admin_archive', 'registry_token']})
+        print('Production deployed and verified: ' + self.payload['sha'], flush=True)
+        # Old web/API containers stay available for a subsequent operator-controlled rollback.
+
+
+def main():
+    os.umask(0o077)
+    config = json.loads(Path('/etc/opennavo/github-deploy.json').read_text())
+    with (Path(config['root']) / 'deploy/github-deploy.lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raw = sys.stdin.buffer.read(MAX_ARCHIVE * 2 + 1)
+        if len(raw) > MAX_ARCHIVE * 2:
+            raise ValueError('deployment payload exceeds the limit')
+        payload = json.loads(raw)
+        if payload.get('action') == 'publish-desktop':
+            version = payload.get('version', '')
+            if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?', version):
+                raise ValueError('invalid desktop version')
+            state = json.loads((Path(config['root']) / 'deploy/github-state.json').read_text())
+            container = config['project'] + '-' + state['services']['api'] + '-1'
+            print(command(['docker', 'exec', container, '/desktop-publish', '--version', version, '--apply']))
+            return
+        archive = validate(payload, config['registry'])
+        Deployment(config, payload).apply(archive)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        # Never echo input payloads, environment or captured subprocess diagnostics.
+        print('Deployment failed: ' + str(error), file=sys.stderr)
+        sys.exit(1)

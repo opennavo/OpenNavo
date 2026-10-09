@@ -453,16 +453,16 @@ mod tests {
             cache_dir: None,
             download_total: None,
         };
-        let start = Instant::now();
-        let mut armed = false;
+        let mut cancel_started = None;
         let result = execute(request, |lines, _| {
-            if !armed && lines.iter().any(|line| line == "FAKE_BREW_READY") {
-                armed = true;
+            if cancel_started.is_none() && lines.iter().any(|line| line == "FAKE_BREW_READY") {
+                // Measure cancellation latency, excluding PTY and simulator startup on busy runners.
+                cancel_started = Some(Instant::now());
                 cancel.store(true, Ordering::Release);
             }
         })
         .unwrap();
-        assert!(armed, "simulator exited before readiness: {result:?}");
+        let cancel_started = cancel_started.expect("simulator exited before announcing readiness");
         assert!(result.canceled);
         assert_ne!(result.code, 0);
         assert!(
@@ -472,6 +472,10 @@ mod tests {
                 .is_some_and(|signal| signal.to_ascii_lowercase().contains("kill")),
             "expected SIGKILL, got {result:?}"
         );
-        assert!(start.elapsed() < Duration::from_secs(2));
+        assert!(
+            cancel_started.elapsed() < Duration::from_secs(2),
+            "cancellation exceeded its deadline: {:?}",
+            cancel_started.elapsed()
+        );
     }
 }

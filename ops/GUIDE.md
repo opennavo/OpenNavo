@@ -153,3 +153,62 @@ The rollout requires two healthy API replicas, applies migrations/permissions, r
 ## Verification limits
 
 `python3 ops/lint.py` and the deployment unit tests validate configuration without deploying. `ops/verify-production.py` creates a fixed isolated verification stack; it is not a command for an existing production deployment. Browser verification must use browser-use CLI. Run restore and full-stack checks on a disposable host before relying on this configuration in production.
+
+## GitHub production and desktop releases
+
+`Deploy production` is a manual workflow. Select a commit on `main`; backend,
+frontend, and security CI must have passed for that exact commit. The workflow
+builds Linux amd64 server/web/MCP images in GHCR, builds the admin bundle, and
+sends immutable image digests and the checked admin archive to the production
+SSH receiver. This workflow targets the existing versioned Compose/Caddy
+installation; it does not initialize a new server or replace databases/storage.
+
+Create a `production` GitHub Environment with `DEPLOY_HOST`, `DEPLOY_USER`,
+`DEPLOY_SSH_KEY`, and `DEPLOY_KNOWN_HOSTS` secrets. Use a dedicated SSH key whose
+host-side authorized_keys entry uses `restrict,command="/usr/bin/python3 /path/to/github-deploy.py"`. The key can invoke only the deployment
+receiver, not an interactive shell or port forwarding. Pin the host key from a
+trusted existing connection. Do not store the server password in GitHub.
+
+Install `ops/github-deploy.py` as a root-owned file. Its private host configuration
+is `/etc/opennavo/github-deploy.json`, with `root`, `project`, `registry`,
+`compose_file`, `caddy_file`, `caddy_container`, `postgres_container`,
+`postgres_user`, `postgres_database`, `local_origin`, and a `checks` list of
+`{host,path}` entries. The existing installation must have `.env`,
+`current-release.env`, and `deploy/rolling.compose.json`. Initialize private
+`deploy/github-state.json` with `services` mapping api/web/mcp/admin to their
+currently routed Compose service names. Never commit these host files: rendered
+Compose data and release snapshots contain credentials.
+
+The receiver validates image digests and source revision labels, checks archive
+paths/checksum, preserves old hashed assets, takes and validates a PostgreSQL
+backup, applies migrations and grants, starts healthy candidates, and switches
+Caddy routes. It then updates the worker and verifies routes again. A failed
+switch restores old routes and the worker; it never runs down migrations.
+Schema changes must remain compatible with the previous application during the
+rollout. Old application containers and private release snapshots remain for
+operator-controlled rollback. First inspect a failed run on the server; logs
+intentionally omit expanded Docker/Compose errors that could reveal secrets.
+The registry token is job-scoped and stored only in a temporary Docker config.
+
+For desktop builds, configure the Apple certificate/P12 password/signing identity,
+App Store Connect issuer/key ID/P8, and matching Tauri updater private key as
+repository Secrets required by `release-desktop.yml`. Configure `ADMIN_API_BASE`,
+`DESKTOP_API_BASE`, and `WEB_BASE_URL` as Variables and `CI_RELEASE_TOKEN` as a
+Secret matching the backend. A password-protected updater key additionally needs
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Never replace an installed client's updater
+key without a deliberate key migration.
+
+After CI passes, push a `desktop-vX.Y.Z` tag to create signed/notarized arm64 and
+Intel updater archives plus a universal DMG. A prerelease suffix selects beta.
+The build publishes GitHub assets and registers a backend draft. Then run
+`Publish desktop update` with that version: it requires the successful signed
+release workflow and activates the manifest using the production-local
+`desktop-publish` command. Deploy the server image containing this command first.
+This keeps database/S3 credentials off GitHub and leaves the existing CI token
+restricted to draft registration. Publishing the same tag again is not a version
+upgrade: use a new version for changed artifacts.
+
+Existing separate `server-v*`, `web-v*`, and `mcp-v*` workflows remain available
+for image distribution. Their tag publications and desktop tag publications now
+require successful CI for the exact source commit. Manual build-only runs do not
+publish packages. Repository changes are not deployed merely by pushing `main`.

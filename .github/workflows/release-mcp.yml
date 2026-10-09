@@ -5,11 +5,17 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: release-mcp-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  gate:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/release-gate.yml
   checks:
+    needs: gate
+    if: always() && (needs.gate.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.gate.result == 'skipped'))
     uses: ./.github/workflows/ci-mcp.yml
   image:
     needs: checks

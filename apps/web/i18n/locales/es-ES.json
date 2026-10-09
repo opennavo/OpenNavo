@@ -348,7 +348,7 @@
     "shaCopied": "SHA-256 copiado",
     "comingTitle": "El cliente estará disponible próximamente",
     "comingDescription": "Podrás descargarlo aquí cuando se publique la versión estable. Mientras tanto, puedes copiar los comandos brew de la web para instalar software.",
-    "brewTitle": "O instalar con Homebrew",
+    "brewTitle": "O instalar con Homebrew (Aún no disponible)",
     "features": {
       "install": {
         "title": "Instalación con un clic",
@@ -397,41 +397,7 @@
     "title": "Acerca de OpenNavo",
     "metaTitle": "Acerca de y privacidad · OpenNavo",
     "description": "Qué es OpenNavo, de dónde proceden los datos y cómo tratamos tu información.",
-    "draft": "Pendiente de revisión",
-    "about": {
-      "title": "Qué es OpenNavo",
-      "body": [
-        "OpenNavo es la tienda de aplicaciones Homebrew para macOS: explora y busca en la web las apps incluidas en Homebrew e instálalas y actualízalas con un clic desde el cliente para macOS.",
-        "OpenNavo no aloja ningún software. Homebrew, instalado en tu ordenador, se encarga de todas las instalaciones y los comandos que se ejecutan se muestran claramente."
-      ]
-    },
-    "data": {
-      "title": "Fuentes de datos",
-      "body": [
-        "El catálogo y las estadísticas de instalaciones proceden de la API pública oficial de Homebrew (formulae.brew.sh) y se sincronizan a diario. El historial de versiones procede de GitHub Releases, los canales de actualización de las aplicaciones, las páginas de actualizaciones oficiales y el historial de commits de Homebrew.",
-        "Las descripciones en chino y las notas de versión se recopilan mediante procesos automatizados y se revisan manualmente por muestreo. Siempre se conserva el enlace al texto original."
-      ]
-    },
-    "privacy": {
-      "title": "Privacidad",
-      "body": [
-        "La web no requiere una cuenta ni recopila qué software has instalado. Las búsquedas se registran de forma anónima para mejorar los resultados, sin guardar direcciones IP. La lista de Brewfile solo se guarda localmente en tu navegador.",
-        "Las estadísticas de uso del cliente para macOS están desactivadas de forma predeterminada. Los informes anónimos de errores solo se envían si das tu consentimiento. Los datos de contacto que proporciones al enviar comentarios solo se utilizan para responderte."
-      ]
-    },
-    "terms": {
-      "title": "Términos de uso",
-      "body": [
-        "OpenNavo se proporciona «tal cual». El software lo publican sus respectivos autores; su instalación y uso están sujetos a sus propias licencias. Comprueba que la fuente sea de confianza antes de instalarlo.",
-        "OpenNavo solo usa Homebrew para realizar las operaciones que confirmes; no instala software en segundo plano en tu nombre."
-      ]
-    },
-    "contact": {
-      "title": "Código abierto y contacto",
-      "body": [
-        "OpenNavo es un proyecto de código abierto. Si detectas información incorrecta, errores de instalación o quieres recomendar una app, puedes avisarnos en la página «Comentarios»."
-      ]
-    }
+    "draft": "Pendiente de revisión"
   },
   "og": {
     "footer": "OpenNavo · Tienda de aplicaciones Homebrew"
@@ -451,6 +417,7 @@
       "ledeFallback": "Explora apps con descripciones y notas de la versión y, después, **instala y actualiza con un solo clic** desde la app para macOS. Homebrew se encarga de la instalación y puedes ver cada paso.",
       "download": "Descargar para Mac",
       "browse": "Explorar apps",
+      "github": "Código abierto en GitHub",
       "followOnX": "Seguir a {account}",
       "meta": "Gratis · macOS 13 o posterior · Apple silicon e Intel"
     },

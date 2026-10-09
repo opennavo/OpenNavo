@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths: &frontend-paths
+      - '.github/**'
       - 'apps/**'
       - 'packages/**'
       # Shared brand regression tests depend on the logo generator.
