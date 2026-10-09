@@ -4,7 +4,7 @@ import type { RouteRecordRaw } from 'vue-router';
 declare module 'vue-router' {
   interface RouteMeta {
     /** Highlighted sidebar navigation item; group detail/search subpages under their top-level destination. */
-    nav?: 'discover' | 'categories' | 'rankings' | 'brewfile' | 'installed' | 'updates' | 'settings';
+    nav?: 'discover' | 'categories' | 'collections' | 'rankings' | 'brewfile' | 'installed' | 'updates' | 'settings';
     /** Render without the app shell (Welcome, menu-bar popover). */
     bare?: boolean;
   }
@@ -84,14 +84,14 @@ export const routes: RouteRecordRaw[] = [
     path: '/collections',
     name: 'collections',
     component: () => import('@/pages/CollectionsPage.vue'),
-    meta: { nav: 'discover' }
+    meta: { nav: 'collections' }
   },
   {
     path: '/collections/:slug',
     name: 'collection',
     component: () => import('@/pages/CollectionPage.vue'),
     props: true,
-    meta: { nav: 'discover' }
+    meta: { nav: 'collections' }
   },
   {
     path: '/brewfile',

@@ -31,6 +31,12 @@ MIGRATION_DATABASE_PASSWORD=MIGRATION_PASSWORD
 
 For managed PostgreSQL, use the provider's host and required TLS parameters instead. Create the database and a migration role with schema/role-management privileges first; keep the application role separate. URL-encode passwords if they contain URI-reserved characters. The application role is provisioned by `db-permissions` after migrations.
 
+## Request logs and IP addresses
+
+The API's ordinary request logger records request IDs, route templates, status and duration without an IP address field. IP-based rate limits and administrator audit records still use source addresses. The bundled Caddy configuration does not enable access logging. If another reverse proxy sits in front of Caddy, disable its ordinary access log (for example, `access_log off;` in the relevant Nginx server block) or use a format that excludes client addresses and forwarded headers; check included configurations for overrides. Validate the configuration before a graceful reload.
+
+This does not erase historical logs or disable proxy error diagnostics, which may contain client addresses. Review log rotation and infrastructure-provider retention separately, and describe actual behavior in the About configuration rather than promising a zero-log service.
+
 ## Build tagged images and admin assets
 
 Use one reviewed source checkout. These local tags are examples; set the four image variables in the external environment file to exactly these tags, or replace them with your own immutable release tags/digests:

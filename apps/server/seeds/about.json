@@ -1,48 +1,51 @@
 {
-  "sourceLocale": "zh-CN",
+  "sourceLocale": "en-US",
   "locales": {
     "en-US": [
       {
         "key": "about",
         "draft": false,
-        "title": "What is OpenNavo?",
+        "title": "About OpenNavo",
         "paragraphs": [
-          "OpenNavo is a Homebrew app store for macOS: browse and search Homebrew listings on the web, then install and update apps with one click using the macOS client.",
-          "OpenNavo doesn’t host any software. All installations are handled by Homebrew on your computer, and the commands run are shown exactly as they are."
+          "OpenNavo helps you discover and manage macOS apps with Homebrew. Browse apps, collections, installation statistics and version history on the website; use the Mac app to install, update and uninstall software on your computer.",
+          "OpenNavo is an independent open-source project, not an official Homebrew or Apple product. Software installation is performed by your local Homebrew and uses the download sources defined by the selected package or mirror."
         ]
       },
       {
         "key": "data",
         "draft": false,
-        "title": "Data sources",
+        "title": "Data and content",
         "paragraphs": [
-          "The catalog, installation statistics, and version listings come from Homebrew. OpenNavo maintains app descriptions, categories, and update notes; this content may be translated automatically."
+          "Package metadata and installation statistics come from Homebrew’s public catalog. Descriptions, categories, collections and release notes are organized by OpenNavo using upstream project pages, release feeds and other public sources. Some content is generated or translated automatically and may contain mistakes or lag behind upstream releases.",
+          "Before installing, check the publisher, source, version and license. Catalog inclusion is not an endorsement or a guarantee of security. Report incorrect information through Feedback."
         ]
       },
       {
         "key": "privacy",
-        "draft": true,
-        "title": "Privacy notice",
+        "draft": false,
+        "title": "Privacy and local data",
         "paragraphs": [
-          "The website doesn’t require an account and doesn’t collect information about which software you install. Search terms are recorded anonymously to improve search results; IP addresses are not stored. Brewfile lists are saved only in your browser.",
-          "Usage statistics in the macOS client are off by default. Anonymous crash reports are sent only with your consent. Contact details you provide with feedback are used only to reply to you."
+          "Browsing the public catalog does not require an account. The service records search terms, language, platform, result counts and selected search results to improve discovery. Ordinary application request logs record time, route, status and duration without an IP address field. IP addresses are still processed for request delivery and rate limiting; administrator sign-in and operation audits retain source IP addresses. Proxy error diagnostics and external infrastructure providers may also process or retain IP addresses. Previously recorded logs may remain until rotation; this is not a zero-log service.",
+          "Your browser stores its Brewfile list locally. The Mac app stores settings, local package information and operation history on your computer. Searching the catalog, loading online resources and checking for updates send requests to the relevant services. Homebrew, GitHub, download mirrors and other external providers apply their own privacy policies.",
+          "Feedback stores the content and contact information you choose to submit, together with supplied platform, app version, operating-system version or error details, to investigate and respond. Do not submit passwords, tokens or other secrets. For questions about submitted information, use the Feedback page and provide enough context to locate it."
         ]
       },
       {
         "key": "terms",
-        "draft": true,
-        "title": "Terms of use",
+        "draft": false,
+        "title": "Using OpenNavo",
         "paragraphs": [
-          "OpenNavo is provided “as is.” Software is published by its respective authors, and installation and use are governed by their own license agreements. Please verify that the source is trustworthy before installing.",
-          "OpenNavo only uses Homebrew to perform actions you have confirmed; it won’t install software for you in the background."
+          "OpenNavo’s own source code is distributed under Apache-2.0; the LICENSE file is the authoritative license text. Third-party apps, libraries, fonts, templates and services retain their own licenses. OpenNavo does not grant additional rights to those materials or waive any applicable purchase requirements.",
+          "The software is provided “as is”, without warranties as described in its license. Review the operation and download source before installing, updating or removing an app, and back up important data. Availability, compatibility and upstream package content can change."
         ]
       },
       {
         "key": "contact",
         "draft": false,
-        "title": "Open source and contact",
+        "title": "Source code and feedback",
         "paragraphs": [
-          "OpenNavo is an open-source project. If you spot incorrect information, an installation fails, or you’d like to suggest an app for inclusion, let us know on the “Feedback” page."
+          "Source code, license texts and contribution guidance: https://github.com/opennavo/OpenNavo . Official Mac downloads: https://opennavo.com/download . Release binaries and checksums are published on GitHub Releases.",
+          "Use the website’s Feedback page for catalog corrections or usage problems. Reproducible bugs and feature requests can also be submitted through GitHub Issues. Public issues must not contain credentials or personal information."
         ]
       },
       {
@@ -50,224 +53,9 @@
         "draft": false,
         "title": "Open source",
         "paragraphs": [
-          "Thank you to the open-source projects and contributors. This inventory includes locked direct, transitive and development dependencies for the web, desktop, server and MCP, plus upstream templates and infrastructure. Not every module ships in the desktop app.",
-          "Names and versions come from dependency locks. NOASSERTION means license metadata has not been verified; follow the project link for original license and copyright notices. external means the version is supplied by the user’s computer and is not pinned by this project."
-        ]
-      }
-    ],
-    "es-ES": [
-      {
-        "key": "about",
-        "draft": false,
-        "title": "¿Qué es OpenNavo?",
-        "paragraphs": [
-          "OpenNavo es una tienda de aplicaciones de Homebrew para macOS: explora y busca las aplicaciones del catálogo de Homebrew en la web e instálalas y actualízalas con un clic desde el cliente de macOS.",
-          "OpenNavo no aloja ningún software. Homebrew en tu ordenador realiza todas las instalaciones y muestra fielmente los comandos ejecutados."
-        ]
-      },
-      {
-        "key": "data",
-        "draft": false,
-        "title": "Fuentes de datos",
-        "paragraphs": [
-          "El catálogo, las estadísticas de instalación y los registros de versiones proceden de Homebrew. OpenNavo mantiene las descripciones de las aplicaciones, las categorías y las notas de actualización; el contenido puede traducirse automáticamente."
-        ]
-      },
-      {
-        "key": "privacy",
-        "draft": true,
-        "title": "Aviso de privacidad",
-        "paragraphs": [
-          "La web no requiere una cuenta ni recopila información sobre el software que instalas. Las búsquedas se registran de forma anónima para mejorar los resultados; no se guardan las direcciones IP. Las listas de Brewfile solo se guardan en tu navegador.",
-          "Las estadísticas de uso del cliente de macOS están desactivadas de forma predeterminada. Los informes anónimos de errores solo se envían si das tu consentimiento. Los datos de contacto que facilites al enviar comentarios solo se usan para responderte."
-        ]
-      },
-      {
-        "key": "terms",
-        "draft": true,
-        "title": "Condiciones de uso",
-        "paragraphs": [
-          "OpenNavo se ofrece «tal cual». Cada software lo publica su autor y su instalación y uso se rigen por sus propias licencias. Comprueba que la fuente sea fiable antes de instalarlo.",
-          "OpenNavo solo utiliza Homebrew para realizar las acciones que confirmes; no instalará software en segundo plano por ti."
-        ]
-      },
-      {
-        "key": "contact",
-        "draft": false,
-        "title": "Código abierto y contacto",
-        "paragraphs": [
-          "OpenNavo es un proyecto de código abierto. Si encuentras información incorrecta, falla una instalación o quieres sugerir una aplicación, dínoslo en la página «Comentarios»."
-        ]
-      },
-      {
-        "key": "openSource",
-        "draft": false,
-        "title": "Open source",
-        "paragraphs": [
-          "Thank you to the open-source projects and contributors. This inventory includes locked direct, transitive and development dependencies for the web, desktop, server and MCP, plus upstream templates and infrastructure. Not every module ships in the desktop app.",
-          "Names and versions come from dependency locks. NOASSERTION means license metadata has not been verified; follow the project link for original license and copyright notices. external means the version is supplied by the user’s computer and is not pinned by this project."
-        ]
-      }
-    ],
-    "ja-JP": [
-      {
-        "key": "about",
-        "draft": false,
-        "title": "OpenNavoとは",
-        "paragraphs": [
-          "OpenNavoはmacOS向けのHomebrewアプリストアです。ウェブでHomebrewに登録されたアプリを閲覧・検索し、macOSクライアントからワンクリックでインストールや更新ができます。",
-          "OpenNavoはソフトウェアをホストしません。インストールはすべてお使いのコンピュータ上のHomebrewが行い、実行されるコマンドはそのまま表示されます。"
-        ]
-      },
-      {
-        "key": "data",
-        "draft": false,
-        "title": "データソース",
-        "paragraphs": [
-          "カタログ、インストール統計、バージョン掲載情報はHomebrewに基づいています。アプリの説明、カテゴリ、更新情報はOpenNavoが管理し、自動翻訳される場合があります。"
-        ]
-      },
-      {
-        "key": "privacy",
-        "draft": true,
-        "title": "プライバシーについて",
-        "paragraphs": [
-          "ウェブサイトの利用にアカウントは不要で、インストールしたソフトウェアの情報も収集しません。検索語句は検索結果の改善のため匿名で記録されますが、IPアドレスは保存しません。Brewfileのリストはブラウザー内にのみ保存されます。",
-          "macOSクライアントの使用統計は初期設定で無効です。匿名のクラッシュレポートは、同意した場合にのみ送信されます。フィードバックに記載された連絡先は、返信のみに使用します。"
-        ]
-      },
-      {
-        "key": "terms",
-        "draft": true,
-        "title": "利用規約",
-        "paragraphs": [
-          "OpenNavoは「現状有姿」で提供されます。ソフトウェアは各作者が公開しており、インストールと使用にはそれぞれのライセンス契約が適用されます。インストール前に提供元が信頼できることをご確認ください。",
-          "OpenNavoは確認済みの操作を実行するためにHomebrewを呼び出すだけで、バックグラウンドでソフトウェアをインストールすることはありません。"
-        ]
-      },
-      {
-        "key": "contact",
-        "draft": false,
-        "title": "オープンソースとお問い合わせ",
-        "paragraphs": [
-          "OpenNavoはオープンソースプロジェクトです。情報の誤りやインストールの失敗を見つけた場合、または掲載を提案したい場合は、「フィードバック」ページからお知らせください。"
-        ]
-      },
-      {
-        "key": "openSource",
-        "draft": false,
-        "title": "Open source",
-        "paragraphs": [
-          "Thank you to the open-source projects and contributors. This inventory includes locked direct, transitive and development dependencies for the web, desktop, server and MCP, plus upstream templates and infrastructure. Not every module ships in the desktop app.",
-          "Names and versions come from dependency locks. NOASSERTION means license metadata has not been verified; follow the project link for original license and copyright notices. external means the version is supplied by the user’s computer and is not pinned by this project."
-        ]
-      }
-    ],
-    "pt-BR": [
-      {
-        "key": "about",
-        "draft": false,
-        "title": "O que é OpenNavo?",
-        "paragraphs": [
-          "OpenNavo é uma loja de aplicativos do Homebrew para macOS: navegue e pesquise na web os aplicativos listados pelo Homebrew e instale e atualize com um clique pelo cliente para macOS.",
-          "OpenNavo não hospeda nenhum software. Todas as instalações são feitas pelo Homebrew no seu computador, e os comandos executados são exibidos exatamente como são."
-        ]
-      },
-      {
-        "key": "data",
-        "draft": false,
-        "title": "Fontes de dados",
-        "paragraphs": [
-          "O catálogo, as estatísticas de instalação e os registros de versões vêm do Homebrew. OpenNavo mantém as descrições dos aplicativos, as categorias e as notas de atualização; o conteúdo pode ser traduzido automaticamente."
-        ]
-      },
-      {
-        "key": "privacy",
-        "draft": true,
-        "title": "Aviso de privacidade",
-        "paragraphs": [
-          "O site não exige uma conta nem coleta informações sobre os softwares que você instala. Os termos de pesquisa são registrados anonimamente para melhorar os resultados; os endereços IP não são armazenados. As listas de Brewfile ficam salvas somente no seu navegador.",
-          "As estatísticas de uso do cliente para macOS vêm desativadas por padrão. Relatórios anônimos de falhas só são enviados com seu consentimento. Os dados de contato informados no feedback são usados apenas para responder a você."
-        ]
-      },
-      {
-        "key": "terms",
-        "draft": true,
-        "title": "Termos de uso",
-        "paragraphs": [
-          "OpenNavo é fornecido “no estado em que se encontra”. Os softwares são publicados por seus respectivos autores, e a instalação e o uso seguem suas próprias licenças. Verifique se a fonte é confiável antes de instalar.",
-          "OpenNavo apenas chama o Homebrew para executar as ações que você confirmou; não instala softwares em segundo plano por você."
-        ]
-      },
-      {
-        "key": "contact",
-        "draft": false,
-        "title": "Código aberto e contato",
-        "paragraphs": [
-          "OpenNavo é um projeto de código aberto. Se encontrar informações incorretas, uma falha na instalação ou quiser sugerir um aplicativo para inclusão, conte para nós na página “Feedback”."
-        ]
-      },
-      {
-        "key": "openSource",
-        "draft": false,
-        "title": "Open source",
-        "paragraphs": [
-          "Thank you to the open-source projects and contributors. This inventory includes locked direct, transitive and development dependencies for the web, desktop, server and MCP, plus upstream templates and infrastructure. Not every module ships in the desktop app.",
-          "Names and versions come from dependency locks. NOASSERTION means license metadata has not been verified; follow the project link for original license and copyright notices. external means the version is supplied by the user’s computer and is not pinned by this project."
-        ]
-      }
-    ],
-    "ru-RU": [
-      {
-        "key": "about",
-        "draft": false,
-        "title": "Что такое OpenNavo?",
-        "paragraphs": [
-          "OpenNavo — магазин приложений Homebrew для macOS: просматривайте и ищите приложения из каталога Homebrew на сайте, а затем устанавливайте и обновляйте их одним нажатием в клиенте для macOS.",
-          "OpenNavo не размещает программное обеспечение. Все установки выполняет Homebrew на вашем компьютере, а запускаемые команды отображаются без изменений."
-        ]
-      },
-      {
-        "key": "data",
-        "draft": false,
-        "title": "Источники данных",
-        "paragraphs": [
-          "Каталог, статистика установок и записи о версиях поступают из Homebrew. OpenNavo ведёт описания приложений, категории и заметки об обновлениях; содержимое может переводиться автоматически."
-        ]
-      },
-      {
-        "key": "privacy",
-        "draft": true,
-        "title": "Конфиденциальность",
-        "paragraphs": [
-          "Для сайта не нужна учётная запись; мы не собираем сведения о том, какое программное обеспечение вы устанавливаете. Поисковые запросы анонимно записываются для улучшения результатов; IP-адреса не сохраняются. Списки Brewfile хранятся только в вашем браузере.",
-          "Статистика использования клиента для macOS по умолчанию отключена. Анонимные отчёты о сбоях отправляются только с вашего согласия. Контактные данные, оставленные в отзыве, используются только для ответа."
-        ]
-      },
-      {
-        "key": "terms",
-        "draft": true,
-        "title": "Условия использования",
-        "paragraphs": [
-          "OpenNavo предоставляется «как есть». Программное обеспечение выпускают его авторы; на установку и использование распространяются их собственные лицензии. Перед установкой убедитесь, что источник заслуживает доверия.",
-          "OpenNavo лишь вызывает Homebrew для выполнения подтверждённых вами действий и не устанавливает программы в фоновом режиме от вашего имени."
-        ]
-      },
-      {
-        "key": "contact",
-        "draft": false,
-        "title": "Открытый исходный код и контакты",
-        "paragraphs": [
-          "OpenNavo — проект с открытым исходным кодом. Если вы заметили неверную информацию, столкнулись с ошибкой установки или хотите предложить приложение для каталога, сообщите нам на странице «Обратная связь»."
-        ]
-      },
-      {
-        "key": "openSource",
-        "draft": false,
-        "title": "Open source",
-        "paragraphs": [
-          "Thank you to the open-source projects and contributors. This inventory includes locked direct, transitive and development dependencies for the web, desktop, server and MCP, plus upstream templates and infrastructure. Not every module ships in the desktop app.",
-          "Names and versions come from dependency locks. NOASSERTION means license metadata has not been verified; follow the project link for original license and copyright notices. external means the version is supplied by the user’s computer and is not pinned by this project."
+          "OpenNavo is built with open-source software. The inventory below is generated from the dependency locks and verified upstream license evidence for this release. It includes direct and transitive dependencies, development tools, fonts, templates and external infrastructure across the web, desktop, server and MCP. An entry does not mean that component is bundled in every download.",
+          "Each entry identifies its ecosystem, package or project, version, declared license and upstream link. Third-party materials retain their own copyright and license terms; Apache-2.0 applies to OpenNavo’s own code, not to every item below. “external” means the version is supplied by the environment rather than pinned by this application.",
+          "Original license texts, provenance and distribution scope are available at https://github.com/opennavo/OpenNavo/tree/main/docs/legal/third-party . Project attribution is in NOTICE, and redistribution guidance is in docs/legal/THIRD_PARTY.md. Consult the notices bundled with a specific release when redistributing its artifacts."
         ]
       }
     ],
@@ -275,53 +63,289 @@
       {
         "key": "about",
         "draft": false,
-        "title": "OpenNavo 是什么",
+        "title": "关于 OpenNavo",
         "paragraphs": [
-          "OpenNavo 是 macOS 上的 Homebrew 应用商店：在网页上浏览与搜索 Homebrew 收录的 App，用 macOS 客户端一键安装与更新。",
-          "OpenNavo 不托管任何软件，所有安装都由你电脑上的 Homebrew 完成，执行的命令都会如实显示。"
+          "OpenNavo 帮你发现和管理 macOS 应用：在网站上浏览应用、精选合集、安装统计和版本记录，在 Mac 客户端中通过 Homebrew 安装、更新和卸载软件。",
+          "OpenNavo 是独立的开源项目，并非 Homebrew 或 Apple 的官方产品。软件安装由你电脑上的 Homebrew 执行，下载来源取决于所选软件包及镜像配置。"
         ]
       },
       {
         "key": "data",
         "draft": false,
-        "title": "数据来源",
+        "title": "数据与内容来源",
         "paragraphs": [
-          "目录、安装统计与版本收录记录来自 Homebrew。应用介绍、分类与更新说明由 OpenNavo 维护，内容可自动翻译。"
+          "软件包信息和安装统计来自 Homebrew 的公开目录。应用介绍、分类、合集和版本说明由 OpenNavo 根据项目官网、发布记录等公开资料整理；部分内容会自动生成或翻译，可能存在错误，也可能晚于上游更新。",
+          "安装前请核对发布者、下载来源、版本和许可协议。收录不代表推荐背书或安全保证。发现信息有误，可以通过「反馈」页告诉我们。"
         ]
       },
       {
         "key": "privacy",
-        "draft": true,
-        "title": "隐私说明",
+        "draft": false,
+        "title": "隐私与本地数据",
         "paragraphs": [
-          "网页端不需要账号，也不会收集你安装了哪些软件。搜索关键词会匿名记录用于改进搜索结果，不保存 IP 地址；Brewfile 清单只保存在你的浏览器本地。",
-          "macOS 客户端的使用统计默认关闭，匿名崩溃报告需要你同意后才会发送。反馈时留下的联系方式只用于回复你。"
+          "浏览公开目录无需注册账号。服务会记录搜索词、语言、平台、结果数量及点击的搜索结果，用于改进检索。应用的普通请求日志记录时间、接口路径、状态和耗时，不再包含 IP 地址字段。请求传输与访问限流仍需处理 IP，管理员登录和操作审计保留来源 IP；代理错误诊断及外部基础设施服务也可能处理或保留 IP。此前产生的日志可能保留至轮转清理，我们不作「零日志」承诺。",
+          "网页端的 Brewfile 清单保存在浏览器本地。Mac 客户端在本机保存设置、本地软件信息和操作记录；搜索目录、加载在线资源及检查更新时，会向对应服务发起网络请求。Homebrew、GitHub、下载镜像等第三方服务按各自的隐私政策处理请求。",
+          "提交反馈时，服务会保存你填写的内容和联系方式，以及随反馈提供的平台、应用版本、系统版本或错误信息，用于排查和回复。请勿提交密码、令牌等敏感信息。如需咨询已提交信息的处理，可通过「反馈」页说明情况，并提供便于定位记录的必要信息。"
         ]
       },
       {
         "key": "terms",
-        "draft": true,
-        "title": "使用条款",
+        "draft": false,
+        "title": "使用说明与许可",
         "paragraphs": [
-          "OpenNavo 按「现状」提供。软件由各自的作者发布，安装与使用遵循它们自己的许可协议；请在安装前确认来源可信。",
-          "OpenNavo 只调用 Homebrew 执行你确认过的操作，不会在后台替你安装软件。"
+          "OpenNavo 自身源码采用 Apache-2.0 许可证，具体条款以仓库 LICENSE 文件为准。第三方应用、依赖库、字体、模板和服务保留各自的许可；使用 OpenNavo 不会额外授予这些内容的权利，也不会免除其适用的付费要求。",
+          "软件按许可证约定以「现状」提供，不作其中排除的保证。安装、更新或卸载前，请核对操作及下载来源，并备份重要数据。服务可用性、兼容性和上游软件包内容都可能变化。"
         ]
       },
       {
         "key": "contact",
         "draft": false,
-        "title": "开源与联系",
+        "title": "开源与反馈",
         "paragraphs": [
-          "OpenNavo 是开源项目。发现信息有误、安装失败或想推荐收录，可以在「反馈」页告诉我们。"
+          "源码、许可文本和贡献说明：https://github.com/opennavo/OpenNavo 。Mac 客户端官方下载：https://opennavo.com/zh/download 。正式安装包和校验和发布在 GitHub Releases。",
+          "目录信息纠错或使用问题可通过网站「反馈」页提交；可复现的程序错误和功能建议也可提交到 GitHub Issues。公开问题中请勿附带凭据或个人敏感信息。"
         ]
       },
       {
         "key": "openSource",
         "draft": false,
-        "title": "开源模块",
+        "title": "Open source",
         "paragraphs": [
-          "感谢所有开源项目及贡献者。以下清单涵盖本仓库锁定的前端、客户端、服务端和 MCP 直接、间接及开发依赖，以及上游模板与基础设施；并非每个模块都随客户端分发。",
-          "名称与版本来自依赖锁文件。NOASSERTION 表示元数据尚未确认许可证；请通过项目链接查看原始许可与版权声明。external 表示由用户本机提供、未由本项目锁定的版本。"
+          "OpenNavo is built with open-source software. The inventory below is generated from the dependency locks and verified upstream license evidence for this release. It includes direct and transitive dependencies, development tools, fonts, templates and external infrastructure across the web, desktop, server and MCP. An entry does not mean that component is bundled in every download.",
+          "Each entry identifies its ecosystem, package or project, version, declared license and upstream link. Third-party materials retain their own copyright and license terms; Apache-2.0 applies to OpenNavo’s own code, not to every item below. “external” means the version is supplied by the environment rather than pinned by this application.",
+          "Original license texts, provenance and distribution scope are available at https://github.com/opennavo/OpenNavo/tree/main/docs/legal/third-party . Project attribution is in NOTICE, and redistribution guidance is in docs/legal/THIRD_PARTY.md. Consult the notices bundled with a specific release when redistributing its artifacts."
+        ]
+      }
+    ],
+    "ja-JP": [
+      {
+        "key": "about",
+        "draft": false,
+        "title": "OpenNavoについて",
+        "paragraphs": [
+          "OpenNavoはHomebrewを使ってmacOSアプリを探し、管理するためのツールです。ウェブではアプリ、コレクション、インストール統計、バージョン履歴を閲覧でき、Macアプリではソフトウェアをインストール・更新・アンインストールできます。",
+          "OpenNavoは独立したオープンソースプロジェクトであり、HomebrewやAppleの公式製品ではありません。インストールはお使いのMacのHomebrewが実行し、取得元は選択したパッケージやミラーの設定に従います。"
+        ]
+      },
+      {
+        "key": "data",
+        "draft": false,
+        "title": "データとコンテンツ",
+        "paragraphs": [
+          "パッケージ情報とインストール統計はHomebrewの公開カタログを参照しています。説明、分類、コレクション、リリースノートは公式サイトなどの公開資料から整理しています。自動生成・翻訳された内容には誤りや更新の遅れが生じる場合があります。",
+          "インストール前に公開元、取得元、バージョン、ライセンスをご確認ください。掲載は推奨や安全性の保証ではありません。誤りはフィードバックからお知らせください。"
+        ]
+      },
+      {
+        "key": "privacy",
+        "draft": false,
+        "title": "プライバシーとローカルデータ",
+        "paragraphs": [
+          "公開カタログの閲覧に登録は不要です。検索改善のため、検索語、言語、プラットフォーム、結果件数、選択した結果を記録します。通常のアプリケーション要求ログには時刻、パス、ステータス、所要時間を記録し、IPアドレスの項目は含めません。通信とアクセス制限ではIPを処理し、管理者のログイン・操作監査には送信元IPを保存します。プロキシのエラー診断や外部インフラ事業者もIPを処理・保存する場合があります。過去のログはローテーションまで残る場合があり、ゼロログを保証するサービスではありません。",
+          "Brewfileリストはブラウザ内に、Macアプリの設定・ローカルパッケージ情報・操作履歴は端末内に保存されます。検索、オンラインリソースの取得、更新確認では関連サービスに通信します。Homebrew、GitHub、ミラーなどには各提供者のプライバシーポリシーが適用されます。",
+          "フィードバックでは、入力した内容や連絡先、提供されたプラットフォーム・アプリやOSのバージョン・エラー情報を調査と返信のため保存します。パスワードやトークンを送信しないでください。送信済み情報については、記録を特定できる必要な情報を添えてフィードバックからお問い合わせください。"
+        ]
+      },
+      {
+        "key": "terms",
+        "draft": false,
+        "title": "利用とライセンス",
+        "paragraphs": [
+          "OpenNavo自身のソースコードはApache-2.0で公開しています。正式な条項はリポジトリのLICENSEをご確認ください。第三者のアプリ、ライブラリ、フォント、テンプレート、サービスにはそれぞれのライセンスが適用され、追加の権利や購入義務の免除を提供するものではありません。",
+          "ソフトウェアはライセンスに記載された保証の範囲で「現状有姿」で提供されます。インストール・更新・削除の前に操作と取得元を確認し、重要なデータをバックアップしてください。提供状況、互換性、パッケージ内容は変更される場合があります。"
+        ]
+      },
+      {
+        "key": "contact",
+        "draft": false,
+        "title": "ソースコードとお問い合わせ",
+        "paragraphs": [
+          "ソースコード、ライセンス、貢献方法：https://github.com/opennavo/OpenNavo 。Mac版の公式ダウンロード：https://opennavo.com/ja/download 。配布ファイルとチェックサムはGitHub Releasesに掲載しています。",
+          "情報の訂正や利用上の問題はフィードバックから、再現可能な不具合や機能の提案はGitHub Issuesからもお知らせいただけます。公開の投稿に認証情報や個人情報を含めないでください。"
+        ]
+      },
+      {
+        "key": "openSource",
+        "draft": false,
+        "title": "Open source",
+        "paragraphs": [
+          "OpenNavo is built with open-source software. The inventory below is generated from the dependency locks and verified upstream license evidence for this release. It includes direct and transitive dependencies, development tools, fonts, templates and external infrastructure across the web, desktop, server and MCP. An entry does not mean that component is bundled in every download.",
+          "Each entry identifies its ecosystem, package or project, version, declared license and upstream link. Third-party materials retain their own copyright and license terms; Apache-2.0 applies to OpenNavo’s own code, not to every item below. “external” means the version is supplied by the environment rather than pinned by this application.",
+          "Original license texts, provenance and distribution scope are available at https://github.com/opennavo/OpenNavo/tree/main/docs/legal/third-party . Project attribution is in NOTICE, and redistribution guidance is in docs/legal/THIRD_PARTY.md. Consult the notices bundled with a specific release when redistributing its artifacts."
+        ]
+      }
+    ],
+    "es-ES": [
+      {
+        "key": "about",
+        "draft": false,
+        "title": "Acerca de OpenNavo",
+        "paragraphs": [
+          "OpenNavo te ayuda a descubrir y gestionar aplicaciones de macOS con Homebrew. Consulta aplicaciones, colecciones, estadísticas e historial de versiones en la web e instala, actualiza o desinstala software desde la app para Mac.",
+          "Es un proyecto independiente de código abierto, no un producto oficial de Homebrew ni de Apple. Tu Homebrew local realiza las instalaciones desde las fuentes definidas por el paquete o el espejo elegido."
+        ]
+      },
+      {
+        "key": "data",
+        "draft": false,
+        "title": "Datos y contenidos",
+        "paragraphs": [
+          "Los metadatos y las estadísticas proceden del catálogo público de Homebrew. OpenNavo organiza descripciones, categorías, colecciones y notas a partir de páginas y otras fuentes públicas. Algunos contenidos se generan o traducen automáticamente y pueden contener errores o retrasos.",
+          "Comprueba el editor, la fuente, la versión y la licencia antes de instalar. La inclusión en el catálogo no constituye una recomendación ni una garantía de seguridad. Comunica los errores mediante Comentarios."
+        ]
+      },
+      {
+        "key": "privacy",
+        "draft": false,
+        "title": "Privacidad y datos locales",
+        "paragraphs": [
+          "No se necesita una cuenta para consultar el catálogo público. Registramos búsquedas, idioma, plataforma, número de resultados y resultados seleccionados para mejorar la búsqueda. Los registros ordinarios de solicitudes de la aplicación guardan hora, ruta, estado y duración, sin un campo de dirección IP. Las IP se procesan para las conexiones y los límites de solicitudes; las auditorías de acceso y operaciones de administradores conservan la IP de origen. Los diagnósticos de errores del proxy y los proveedores de infraestructura externos también pueden procesar o conservar IP. Los registros anteriores pueden permanecer hasta su rotación; no prometemos ausencia total de registros.",
+          "La lista Brewfile se guarda en tu navegador. La app almacena ajustes, información de paquetes locales e historial de operaciones en tu Mac. Las búsquedas, los recursos en línea y las comprobaciones de actualización envían solicitudes a los servicios correspondientes. Homebrew, GitHub y los espejos aplican sus propias políticas de privacidad.",
+          "Los comentarios conservan el contenido y contacto que facilites, junto con los datos de plataforma, versiones o errores enviados, para investigar y responder. No envíes contraseñas ni tokens. Para consultar el tratamiento de información enviada, utiliza Comentarios e indica los datos necesarios para localizarla."
+        ]
+      },
+      {
+        "key": "terms",
+        "draft": false,
+        "title": "Uso y licencias",
+        "paragraphs": [
+          "El código propio de OpenNavo se distribuye con Apache-2.0; el texto de referencia está en LICENSE. Las aplicaciones, bibliotecas, fuentes, plantillas y servicios de terceros conservan sus licencias. OpenNavo no concede derechos adicionales sobre ellos ni elimina requisitos de compra aplicables.",
+          "El software se proporciona «tal cual», con las exclusiones de garantía de su licencia. Revisa la operación y el origen de descarga y respalda tus datos antes de instalar, actualizar o eliminar aplicaciones. La disponibilidad, compatibilidad y los paquetes pueden cambiar."
+        ]
+      },
+      {
+        "key": "contact",
+        "draft": false,
+        "title": "Código y comentarios",
+        "paragraphs": [
+          "Código, licencias y contribuciones: https://github.com/opennavo/OpenNavo . Descarga oficial para Mac: https://opennavo.com/es/download . Los archivos y sus sumas de comprobación se publican en GitHub Releases.",
+          "Utiliza Comentarios para corregir el catálogo o informar de problemas. Los errores reproducibles y las propuestas también pueden enviarse mediante GitHub Issues. No publiques credenciales ni información personal."
+        ]
+      },
+      {
+        "key": "openSource",
+        "draft": false,
+        "title": "Open source",
+        "paragraphs": [
+          "OpenNavo is built with open-source software. The inventory below is generated from the dependency locks and verified upstream license evidence for this release. It includes direct and transitive dependencies, development tools, fonts, templates and external infrastructure across the web, desktop, server and MCP. An entry does not mean that component is bundled in every download.",
+          "Each entry identifies its ecosystem, package or project, version, declared license and upstream link. Third-party materials retain their own copyright and license terms; Apache-2.0 applies to OpenNavo’s own code, not to every item below. “external” means the version is supplied by the environment rather than pinned by this application.",
+          "Original license texts, provenance and distribution scope are available at https://github.com/opennavo/OpenNavo/tree/main/docs/legal/third-party . Project attribution is in NOTICE, and redistribution guidance is in docs/legal/THIRD_PARTY.md. Consult the notices bundled with a specific release when redistributing its artifacts."
+        ]
+      }
+    ],
+    "pt-BR": [
+      {
+        "key": "about",
+        "draft": false,
+        "title": "Sobre o OpenNavo",
+        "paragraphs": [
+          "O OpenNavo ajuda você a descobrir e gerenciar apps do macOS com o Homebrew. Consulte apps, coleções, estatísticas e histórico de versões no site e instale, atualize ou desinstale software pelo app para Mac.",
+          "É um projeto independente de código aberto, não um produto oficial do Homebrew ou da Apple. O Homebrew do seu computador executa as instalações a partir das fontes definidas pelo pacote ou espelho escolhido."
+        ]
+      },
+      {
+        "key": "data",
+        "draft": false,
+        "title": "Dados e conteúdo",
+        "paragraphs": [
+          "Os metadados e as estatísticas vêm do catálogo público do Homebrew. O OpenNavo organiza descrições, categorias, coleções e notas a partir de páginas dos projetos e outras fontes públicas. Parte do conteúdo é gerada ou traduzida automaticamente e pode conter erros ou atrasos.",
+          "Confira o autor, a origem, a versão e a licença antes de instalar. A inclusão no catálogo não é um endosso nem uma garantia de segurança. Avise sobre erros pelo Feedback."
+        ]
+      },
+      {
+        "key": "privacy",
+        "draft": false,
+        "title": "Privacidade e dados locais",
+        "paragraphs": [
+          "Não é necessário criar conta para consultar o catálogo público. Registramos pesquisas, idioma, plataforma, quantidade de resultados e resultados selecionados para melhorar a busca. Os registros comuns de requisições da aplicação guardam horário, rota, status e duração, sem um campo de endereço IP. Os IPs são processados para conexões e limites de requisições; auditorias de acesso e operações de administradores guardam o IP de origem. Diagnósticos de erros do proxy e provedores externos de infraestrutura também podem processar ou guardar IPs. Registros anteriores podem permanecer até a rotação; não prometemos ausência total de registros.",
+          "A lista Brewfile fica no navegador. O app salva configurações, informações dos pacotes locais e histórico de operações no seu Mac. Buscas, recursos on-line e verificações de atualização fazem solicitações aos serviços correspondentes. Homebrew, GitHub e espelhos seguem suas próprias políticas de privacidade.",
+          "O feedback armazena o conteúdo e o contato que você enviar, além de plataforma, versões ou erros fornecidos, para investigação e resposta. Não envie senhas ou tokens. Para consultar o tratamento de informações enviadas, use o Feedback com os dados necessários para localizar o registro."
+        ]
+      },
+      {
+        "key": "terms",
+        "draft": false,
+        "title": "Uso e licenças",
+        "paragraphs": [
+          "O código próprio do OpenNavo usa Apache-2.0; o texto de referência está em LICENSE. Apps, bibliotecas, fontes, modelos e serviços de terceiros mantêm suas licenças. O OpenNavo não concede direitos adicionais sobre eles nem dispensa compras exigidas por seus fornecedores.",
+          "O software é fornecido «no estado em que se encontra», com as exclusões de garantia da licença. Confira a operação e a origem do download e faça backup antes de instalar, atualizar ou remover apps. Disponibilidade, compatibilidade e conteúdo dos pacotes podem mudar."
+        ]
+      },
+      {
+        "key": "contact",
+        "draft": false,
+        "title": "Código e feedback",
+        "paragraphs": [
+          "Código, licenças e contribuições: https://github.com/opennavo/OpenNavo . Download oficial para Mac: https://opennavo.com/pt/download . Os arquivos e checksums são publicados no GitHub Releases.",
+          "Use o Feedback para corrigir o catálogo ou relatar problemas. Bugs reproduzíveis e sugestões também podem ser enviados pelo GitHub Issues. Não publique credenciais nem informações pessoais."
+        ]
+      },
+      {
+        "key": "openSource",
+        "draft": false,
+        "title": "Open source",
+        "paragraphs": [
+          "OpenNavo is built with open-source software. The inventory below is generated from the dependency locks and verified upstream license evidence for this release. It includes direct and transitive dependencies, development tools, fonts, templates and external infrastructure across the web, desktop, server and MCP. An entry does not mean that component is bundled in every download.",
+          "Each entry identifies its ecosystem, package or project, version, declared license and upstream link. Third-party materials retain their own copyright and license terms; Apache-2.0 applies to OpenNavo’s own code, not to every item below. “external” means the version is supplied by the environment rather than pinned by this application.",
+          "Original license texts, provenance and distribution scope are available at https://github.com/opennavo/OpenNavo/tree/main/docs/legal/third-party . Project attribution is in NOTICE, and redistribution guidance is in docs/legal/THIRD_PARTY.md. Consult the notices bundled with a specific release when redistributing its artifacts."
+        ]
+      }
+    ],
+    "ru-RU": [
+      {
+        "key": "about",
+        "draft": false,
+        "title": "Об OpenNavo",
+        "paragraphs": [
+          "OpenNavo помогает находить приложения для macOS и управлять ими через Homebrew. На сайте доступны каталог, подборки, статистика установок и история версий; приложение для Mac позволяет устанавливать, обновлять и удалять программы.",
+          "Это независимый проект с открытым исходным кодом, а не официальный продукт Homebrew или Apple. Установку выполняет Homebrew на вашем компьютере, используя источники выбранного пакета или зеркала."
+        ]
+      },
+      {
+        "key": "data",
+        "draft": false,
+        "title": "Данные и материалы",
+        "paragraphs": [
+          "Метаданные пакетов и статистика поступают из публичного каталога Homebrew. Описания, категории, подборки и заметки о версиях формируются по страницам проектов и другим открытым источникам. Часть материалов создаётся или переводится автоматически; возможны ошибки и задержки обновления.",
+          "Перед установкой проверьте автора, источник, версию и лицензию. Наличие в каталоге не означает одобрения или гарантии безопасности. Об ошибках сообщайте через обратную связь."
+        ]
+      },
+      {
+        "key": "privacy",
+        "draft": false,
+        "title": "Конфиденциальность и локальные данные",
+        "paragraphs": [
+          "Для просмотра публичного каталога учётная запись не нужна. Для улучшения поиска сохраняются запросы, язык, платформа, число результатов и выбранные результаты. Обычные журналы запросов приложения содержат время, маршрут, статус и длительность без поля IP-адреса. IP обрабатываются для соединений и ограничения частоты запросов; аудит входов и действий администраторов сохраняет исходный IP. Диагностика ошибок прокси и внешние поставщики инфраструктуры также могут обрабатывать или сохранять IP. Старые журналы могут оставаться до ротации; мы не обещаем полного отсутствия журналов.",
+          "Список Brewfile хранится в браузере. Приложение сохраняет настройки, сведения о локальных пакетах и историю операций на Mac. Поиск, загрузка сетевых ресурсов и проверка обновлений обращаются к соответствующим сервисам. Homebrew, GitHub и зеркала применяют собственные правила конфиденциальности.",
+          "Обратная связь сохраняет отправленный текст и контактные данные, а также переданные сведения о платформе, версиях или ошибках для разбора и ответа. Не отправляйте пароли и токены. По вопросам обработки отправленных данных обращайтесь через обратную связь, указав необходимую информацию для поиска записи."
+        ]
+      },
+      {
+        "key": "terms",
+        "draft": false,
+        "title": "Использование и лицензии",
+        "paragraphs": [
+          "Собственный код OpenNavo распространяется по Apache-2.0; действующий текст находится в LICENSE. Сторонние приложения, библиотеки, шрифты, шаблоны и сервисы сохраняют свои лицензии. OpenNavo не предоставляет дополнительных прав на них и не отменяет применимые требования об оплате.",
+          "Программа предоставляется «как есть» с оговорками о гарантиях, указанными в лицензии. Перед установкой, обновлением или удалением проверьте действие и источник загрузки и сохраните важные данные. Доступность, совместимость и содержимое пакетов могут меняться."
+        ]
+      },
+      {
+        "key": "contact",
+        "draft": false,
+        "title": "Код и обратная связь",
+        "paragraphs": [
+          "Код, лицензии и правила участия: https://github.com/opennavo/OpenNavo . Официальная загрузка для Mac: https://opennavo.com/ru/download . Файлы и контрольные суммы публикуются в GitHub Releases.",
+          "Для исправлений каталога и вопросов используйте обратную связь. Воспроизводимые ошибки и предложения также можно направить через GitHub Issues. Не публикуйте учётные данные и личную информацию."
+        ]
+      },
+      {
+        "key": "openSource",
+        "draft": false,
+        "title": "Open source",
+        "paragraphs": [
+          "OpenNavo is built with open-source software. The inventory below is generated from the dependency locks and verified upstream license evidence for this release. It includes direct and transitive dependencies, development tools, fonts, templates and external infrastructure across the web, desktop, server and MCP. An entry does not mean that component is bundled in every download.",
+          "Each entry identifies its ecosystem, package or project, version, declared license and upstream link. Third-party materials retain their own copyright and license terms; Apache-2.0 applies to OpenNavo’s own code, not to every item below. “external” means the version is supplied by the environment rather than pinned by this application.",
+          "Original license texts, provenance and distribution scope are available at https://github.com/opennavo/OpenNavo/tree/main/docs/legal/third-party . Project attribution is in NOTICE, and redistribution guidance is in docs/legal/THIRD_PARTY.md. Consult the notices bundled with a specific release when redistributing its artifacts."
         ]
       }
     ]

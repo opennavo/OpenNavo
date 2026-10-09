@@ -71,6 +71,15 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "### OpenNavo $version（$channel）" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Validate versioned release notes before building
+        if: github.event_name == 'push'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node apps/desktop/scripts/release-notes.mjs --version "$VERSION"
 
   build:
     needs: meta
@@ -245,7 +254,7 @@ jobs:
 
       - name: Register draft release
         run: |
-          node apps/desktop/scripts/register-release.mjs --dir release-artifacts --version "$VERSION" --channel "$CHANNEL"
+          node apps/desktop/scripts/register-release.mjs --dir release-artifacts --version "$VERSION" --channel "$CHANNEL" --notes-dir apps/desktop/release-notes
           echo "- GitHub artifacts are public; clients receive updates only after publishing in admin. Run Update desktop tap after the stable admin release." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Render cask

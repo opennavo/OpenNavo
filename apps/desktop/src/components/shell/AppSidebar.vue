@@ -35,10 +35,17 @@ const groups = computed<OnSidebarGroup[]>(() => [
     ]
   },
   {
+    key: 'lists',
+    label: t('nav.lists'),
+    items: [
+      item('collections', 'lucide:library', t('collections.title')),
+      item('brewfile', 'lucide:file-text', t('brewfile.title'), { count: brewfile.items.length || undefined })
+    ]
+  },
+  {
     key: 'mine',
     label: t('nav.mine'),
     items: [
-      item('brewfile', 'lucide:file-text', t('brewfile.title'), { count: brewfile.items.length || undefined }),
       item('installed', 'lucide:package', t('nav.installed'), { count: library.items.length || undefined }),
       item('updates', 'lucide:circle-arrow-down', t('nav.updates'), {
         badge: updates.actionable.length || undefined,

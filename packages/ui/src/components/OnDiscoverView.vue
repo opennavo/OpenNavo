@@ -189,7 +189,7 @@ const RECENT_STATS: readonly OnAppCardStat[] = ['version', 'installs30d'];
       />
       <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-12px">
         <OnCollectionCard
-          v-for="collection in collections.slice(0, 3)"
+          v-for="collection in collections.slice(0, 6)"
           :key="collection.key"
           :title="collection.title"
           :subtitle="collection.subtitle"

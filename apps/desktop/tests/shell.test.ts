@@ -34,6 +34,7 @@ describe('AppShell', () => {
       '/discover',
       '/categories',
       '/rankings',
+      '/collections',
       '/brewfile',
       '/installed',
       '/updates',
@@ -42,8 +43,8 @@ describe('AppShell', () => {
     expect(links[0]?.attributes('aria-current')).toBe('page');
     expect(links[1]?.attributes('aria-current')).toBeUndefined();
     // The simulated machine has 15 packages (8 apps, 7 command-line tools); the Cask-only catalog (ADR-018) counts only apps.
-    expect(links[4]?.text()).toContain('8');
-    expect(links[5]?.text()).toContain('4');
+    expect(links[5]?.text()).toContain('8');
+    expect(links[6]?.text()).toContain('4');
     wrapper.unmount();
   });
 

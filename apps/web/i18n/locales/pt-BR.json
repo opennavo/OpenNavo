@@ -363,6 +363,31 @@
         "body": "Instalações, atualizações e desinstalações ficam registradas localmente. Em caso de falha, você pode consultar o log e tentar novamente."
       }
     },
+    "steps": {
+      "title": "Comece em três passos",
+      "open": {
+        "title": "Abra a imagem de disco",
+        "body": "Quando o download terminar, clique duas vezes no arquivo .dmg."
+      },
+      "drag": {
+        "title": "Arraste para Aplicativos",
+        "body": "Arraste o OpenNavo para a pasta Aplicativos; depois, abra-o rapidamente pelo Spotlight."
+      },
+      "setup": {
+        "title": "Conclua a configuração",
+        "body": "Na primeira abertura, o OpenNavo verifica seu Mac e permite escolher a fonte de download. Ainda não tem o Homebrew? Dá para instalá-lo ali mesmo."
+      }
+    },
+    "details": {
+      "title": "Detalhes da versão",
+      "version": "Versão",
+      "released": "Data de lançamento",
+      "size": "Tamanho",
+      "requires": "Requisitos",
+      "requiresValue": "macOS {macos} ou posterior",
+      "chip": "Chip",
+      "universal": "Apple silicon e Intel"
+    },
     "changelog": "Registro de alterações"
   },
   "feedback": {

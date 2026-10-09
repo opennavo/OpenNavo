@@ -48,19 +48,25 @@ describe('Draft registration', () => {
     const body = releaseBody({
       version: '0.3.0',
       channel: 'stable',
+      notesZh: '修复应用启动问题。',
+      notesEn: 'Fix application startup.',
       artifacts: [artifact('darwin-aarch64', 'sig-a'), artifact('darwin-x86_64', null), artifact('dmg-universal', 'x')]
     });
     expect(body.minMacos).toBe('13.0');
     expect(body).not.toHaveProperty('notesZh');
     expect(body.sourceLocale).toBe('zh-CN');
-    expect(body.i18n['zh-CN'].notes).toBe('OpenNavo 0.3.0');
+    expect(body.i18n['zh-CN'].notes).toBe('修复应用启动问题。');
     expect(body.artifacts.find(item => item.target === 'dmg-universal')?.signature).toBeNull();
     expect(body.artifacts.find(item => item.target === 'darwin-aarch64')?.signature).toBe('sig-a');
   });
 
   it('Reject missing targets and invalid versions', () => {
     expect(() =>
-      releaseBody({ version: '0.3.0', channel: 'stable', artifacts: [artifact('darwin-aarch64', null)] })
+      releaseBody({
+        version: '0.3.0',
+        channel: 'stable',
+        artifacts: [artifact('darwin-aarch64', null)]
+      })
     ).toThrow(/missing artifacts/);
     expect(() => releaseBody({ version: 'latest', channel: 'stable', artifacts: [] })).toThrow();
   });

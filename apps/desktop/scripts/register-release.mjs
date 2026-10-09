@@ -4,6 +4,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { loadReleaseNotes } from './release-notes.mjs';
 import { TARGETS, releaseBody } from './release-lib.mjs';
 
 const { values } = parseArgs({
@@ -12,9 +13,14 @@ const { values } = parseArgs({
     version: { type: 'string' },
     channel: { type: 'string', default: 'stable' },
     'notes-zh': { type: 'string' },
-    'notes-en': { type: 'string' }
+    'notes-en': { type: 'string' },
+    'notes-dir': { type: 'string' }
   }
 });
+if (values['notes-dir'] && (values['notes-zh'] !== undefined || values['notes-en'] !== undefined)) {
+  throw new Error('Use --notes-dir or inline --notes-zh/--notes-en, not both');
+}
+const notes = values['notes-dir'] ? loadReleaseNotes(values['notes-dir'], values.version ?? '') : {};
 const base = process.env.ADMIN_API_BASE;
 const token = process.env.CI_RELEASE_TOKEN;
 if (!base || !token) throw new Error('ADMIN_API_BASE and CI_RELEASE_TOKEN are required');
@@ -27,13 +33,16 @@ const body = releaseBody({
   version: values.version ?? '',
   channel: values.channel,
   artifacts,
-  notesZh: values['notes-zh'],
-  notesEn: values['notes-en']
+  notesZh: notes['zh-CN'] ?? values['notes-zh'],
+  notesEn: notes['en-US'] ?? values['notes-en']
 });
 
 const response = await fetch(`${base.replace(/\/+$/, '')}/desktop-releases`, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  headers: {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`
+  },
   body: JSON.stringify(body),
   redirect: 'error',
   signal: AbortSignal.timeout(30_000)

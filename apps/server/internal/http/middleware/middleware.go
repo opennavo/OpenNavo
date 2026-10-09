@@ -38,7 +38,7 @@ func Logger(logger *slog.Logger) gin.HandlerFunc {
 		if route == "" {
 			route = "unmatched"
 		}
-		logger.InfoContext(c.Request.Context(), "http request", "requestId", c.GetString("requestId"), "method", c.Request.Method, "route", route, "status", c.Writer.Status(), "latencyMs", float64(time.Since(start).Microseconds())/1000, "ip", c.ClientIP(), "userId", c.GetInt64("userId"))
+		logger.InfoContext(c.Request.Context(), "http request", "requestId", c.GetString("requestId"), "method", c.Request.Method, "route", route, "status", c.Writer.Status(), "latencyMs", float64(time.Since(start).Microseconds())/1000, "userId", c.GetInt64("userId"))
 	}
 }
 func Recovery(logger *slog.Logger) gin.HandlerFunc {

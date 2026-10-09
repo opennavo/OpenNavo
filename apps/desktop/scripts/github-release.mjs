@@ -4,15 +4,7 @@ import { openAsBlob, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import {
-  TARGETS,
-  channelOf,
-  describeFile,
-  githubArtifactUrl,
-  githubBase,
-  releaseBody,
-  isReleaseVersion
-} from './release-lib.mjs';
+import { TARGETS, channelOf, describeFile, githubArtifactUrl, githubBase, isReleaseVersion } from './release-lib.mjs';
 
 export function prepareAssets(dir, repository, version) {
   githubBase(repository);
@@ -36,9 +28,12 @@ export function prepareAssets(dir, repository, version) {
     }
     return row;
   });
-  releaseBody({ version, channel: channelOf(version), artifacts });
   const names = artifacts.flatMap(row => (row.target === 'dmg-universal' ? [row.file] : [row.file, `${row.file}.sig`]));
-  const assets = names.map(name => ({ name, path: join(dir, name), ...describeFile(join(dir, name)) }));
+  const assets = names.map(name => ({
+    name,
+    path: join(dir, name),
+    ...describeFile(join(dir, name))
+  }));
   const checksums = assets.map(a => `${a.sha256}  ${a.name}\n`).join('');
   const path = join(dir, 'SHA256SUMS');
   writeFileSync(path, checksums);
@@ -112,7 +107,11 @@ export function githubClient(repository, token, fetcher = fetch) {
     upload: async (id, asset) =>
       request(
         `https://uploads.github.com/repos/${repository}/releases/${id}/assets?name=${encodeURIComponent(asset.name)}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: await openAsBlob(asset.path) }
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: await openAsBlob(asset.path)
+        }
       ),
     publish: id => request(`${api}/releases/${id}`, json('PATCH', { draft: false, make_latest: 'false' })),
     verify: (url, asset) => verifyDownload(url, asset, fetcher)
@@ -162,6 +161,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   if (!process.env.ADMIN_API_BASE || !process.env.CI_RELEASE_TOKEN)
     throw new Error('registration configuration is required');
   const assets = prepareAssets(resolve(values.dir), repository, version);
-  await publishRelease({ repository, version, assets, client: githubClient(repository, process.env.GH_TOKEN) });
+  await publishRelease({
+    repository,
+    version,
+    assets,
+    client: githubClient(repository, process.env.GH_TOKEN)
+  });
   console.log(`GitHub Release desktop-v${version}: all anonymous downloads verified`);
 }

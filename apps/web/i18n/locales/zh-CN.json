@@ -363,6 +363,31 @@
         "body": "安装、更新、卸载都写进本机记录，失败时可以查看日志并重试。"
       }
     },
+    "steps": {
+      "title": "三步开始使用",
+      "open": {
+        "title": "打开安装盘",
+        "body": "下载完成后，双击 .dmg 文件打开。"
+      },
+      "drag": {
+        "title": "拖进「应用程序」",
+        "body": "把 OpenNavo 拖到「应用程序」文件夹，之后可以用聚焦搜索快速打开。"
+      },
+      "setup": {
+        "title": "完成首次设置",
+        "body": "首次打开会检查这台 Mac 并选择下载源；还没装 Homebrew 也没关系，可以在这里直接安装。"
+      }
+    },
+    "details": {
+      "title": "版本信息",
+      "version": "版本",
+      "released": "发布日期",
+      "size": "文件大小",
+      "requires": "系统要求",
+      "requiresValue": "macOS {macos} 及以上",
+      "chip": "芯片",
+      "universal": "Apple 芯片与 Intel"
+    },
     "changelog": "更新日志"
   },
   "feedback": {

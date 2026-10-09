@@ -1,12 +1,21 @@
 // Desktop release artifact names, checksums, draft registration payloads, and cask rendering (06 §15, 03 §13.3).
 // release-desktop.yml calls these through release-artifacts.mjs / register-release.mjs / render-cask.mjs; unit tests import the pure functions directly.
+import { validateNotes } from './release-notes.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 
 /** Three build targets: updater packages for both architectures and a Universal DMG for initial installation (registration target must be one of these). */
 export const TARGETS = {
-  'darwin-aarch64': { rustTarget: 'aarch64-apple-darwin', bundle: 'app', file: () => 'OpenNavo_aarch64.app.tar.gz' },
-  'darwin-x86_64': { rustTarget: 'x86_64-apple-darwin', bundle: 'app', file: () => 'OpenNavo_x64.app.tar.gz' },
+  'darwin-aarch64': {
+    rustTarget: 'aarch64-apple-darwin',
+    bundle: 'app',
+    file: () => 'OpenNavo_aarch64.app.tar.gz'
+  },
+  'darwin-x86_64': {
+    rustTarget: 'x86_64-apple-darwin',
+    bundle: 'app',
+    file: () => 'OpenNavo_x64.app.tar.gz'
+  },
   'dmg-universal': {
     rustTarget: 'universal-apple-darwin',
     bundle: 'dmg',
@@ -52,7 +61,10 @@ export function githubArtifactUrl(repository, version, file) {
 }
 
 export function describeFile(path) {
-  return { bytes: statSync(path).size, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') };
+  return {
+    bytes: statSync(path).size,
+    sha256: createHash('sha256').update(readFileSync(path)).digest('hex')
+  };
 }
 
 /** Draft registration payload (DesktopReleaseCreate contract); DMGs have no update signature. */
@@ -68,8 +80,8 @@ export function releaseBody({ version, channel, artifacts, notesZh, notesEn, min
     minMacos,
     sourceLocale: 'zh-CN',
     i18n: {
-      'zh-CN': { notes: notesZh ?? `OpenNavo ${version}` },
-      'en-US': { notes: notesEn ?? `OpenNavo ${version}` }
+      'zh-CN': { notes: validateNotes(notesZh, version, 'zh-CN') },
+      'en-US': { notes: validateNotes(notesEn, version, 'en-US') }
     },
     artifacts: artifacts.map(({ target, url, signature, bytes, sha256 }) => ({
       target,

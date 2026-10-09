@@ -31,6 +31,7 @@ const messages: MessageSchema = {
   },
   nav: {
     browse: 'Browse',
+    lists: 'Lists',
     mine: 'Library',
     discover: 'Discover',
     categories: 'Categories',

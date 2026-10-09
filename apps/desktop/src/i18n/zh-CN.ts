@@ -28,6 +28,7 @@ export default {
   },
   nav: {
     browse: '浏览',
+    lists: '清单',
     mine: '我的',
     discover: '发现',
     categories: '分类',

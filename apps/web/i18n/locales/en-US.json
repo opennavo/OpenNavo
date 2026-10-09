@@ -363,6 +363,31 @@
         "body": "Installs, updates, and removals are logged locally, so you can read the log and retry on failure."
       }
     },
+    "steps": {
+      "title": "Get started in three steps",
+      "open": {
+        "title": "Open the disk image",
+        "body": "When the download finishes, double-click the .dmg file."
+      },
+      "drag": {
+        "title": "Drag to Applications",
+        "body": "Drag OpenNavo into your Applications folder, then open it anytime with Spotlight."
+      },
+      "setup": {
+        "title": "Finish setup",
+        "body": "On first launch, OpenNavo checks your Mac and lets you choose a download source. No Homebrew yet? You can install it right there."
+      }
+    },
+    "details": {
+      "title": "Release details",
+      "version": "Version",
+      "released": "Released",
+      "size": "Size",
+      "requires": "Requires",
+      "requiresValue": "macOS {macos} or later",
+      "chip": "Chip",
+      "universal": "Apple silicon and Intel"
+    },
     "changelog": "Release notes"
   },
   "feedback": {
