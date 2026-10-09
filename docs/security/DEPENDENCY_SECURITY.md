@@ -2,6 +2,16 @@
 
 This is a local recheck and remediation record for the checkout based on `ad56bcb`. It is not a claim that GitHub Actions passed or that the hosted deployment has been upgraded. No vulnerability exclusions were added. Image counts are matching package/advisory records, including repeated CVEs in different binaries, not counts of exploitable application endpoints.
 
+## GitHub release gate follow-up
+
+The first complete backend CI reached `govulncheck` after integration tests passed
+and reported nine reachable advisories in Go 1.27.1 / `golang.org/x/net` v0.59.0.
+The application now pins Go 1.27.2 and x/net v0.60.0, including the server image
+build toolchain. The patched local symbol scan reports no vulnerable called
+symbols or imported packages; one unused module-level advisory remains. The
+older image scan counts below are historical and do not describe this new image.
+Dependency notices were regenerated using the server module's selected toolchain.
+
 ## Node dependencies
 
 | Audit scope | Before: critical / high / moderate / low | After |

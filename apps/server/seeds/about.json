@@ -4117,9 +4117,9 @@
     {
       "ecosystem": "Go",
       "name": "golang.org/x/net",
-      "version": "v0.59.0",
+      "version": "v0.60.0",
       "license": "BSD-3-Clause",
-      "url": "https://pkg.go.dev/golang.org/x/net@v0.59.0"
+      "url": "https://pkg.go.dev/golang.org/x/net@v0.60.0"
     },
     {
       "ecosystem": "Go",
@@ -4418,7 +4418,7 @@
     {
       "ecosystem": "Platform",
       "name": "Go standard library",
-      "version": "go1.27.1",
+      "version": "go1.27.2",
       "license": "BSD-3-Clause",
       "url": "https://go.dev/LICENSE"
     },

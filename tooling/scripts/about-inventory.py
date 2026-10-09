@@ -279,8 +279,8 @@ def main():
     modules.append(record('Platform', 'soybean-admin', '2.2.0', 'MIT', 'https://github.com/soybeanjs/soybean-admin/tree/v2.2.0',
                           'runtime', {'source': 'Retained upstream template license'}, [('LICENSE', (ROOT / 'apps/admin/LICENSE').read_bytes())]))
     # Statically linked standard libraries are not represented in package locks.
-    goroot = Path(run(['go', 'env', 'GOROOT']).strip())
-    go_version = run(['go', 'env', 'GOVERSION']).strip()
+    goroot = Path(run(['go', 'env', 'GOROOT'], ROOT / 'apps/server').strip())
+    go_version = run(['go', 'env', 'GOVERSION'], ROOT / 'apps/server').strip()
     go_license = next(path for path in (goroot / 'LICENSE', goroot.parent / 'LICENSE') if path.is_file())
     modules.append(record('Platform', 'Go standard library', go_version, 'BSD-3-Clause',
         'https://go.dev/LICENSE', 'runtime', {'source': 'Installed Go toolchain LICENSE', 'toolchain': go_version},

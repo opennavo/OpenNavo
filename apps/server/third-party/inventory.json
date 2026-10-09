@@ -2,8 +2,8 @@
   "formatVersion": 1,
   "lockDigests": {
     "pnpm-lock.yaml": "97961a58e1bf0c68aff176cc698bceb5174d88f4b9196c9c49092f263d456fda",
-    "apps/server/go.mod": "a02d924bf923d478e96870e6f8e36cf116ac364dd5269274351a66fc2999acda",
-    "apps/server/go.sum": "270184faa8d0510aafa4b7f4c2056678c59b506f5e424633b2f0b74961501203",
+    "apps/server/go.mod": "6d64638fcd95df0f3512fd647528e7b8d179f2b3eb37c31dc68d498ac2cae756",
+    "apps/server/go.sum": "8e49c990b927c1cd3e3c79e49e534ee4ead68daff3a48274c2cf134e89096b96",
     "apps/mcp/uv.lock": "7cf1c9389ae8f28702b943baabd723ab3badbc21fbfcee5d816cb2b431718220",
     "apps/desktop/src-tauri/Cargo.lock": "e9ccd458898873e04b33ed28be6b32302c82204cf8b27d4205e08a0b5bf322a3"
   },
@@ -1457,13 +1457,13 @@
     {
       "ecosystem": "Go",
       "name": "golang.org/x/net",
-      "version": "v0.59.0",
+      "version": "v0.60.0",
       "license": "BSD-3-Clause",
-      "url": "https://pkg.go.dev/golang.org/x/net@v0.59.0",
+      "url": "https://pkg.go.dev/golang.org/x/net@v0.60.0",
       "scope": "runtime",
       "evidence": {
         "source": "Go module download verified by go.sum / checksum database",
-        "sum": "h1:5zfYln+w5XCxwrnMMJPufRgNoXEaGxl0wo5GqPXyues="
+        "sum": "h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU="
       },
       "licenseFiles": [
         {
@@ -1628,13 +1628,13 @@
     {
       "ecosystem": "Platform",
       "name": "Go standard library",
-      "version": "go1.27.1",
+      "version": "go1.27.2",
       "license": "BSD-3-Clause",
       "url": "https://go.dev/LICENSE",
       "scope": "runtime",
       "evidence": {
         "source": "Installed Go toolchain LICENSE",
-        "toolchain": "go1.27.1"
+        "toolchain": "go1.27.2"
       },
       "licenseFiles": [
         {
