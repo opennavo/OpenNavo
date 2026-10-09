@@ -34,9 +34,9 @@ const run = client => publishRelease({ repository, version, assets, client, note
 describe('GitHub releases and failure recovery', () => {
   it.each([undefined, '', '## Improvements\n\n- 改进导航。'])(
     'rejects missing or Chinese notes before remote changes',
-    async notesEn => {
+    async invalidNotes => {
       const client = fixture();
-      await expect(publishRelease({ repository, version, assets, client, notesEn })).rejects.toThrow();
+      await expect(publishRelease({ repository, version, assets, client, notesEn: invalidNotes })).rejects.toThrow();
       expect(client.repository).not.toHaveBeenCalled();
       expect(client.updateNotes).not.toHaveBeenCalled();
     }
