@@ -1,0 +1,852 @@
+{
+  "app": {
+    "name": "OpenNavo"
+  },
+  "nav": {
+    "browse": "見つける",
+    "mine": "マイページ",
+    "discover": "見つける",
+    "categories": "カテゴリ",
+    "rankings": "ランキング",
+    "installed": "インストール済み",
+    "updates": "更新",
+    "history": "更新履歴",
+    "settings": "設定",
+    "updatesBadge": "利用可能な更新が{count}件あります"
+  },
+  "env": {
+    "label": "Homebrew",
+    "checking": "確認中…",
+    "checkingHint": "ローカルのHomebrew環境を読み込んでいます",
+    "ready": "Homebrewを利用できます",
+    "noBrew": "Homebrewがインストールされていません",
+    "noBrewHint": "クリックしてインストールを開始",
+    "version": "{version} · {arch}",
+    "mirrors": {
+      "official": "公式ソース",
+      "tuna": "清華大学TUNAミラー",
+      "ustc": "中国科学技術大学USTCミラー",
+      "aliyun": "Alibaba Cloudミラー"
+    }
+  },
+  "toolbar": {
+    "back": "戻る",
+    "forward": "進む",
+    "search": "{count}個のアプリを検索",
+    "searchShort": "App を検索",
+    "taskRunning": "{action} {name}",
+    "taskQueued": "ほか {count} 個がキューに入っています"
+  },
+  "rail": {
+    "title": "概要",
+    "subtitle": "このMacのHomebrewの状態",
+    "installed": "インストール済み",
+    "updates": "更新可能",
+    "updatesHint": "ダウンロード約 {size}",
+    "updatesNone": "すべて最新です",
+    "disk": "ディスク使用量",
+    "diskHint": "キャッシュを含めて {size}",
+    "lastCheck": "前回の確認",
+    "lastCheckAuto": "毎日 {time} に自動実行",
+    "lastCheckManual": "自動確認はオフです",
+    "never": "まだ確認していません",
+    "weeklyTop": "今週の人気",
+    "weeklyTopHint": "過去30日間のAppインストール数"
+  },
+  "common": {
+    "empty": "まだコンテンツがありません",
+    "refreshFailed": "一部のコンテンツを読み込めませんでした。前回読み込んだコンテンツは保持されています。",
+    "notFound": "このコンテンツは利用できないか、削除されました",
+    "loadMore": "さらに読み込む",
+    "viewAll": "すべて表示",
+    "viewRankings": "ランキングを見る",
+    "retry": "再試行",
+    "loading": "読み込み中…",
+    "more": "その他の操作",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "count": "{count} 件"
+  },
+  "offline": {
+    "title": "OpenNavoサービスに接続できません",
+    "description": "ローカルカタログを表示しています。スクリーンショット、バージョン履歴、コレクションはオンラインで確認できます。"
+  },
+  "discover": {
+    "featured": "今週のおすすめ",
+    "viewDetails": "詳細を見る",
+    "allCategories": "すべて",
+    "categoriesLabel": "カテゴリ",
+    "popularApps": "人気アプリ",
+    "popularAppsHint": "過去30日間のHomebrewインストール数",
+    "recentlyUpdated": "最近更新",
+    "recentlyUpdatedHint": "最近新バージョンが公開されたApp",
+    "collections": "コレクション",
+    "installCollection": "コレクションを一括インストール",
+    "collectionCount": "{title}（{count}個）"
+  },
+  "categories": {
+    "title": "カテゴリ",
+    "subtitle": "{count}個のカテゴリを用途別に閲覧",
+    "packages": "{count} 件",
+    "empty": "このカテゴリにはまだパッケージがありません",
+    "sortLabel": "並べ替え",
+    "sorts": {
+      "popular": "人気",
+      "updated": "最近更新",
+      "name": "名前"
+    }
+  },
+  "rankings": {
+    "title": "ランキング",
+    "subtitle": "Homebrew公式のインストール統計に基づき、毎日更新されます",
+    "periodLabel": "集計期間",
+    "periods": {
+      "installs30d": "30日",
+      "installs90d": "90日",
+      "installs365d": "1年"
+    },
+    "noStats": "統計はありません"
+  },
+  "search": {
+    "title": "検索",
+    "results": "「{q}」の検索結果：{count}件",
+    "empty": "「{q}」は見つかりませんでした",
+    "emptyHint": "別のキーワードを入力するか、英語名やピンイン略称をお試しください",
+    "alias": "別名：{name}",
+    "prompt": "名前、用途、コマンドを入力して検索"
+  },
+  "collections": {
+    "title": "コレクション",
+    "subtitle": "ソフトウェアのセットを選んで、一度にインストールできます",
+    "empty": "コレクションはまだありません",
+    "items": "{count}個",
+    "install": "コレクションを一括インストール",
+    "installTitle": "コレクション「{title}」をインストール",
+    "installDescription": "{count}個のパッケージを順番にインストールします。インストール済みのものはスキップされます。",
+    "installConfirm": "インストール開始",
+    "allInstalled": "コレクション内のパッケージはすべてインストール済みです",
+    "installed": "インストール済み",
+    "queued": "キューに追加しました：{count}個",
+    "offline": "コレクションはオンラインで確認できます"
+  },
+  "package": {
+    "arch": {
+      "arm64": "Apple シリコン",
+      "x86_64": "Intel"
+    },
+    "autoUpdates": "自動更新",
+    "disabled": "無効化済み",
+    "deprecated": "非推奨",
+    "homepage": "ホームページ",
+    "fromTap": "提供元",
+    "stats": {
+      "label": "データ",
+      "installs30d": "過去 30 日間のインストール数",
+      "rank": "{kind}ランキング {rank} 位",
+      "installs365d": "過去1年間のインストール数",
+      "total365": "過去365日間の合計",
+      "latest": "最新バージョン",
+      "size": "ダウンロードサイズ",
+      "cadence": "更新頻度",
+      "releases30d": "過去30日間に{count}回リリース"
+    },
+    "cadence": {
+      "daily": "毎日",
+      "weekly": "毎週",
+      "biweekly": "2週間ごと",
+      "monthly": "毎月",
+      "irregular": "不定期"
+    },
+    "tabs": {
+      "label": "詳細ページのタブ",
+      "overview": "概要",
+      "versions": "バージョン履歴",
+      "dependencies": "依存関係と競合",
+      "details": "インストール詳細"
+    },
+    "disabledNotice": "Homebrewによりこのパッケージは無効化されています：{reason}",
+    "deprecatedNotice": "Homebrewによりこのパッケージは非推奨になっています：{reason}",
+    "noReason": "理由は記載されていません",
+    "replacement": "代替：{token}",
+    "release": {
+      "new": "新バージョン",
+      "title": "{version}の更新内容",
+      "translated": "中国語に翻訳済み",
+      "source": {
+        "github_release": "GitHub Releaseより",
+        "sparkle": "アプリ内更新フィードより",
+        "webpage": "公式サイトの更新ページより",
+        "manual": "手動で編集",
+        "editorial": "OpenNavo編集部",
+        "homebrew": "Homebrewのコミット履歴より"
+      },
+      "viewAll": "全{count}バージョンを表示",
+      "noNotes": "このバージョンには個別の更新内容がありません。",
+      "emptyTitle": "バージョン履歴はまだありません",
+      "prerelease": "プレリリース",
+      "filterLabel": "バージョンで絞り込む",
+      "filterAll": "すべて {count}",
+      "filterWithNotes": "更新内容あり {count}",
+      "filterMine": "インストール済み {count}個",
+      "languageLabel": "本文の言語",
+      "languageTranslated": "中国語",
+      "languageOriginal": "原文",
+      "mineEmpty": "読み込み済みのバージョンに、インストールしたものはありません",
+      "count30d": "過去 30 日",
+      "count30dUnit": "バージョン",
+      "cadenceHint": {
+        "daily": "ほぼ毎日リリース",
+        "weekly": "週に1回程度リリース",
+        "biweekly": "2週間に1回程度リリース",
+        "monthly": "月に1回程度リリース",
+        "irregular": "リリース時期は不定期"
+      },
+      "brewLabel": "Homebrewへの登録",
+      "brewSync": "≈ 同期",
+      "brewLater": "{time}遅れ",
+      "brewEarlier": "{time}早い",
+      "brewHint": "上流より早いものが{earlier}/{compared}件",
+      "lagMinutes": "{n}分",
+      "lagHours": "{n}時間",
+      "lagDays": "{n}日",
+      "sourcesTitle": "データソース",
+      "sourceInfo": {
+        "webpage": {
+          "title": "公式サイトの更新ページ",
+          "body": "開発者公式サイトの更新情報ページから要点を抽出"
+        },
+        "github_release": {
+          "title": "GitHub Releases",
+          "body": "GitHubで公開されたバージョン情報と公開日時"
+        },
+        "sparkle": {
+          "title": "アプリ内更新フィード",
+          "body": "アプリ内の更新チェックで使用するSparkle appcast"
+        },
+        "manual": {
+          "title": "手動で編集",
+          "body": "編集部が公式発表をもとに整理"
+        },
+        "editorial": {
+          "title": "OpenNavo編集部",
+          "body": "OpenNavoが公式情報をもとに作成した更新内容"
+        },
+        "homebrew": {
+          "title": "Homebrewのコミット履歴",
+          "body": "Homebrewリポジトリにおけるパッケージのバージョン更新コミットと登録日時"
+        },
+        "local": {
+          "title": "このMacの記録",
+          "body": "OpenNavoで行ったインストールと更新の履歴"
+        }
+      },
+      "localUpgrade": "{time}にOpenNavoで{from}からこのバージョンに更新しました · 所要時間 {duration}",
+      "localInstall": "{time}にOpenNavoでこのバージョンをインストールしました · 所要時間 {duration}",
+      "notify": "新しいバージョンがあれば通知",
+      "notifyHint": "すべてのApp共通 · システム通知＋メニューバーのバッジ",
+      "pin": "現在のバージョンに固定",
+      "pinHint": "brew pinと同じです。「すべて更新」ではスキップされます",
+      "pinHintSelfUpdate": "brew pinと同じです。ただし、{name}に付属するアップデーターが独自に更新する場合があります"
+    },
+    "monthly": {
+      "title": "月間平均インストール数",
+      "d30": "過去 30 日",
+      "avg90": "過去90日間の月平均",
+      "avg365": "過去1年間の月平均",
+      "full": "{count}回",
+      "trend": {
+        "rising": "最近インストール数が増加しています",
+        "slowing": "最近インストール数が減少しています。多くの既存ユーザーはアプリ内の更新機能でアップグレードしています",
+        "steady": "インストール数は安定しています"
+      }
+    },
+    "related": "類似アプリ",
+    "screenshots": "スクリーンショット",
+    "caveats": "注意事項",
+    "info": {
+      "homepage": "ホームページ",
+      "binaries": "付属コマンド",
+      "autoUpdates": "自動更新",
+      "autoYes": "アプリ内蔵（auto_updates）",
+      "autoNo": "Homebrewで更新",
+      "uninstall": "アンインストール時",
+      "arch": "アーキテクチャ",
+      "minMacos": "最小システム要件",
+      "license": "ライセンス"
+    },
+    "deps": {
+      "macos": "システム要件",
+      "formulae": "依存するコマンドラインツール",
+      "casks": "依存するアプリ",
+      "emptyTitle": "依存関係なし",
+      "emptyDescription": "インストール時に他のパッケージはインストールされません。",
+      "runtime": "実行時依存関係",
+      "build": "ビルド依存関係",
+      "other": "その他：",
+      "type": {
+        "runtime": "実行時",
+        "build": "ビルド",
+        "test": "テスト",
+        "optional": "任意",
+        "recommended": "推奨",
+        "usesFromMacos": "システム標準を使用",
+        "cask": "App"
+      },
+      "conflicts": "競合",
+      "dependents": "{count}個のパッケージが依存"
+    },
+    "details": {
+      "tap": "ソースリポジトリ",
+      "names": "その他の名前",
+      "location": "インストール先",
+      "pkgs": "インストーラーパッケージ",
+      "kegOnly": "keg-only",
+      "kegOnlyValue": "/opt/homebrewにはリンクされません。PATHに手動で追加してください",
+      "download": "ダウンロードURL",
+      "source": "Homebrew定義ファイル",
+      "repo": "ソースコード"
+    },
+    "installed": "{version}をインストール済み",
+    "installedSelfUpdated": "{version}をインストール済み（Appが独自に更新済み）",
+    "installedAt": "インストール日：{date}",
+    "updateTo": "{version}に更新",
+    "open": "開く",
+    "getNeedsBrew": "先にHomebrewをインストール",
+    "actions": {
+      "label": "その他の操作",
+      "uninstall": "アンインストール",
+      "reinstall": "再インストール",
+      "pin": "バージョンを固定",
+      "unpin": "固定を解除",
+      "reveal": "Finderで表示",
+      "copyCommand": "brewコマンドをコピー",
+      "web": "Webサイトで表示"
+    },
+    "uninstallConfirm": {
+      "title": "{name}をアンインストールしますか？",
+      "description": "{command}を実行します。",
+      "zap": "アプリデータも削除する（--zap）",
+      "confirm": "アンインストール"
+    },
+    "commandCopied": "brewコマンドをコピーしました",
+    "offline": "オンラインでスクリーンショットや詳細を確認できます",
+    "notFound": "ローカルカタログにこのパッケージはありません",
+    "pinned": "固定済み",
+    "localSince": "{date}にこのバージョンに更新しました"
+  },
+  "library": {
+    "title": "インストール済み",
+    "summary": "{count}項目 · 使用量 {size}",
+    "summaryCount": "{count}項目",
+    "filterPlaceholder": "インストール済みを絞り込む…",
+    "refresh": "更新",
+    "empty": "Homebrewでインストールしたソフトウェアはまだありません",
+    "emptyFiltered": "条件に一致する項目はありません",
+    "columns": {
+      "name": "名前",
+      "version": "バージョン",
+      "size": "サイズ",
+      "installedAt": "インストール日",
+      "status": "状態",
+      "actions": "操作"
+    },
+    "status": {
+      "installed": "インストール済み",
+      "latest": "最新",
+      "outdated": "更新可能",
+      "pinned": "固定済み",
+      "selfUpdated": "最新（Appが独自に更新済み）",
+      "running": "更新中 {percent}",
+      "runningUnknown": "処理中",
+      "queued": "キュー待ち",
+      "unknown": "不明"
+    },
+    "dependency": "依存関係 · {names}で使用中",
+    "storage": {
+      "title": "ストレージ",
+      "total": "合計 {size}",
+      "caption": "ディスク使用量",
+      "apps": "App",
+      "cache": "ダウンロードキャッシュ"
+    },
+    "cleanup": {
+      "title": "キャッシュを削除",
+      "description": "古いバージョンとダウンロードキャッシュを削除します。brew cleanupと同じです。",
+      "button": "{size}を解放",
+      "none": "削除できるキャッシュはありません"
+    },
+    "backup": {
+      "title": "バックアップと移行",
+      "description": "すべてのパッケージをBrewfileに書き出し、新しいMacでワンクリックで復元できます。",
+      "export": "書き出す",
+      "restore": "復元",
+      "exported": "{count}個のパッケージを書き出しました"
+    },
+    "restore": {
+      "title": "Brewfileから復元",
+      "summary": "インストール可能 {ready}個 · インストール済み {installed}個 · 現在未対応 {unsupported}個",
+      "install": "{count}個をインストール",
+      "status": {
+        "ready": "インストール可能",
+        "installed": "インストール済み",
+        "skipped": "操作不要",
+        "unsupported": "現在未対応",
+        "invalid": "無効",
+        "not_found": "見つかりません"
+      }
+    },
+    "health": {
+      "title": "ヘルスチェック",
+      "ok": "brew doctorで問題は見つかりませんでした",
+      "warnings": "警告 {count}件",
+      "run": "チェックを実行",
+      "running": "確認中…"
+    }
+  },
+  "updates": {
+    "title": "更新",
+    "summary": "更新可能 {count}個 · ダウンロード約 {size}",
+    "summaryNone": "すべて最新です",
+    "lastCheck": "前回の確認 {time}",
+    "check": "更新を確認",
+    "checking": "確認中…",
+    "updateAll": "すべて更新",
+    "changelog": "更新内容",
+    "update": "更新",
+    "ignore": "このバージョンを無視",
+    "ignored": "{name} {version}を無視しました",
+    "pinned": "固定済みのため、更新されません",
+    "patch": "パッチ",
+    "empty": "すべて最新です",
+    "emptyHint": "新しいバージョンがあればここに表示されます",
+    "queued": "キューに追加しました：{count}個",
+    "history": {
+      "title": "更新履歴",
+      "subtitle": "このMac · 過去30日間 {count}回",
+      "filterLabel": "結果",
+      "all": "すべて",
+      "succeeded": "成功",
+      "failed": "失敗",
+      "today": "今日 · {date}",
+      "yesterday": "昨日 · {date}",
+      "viewLog": "ログを表示",
+      "retry": "再試行",
+      "canceled": "キャンセルしました",
+      "batch": "{action}：{count}個の{kind}",
+      "empty": "更新履歴はまだありません"
+    },
+    "month": {
+      "title": "今月",
+      "since": "{date}以降",
+      "updated": "更新済み",
+      "updatedUnit": "回",
+      "successRate": "成功率",
+      "successHint": "失敗 {count}回"
+    },
+    "auto": {
+      "title": "自動更新",
+      "subtitle": "バックグラウンドアシスタントがスケジュールに従って実行",
+      "check": "毎日 {time} に確認",
+      "checkHint": "brew update + outdated",
+      "casks": "Appの更新を自動インストール",
+      "casksHint": "オフにすると通知のみ",
+      "greedy": "独自のアップデーターがあるAppを含める",
+      "greedyHint": "--greedyと同じです"
+    },
+    "mirror": {
+      "switch": "切り替え",
+      "latency": "すべてミラー経由 · {ms} ms"
+    },
+    "next": {
+      "today": "今日 {time}",
+      "tomorrow": "明日 {time}",
+      "title": "次回の確認",
+      "text": "{time}。Macがスリープ中の場合は、復帰後に確認します。",
+      "off": "自動確認はオフです。設定からオンにできます。"
+    },
+    "log": {
+      "title": "{name}のログ",
+      "empty": "ログはありません"
+    }
+  },
+  "history": {
+    "clear": "履歴を消去",
+    "clearDescription": "すべての更新履歴を消去しますか？この操作は取り消せません。インストール済みのAppや進行中のタスクには影響しません。",
+    "cleared": "更新履歴を消去しました",
+    "title": "更新履歴",
+    "subtitle": "このMacでのすべてのインストール、更新、アンインストール",
+    "search": "名前で絞り込む",
+    "exportCsv": "CSVを書き出す",
+    "exported": "{count}件の記録を書き出しました",
+    "empty": "記録はまだありません",
+    "duration": "{time}"
+  },
+  "settings": {
+    "title": "設定",
+    "sections": {
+      "general": "一般",
+      "mirrors": "ダウンロードソース",
+      "homebrew": "Homebrew",
+      "privacy": "プライバシー",
+      "about": "概要"
+    },
+    "general": {
+      "followSystem": "システムに従う（現在: {language}）",
+      "systemDialogsRestartHint": "OpenNavoを再起動すると、システムダイアログの言語が切り替わります。",
+      "language": "表示言語",
+      "launchAtLogin": "ログイン時に起動",
+      "launchAtLoginHint": "起動後はメニューバーアイコンのみ表示",
+      "keepInMenuBar": "ウィンドウを閉じてもメニューバーに常駐",
+      "trayShowCount": "更新可能数をメニューバーに表示",
+      "notifyUpdates": "更新がある場合に通知",
+      "zapByDefault": "アンインストール時にアプリデータも削除する",
+      "zapByDefaultHint": "brew uninstall --zapと同じです",
+      "updates": "更新を確認",
+      "autoCheck": "毎日更新を自動確認",
+      "checkTime": "確認時刻",
+      "runBrewUpdate": "確認前にHomebrewのインデックスを更新",
+      "runBrewUpdateHint": "brew update"
+    },
+    "mirrors": {
+      "title": "ダウンロードソース",
+      "description": "APIメタデータ、Bottleバイナリパッケージ、brew自体のGitリポジトリにも適用されます。",
+      "copyEnv": "ターミナル環境変数をコピー",
+      "envCopied": "コピーしました。ターミナルまたはシェル設定に貼り付けできます",
+      "envHint": "OpenNavoから実行するbrewのみに適用されます。ターミナルで同じソースを使うには、以下の変数をコピーしてください。"
+    },
+    "homebrew": {
+      "path": "brewのパス",
+      "auto": "自動検出",
+      "version": "バージョン",
+      "prefix": "インストール先",
+      "analytics": "匿名の統計情報をHomebrewに送信",
+      "analyticsFollow": "brew自体の設定に従う",
+      "analyticsOff": "オフ（HOMEBREW_NO_ANALYTICS=1）",
+      "missing": "Homebrewが見つかりません",
+      "install": "Homebrewをインストール"
+    },
+    "privacy": {
+      "crashReports": "匿名のクラッシュレポートを送信",
+      "crashReportsHint": "デフォルトはオフです。有効にすると、クラッシュ時のコールスタックのみ送信されます",
+      "appManagement": "アプリ管理",
+      "appManagementHint": "アプリのアップデートとアンインストールに必要です",
+      "fullDiskAccess": "フルディスクアクセス",
+      "fullDiskAccessHint": "アンインストール時のアプリデータ削除に必要です",
+      "enable": "オンにする",
+      "waiting": "許可を待っています…",
+      "granted": "オン",
+      "denied": "オフ",
+      "unknown": "確認できません",
+      "clearSearch": "最近の検索を消去"
+    },
+    "about": {
+      "openSource": "オープンソースへの謝辞",
+      "view": "表示",
+      "draft": "審査待ち",
+      "version": "バージョン {version}",
+      "website": "Webサイト",
+      "feedback": "問題を報告",
+      "privacy": "プライバシーについて",
+      "catalog": "ローカルカタログ：{count}個のパッケージ、同期日時 {time}",
+      "sync": "今すぐ同期"
+    },
+    "saved": "保存しました"
+  },
+  "mirrors": {
+    "official": "公式",
+    "probe": "再テスト",
+    "probing": "テスト中…",
+    "fastest": "最速",
+    "recommended": "おすすめ",
+    "unavailable": "利用不可",
+    "configFailed": "ミラーリストを読み込めません。現在は公式ソースのみ利用できます。",
+    "slowOfficial": "公式ソースの応答が遅いです（{official}）。{name} は {latency} で応答します。",
+    "failedOfficial": "公式ソースに接続できません。{name} は {latency} で応答します。",
+    "useSuggested": "{name}を使用",
+    "selectedFailed": "選択したソースは速度テストに失敗しました。このソースからのインストールは失敗する可能性があります。"
+  },
+  "welcome": {
+    "title": "OpenNavoへようこそ",
+    "subtitle": "開始前にこのMacを確認します。数秒で完了します。",
+    "checks": "システムチェック",
+    "checking": "確認中…",
+    "detectFailed": "チェックが完了しませんでした。",
+    "redetect": "再確認",
+    "macos": "macOS {version} · {arch}",
+    "macosOk": "要件を満たしています",
+    "clt": "Xcodeコマンドラインツール",
+    "cltOk": "インストール済み",
+    "cltMissing": "Homebrew のインストール時に一緒にインストールされます",
+    "homebrew": "Homebrew",
+    "homebrewOk": "{version} · {prefix}",
+    "homebrewMissing": "見つかりません。{prefix}は空です",
+    "source": {
+      "title": "ダウンロードソース",
+      "official": "公式ソース",
+      "mirror": "その他のミラー",
+      "mirrorMissing": "ミラーリストを取得できません",
+      "retry": "再試行",
+      "hint": "今後のインストールとアップデートにも、このダウンロード元が使われます。「設定 → ダウンロード元」から別のミラーに切り替えられます。",
+      "hintBrew": "OpenNavoはアプリのインストールとアップデートにこのソースを使用します。ターミナルで設定したミラー変数は読み込まれません。"
+    },
+    "install": "Homebrewをインストール",
+    "passwordHint": "インストールには管理者パスワードが必要です。システムのダイアログが表示されます。OpenNavo がパスワードを保存することはありません。",
+    "skip": "スキップして見てみる",
+    "failed": {
+      "title": "Homebrewをインストールできませんでした",
+      "E_SUDO": "管理者パスワードが入力されなかったため、インストールをキャンセルしました。",
+      "E_DOWNLOAD": "インストーラをダウンロードできませんでした。別のダウンロードソースをお試しください。",
+      "viewLog": "ログを表示",
+      "logTitle": "Homebrewのインストールログ"
+    },
+    "permissions": {
+      "title": "アクセス権限",
+      "required": "必須",
+      "optional": "任意",
+      "enable": "オンにする",
+      "waiting": "許可を待っています…",
+      "granted": "オン",
+      "confirm": "オンにしました",
+      "startHint": "アプリ管理をオンにすると、使い始められます。",
+      "appManagement": {
+        "title": "OpenNavoによるアプリ管理を許可",
+        "body": "アプリのアップデートとアンインストールに必要です。",
+        "enable": "アプリ管理をオンにする"
+      },
+      "fullDiskAccess": {
+        "title": "フルディスクアクセス",
+        "body": "アンインストール時のアプリデータ削除に必要です。後からオンにすることもできます。",
+        "enable": "フルディスクアクセスをオンにする"
+      }
+    },
+    "done": "使い始める",
+    "arch": {
+      "arm64": "Apple シリコン",
+      "x86_64": "Intel"
+    }
+  },
+  "permission": {
+    "relaunch": {
+      "body": "システム設定でオンにしました。設定を適用するには、OpenNavoを再度開いてください。",
+      "action": "再度開く"
+    },
+    "guide": {
+      "appManagement": "アプリ管理",
+      "fullDiskAccess": "フルディスクアクセス",
+      "dragTitle": "OpenNavoを上のリストにドラッグ",
+      "plusTitle": "リストの下にある「+」をクリックして、OpenNavoを選択",
+      "toggleHint": "リストにOpenNavoがすでにある場合は、スイッチをオンにしてください。",
+      "dragLabel": "OpenNavoのアイコンをドラッグ",
+      "close": "閉じる",
+      "done": {
+        "appManagement": "OpenNavoによるアプリ管理が許可されました",
+        "fullDiskAccess": "フルディスクアクセスが有効になりました"
+      },
+      "doneHint": "macOSから「終了して再度開く」と表示されたら、クリックしてください。"
+    },
+    "prompt": {
+      "appManagement": {
+        "title": "OpenNavoによるアプリ管理を許可",
+        "body": "macOSにより、OpenNavoが以下のAppを変更することがブロックされました。「App管理」をオンにして、もう一度お試しください。"
+      },
+      "fullDiskAccess": {
+        "title": "フルディスクアクセスが必要です",
+        "body": "以下のアプリは削除されましたが、アプリデータは削除されていません。データの削除にはフルディスクアクセスが必要です。オンにして、もう一度お試しいただくとアンインストールが完了します。"
+      },
+      "enable": "オンにする",
+      "waiting": "許可を待っています…",
+      "retry": "再試行",
+      "retryAll": "すべて再試行",
+      "later": "後で"
+    },
+    "uninstall": {
+      "title": "アプリデータの削除には「フルディスクアクセス」が必要です",
+      "body": "アンインストールする前にオンにするか、チェックを外してアプリのみを削除してください。"
+    }
+  },
+  "deeplink": {
+    "installTitle": "{name} をインストールしますか？",
+    "installDescription": "Webページから、この Mac へのインストールが要求されました。確認すると以下のコマンドを実行します。キャンセルすると何も行いません。",
+    "installConfirm": "インストール",
+    "formulaUnsupported": "OpenNavo で扱うのは App（Homebrew Cask）のみです。このリンク先はコマンドラインツールです。"
+  },
+  "tray": {
+    "available": "利用可能な更新が{count}件あります",
+    "upToDate": "すべて最新です",
+    "upToDateHint": "新しいバージョンがある場合、ここに表示されます",
+    "running": {
+      "upgrade": "{name} を更新中",
+      "install": "{name} をインストール中",
+      "uninstall": "{name} をアンインストール中",
+      "other": "{name} を処理中"
+    },
+    "queued": "ほかに {count} 件のタスクが待機中",
+    "update": "更新",
+    "updateAll": "すべて更新（{count}）",
+    "more": "ほかに {count} 件あります。OpenNavo で確認",
+    "open": "OpenNavo を開く",
+    "settings": "設定",
+    "queuedToast": "キューに追加しました"
+  },
+  "quit": {
+    "title": "未完了のタスクがあと {n} 件あります",
+    "description": "終了すると、進行中のインストールは中断されます。完了済みのものには影響しません。",
+    "confirm": "終了する",
+    "cancel": "実行を続ける"
+  },
+  "restore": {
+    "title": "前回、未完了のタスクが {n} 件ありました",
+    "description": "続行すると元の順序で実行します。破棄すると、これらのタスクをキャンセルします。",
+    "resume": "続行",
+    "discard": "破棄"
+  },
+  "updater": {
+    "title": "クライアントのアップデート",
+    "current": "現在のバージョン {version}",
+    "check": "更新を確認",
+    "latest": "最新バージョンです",
+    "available": "新しいバージョン {version}",
+    "install": "ダウンロードしてインストール",
+    "downloading": "ダウンロード中 {percent}",
+    "installed": "インストール済みです。再起動後に有効になります",
+    "restart": "再起動",
+    "busy": "タスクの実行中です。完了してから再起動してください",
+    "failed": "アップデートの確認に失敗しました"
+  },
+  "palette": {
+    "placeholder": "App または操作を検索",
+    "apps": "App",
+    "actions": "操作",
+    "navigation": "移動",
+    "open": "開く",
+    "install": "インストール",
+    "update": "{name} を更新",
+    "reveal": "Finder で {name} を表示",
+    "viewAll": "「{q}」の検索結果をすべて表示",
+    "goTo": "{page}へ移動",
+    "installedVersion": "{version}をインストール済み",
+    "updatable": "更新可能",
+    "copied": "{command} をコピーしました"
+  },
+  "tasks": {
+    "ops": {
+      "install": "インストール",
+      "upgrade": "更新",
+      "uninstall": "アンインストール",
+      "reinstall": "再インストール",
+      "pin": "バージョンを固定",
+      "unpin": "固定を解除",
+      "cleanup": "キャッシュを削除",
+      "update": "Homebrew を更新",
+      "install_homebrew": "Homebrewをインストール"
+    },
+    "running": {
+      "install": "{name} をインストール中",
+      "upgrade": "{name} を更新中",
+      "uninstall": "{name} をアンインストール中",
+      "reinstall": "{name} を再インストール中",
+      "pin": "{name} を固定中",
+      "unpin": "{name} の固定を解除中",
+      "cleanup": "キャッシュをクリーンアップ中",
+      "update": "Homebrew を更新中",
+      "install_homebrew": "Homebrew をインストール中"
+    },
+    "phases": {
+      "preparing": "準備",
+      "fetching": "情報を取得",
+      "downloading": "ダウンロード",
+      "installing": "インストール",
+      "linking": "リンク",
+      "cleaning": "クリーンアップ",
+      "uninstalling": "アンインストール",
+      "updating": "インデックスを更新",
+      "finishing": "完了"
+    },
+    "step": "全 {count} ステップ中 {index} ステップ目：{phase}",
+    "remaining": "残り約 {time}",
+    "queue": "キュー待ち",
+    "oneAtATime": "brew は一度に 1 件のタスクしか実行できません",
+    "triggers": {
+      "manual": "手動",
+      "schedule": "自動",
+      "deeplink": "Web",
+      "bundle": "一括",
+      "retry": "再試行"
+    },
+    "succeeded": "{name} の{action}が完了しました",
+    "failed": "{name} の{action}に失敗しました"
+  },
+  "errors": {
+    "E_APP_RUNNING": "アプリが実行中です。更新を延期しました。アプリを終了して、もう一度お試しください。",
+    "E_APP_QUIT_FAILED": "アプリを終了できませんでした。更新を延期しました。作業を保存してアプリを終了し、もう一度お試しください。",
+    "E_APP_CHECK_FAILED": "アプリの実行状態を確認できませんでした。更新を延期しました。インストール済みアプリの一覧を更新して、もう一度お試しください。",
+    "actionFailed": "操作が完了しませんでした",
+    "E_BREW_NOT_FOUND": "先に Homebrew をインストールしてください",
+    "E_INVALID_ARG": "無効なパラメータです",
+    "E_CHECKSUM": "ダウンロードが中断されました：SHA-256 チェックサムが一致しません",
+    "E_DOWNLOAD": "ダウンロードに失敗しました。ネットワークを確認するか、ダウンロード元を切り替えてください",
+    "E_APP_EXISTS": "インストール先に同じ名前のAppがすでにあります。操作は完了しませんでした。ログを確認してください。インストールを再試行すると、再度確認し、引き継ぎの確認を求めます。",
+    "E_NOT_FOUND": "Homebrew でこのパッケージが見つかりません",
+    "E_DISABLED": "Homebrew でこのパッケージは無効化されています",
+    "E_LOCKED": "別の Homebrew プロセスが実行中です。しばらくしてから自動で再試行します",
+    "E_PERMISSION": "この App を変更する権限がありません。システム設定で許可してください",
+    "E_FULL_DISK_ACCESS": "アプリデータの削除には「フルディスクアクセス」が必要です",
+    "E_SUDO": "管理者パスワードが必要です",
+    "E_MACOS_VERSION": "システムのバージョン要件を満たしていません",
+    "E_REQUIRED_BY": "ほかのパッケージが依存しているため、アンインストールできません",
+    "E_CONFLICT": "インストール済みのパッケージと競合しています",
+    "E_INTERRUPTED": "タスクが中断されました",
+    "E_TIMEOUT": "長時間応答がありません",
+    "E_UNKNOWN": "操作に失敗しました。ログを確認できます",
+    "E_NETWORK": "OpenNavoサービスに接続できません"
+  },
+  "installConfirm": {
+    "title": "既存の{name}を引き継ぎますか？",
+    "description": "インストール先にAppがすでにあります。確認すると、Homebrewでの管理を試みます。引き継ぎ後は、OpenNavoから更新やアンインストールができます。",
+    "matchHint": "引き継ぎには、既存のアプリとインストールパッケージの内容が一致している必要があります。一致しない場合は、強制的に上書きせず、引き継ぎに失敗します。",
+    "confirm": "引き継ぎを確認",
+    "blockedTitle": "{name}はまだインストールできません",
+    "blockedDescription": "インストール先または既存のアプリを確認できませんでした。インストールも引き継ぎも行われていません。アプリとインストール情報を確認して、もう一度お試しください。"
+  },
+  "runningApps": {
+    "title": "アプリが実行中です",
+    "description": "アプリを終了して更新する前に、作業を保存してください。",
+    "batchDescription": "次のアプリが実行中です。作業を保存してから、スキップするか、終了して更新するかを選択してください。",
+    "later": "後で",
+    "skip": "これらのアプリをスキップ",
+    "quit": "終了して更新",
+    "quitAll": "アプリを終了して更新",
+    "reopen": "更新が成功した後に再度開く",
+    "quitHint": "アプリが開いたままの場合、または終了をキャンセルした場合、そのアプリの更新は延期されます。アプリを強制終了することはありません。",
+    "deferred": "延期しました"
+  },
+  "page": {
+    "comingSoon": "ページの内容は後続のタスクで追加されます。"
+  },
+  "brewfile": {
+    "title": "マイBrewfile",
+    "description": "アプリを保存して、まとめてインストールまたは書き出せます。このリストはこの端末にのみ保存されます。",
+    "count": "{count}項目",
+    "emptyTitle": "リストは空です",
+    "emptyDescription": "アプリの詳細ページ、またはインストール済みアプリのメニューで「リストに追加」を選択してください。",
+    "browse": "アプリを探す",
+    "fileTitle": "OpenNavoが生成",
+    "download": "Brewfileを書き出す",
+    "moveUp": "{name}を上へ移動",
+    "moveDown": "{name}を下へ移動",
+    "remove": "リストから{name}を削除",
+    "add": "リストに追加",
+    "inList": "追加済み",
+    "removeShort": "リストから削除",
+    "added": "リストに追加しました",
+    "full": "最大200件です。先にアプリを削除してください。",
+    "saveFailed": "リストを保存または読み込めません。ストレージを確認して再試行してください。",
+    "install": "{count}個をインストール",
+    "installHint": "インストール済み、待機中、利用不可のアプリはスキップします。",
+    "copy": "Brewfileをコピー",
+    "exported": "Brewfileを書き出しました",
+    "installTitle": "リストのアプリをインストール"
+  }
+}

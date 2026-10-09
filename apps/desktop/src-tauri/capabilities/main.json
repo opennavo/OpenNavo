@@ -1,0 +1,34 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Permissions available to the main window",
+  "windows": ["main"],
+  "permissions": [
+    "native-main",
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-size",
+    "core:window:allow-set-min-size",
+    "core:window:allow-unmaximize",
+    "core:window:allow-center",
+    "deep-link:default",
+    "updater:default",
+    "notification:default",
+    "autostart:default",
+    "positioner:default",
+    "window-state:default",
+    "store:default",
+    "dialog:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "x-apple.systempreferences:*" }
+      ]
+    },
+    "clipboard-manager:allow-write-text",
+    "process:default",
+    "log:default",
+    "os:default"
+  ]
+}

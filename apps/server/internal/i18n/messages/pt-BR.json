@@ -1,0 +1,21 @@
+{
+  "1001": "Parâmetros da solicitação inválidos",
+  "1002": "Recurso não encontrado",
+  "1003": "O recurso já existe",
+  "1004": "Você não tem permissão para realizar esta ação",
+  "1005": "Solicitações demais. Tente novamente mais tarde",
+  "1006": "Esta operação não é permitida no estado atual",
+  "1007": "O arquivo é muito grande ou o formato não é compatível",
+  "1101": "Nome de usuário ou senha incorretos",
+  "1102": "A conta está bloqueada. Tente novamente em 15 minutos",
+  "1201": "O catálogo foi atualizado. Baixe o snapshot novamente",
+  "1301": "O serviço upstream está temporariamente indisponível",
+  "1302": "O serviço de idiomas está temporariamente indisponível",
+  "5000": "O serviço está temporariamente indisponível",
+  "7777": "A sessão expirou. Entre novamente",
+  "7778": "A senha foi alterada. Entre novamente",
+  "8888": "Faça login primeiro",
+  "8889": "A conta está desativada",
+  "9999": "O token de acesso expirou",
+  "0000": "OK"
+}

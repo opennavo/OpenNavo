@@ -1,0 +1,71 @@
+{
+  "name": "@soybeanjs/eslint-config-vue",
+  "version": "0.0.2",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "description": "SoybeanJS's eslint config for Vue projects.",
+  "author": {
+    "name": "Soybean",
+    "email": "soybeanjs@outlook.com",
+    "url": "https://github.com/soybeanjs"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/soybeanjs/eslint-config-vue",
+  "repository": {
+    "url": "https://github.com/soybeanjs/eslint-config-vue.git"
+  },
+  "bugs": {
+    "url": "https://github.com/soybeanjs/eslint-config-vue/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint-plugin-vue": "^10.8.0",
+    "vue-eslint-parser": "^10.4.0"
+  },
+  "devDependencies": {
+    "@soybeanjs/cli": "1.5.0",
+    "@types/node": "25.3.3",
+    "eslint": "^10.0.2",
+    "lint-staged": "16.3.1",
+    "oxfmt": "^0.35.0",
+    "oxlint": "^1.50.0",
+    "simple-git-hooks": "2.13.1",
+    "tsdown": "0.20.3",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  },
+  "simple-git-hooks": {
+    "commit-msg": "pnpm soy git-commit-verify",
+    "pre-commit": "pnpm typecheck && pnpm lint-staged"
+  },
+  "lint-staged": {
+    "*": "oxlint --fix && oxfmt"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "cleanup": "soy cleanup",
+    "commit": "soy git-commit",
+    "lint": "oxlint --fix && oxfmt",
+    "fmt": "oxfmt",
+    "publish-pkg": "pnpm publish --access public",
+    "release": "soy release",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "upkg": "soy update-pkg"
+  }
+}

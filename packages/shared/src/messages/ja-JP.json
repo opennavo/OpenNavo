@@ -1,0 +1,181 @@
+{
+  "getButton": {
+    "get": "取得",
+    "open": "開く",
+    "installed": "インストール済み",
+    "update": "更新",
+    "queued": "キュー待ち",
+    "running": "処理中",
+    "cancel": "キャンセル",
+    "unavailable": "利用できません"
+  },
+  "action": {
+    "checkUpdates": "更新を確認",
+    "updateTo": "{version}に更新",
+    "updateAll": "すべて更新（{count}）",
+    "retry": "再試行",
+    "viewLog": "ログを表示",
+    "cancel": "キャンセル",
+    "openInApp": "OpenNavo で開く",
+    "copyInstallCommand": "インストールコマンドをコピー",
+    "addToBrewfile": "Brewfile リストに追加",
+    "inBrewfile": "リストに追加済み",
+    "uninstall": "アンインストール",
+    "delete": "削除",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "clear": "クリア"
+  },
+  "kind": {
+    "cask": "App",
+    "formula": "コマンドラインツール"
+  },
+  "card": {
+    "installs30d": "30 日間のインストール数",
+    "version": "バージョン",
+    "category": "カテゴリ"
+  },
+  "nav": {
+    "breadcrumb": "パンくずリスト",
+    "pagination": "ページネーション",
+    "previous": "前のページ",
+    "next": "次のページ",
+    "page": "{page} ページ目",
+    "loadMore": "さらに読み込む",
+    "categories": "カテゴリで絞り込む"
+  },
+  "installCommand": {
+    "title": "インストールコマンド"
+  },
+  "cask": {
+    "platform": "システムとアーキテクチャ",
+    "platforms": "プラットフォームの対応状況",
+    "version": "利用可能なバージョン",
+    "requirements": "システム要件",
+    "formulae": "コマンドラインの依存関係",
+    "casks": "アプリの依存関係",
+    "unknown": "未確認",
+    "noMac": "macOSのサポートは宣言されていません",
+    "rosetta": "Rosettaが必要です",
+    "legacy": "一部のプラットフォームで旧バージョンを利用できます",
+    "arm64": "Appleシリコン",
+    "x86_64": "Intel",
+    "declarations": "インストールとアンインストールの内容",
+    "install": "インストール",
+    "uninstall": "アンインストール",
+    "cleanup": "ユーザーデータを削除",
+    "source": "ソースファイル",
+    "target": "宣言された保存先",
+    "declaration": "宣言全体を表示",
+    "download": "ダウンロードURL"
+  },
+  "hero": {
+    "viewDetails": "詳細を見る"
+  },
+  "about": {
+    "title": "紹介",
+    "machineTranslated": "AI 翻訳",
+    "viewOriginal": "原文を表示",
+    "expand": "全文を展開",
+    "collapse": "折りたたむ"
+  },
+  "gallery": {
+    "label": "スクリーンショット",
+    "item": "スクリーンショット {index}",
+    "dialog": "スクリーンショットのプレビュー",
+    "position": "{index} / {total}",
+    "previous": "前の画像",
+    "next": "次の画像",
+    "close": "閉じる"
+  },
+  "dialog": {
+    "close": "閉じる",
+    "confirm": "確認",
+    "cancel": "キャンセル"
+  },
+  "toast": {
+    "region": "通知",
+    "view": "表示",
+    "close": "通知を閉じる"
+  },
+  "menu": {
+    "more": "その他の操作"
+  },
+  "palette": {
+    "label": "コマンドパレット",
+    "placeholder": "App または操作を検索",
+    "results": "検索結果",
+    "empty": "一致する結果はありません",
+    "loading": "検索中…",
+    "hintSelect": "↑↓ 選択",
+    "hintOpen": "↵ 開く",
+    "hintInstall": "⌘↵ インストール／更新",
+    "hintCopy": "⌘C brew コマンドをコピー"
+  },
+  "collection": {
+    "viewAll": "全 {count} 件を表示"
+  },
+  "rank": {
+    "up": "{n} 位上昇",
+    "down": "{n} 位下降",
+    "same": "順位変動なし"
+  },
+  "progress": {
+    "busy": "進行中"
+  },
+  "task": {
+    "queued": "待機中：",
+    "expandLog": "ログを展開",
+    "collapseLog": "ログを折りたたむ"
+  },
+  "log": {
+    "label": "ログ"
+  },
+  "chart": {
+    "other": "その他",
+    "item": "項目",
+    "value": "値",
+    "share": "割合"
+  },
+  "table": {
+    "sortBy": "{label}で並べ替え"
+  },
+  "topNav": {
+    "label": "メインナビゲーション",
+    "home": "OpenNavo ホーム",
+    "search": "App を検索",
+    "download": "クライアントをダウンロード",
+    "openMenu": "メニューを開く",
+    "closeMenu": "メニューを閉じる"
+  },
+  "version": {
+    "timeline": "バージョン履歴",
+    "latest": "最新",
+    "installed": "現在インストール中",
+    "patch": "パッチ",
+    "prerelease": "プレリリース",
+    "machineTranslation": "AI 翻訳",
+    "noNotes": "このバージョンには個別の更新内容はありません",
+    "viewOriginal": "原文を表示",
+    "expand": "展開",
+    "collapse": "折りたたむ",
+    "updateTo": "このバージョンに更新",
+    "showEarlier": "以前のバージョンをあと {count} 件表示",
+    "sources": {
+      "webpage": "公式サイトの更新ページ",
+      "sparkle": "Sparkle 更新フィード",
+      "github_release": "GitHub Release",
+      "manual": "手動で編集",
+      "editorial": "OpenNavo編集部",
+      "homebrew": "Homebrewへの登録"
+    }
+  },
+  "state": {
+    "loadFailedTitle": "読み込みに失敗しました",
+    "loadFailedDescription": "ネットワークまたはサービスを一時的に利用できません。しばらくしてから再試行してください。",
+    "noResultsTitle": "「{q}」は見つかりませんでした",
+    "noResultsDescription": "英語名または拼音をお試しいただくか、収録してほしい App をお知らせください。",
+    "offlineTitle": "オフラインです",
+    "offlineDescription": "ローカルにキャッシュされたカタログを表示中です。オンラインになると自動で更新します。"
+  }
+}

@@ -1,0 +1,1609 @@
+{
+  "system": {
+    "title": "OpenNavo 管理画面",
+    "updateTitle": "システムバージョン更新のお知らせ",
+    "updateContent": "システムの新しいバージョンが検出されました。今すぐページを更新しますか？",
+    "updateConfirm": "今すぐ更新",
+    "updateCancel": "後で"
+  },
+  "common": {
+    "action": "操作",
+    "add": "追加",
+    "addSuccess": "追加しました",
+    "backToHome": "ホームに戻る",
+    "batchDelete": "一括削除",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "check": "チェック",
+    "selectAll": "すべて選択",
+    "expandColumn": "列を展開",
+    "columnSetting": "列の設定",
+    "config": "設定",
+    "confirm": "確認",
+    "delete": "削除",
+    "deleteSuccess": "削除しました",
+    "confirmDelete": "削除してもよろしいですか？",
+    "edit": "編集",
+    "warning": "警告",
+    "error": "エラー",
+    "index": "番号",
+    "keywordSearch": "キーワードを入力してください",
+    "logout": "ログアウト",
+    "logoutConfirm": "ログアウトしてもよろしいですか？",
+    "lookForward": "近日公開",
+    "modify": "変更",
+    "modifySuccess": "変更しました",
+    "noData": "データがありません",
+    "operate": "操作",
+    "pleaseCheckValue": "入力値が有効か確認してください",
+    "refresh": "更新",
+    "reset": "リセット",
+    "search": "検索",
+    "switch": "切り替え",
+    "tip": "ヒント",
+    "trigger": "実行",
+    "update": "更新",
+    "updateSuccess": "更新しました",
+    "userCenter": "ユーザーセンター",
+    "yesOrNo": {
+      "yes": "はい",
+      "no": "いいえ"
+    }
+  },
+  "request": {
+    "logout": "リクエスト失敗後にユーザーをログアウト",
+    "logoutMsg": "ユーザーの状態が無効です。もう一度ログインしてください",
+    "logoutWithModal": "リクエスト失敗後にモーダルを表示してからユーザーをログアウト",
+    "logoutWithModalMsg": "ユーザーの状態が無効です。もう一度ログインしてください",
+    "refreshToken": "リクエストしたTokenの有効期限が切れています。Tokenを更新してください",
+    "tokenExpired": "リクエストしたTokenの有効期限が切れています"
+  },
+  "theme": {
+    "themeDrawerTitle": "テーマ設定",
+    "tabs": {
+      "appearance": "外観",
+      "layout": "レイアウト",
+      "general": "一般",
+      "preset": "プリセット"
+    },
+    "appearance": {
+      "themeSchema": {
+        "title": "テーマモード",
+        "light": "ライトモード",
+        "dark": "ダークモード",
+        "auto": "システムに合わせる"
+      },
+      "grayscale": "グレースケール",
+      "colourWeakness": "色覚サポート",
+      "themeColor": {
+        "title": "テーマカラー",
+        "primary": "メインカラー",
+        "info": "情報色",
+        "success": "成功色",
+        "warning": "警告色",
+        "error": "エラー色",
+        "followPrimary": "メインカラーに合わせる"
+      },
+      "themeRadius": {
+        "title": "テーマの角丸"
+      },
+      "recommendColor": "おすすめのカラーアルゴリズムを適用",
+      "recommendColorDesc": "おすすめカラーのアルゴリズムの参照元",
+      "preset": {
+        "title": "テーマプリセット",
+        "apply": "適用",
+        "applySuccess": "プリセットを適用しました",
+        "default": {
+          "name": "デフォルトプリセット",
+          "desc": "Soybeanのデフォルトテーマプリセットです"
+        },
+        "dark": {
+          "name": "ダークプリセット",
+          "desc": "夜間の使用に適したダークテーマのプリセットです"
+        },
+        "compact": {
+          "name": "コンパクトプリセット",
+          "desc": "小さな画面に適したコンパクトなレイアウトのプリセットです"
+        },
+        "azir": {
+          "name": "Azirのプリセット",
+          "desc": "Azirが好む、落ち着いた寒色系の上品なプリセットです"
+        }
+      }
+    },
+    "layout": {
+      "layoutMode": {
+        "title": "レイアウトモード",
+        "vertical": "左側メニュー",
+        "vertical-mix": "左側メニュー混合",
+        "vertical-hybrid-header-first": "左側混合・ヘッダー優先",
+        "horizontal": "上部メニュー",
+        "top-hybrid-sidebar-first": "上部混合・サイドバー優先",
+        "top-hybrid-header-first": "上部混合・ヘッダー優先",
+        "vertical_detail": "メニューを左側、コンテンツを右側に配置するレイアウトです。",
+        "vertical-mix_detail": "左側に2つのメニューを配置するレイアウトです。第1階層メニューを左側の濃色領域、第2階層メニューを左側の淡色領域に配置します。",
+        "vertical-hybrid-header-first_detail": "左側混合レイアウトです。第1階層メニューを上部、第2階層メニューを左側の濃色領域、第3階層メニューを左側の淡色領域に配置します。",
+        "horizontal_detail": "メニューを上部、コンテンツを下部に配置するレイアウトです。",
+        "top-hybrid-sidebar-first_detail": "上部混合レイアウトです。第1階層メニューを左側、第2階層メニューを上部に配置します。",
+        "top-hybrid-header-first_detail": "上部混合レイアウトです。第1階層メニューを上部、第2階層メニューを左側に配置します。"
+      },
+      "tab": {
+        "title": "タブバー設定",
+        "visible": "タブバーを表示",
+        "cache": "タブバー情報をキャッシュ",
+        "cacheTip": "ページを離れた後もタブバーの情報を保持します",
+        "height": "タブバーの高さ",
+        "mode": {
+          "title": "タブバーのスタイル",
+          "slider": "スライダースタイル",
+          "chrome": "Chromeスタイル",
+          "button": "ボタンスタイル"
+        },
+        "closeByMiddleClick": "マウスの中ボタンでタブを閉じる",
+        "closeByMiddleClickTip": "マウスの中ボタンをクリックしてタブを閉じられるようにします"
+      },
+      "header": {
+        "title": "ヘッダー設定",
+        "height": "ヘッダーの高さ",
+        "breadcrumb": {
+          "visible": "パンくずリストを表示",
+          "showIcon": "パンくずリストのアイコンを表示"
+        }
+      },
+      "sider": {
+        "title": "サイドバー設定",
+        "inverted": "サイドバーをダークカラーにする",
+        "width": "サイドバーの幅",
+        "collapsedWidth": "サイドバーの折りたたみ時の幅",
+        "mixWidth": "混合レイアウトのサイドバー幅",
+        "mixCollapsedWidth": "混合レイアウトのサイドバーの折りたたみ時の幅",
+        "mixChildMenuWidth": "混合レイアウトの子メニュー幅",
+        "autoSelectFirstMenu": "最初のサブメニューを自動選択",
+        "autoSelectFirstMenuTip": "第1階層メニューをクリックすると、最初のサブメニューが自動的に選択され、最下層まで移動します"
+      },
+      "footer": {
+        "title": "フッター設定",
+        "visible": "フッターを表示",
+        "fixed": "フッターを固定",
+        "height": "フッターの高さ",
+        "right": "フッターを右寄せ"
+      },
+      "content": {
+        "title": "コンテンツ領域の設定",
+        "scrollMode": {
+          "title": "スクロールモード",
+          "tip": "テーマのスクロールでは main 部分のみがスクロールします。外側のスクロールではヘッダーとフッターも一緒にスクロールできます",
+          "wrapper": "外側をスクロール",
+          "content": "メイン部分をスクロール"
+        },
+        "page": {
+          "animate": "ページ切り替えアニメーション",
+          "mode": {
+            "title": "ページ切り替えアニメーションの種類",
+            "fade-slide": "スライド",
+            "fade": "フェード",
+            "fade-bottom": "下からフェード",
+            "fade-scale": "拡大縮小フェード",
+            "zoom-fade": "ズームフェード",
+            "zoom-out": "ズームアウト",
+            "none": "なし"
+          }
+        },
+        "fixedHeaderAndTab": "ヘッダーとタブバーを固定"
+      }
+    },
+    "general": {
+      "title": "一般設定",
+      "watermark": {
+        "title": "透かし設定",
+        "visible": "全画面に透かしを表示",
+        "text": "透かしのテキストをカスタマイズ",
+        "enableUserName": "ユーザー名の透かしを有効にする",
+        "enableTime": "現在時刻を表示",
+        "timeFormat": "時刻形式"
+      },
+      "multilingual": {
+        "title": "多言語設定",
+        "visible": "多言語ボタンを表示"
+      },
+      "globalSearch": {
+        "title": "グローバル検索設定",
+        "visible": "グローバル検索ボタンを表示"
+      }
+    },
+    "configOperation": {
+      "copyConfig": "設定をコピー",
+      "copySuccessMsg": "コピーしました。src/theme/settings.ts の themeSettings 変数を置き換えてください",
+      "resetConfig": "設定をリセット",
+      "resetSuccessMsg": "リセットしました"
+    }
+  },
+  "route": {
+    "403": "権限がありません",
+    "404": "ページが見つかりません",
+    "500": "サーバーエラー",
+    "login": "ログイン",
+    "iframe-page": "Iframe",
+    "dashboard": "ダッシュボード",
+    "catalog": "カタログ",
+    "catalog_package": "パッケージ",
+    "catalog_package-detail": "パッケージ詳細",
+    "catalog_category": "カテゴリー",
+    "content": "コンテンツ",
+    "content_collection": "コレクション",
+    "content_collection-detail": "コレクション詳細",
+    "content_feature": "特集",
+    "content_glossary": "用語集",
+    "content_announcement": "お知らせ",
+    "changelog": "変更履歴",
+    "changelog_release": "リリース",
+    "changelog_review": "翻訳",
+    "ops": "運用",
+    "ops_job": "ジョブ",
+    "ops_search": "検索インサイト",
+    "ops_feedback": "フィードバック",
+    "ops_agent-log": "AgentとAIのログ",
+    "release": "デスクトップ",
+    "release_desktop": "デスクトップ版リリース",
+    "release_mirror": "ミラー",
+    "release_config": "リモート設定",
+    "system": "システム",
+    "system_user": "管理者",
+    "system_role": "ロールと権限",
+    "system_translation": "翻訳AIの設定",
+    "system_github": "GitHub の設定",
+    "system_agent": "Agentアクセス",
+    "system_audit": "監査ログ",
+    "user-center": "ユーザーセンター"
+  },
+  "page": {
+    "shared": {
+      "flags": {
+        "hidden": "非表示",
+        "editorChoice": "おすすめ",
+        "deprecated": "非推奨",
+        "disabled": "無効",
+        "font": "フォント"
+      },
+      "translationStatus": {
+        "none": "なし",
+        "source": "原文",
+        "machine": "機械翻訳",
+        "manual": "手動",
+        "pending": "処理待ち",
+        "failed": "失敗"
+      },
+      "i18n": {
+        "sourceLocale": "原文の言語",
+        "sourceHint": "原文のみ入力してください。他の言語はAIが翻訳します",
+        "required": "原文を入力してください",
+        "translations": "その他の言語",
+        "translationsSummary": "{done}/{total}言語の翻訳が完了 · 展開して編集できます",
+        "autoPlaceholder": "空欄の場合、AI翻訳が使用されます"
+      },
+      "changelogStatus": {
+        "none": "なし",
+        "ok": "正常",
+        "error": "エラー"
+      },
+      "publishStatus": {
+        "draft": "下書き",
+        "scheduled": "公開予約済み",
+        "published": "公開済み",
+        "archived": "公開終了"
+      },
+      "any": "すべて",
+      "yes": "はい",
+      "no": "いいえ",
+      "saved": "保存しました",
+      "viewOnSite": "サイトで表示",
+      "updatedBy": "更新者: {name} · {time}",
+      "empty": "—",
+      "locale": {
+        "zh-CN": "中国語",
+        "en-US": "英語"
+      },
+      "markdown": {
+        "edit": "編集",
+        "preview": "プレビュー"
+      },
+      "charCount": "{count} / {max} 文字"
+    },
+    "dashboard": {
+      "scale": "カタログ規模",
+      "total": "アプリ数",
+      "fonts": "フォント",
+      "disabled": "無効",
+      "disabledHint": "廃止 {deprecated} 件 · 非表示 {hidden} 件",
+      "coverage": "カバー率",
+      "coverageHint": "対象となるすべての App。フォントと、無効・非表示・削除済みの App は除きます",
+      "sixLocaleContentHint": "6言語すべてで概要と説明が揃い、最新である必要があります。言語フォールバックは含まれません。",
+      "coverageItems": {
+        "zhSummary": "中国語の概要",
+        "primaryCategory": "主カテゴリ",
+        "icon": "アイコン",
+        "latestVersionNotes": "最新バージョンの更新内容",
+        "sixLocaleContent": "6言語のコンテンツの完全性"
+      },
+      "sync": "同期状況",
+      "syncItems": {
+        "catalog": "カタログの同期",
+        "analytics": "インストール数の同期",
+        "snapshot": "デスクトップスナップショット"
+      },
+      "syncState": {
+        "ok": "正常",
+        "late": "遅延",
+        "never": "未実行"
+      },
+      "syncEvery": {
+        "catalog": "15 分ごと",
+        "analytics": "毎日 03:00",
+        "snapshot": "1 時間ごと"
+      },
+      "failed24h": "過去 24 時間の失敗したジョブ",
+      "viewJobs": "ジョブ",
+      "snapshotInfo": "カーソル {cursor} · {count} パッケージ",
+      "llm": "LLM の使用状況",
+      "llmModel": "モデル {model}",
+      "llmTokens": "今月のトークン数",
+      "llmBudget": "予算 {budget}",
+      "llmSpend": "約 {spend}、予算 {budget}",
+      "pendingPackages": "中国語の概要がありません",
+      "pendingReleases": "翻訳待ちのリリースノート",
+      "needsReview": "AI翻訳",
+      "viewReview": "翻訳",
+      "todo": "未対応",
+      "feedbackOpen": "未対応のフィードバック",
+      "viewFeedback": "フィードバック",
+      "usage": "過去 6 か月の LLM トークン使用量",
+      "usageSeries": {
+        "translate_content": "コンテンツ翻訳",
+        "enrich_package": "パッケージ情報の拡充（廃止）",
+        "translate_release": "リリース概要（廃止）"
+      },
+      "hermes": {
+        "title": "今日のHermes",
+        "view": "ログを表示",
+        "writes": "書き込み",
+        "translations": "AI翻訳",
+        "failures": "失敗",
+        "date": "UTC日付で集計 · {date}"
+      },
+      "refreshedAt": "60 秒ごとに自動更新 · 更新日時 {time}"
+    },
+    "catalog": {
+      "package": {
+        "title": "パッケージ",
+        "keyword": "キーワード",
+        "keywordPlaceholder": "token または名前（言語を問わず）",
+        "category": "カテゴリー",
+        "translationStatus": "翻訳",
+        "hasIcon": "アイコン",
+        "hasIconOptions": {
+          "yes": "アイコンあり",
+          "no": "アイコンなし"
+        },
+        "sort": "並べ替え",
+        "sortOptions": {
+          "popular": "人気順",
+          "updated": "最近更新された順",
+          "name": "名前",
+          "created": "作成日時"
+        },
+        "columns": {
+          "icon": "アイコン",
+          "name": "名前",
+          "version": "バージョン",
+          "installs30d": "30日間のインストール数",
+          "rank": "順位",
+          "category": "メインカテゴリー",
+          "summary": "概要",
+          "changelog": "リリースノート",
+          "flags": "フラグ",
+          "updateTime": "更新日時"
+        },
+        "resync": "再同期",
+        "resyncQueued": "同期キューに追加しました：{token}"
+      },
+      "packageDetail": {
+        "installs30d": "過去30日間のインストール数：{count}",
+        "tabs": {
+          "basic": "基本情報",
+          "i18n": "テキストと翻訳",
+          "categories": "カテゴリ",
+          "assets": "アイコンとスクリーンショット",
+          "changelog": "リリースノート",
+          "audit": "操作履歴"
+        },
+        "basic": {
+          "homebrew": "Homebrew の項目",
+          "homebrewHint": "Homebrew から取得（読み取り専用）",
+          "names": "名前",
+          "descEn": "英語の説明",
+          "homepage": "ホームページ",
+          "downloadUrl": "ダウンロード URL",
+          "downloadSize": "ダウンロードサイズ",
+          "downloadSizeUnit": "バイト",
+          "downloadSizeHint": "自動で検出されます。検出できない場合のみ入力してください。バージョン更新後に再検出されます。",
+          "accentColor": "アクセントカラー",
+          "accentColorHint": "アイコンを設定すると自動で算出されます。手動で設定することもできます。",
+          "accentColorClear": "クリア",
+          "tap": "Tap",
+          "raw": "生の JSON",
+          "editable": "編集可能",
+          "developer": "開発者",
+          "repoUrl": "GitHub リポジトリ",
+          "tags": "タグ",
+          "tagsHint": "タグは最大 10 個、各 20 文字まで",
+          "hidden": "非表示",
+          "hiddenHint": "非表示のパッケージは、サイトやアプリに表示されません",
+          "editorChoice": "編集者のおすすめ",
+          "notes": "内部メモ",
+          "save": "保存"
+        },
+        "i18n": {
+          "hint": "原文の言語：{locale}。原文が変更されると、他の言語はAIによって再翻訳されます。他の言語での編集は手動修正としてすぐに反映されます。",
+          "displayName": "表示名",
+          "summary": "一言紹介",
+          "summaryHint": "中国語では30文字以内を推奨",
+          "summaryTooLong": "推奨文字数を超えていますが、保存できます",
+          "description": "紹介",
+          "sources": {
+            "homebrew": "Homebrew",
+            "rule": "ルール",
+            "llm": "LLM",
+            "human": "人手"
+          },
+          "model": "モデル {model}",
+          "translatedAt": "翻訳日時：{time}",
+          "stale": "原文が変更されました。翻訳を再作成しています",
+          "makeSource": "この言語を原文にする",
+          "save": "保存",
+          "saved": "保存しました"
+        },
+        "categories": {
+          "title": "カテゴリー",
+          "hint": "最大 3 個（うち 1 個をメインに設定）",
+          "primary": "メイン",
+          "add": "カテゴリーを追加",
+          "sources": {
+            "rule": "ルール",
+            "llm": "LLM",
+            "human": "人手"
+          },
+          "confidence": "信頼度 {value}",
+          "max": "カテゴリーは最大 3 個です",
+          "needPrimary": "メインカテゴリーを選択してください",
+          "empty": "カテゴリーはまだありません",
+          "save": "カテゴリーを保存"
+        },
+        "assets": {
+          "icon": "アイコン",
+          "iconSources": {
+            "manual": "アップロード",
+            "harvester": "アイコン収集ツール",
+            "homepage": "ホームページ"
+          },
+          "noIcon": "アイコンなし",
+          "uploadIcon": "アイコンをアップロード",
+          "removeIcon": "アイコンを削除",
+          "removeIconConfirm": "削除すると、サイトに文字のプレースホルダーが表示されます。アイコンを削除しますか？",
+          "uploadHint": "PNG、JPEG、WebP（5 MB 以下）",
+          "screenshots": "スクリーンショット",
+          "screenshotsHint": "ドラッグして並べ替え",
+          "uploadScreenshot": "スクリーンショットをアップロード",
+          "caption": "キャプション（他の言語は AI が翻訳します）",
+          "theme": "テーマ",
+          "themes": {
+            "dark": "ダーク",
+            "light": "ライト"
+          },
+          "deleteScreenshotConfirm": "このスクリーンショットを削除しますか？",
+          "noScreenshots": "スクリーンショットなし",
+          "tooLarge": "ファイルが 5 MB を超えています",
+          "badType": "PNG、JPEG、WebP のみ対応しています"
+        },
+        "changelog": {
+          "sources": "Homebrew のコミット履歴",
+          "excluded": "コミット取得を除外しました",
+          "fetchEnabled": "コミット取得が有効です",
+          "excludeFetch": "取得対象から除外",
+          "resumeFetch": "取得を再開",
+          "excludeConfirm": "このアプリのコミット取得を停止し、キューにあるタスクもスキップします。除外しますか？",
+          "resumeConfirm": "次回の定期実行サイクルで取得を再開します。続行しますか？",
+          "reloadSettings": "取得設定を再読み込み",
+          "exclusionHint": "Homebrewのコミットのみが対象です。カタログやインストール統計の同期、保存済みのバージョン履歴には影響しません。",
+          "sourcesHint": "各バージョンが Homebrew に追加された日時を記録するため、自動で取得されます",
+          "columns": {
+            "type": "種類",
+            "config": "設定",
+            "status": "前回のステータス",
+            "nextFetch": "次回取得"
+          },
+          "types": {
+            "github_releases": "GitHub Releases",
+            "sparkle": "Sparkle",
+            "webpage": "ウェブページ",
+            "homebrew_commits": "Homebrewのコミット"
+          },
+          "status": {
+            "never": "未取得",
+            "ok": "正常",
+            "not_modified": "変更なし",
+            "error": "エラー",
+            "rate_limited": "レート制限中",
+            "not_found": "見つかりません"
+          },
+          "failCount": "{count}回連続で失敗",
+          "noSources": "コミット履歴はまだありません",
+          "versions": "Homebrewで確認されたバージョン",
+          "versionColumns": {
+            "version": "バージョン",
+            "firstSeen": "初回確認",
+            "committed": "コミット日時",
+            "commit": "コミット",
+            "release": "リリースノート"
+          },
+          "linked": "関連付け済み",
+          "unlinked": "未関連付け"
+        },
+        "audit": {
+          "columns": {
+            "time": "日時",
+            "actor": "実行者",
+            "action": "操作",
+            "entity": "対象",
+            "ip": "IP"
+          },
+          "diff": "変更内容",
+          "before": "変更前",
+          "after": "変更後",
+          "system": "システム"
+        }
+      },
+      "category": {
+        "title": "カテゴリー",
+        "saveOrder": "順序を保存",
+        "orderChanged": "順序を変更しました。適用するには保存してください",
+        "columns": {
+          "icon": "アイコン",
+          "name": "名前",
+          "languages": "言語",
+          "slug": "スラッグ",
+          "appliesTo": "適用対象",
+          "packageCount": "パッケージ数",
+          "visible": "表示",
+          "hiddenByDefault": "デフォルトで非表示"
+        },
+        "appliesTo": {
+          "cask": "App",
+          "formula": "CLI",
+          "both": "すべて"
+        },
+        "addRoot": "カテゴリを新規作成",
+        "addChild": "サブカテゴリを追加",
+        "editTitle": "カテゴリを編集",
+        "addTitle": "カテゴリを新規作成",
+        "deleteConfirm": "カテゴリ「{name}」を削除しますか？サブカテゴリまたはパッケージがあるカテゴリは削除できません。",
+        "form": {
+          "parent": "親カテゴリ",
+          "parentNone": "なし（トップレベル）",
+          "slug": "スラッグ",
+          "slugInvalid": "小文字の英字、数字、ハイフンのみ使用できます。先頭は英字または数字にしてください",
+          "icon": "アイコン",
+          "iconInvalid": "lucide:アイコン名の形式で入力してください",
+          "iconHint": "例：lucide:code-xml",
+          "name": "名前",
+          "description": "説明",
+          "required": "必須"
+        }
+      }
+    },
+    "ops": {
+      "job": {
+        "queues": "キュー",
+        "queuesEmpty": "キューデータがありません（worker の未起動時は空になります）",
+        "autoRefresh": "10秒ごとに更新",
+        "queueFields": {
+          "pending": "待機中",
+          "active": "実行中",
+          "scheduled": "予約済み",
+          "retry": "再試行",
+          "archived": "アーカイブ済み",
+          "processedToday": "本日の処理数",
+          "failedToday": "本日の失敗"
+        },
+        "trigger": "今すぐ実行",
+        "triggerConfirm": "「{job}」を今すぐ実行しますか？実行中の同じジョブは再実行されません。",
+        "triggered": "「{job}」を起動しました",
+        "runs": "ジョブの実行履歴",
+        "types": {
+          "catalog_sync": "カタログ同期",
+          "analytics_sync": "インストール数の同期",
+          "snapshot_build": "デスクトップスナップショット",
+          "enrich_schedule": "情報拡充スケジューラー（廃止）",
+          "translate_schedule": "リリース概要スケジューラー（廃止）",
+          "changelog_schedule": "Homebrew コミット取得スケジューラー",
+          "assets_icons": "アイコンの収集（廃止）",
+          "assets_download-size": "ダウンロードサイズの検出",
+          "cleanup": "クリーンアップ"
+        },
+        "triggers": {
+          "schedule": "スケジュール",
+          "manual": "手動",
+          "event": "イベント"
+        },
+        "statuses": {
+          "running": "実行中",
+          "succeeded": "成功",
+          "failed": "失敗",
+          "partial": "一部成功"
+        },
+        "columns": {
+          "type": "種類",
+          "trigger": "起動方法",
+          "status": "ステータス",
+          "startedAt": "開始時刻",
+          "duration": "所要時間",
+          "stats": "統計",
+          "error": "エラー"
+        },
+        "filters": {
+          "type": "種類",
+          "status": "ステータス"
+        },
+        "detail": "ジョブの詳細",
+        "stats": "統計",
+        "error": "エラー"
+      },
+      "search": {
+        "tabs": {
+          "top": "人気の検索語",
+          "zero": "結果なしの検索語",
+          "synonyms": "同義語"
+        },
+        "days": "期間",
+        "daysOption": "過去 {days} 日",
+        "columns": {
+          "query": "検索語",
+          "count": "検索数",
+          "zeroCount": "結果なしの回数",
+          "clicks": "クリック数",
+          "ctr": "クリック率",
+          "topClicked": "クリック数が多い項目",
+          "terms": "語句",
+          "enabled": "有効",
+          "updated": "更新日時"
+        },
+        "addSynonym": "同義語を追加",
+        "newSynonym": "新しい同義語",
+        "editSynonym": "同義語を編集",
+        "terms": "語句",
+        "termsHint": "2～10個の語句を入力してください。各語句は40文字以内です。いずれかの語句を検索すると、ほかの語句も一致します",
+        "termsInvalid": "語句は2～10個で入力してください",
+        "deleteConfirm": "同義語「{terms}」を削除しますか？"
+      },
+      "feedback": {
+        "title": "ユーザーフィードバック",
+        "status": "ステータス",
+        "type": "種類",
+        "statuses": {
+          "open": "未対応",
+          "in_progress": "対応中",
+          "resolved": "解決済み",
+          "rejected": "却下"
+        },
+        "types": {
+          "wrong_info": "情報の誤り",
+          "install_failed": "インストール失敗",
+          "broken_link": "リンク切れ",
+          "suggest_package": "掲載リクエスト",
+          "translation": "翻訳の問題",
+          "other": "その他"
+        },
+        "columns": {
+          "type": "種類",
+          "package": "関連パッケージ",
+          "content": "内容",
+          "platform": "プラットフォームとバージョン",
+          "errorCode": "エラーコード",
+          "contact": "連絡先",
+          "status": "ステータス",
+          "createTime": "送信日時"
+        },
+        "handle": "対応",
+        "handleTitle": "フィードバック #{id} を処理",
+        "handlerNote": "対応メモ",
+        "handled": "{name} が {time} に処理"
+      },
+      "agentLog": {
+        "tabs": {
+          "calls": "Hermes の呼び出し",
+          "translations": "AI 翻訳",
+          "revisions": "コンテンツのリビジョン",
+          "trash": "ゴミ箱"
+        },
+        "columns": {
+          "time": "日時",
+          "client": "Agentクライアント",
+          "tool": "ツール",
+          "objects": "オブジェクト",
+          "result": "結果",
+          "duration": "所要時間",
+          "requestId": "リクエストID",
+          "object": "オブジェクト",
+          "locales": "言語",
+          "model": "モデル",
+          "tokens": "Token",
+          "actor": "実行者",
+          "version": "バージョン",
+          "locale": "言語",
+          "action": "操作",
+          "deletedAt": "削除日時",
+          "expiresAt": "保管期限",
+          "state": "状態"
+        },
+        "filters": {
+          "tool": "ツール名",
+          "requestId": "リクエストID",
+          "dryRun": "呼び出し種別",
+          "status": "ステータス",
+          "locale": "言語",
+          "entity": "オブジェクト種別",
+          "objectKey": "オブジェクトキー",
+          "state": "状態"
+        },
+        "entities": {
+          "package": "App",
+          "release": "リリースノート",
+          "category": "カテゴリ",
+          "collection": "コレクション",
+          "collection_item": "コレクション項目",
+          "feature": "注目コンテンツ",
+          "screenshot": "スクリーンショット",
+          "glossary": "用語",
+          "synonym": "同義語",
+          "announcement": "お知らせ",
+          "desktop_release": "デスクトップアプリのリリース",
+          "mirror": "ミラー",
+          "feedback": "フィードバック",
+          "asset": "アセット"
+        },
+        "actorTypes": {
+          "admin": "管理者",
+          "agent": "Agent",
+          "system": "システム"
+        },
+        "translationStatus": {
+          "succeeded": "成功",
+          "failed": "失敗",
+          "stale": "古い"
+        },
+        "actions": {
+          "create": "作成",
+          "update": "更新",
+          "delete": "削除",
+          "restore": "復元",
+          "translate": "翻訳"
+        },
+        "realCall": "本番呼び出し",
+        "dryRun": "プレビュー",
+        "succeeded": "成功",
+        "detail": "詳細",
+        "revert": "取り消し",
+        "revertConfirm": "{tool} の呼び出し（リクエスト {requestId}）によるすべての変更を取り消しますか？取り消しもリビジョンとして記録されるため、後から復元できます。",
+        "reverted": "取り消しました。{count} 件のオブジェクトを復元しました",
+        "revertedBy": "次のリクエストにより取り消されました",
+        "operationId": "管理画面のAPI操作",
+        "paramsSummary": "パラメーター概要（マスキング済み）",
+        "resultSummary": "結果の概要",
+        "tokenDetail": "入力 {prompt} · 出力 {completion} · 推論 {reasoning} · キャッシュ {cached}",
+        "retry": "再翻訳",
+        "retried": "翻訳キューに再登録しました",
+        "compare": "比較",
+        "restore": "復元",
+        "restoreRevisionConfirm": "{object} を v{version} に復元しますか？復元後、自動で再翻訳されます。",
+        "restored": "復元済み",
+        "affectedUrls": "影響を受けた公開ページ",
+        "notRestored": "未復元",
+        "restoredItems": "復元済み",
+        "inTrash": "ゴミ箱内",
+        "restoredAt": "{time} に復元",
+        "view": "表示",
+        "restoreTrashConfirm": "「{label}」を復元しますか？元の ID と公開 URL はそのまま維持されます。",
+        "deletedBy": "{actor}が{time}に削除"
+      }
+    },
+    "system": {
+      "agent": {
+        "settingsTitle": "マスター切り替えと上限",
+        "enabled": "Agent 接続を有効化",
+        "enabledHint": "オフにするとすべての Agent が一時停止し、30 秒以内にすべてのトークンが使用できなくなります",
+        "pauseTitle": "Agent 接続を一時停止",
+        "pauseConfirm": "一時停止から 30 秒以内にすべてのトークンで呼び出しができなくなり、Hermes の毎日の実行も失敗します。それでも一時停止しますか？",
+        "limits": {
+          "callsPerMinute": "1 分あたりの呼び出し数",
+          "writesPerDay": "1 日あたりの書き込み数",
+          "llmOpsPerDay": "1 日あたりの LLM 操作数",
+          "batchLimit": "1 回のバッチ上限"
+        },
+        "limitsHint": "トークンごとにカウントされ、毎日 UTC 00:00 にリセットされます。LLM 操作には、書き込み後の自動翻訳と再翻訳が含まれます",
+        "saveSettings": "設定を保存",
+        "mcpUrl": "MCP接続URL",
+        "configTitle": "Hermes 接続設定",
+        "configHint": "これを ~/.hermes/config.yaml に記述し、トークンを ~/.hermes/.env の OPENNAVO_TOKEN に設定してから、Hermes で /reload-mcp を実行してください。Hermes が接続すると、トークン一覧の「最終使用日時」が更新されます",
+        "copy": "コピー",
+        "copied": "コピーしました",
+        "updatedAt": "設定の更新日時：{time}",
+        "clientsTitle": "Agent クライアント",
+        "addClient": "クライアントを新規作成",
+        "editClient": "クライアントを編集",
+        "clientName": "名前",
+        "clientNamePlaceholder": "例：Hermes · 自宅のコンピューター",
+        "clientNameRequired": "名前を入力してください",
+        "clientNotes": "メモ",
+        "clientHint": "各クライアントには管理画面にログインできないマシンアカウント（R_AGENT）が作成され、監査ログではそのアカウントが操作ユーザーとして記録されます",
+        "clientEnabled": "有効",
+        "clientDisabled": "無効",
+        "enableClient": "有効化",
+        "disableClient": "無効化",
+        "enableClientConfirm": "「{name}」を有効にしますか？有効期限内のトークンは再び使用できるようになります。",
+        "disableClientConfirm": "「{name}」を無効にしますか？すべてのトークンは 30 秒以内に使用できなくなります。トークン自体は削除されません。",
+        "tokens": "トークン",
+        "tokensOf": "{name}のトークン",
+        "tokensHint": "一覧にはプレフィックスのみ表示されます。トークン全体が表示されるのは作成時の1回だけです",
+        "addToken": "トークンを新規作成",
+        "editToken": "トークンを編集",
+        "tokenName": "名前",
+        "tokenNamePlaceholder": "例：毎日の更新",
+        "tokenNameRequired": "トークン名を入力してください",
+        "permissions": "権限",
+        "selectAll": "すべて選択",
+        "permissionCount": "{picked} / {total} 件を選択中",
+        "permissionsHint": "選択されていない権限に対応するツールは、Hermesから参照も呼び出しもできません。システム、デスクトップ版のリリース、ダウンロードミラー、リモート設定は付与できません",
+        "allowDelete": "削除を許可",
+        "allowDeleteHint": "オフの場合は何も削除できません。オンの場合、削除した項目はゴミ箱に移動し、30 日以内であれば復元できます",
+        "expiresAt": "有効期限",
+        "expiry": {
+          "default": "90 日後",
+          "custom": "日時を指定",
+          "never": "無期限"
+        },
+        "expiryInvalid": "未来の日時を選択してください",
+        "ipAllowlist": "接続元 IP",
+        "ipAllowlistHint": "任意です。IP アドレスまたは CIDR 範囲（例：203.0.113.0/24）を入力してください。空欄の場合、すべてのアドレスを許可します",
+        "revoke": "取り消す",
+        "revokeConfirm": "トークン「{name}」を取り消しますか？30秒以内に反映され、元に戻せません。代わりに新しいトークンを作成してください。",
+        "revoked": "取り消し済み",
+        "neverExpires": "無期限",
+        "expiringSoon": "まもなく期限切れ",
+        "tokenStatus": {
+          "active": "有効",
+          "expired": "期限切れ",
+          "revoked": "取り消し済み"
+        },
+        "tokenCreatedTitle": "トークンを作成しました",
+        "tokenCreatedWarning": "トークンが表示されるのは今回限りです。このウィンドウを閉じると再表示できないため、今すぐコピーして保存してください。",
+        "tokenPlaintext": "「{name}」のトークン",
+        "tokenSaved": "保存しました",
+        "columns": {
+          "clientName": "クライアント",
+          "status": "ステータス",
+          "activeTokens": "有効なトークン",
+          "lastUsed": "最終使用日時",
+          "createdAt": "作成日時",
+          "tokenName": "トークン",
+          "permissions": "権限",
+          "allowDelete": "削除可能",
+          "expiresAt": "有効期限"
+        },
+        "permissionGroups": {
+          "dashboard": "ダッシュボード",
+          "catalog": "カタログ",
+          "content": "コンテンツ",
+          "changelog": "リリースノート",
+          "ops": "運用",
+          "release": "デスクトップアプリ",
+          "other": "その他"
+        },
+        "permissionLabels": {
+          "dashboard_view": "ダッシュボードを表示（読み取り専用）",
+          "catalog_package_view": "アプリ、バージョン、カテゴリツリー、アセットを表示",
+          "catalog_package_edit": "アプリの詳細、テキスト、カテゴリ、公開設定、おすすめを編集",
+          "catalog_package_resync": "アプリを再同期",
+          "catalog_asset_upload": "アイコンとスクリーンショット",
+          "catalog_category_edit": "カテゴリの作成、編集、削除、並べ替え",
+          "content_collection_edit": "コレクションとその項目の作成、編集、削除",
+          "content_collection_publish": "コレクションの公開と非公開",
+          "content_feature_edit": "特集",
+          "content_glossary_edit": "用語集",
+          "content_announcement_edit": "デスクトップアプリのお知らせ",
+          "changelog_release_edit": "リリースノートの作成とバージョンの非表示",
+          "translation_review": "翻訳状況の確認、再翻訳、訳文の修正",
+          "ops_job_view": "ジョブとキューを表示",
+          "ops_job_trigger": "ジョブを手動で実行",
+          "ops_search_view": "検索インサイトを表示",
+          "ops_search_edit": "同義語を管理",
+          "ops_feedback_handle": "ユーザーフィードバックを処理",
+          "agent_log_view": "Agent と AI のログを表示",
+          "content_revision_restore": "リビジョンの復元、呼び出しの取り消し、ゴミ箱からの復元",
+          "release_desktop_notes": "デスクトップ版のリリースノートを作成"
+        }
+      },
+      "github": {
+        "title": "GitHub の設定",
+        "scope": "Homebrew のコミット履歴の取得に使用する GitHub PAT を設定し、API リクエストの割り当て量を増やします。",
+        "permissionsHint": "公開リポジトリへの読み取りアクセス権を持つ fine-grained PAT を使用してください。書き込み権限は不要です。",
+        "permissionsLink": "GitHub の権限の詳細を表示",
+        "token": "GitHub Personal Access Token（PAT）",
+        "tokenPlaceholder": "新しい PAT を入力するか、現在のトークンを保持するには空欄のままにしてください",
+        "tokenHint": "トークンは暗号化して保存され、保存後に表示されることはありません",
+        "tokenSource": {
+          "admin": "管理者 PAT が設定されています",
+          "none": "トークンが設定されていません。未認証リクエストを使用します"
+        },
+        "save": "PAT を保存",
+        "clearToken": "管理者 PAT を削除",
+        "clearNone": "管理者 PAT を削除すると、割り当て量の少ない未認証リクエストに切り替わります。続行しますか？",
+        "effect": "次回の取得リクエストから適用されます。再起動は不要です",
+        "loadFailed": "設定を読み込めませんでした。［更新］をクリックして再試行してください。",
+        "saveFailed": "PAT を保存できませんでした。入力内容を確認するか、後でもう一度お試しください。",
+        "invalidToken": "PAT に空白文字や非 ASCII 文字を含めることはできません。また、4096 文字を超えることもできません。"
+      },
+      "translation": {
+        "title": "翻訳AIの設定",
+        "scope": "コンテンツの自動翻訳に使用する AI を設定します。インターフェースの文言は引き続き開発ツールと同期されます。",
+        "enabled": "自動翻訳を有効にする",
+        "baseUrl": "ゲートウェイURL",
+        "apiKey": "APIキー",
+        "keyPlaceholder": "既存のキーを保持するには空欄にしてください",
+        "keyHint": "キーは暗号化して保存され、保存後に表示されることはありません",
+        "keySource": {
+          "admin": "管理者キーを設定済み",
+          "environment": "環境変数のキーを使用中",
+          "none": "キーが設定されていません"
+        },
+        "clearKey": "管理者キーを削除",
+        "clearHint": "保存すると環境変数のキーに切り替わります。環境変数にキーがない場合は、翻訳を無効にしてください。",
+        "model": "翻訳モデル",
+        "reasoningEffort": "推論の強度",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "monthlyTokenBudget": "月間トークン予算",
+        "hardCap": "サーバーの上限：{count}トークン",
+        "save": "設定を保存",
+        "effect": "再起動せず、次回のタスク呼び出しから適用されます",
+        "loadFailed": "設定を読み込めませんでした。「更新」を選択して再試行してください。",
+        "saveFailed": "設定を保存できませんでした。入力内容を確認するか、後でもう一度お試しください。",
+        "invalidUrl": "認証情報、クエリパラメーター、フラグメントを含まない完全なHTTP(S)ゲートウェイURLを入力してください。本番環境ではHTTPSが必要です。",
+        "invalidModel": "スペースを含まないモデル名を入力してください。",
+        "invalidBudget": "予算は正の整数で入力してください。",
+        "fetchModels": "モデルを取得",
+        "modelPlaceholder": "モデル名を選択または入力",
+        "modelsHint": "設定の読み込み時にモデルが自動的に取得されます。URLまたはキーを変更した後は、保存せずに再取得できます。モデル名を入力することもできます。",
+        "modelsFailed": "モデルを取得できませんでした。ゲートウェイのURLとキーを確認して再試行するか、モデル名を入力してください。",
+        "modelsEmpty": "ゲートウェイから利用可能なモデルが返されませんでした。モデル名を入力できます。",
+        "keyRequired": "翻訳にはAPIキーが必要です。キーを削除する前に、翻訳を無効にするか環境変数のキーを保持してください。"
+      },
+      "user": {
+        "title": "管理者",
+        "userName": "ユーザー名",
+        "userNameInvalid": "3～32文字の英字、数字、アンダースコア、ピリオド、ハイフンを使用してください",
+        "nickName": "ニックネーム",
+        "email": "メールアドレス",
+        "roles": "ロール",
+        "status": "ステータス",
+        "statusOptions": {
+          "1": "有効",
+          "2": "無効"
+        },
+        "lastLogin": "最終ログイン",
+        "locked": "ロック中",
+        "password": "初期パスワード",
+        "newPassword": "新しいパスワード",
+        "passwordInvalid": "10文字以上で入力してください",
+        "addTitle": "管理者を新規作成",
+        "editTitle": "管理者を編集",
+        "resetPassword": "パスワードをリセット",
+        "resetPasswordTitle": "「{name}」のパスワードをリセット",
+        "resetDone": "パスワードをリセットしました。対象ユーザーのセッションからログアウトしました",
+        "forceLogout": "強制ログアウト",
+        "forceLogoutConfirm": "「{name}」をすべてのセッションから今すぐログアウトさせますか？",
+        "forceLogoutDone": "強制ログアウトしました",
+        "deleteConfirm": "管理者「{name}」を削除しますか？",
+        "self": "現在のアカウント",
+        "more": "その他"
+      },
+      "role": {
+        "title": "ロール",
+        "permissions": "権限",
+        "builtin": "組み込み",
+        "users": "{count} 人",
+        "superAll": "スーパー管理者はすべての権限を持つため、個別設定は不要です",
+        "savePermissions": "権限を保存",
+        "roleCode": "ロールコード",
+        "roleCodeInvalid": "R_で始まり、大文字・数字・アンダースコアのみ使用できます",
+        "roleName": "名前",
+        "roleDesc": "説明",
+        "status": "ステータス",
+        "addTitle": "ロールを新規作成",
+        "editTitle": "ロールを編集",
+        "deleteConfirm": "ロール「{name}」を削除しますか？",
+        "groups": {
+          "dashboard": "ダッシュボード",
+          "catalog": "カタログ",
+          "content": "コンテンツ",
+          "changelog": "リリースノート",
+          "translation": "翻訳",
+          "ops": "運用",
+          "release": "デスクトップアプリ",
+          "system": "システム"
+        },
+        "selectRole": "左側でロールを選択して、権限を表示・編集してください"
+      },
+      "audit": {
+        "title": "監査ログ",
+        "actor": "実行者",
+        "actorId": "実行者ID",
+        "entityType": "オブジェクトの種類",
+        "action": "操作",
+        "actionPlaceholder": "例: catalog.package.update",
+        "range": "期間"
+      }
+    },
+    "userCenter": {
+      "profile": "プロフィール",
+      "nickName": "ニックネーム",
+      "email": "メールアドレス",
+      "avatarUrl": "アバターURL",
+      "save": "プロフィールを保存",
+      "password": "パスワードを変更",
+      "oldPassword": "現在のパスワード",
+      "newPassword": "新しいパスワード",
+      "confirmPassword": "新しいパスワードを確認",
+      "passwordInvalid": "10文字以上で入力してください",
+      "mismatch": "新しいパスワードが一致しません",
+      "changePassword": "パスワードを変更",
+      "passwordChanged": "パスワードを変更しました。もう一度ログインしてください"
+    },
+    "content": {
+      "glossary": {
+        "title": "用語集",
+        "add": "用語を追加",
+        "addTitle": "用語を追加",
+        "editTitle": "用語を編集",
+        "search": "用語を検索",
+        "type": "種類",
+        "term": "用語",
+        "termPlaceholder": "原文にある語句（例：Homebrew）",
+        "termRequired": "用語を入力してください",
+        "translations": "固定訳",
+        "fixedTranslation": "固定訳",
+        "doNotTranslate": "翻訳しない",
+        "doNotTranslateHint": "ブランド名やコマンドなどは原文のまま保持します",
+        "keepOriginal": "原文のまま",
+        "formHint": "固定訳が必要な言語だけ入力してください。次回の自動翻訳から適用され、既存の訳文は変更されません",
+        "updatedAt": "更新日時",
+        "deleteConfirm": "用語「{term}」を削除しますか？ゴミ箱に移動し、30日以内なら復元できます。",
+        "deleted": "削除しました。ゴミ箱から復元できます"
+      },
+      "announcement": {
+        "title": "デスクトップアプリのお知らせ",
+        "enabled": "お知らせを表示",
+        "enabledHint": "オンにすると、デスクトップアプリの上部に表示されます",
+        "sourceLocale": "原文の言語",
+        "titleField": "タイトル",
+        "body": "本文",
+        "required": "お知らせを表示する場合は、タイトルと本文の入力が必要です",
+        "translateHint": "原文のみ入力してください。保存後、他の5言語に自動翻訳されます",
+        "save": "保存",
+        "saved": "保存しました。他の言語への翻訳中です",
+        "translations": "言語ごとの翻訳状況",
+        "locale": "言語",
+        "status": "ステータス",
+        "content": "内容",
+        "updatedAt": "更新日時",
+        "statuses": {
+          "source": "原文",
+          "machine": "AI翻訳",
+          "manual": "手動修正",
+          "pending": "翻訳中",
+          "failed": "失敗",
+          "missing": "未入力",
+          "skipped": "スキップ"
+        }
+      },
+      "collection": {
+        "title": "コレクション",
+        "create": "新しいコレクション",
+        "keyword": "タイトルまたはスラッグ",
+        "status": "ステータス",
+        "columns": {
+          "cover": "カバー",
+          "title": "タイトル",
+          "slug": "スラッグ",
+          "items": "項目",
+          "status": "ステータス",
+          "publishAt": "公開日時",
+          "sort": "順序",
+          "updated": "更新日時"
+        },
+        "publish": "公開",
+        "unpublish": "公開を停止",
+        "publishConfirm": "「{title}」を公開しますか？サイトに表示されます。",
+        "unpublishConfirm": "「{title}」の公開を停止しますか？サイトに表示されなくなります。",
+        "published": "公開済み",
+        "unpublished": "公開を停止しました",
+        "deleteConfirm": "コレクション「{title}」を削除しますか？",
+        "scheduledAt": "{time} に公開予定"
+      },
+      "collectionDetail": {
+        "newTitle": "新しいコレクション",
+        "basic": "基本情報",
+        "slug": "スラッグ",
+        "slugInvalid": "小文字の英字、数字、ハイフンのみ使用できます。先頭は英字または数字にしてください",
+        "titleField": "タイトル",
+        "subtitle": "サブタイトル",
+        "body": "本文",
+        "cover": "カバー",
+        "uploadCover": "カバーをアップロード",
+        "removeCover": "カバーを削除",
+        "sort": "順序",
+        "unpublishAt": "公開停止日時",
+        "items": "項目",
+        "itemsHint": "ドラッグして並べ替え（最大 100 件）",
+        "addPackage": "パッケージを検索して追加",
+        "note": "紹介文（原文：{locale}）",
+        "disabledPackage": "無効です。サイトには表示されません",
+        "duplicate": "すでにコレクションに追加されています",
+        "maxItems": "項目は最大 100 件です",
+        "emptyItems": "項目はまだありません",
+        "save": "保存",
+        "saved": "保存しました",
+        "publish": "公開",
+        "publishNow": "今すぐ公開",
+        "schedule": "公開を予約",
+        "publishAt": "公開日時",
+        "preview": "サイトでのプレビュー",
+        "previewLocale": "プレビュー言語",
+        "created": "作成しました。続けて項目を編集してください"
+      },
+      "feature": {
+        "title": "注目枠",
+        "create": "新しい注目枠",
+        "placement": "掲載場所",
+        "placements": {
+          "home_hero": "ホームのヒーロー枠",
+          "home_secondary": "ホームのサブ枠",
+          "category_top": "カテゴリトップ"
+        },
+        "category": "カテゴリ",
+        "categoryRequired": "カテゴリトップに掲載する場合は、カテゴリを選択してください",
+        "targetType": "対象の種類",
+        "targetTypes": {
+          "package": "パッケージ",
+          "collection": "コレクション",
+          "url": "リンク"
+        },
+        "target": "対象",
+        "targetRequired": "対象を選択してください",
+        "packageSearch": "パッケージを検索",
+        "collectionSelect": "コレクションを選択",
+        "url": "リンク先URL",
+        "glowColor": "グローの色",
+        "badge": "バッジ",
+        "featureTitle": "タイトル",
+        "subtitle": "2行目",
+        "body": "本文",
+        "bodyHint": "**太字** のみ使用できます",
+        "bodyInvalid": "本文では **太字** の書式のみ使用できます",
+        "ctaLabel": "ボタンのラベル",
+        "startsAt": "開始日時",
+        "endsAt": "終了日時",
+        "range": "期間",
+        "status": "ステータス",
+        "sort": "並び順",
+        "columns": {
+          "placement": "掲載場所",
+          "title": "タイトル",
+          "target": "対象",
+          "range": "掲載期間",
+          "status": "ステータス",
+          "sort": "順序"
+        },
+        "editTitle": "注目枠を編集",
+        "deleteConfirm": "注目枠「{title}」を削除しますか？",
+        "preview": "サイトのプレビュー",
+        "zh": "中国語の文言",
+        "en": "英語の文面"
+      }
+    },
+    "changelog": {
+      "release": {
+        "title": "リリース",
+        "package": "パッケージ",
+        "packagePlaceholder": "パッケージを検索",
+        "keyword": "キーワード",
+        "keywordPlaceholder": "トークンまたはバージョン",
+        "source": "ソース",
+        "sources": {
+          "editorial": "OpenNavo編集部",
+          "github_release": "GitHub Release",
+          "sparkle": "Sparkle",
+          "webpage": "リリースノートページ",
+          "manual": "編集部選定"
+        },
+        "translationStatus": "翻訳ステータス",
+        "translationStatuses": {
+          "none": "なし",
+          "source": "原文",
+          "machine": "機械翻訳",
+          "manual": "手動",
+          "pending": "待機中",
+          "failed": "失敗",
+          "skipped": "スキップ"
+        },
+        "hidden": "非表示",
+        "columns": {
+          "package": "パッケージ",
+          "version": "バージョン",
+          "title": "タイトル",
+          "publishedAt": "公開日時",
+          "source": "ソース",
+          "translation": "翻訳",
+          "fetchedAt": "取得日時"
+        },
+        "editTranslation": "翻訳を編集",
+        "retranslate": "再翻訳",
+        "retranslateConfirm": "{name} {version}を再翻訳しますか？LLMの利用枠を消費します。",
+        "retranslateQueued": "翻訳キューに追加しました",
+        "hide": "非表示にする",
+        "show": "表示",
+        "hiddenDone": "非表示にしました",
+        "shownDone": "表示しました",
+        "more": "さらに表示"
+      },
+      "editor": {
+        "original": "原文",
+        "noOriginal": "原文がありません",
+        "translation": "翻訳",
+        "summary": "概要",
+        "sections": "分類されたハイライト",
+        "area": "項目",
+        "item": "ハイライト",
+        "addSection": "項目を追加",
+        "addItem": "ハイライトを追加",
+        "body": "全文の翻訳",
+        "preview": "サイトでのプレビュー",
+        "save": "保存（手動修正としてすぐに反映）",
+        "saved": "保存しました",
+        "failReason": "翻訳に失敗しました：{reason}",
+        "stale": "原文が変更されたため、翻訳が古くなっている可能性があります",
+        "maxSections": "項目は最大8件です",
+        "maxItems": "項目ごとに最大6件のハイライトを追加できます"
+      },
+      "notes": {
+        "tabVersions": "登録バージョン・更新内容を書く",
+        "tabReleases": "更新内容",
+        "title": "Homebrewの登録バージョン",
+        "hint": "独自の更新内容を原文の言語で入力してください。他の言語には自動翻訳されます",
+        "keywordPlaceholder": "Tokenまたはバージョン",
+        "sortLabel": "並べ替え",
+        "sort": {
+          "updated": "最近追加された順",
+          "popular": "人気順"
+        },
+        "columns": {
+          "app": "App",
+          "version": "バージョン",
+          "rank": "順位",
+          "committed": "Homebrewへの登録日",
+          "firstSeen": "初回確認日",
+          "notes": "更新内容"
+        },
+        "written": "入力済み",
+        "notWritten": "未入力",
+        "historical": "上流の古い更新内容があります",
+        "write": "更新内容を書く",
+        "edit": "更新内容を編集",
+        "translations": "翻訳",
+        "clear": "クリア",
+        "clearConfirm": "{token} {version} に対して作成した更新内容をクリアしますか？削除されるのは当サイトの更新内容のみです。ゴミ箱またはリビジョンから復元できます。",
+        "cleared": "クリアしました",
+        "editorTitle": "{token} {version} の更新内容",
+        "sourceLocale": "原文の言語",
+        "publishedAt": "日付（任意。デフォルトはHomebrewへの登録日）",
+        "titleField": "タイトル（任意）",
+        "titlePlaceholder": "例：バージョン2.0",
+        "summary": "1行の概要",
+        "sections": "グループ別ハイライト",
+        "sectionsHint": "最大{groups}グループ、各グループ最大{items}件。グループ名は{area}文字以内、各項目は{item}文字以内です",
+        "addGroup": "グループを追加",
+        "removeGroup": "グループを削除",
+        "areaPlaceholder": "グループ名（例：新機能）",
+        "itemPlaceholder": "ハイライト",
+        "addItem": "ハイライトを追加",
+        "body": "本文（任意、Markdown）",
+        "bodyPlaceholder": "詳しい説明が必要な場合のみ入力してください",
+        "translateHint": "保存後、他の5言語に自動翻訳されます",
+        "save": "保存",
+        "saved": "保存しました。他の言語に翻訳しています",
+        "errors": {
+          "summaryRequired": "1行の概要を入力してください",
+          "summaryTooLong": "概要は{summary}文字以内で入力してください",
+          "titleTooLong": "タイトルは{title}文字以内で入力してください",
+          "tooManyGroups": "グループは最大{groups}個です",
+          "areaRequired": "すべてのグループに名前を入力してください",
+          "areaTooLong": "グループ名は{area}文字以内で入力してください",
+          "itemsRequired": "各グループにハイライトを1つ以上入力してください",
+          "tooManyItems": "各グループのハイライトは最大{items}件です",
+          "itemTooLong": "各ハイライトは{item}文字以内で入力してください"
+        }
+      },
+      "translations": {
+        "title": "翻訳管理",
+        "hint": "AI翻訳はレビューなしでそのまま公開されます。「*」は原文が変更され、翻訳が古くなっている可能性があることを示します。1つの言語を修正しても、他の言語には影響しません。",
+        "search": "オブジェクトを検索",
+        "entity": "オブジェクトの種類",
+        "locale": "言語",
+        "status": "ステータス",
+        "stale": "原文が変更されました",
+        "staleOnly": "原文が変更されました",
+        "upToDate": "最新",
+        "columns": {
+          "object": "オブジェクト",
+          "updatedAt": "更新日時"
+        },
+        "entities": {
+          "package": "App",
+          "release": "更新内容",
+          "category": "カテゴリ",
+          "collection": "コレクション",
+          "collection_item": "コレクション項目",
+          "feature": "特集",
+          "screenshot": "スクリーンショット",
+          "desktop_release": "デスクトップ版リリース",
+          "mirror": "ミラー",
+          "announcement": "お知らせ"
+        },
+        "statuses": {
+          "source": "原文",
+          "machine": "AI",
+          "manual": "手動",
+          "pending": "翻訳中",
+          "failed": "失敗",
+          "missing": "未翻訳",
+          "skipped": "スキップ"
+        },
+        "fix": "修正",
+        "fixTitle": "翻訳を修正 · {label}",
+        "fixLocale": "言語",
+        "fixHint": "変更されるのはこの言語のみです。保存後、手動修正済みとしてマークされます",
+        "noTextFields": "このオブジェクトには、ここで修正できるテキストがありません",
+        "saveFix": "修正を保存",
+        "fixed": "修正を保存しました",
+        "retranslate": "再翻訳",
+        "retranslateTitle": "再翻訳 · {label}",
+        "retranslateHint": "再翻訳する言語を選択してください。翻訳枠を消費します",
+        "queued": "翻訳キューに追加しました",
+        "fields": {
+          "displayName": "表示名",
+          "summary": "1行の概要",
+          "description": "紹介文",
+          "title": "タイトル",
+          "subtitle": "サブタイトル",
+          "body": "本文",
+          "badge": "バッジ",
+          "ctaLabel": "ボタンのテキスト",
+          "name": "名前",
+          "caption": "キャプション",
+          "note": "おすすめ文",
+          "notes": "更新内容",
+          "bodyMarkdown": "本文"
+        }
+      }
+    },
+    "release": {
+      "desktop": {
+        "title": "デスクトップアプリのリリース",
+        "channel": "チャンネル",
+        "channels": {
+          "stable": "安定版",
+          "beta": "ベータ"
+        },
+        "statuses": {
+          "draft": "下書き",
+          "published": "公開済み",
+          "rolled_back": "ロールバック済み"
+        },
+        "columns": {
+          "version": "バージョン",
+          "channel": "チャンネル",
+          "status": "ステータス",
+          "minMacos": "最小 macOS バージョン",
+          "artifacts": "成果物",
+          "published": "公開日時",
+          "createTime": "作成日時"
+        },
+        "targets": {
+          "darwin-aarch64": "Appleシリコン",
+          "darwin-x86_64": "Intel",
+          "dmg-universal": "DMG"
+        },
+        "unsigned": "署名なし",
+        "draftHint": "下書きはリリースパイプラインで登録されます。この画面では作成できません",
+        "editNotes": "リリースノートを編集",
+        "notesTitle": "{version} リリースノート",
+        "notes": "リリースノート",
+        "minMacos": "最小macOSバージョン",
+        "publish": "公開",
+        "publishConfirm": "{version} を「{channel}」チャンネルに公開しますか？desktop/{channelKey}/latest.json が上書きされ、クライアントにアップデートが配信されます。",
+        "publishDone": "公開しました",
+        "rollback": "ロールバック",
+        "rollbackConfirm": "「{channel}」チャンネルの {version} をロールバックしますか？マニフェストは前回公開されたバージョンに戻ります。",
+        "rollbackDone": "ロールバックしました",
+        "more": "その他"
+      },
+      "mirror": {
+        "title": "ダウンロードミラー",
+        "create": "ミラーを新規作成",
+        "editTitle": "ミラーを編集",
+        "columns": {
+          "key": "キー",
+          "name": "名前",
+          "apiDomain": "APIドメイン",
+          "bottleDomain": "Bottleドメイン",
+          "probeUrl": "プローブURL",
+          "recommended": "推奨",
+          "enabled": "有効",
+          "sort": "順序"
+        },
+        "form": {
+          "key": "キー",
+          "name": "名前",
+          "apiDomain": "APIドメイン",
+          "bottleDomain": "Bottleドメイン",
+          "brewGitRemote": "Homebrew Gitリモート",
+          "coreGitRemote": "Homebrew Core Gitリモート",
+          "probeUrl": "プローブURL",
+          "recommended": "推奨",
+          "enabled": "有効",
+          "sort": "順序",
+          "keyInvalid": "小文字、数字、ハイフンのみ使用できます",
+          "urlInvalid": "https:// で始まるURLを指定してください",
+          "officialHint": "公式ソースを使用するには、4つのアドレスをすべて空欄にしてください",
+          "officialLocked": "これは公式配信元です。クライアントには常に表示されるため、keyと4つのアドレスは変更できず、無効化もできません。",
+          "probeUrlHint": "クライアントはこのURLにHEADリクエストを送信してレイテンシを測定し、配信元の横に結果を表示します。",
+          "recommendedHint": "「おすすめ」をオンにすると、クライアントにタグが表示されます。デフォルトの選択（公式配信元）は変わりません。"
+        },
+        "officialRow": "クライアントに常に表示",
+        "deleteConfirm": "ミラー「{name}」を削除しますか？すでに選択しているクライアントは、ユーザーが別の配信元を選ぶまで、保存済みのアドレスを使い続けます。"
+      },
+      "config": {
+        "title": "リモート設定",
+        "columns": {
+          "key": "キー",
+          "value": "値",
+          "description": "説明",
+          "updated": "更新日時"
+        },
+        "editTitle": "{key} を編集",
+        "value": "値（JSON）",
+        "description": "説明",
+        "invalidJson": "JSON の形式が正しくありません",
+        "sectionTitle": "セクションタイトル",
+        "paragraphs": "本文（段落は空行で区切ってください）",
+        "draft": "審査待ちとしてマーク",
+        "moduleCount": "原文の言語で書かれた本文は保存後に自動翻訳されます。オープンソースのセクションは英語のままで、翻訳されません。依存関係が{count}件登録されています。JSONを展開して一覧を編集できます。"
+      }
+    },
+    "placeholder": "このページは後続のタスクで実装されます",
+    "login": {
+      "common": {
+        "loginOrRegister": "ログイン / 新規登録",
+        "userNamePlaceholder": "ユーザー名を入力してください",
+        "phonePlaceholder": "電話番号を入力してください",
+        "codePlaceholder": "認証コードを入力してください",
+        "passwordPlaceholder": "パスワードを入力してください",
+        "confirmPasswordPlaceholder": "パスワードをもう一度入力してください",
+        "codeLogin": "認証コードでログイン",
+        "confirm": "確定",
+        "back": "戻る",
+        "validateSuccess": "認証に成功しました",
+        "loginSuccess": "ログインしました",
+        "welcomeBack": "おかえりなさい、{userName} さん！",
+        "subtitle": "Homebrew アプリストア管理画面",
+        "login": "ログイン"
+      },
+      "pwdLogin": {
+        "title": "パスワードでログイン",
+        "rememberMe": "ログイン状態を保持",
+        "forgetPassword": "パスワードをお忘れですか？",
+        "register": "アカウント登録",
+        "otherAccountLogin": "別のアカウントでログイン",
+        "otherLoginMode": "別のログイン方法",
+        "superAdmin": "スーパー管理者",
+        "admin": "管理者",
+        "user": "一般ユーザー",
+        "forgetPasswordHint": "パスワードを忘れた場合は、スーパー管理者にリセットを依頼してください。"
+      },
+      "codeLogin": {
+        "title": "認証コードでログイン",
+        "getCode": "認証コードを取得",
+        "reGetCode": "{time}秒後に再取得できます",
+        "sendCodeSuccess": "認証コードを送信しました",
+        "imageCodePlaceholder": "画像認証コードを入力してください"
+      },
+      "register": {
+        "title": "アカウント登録",
+        "agreement": "以下をよく読み、同意します",
+        "protocol": "《ユーザー規約》",
+        "policy": "《プライバシーポリシー》"
+      },
+      "resetPwd": {
+        "title": "パスワードをリセット"
+      },
+      "bindWeChat": {
+        "title": "WeChat を連携"
+      }
+    }
+  },
+  "form": {
+    "required": "必須項目です",
+    "userName": {
+      "required": "ユーザー名を入力してください",
+      "invalid": "ユーザー名の形式が正しくありません"
+    },
+    "phone": {
+      "required": "電話番号を入力してください",
+      "invalid": "電話番号の形式が正しくありません"
+    },
+    "pwd": {
+      "required": "パスワードを入力してください",
+      "invalid": "6～18文字で、英字、数字、アンダースコアを含めてください"
+    },
+    "confirmPwd": {
+      "required": "確認用パスワードを入力してください",
+      "invalid": "パスワードが一致しません"
+    },
+    "code": {
+      "required": "認証コードを入力してください",
+      "invalid": "認証コードの形式が正しくありません"
+    },
+    "email": {
+      "required": "メールアドレスを入力してください",
+      "invalid": "メールアドレスの形式が正しくありません"
+    }
+  },
+  "dropdown": {
+    "closeCurrent": "閉じる",
+    "closeOther": "他を閉じる",
+    "closeLeft": "左側を閉じる",
+    "closeRight": "右側を閉じる",
+    "closeAll": "すべて閉じる",
+    "pin": "タブを固定",
+    "unpin": "タブの固定を解除"
+  },
+  "icon": {
+    "themeConfig": "テーマ設定",
+    "themeSchema": "テーマモード",
+    "lang": "言語を切り替え",
+    "fullscreen": "全画面表示",
+    "fullscreenExit": "全画面表示を終了",
+    "reload": "ページを再読み込み",
+    "collapse": "メニューを折りたたむ",
+    "expand": "メニューを展開",
+    "pin": "固定",
+    "unpin": "固定を解除"
+  },
+  "datatable": {
+    "itemCount": "全 {total} 件",
+    "fixed": {
+      "left": "左に固定",
+      "right": "右に固定",
+      "unFixed": "固定を解除"
+    }
+  }
+}

@@ -1,0 +1,253 @@
+name: Release desktop
+
+# Build, sign, notarize, and release desktop artifacts (06 section 15, 10 M5-03). Triggered by desktop-vX.Y.Z tags; prerelease suffixes such as -beta.N use beta.
+# Manual runs build only; tag releases require complete signing, notarization, and admin registration configuration.
+# GitHub Releases is the sole package download source; admin publishing switches only the update manifest.
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build (build only, no upload)
+        required: true
+        default: 0.0.1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Shared API address for frontend and Rust catalog synchronization (06 section 7), embedded at build time.
+  VITE_API_BASE: ${{ vars.DESKTOP_API_BASE || 'https://api.opennavo.com/api/v1' }}
+  WEB_HOMEPAGE: ${{ vars.WEB_BASE_URL || 'https://opennavo.com/' }}
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      - name: Validate release configuration
+        if: github.event_name == 'push'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          ADMIN_API_BASE: ${{ vars.ADMIN_API_BASE }}
+          CI_RELEASE_TOKEN: ${{ secrets.CI_RELEASE_TOKEN }}
+        run: |
+          for key in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8 TAURI_SIGNING_PRIVATE_KEY ADMIN_API_BASE CI_RELEASE_TOKEN; do
+            if [ -z "${!key}" ]; then echo "::error::Missing release configuration: $key"; exit 1; fi
+          done
+          case "$ADMIN_API_BASE" in https://*) ;; *) echo "::error::Admin API address must use HTTPS"; exit 1 ;; esac
+      - id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then version="${REF_NAME#desktop-v}"; else version="$INPUT_VERSION"; fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::Invalid version: $version"
+            exit 1
+          fi
+          channel=stable
+          case "$version" in *-*) channel=beta ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "### OpenNavo $version（$channel）" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: darwin-aarch64
+            target: aarch64-apple-darwin
+            bundles: app
+          - artifact: darwin-x86_64
+            target: x86_64-apple-darwin
+            bundles: app
+          - artifact: dmg-universal
+            target: universal-apple-darwin
+            bundles: dmg
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      CHANNEL: ${{ needs.meta.outputs.channel }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - run: python3 tooling/scripts/check-notices.py --check-rust-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          key: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure signing
+        id: signing
+        run: |
+          umask 077
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "apple=true" >> "$GITHUB_OUTPUT"
+            # Use a temporary keychain for this runner only; never leave private keys in the working directory.
+            keychain="$RUNNER_TEMP/opennavo-signing.keychain-db"
+            keychain_password="$(openssl rand -hex 24)"
+            echo "::add-mask::$keychain_password"
+            printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            security import "$RUNNER_TEMP/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+            security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+            if [ -n "$APPLE_API_KEY_P8" ] && [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY" ]; then
+              # Write the App Store Connect notarization key to a temporary file and pass its path to the Tauri bundler.
+              printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+              echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+            else
+              echo "::notice::Missing notarization secrets (H-06); signed but not notarized"
+              echo "- ${{ matrix.artifact }}: signed, not notarized (missing H-06 notarization secrets)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "apple=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Missing Apple signing secrets (H-06); producing unsigned builds"
+            echo "- ${{ matrix.artifact }}: unsigned and not notarized (missing H-06)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "updater=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updater=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Missing updater signing secrets (H-07); update artifacts must be signed before publishing the draft"
+            echo "- ${{ matrix.artifact }}: updater artifact is unsigned (missing H-07)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Package
+        env:
+          APPLE_SIGNED: ${{ steps.signing.outputs.apple }}
+        run: |
+          printf '{"version":"%s"}\n' "$VERSION" > "$RUNNER_TEMP/version.json"
+          args=(--ci --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" --config "$RUNNER_TEMP/version.json")
+          # Override the updater endpoint with tauri.beta.conf.json for beta (path relative to apps/desktop).
+          if [ "$CHANNEL" = beta ]; then args+=(--config src-tauri/tauri.beta.conf.json); fi
+          # Skip signing without Apple secrets; --no-sign also skips updater signing, applied separately in the next step (06 section 15).
+          if [ "$APPLE_SIGNED" != true ]; then args+=(--no-sign); fi
+          pnpm --filter @opennavo/desktop exec tauri build "${args[@]}"
+
+      - name: Sign updater artifacts separately
+        if: matrix.bundles == 'app' && steps.signing.outputs.apple != 'true' && steps.signing.outputs.updater == 'true'
+        run: |
+          for archive in apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz; do
+            pnpm --filter @opennavo/desktop exec tauri signer sign --app-version "$VERSION" "$(pwd)/$archive"
+          done
+
+      - name: Verify release signing and notarization
+        if: github.event_name == 'push'
+        run: |
+          bundle="apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
+          codesign --verify --deep --strict "$bundle/macos/OpenNavo.app"
+          xcrun stapler validate "$bundle/macos/OpenNavo.app"
+          if [ "${{ matrix.bundles }}" = dmg ]; then
+            for dmg in "$bundle"/dmg/*.dmg; do
+              xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+              xcrun stapler staple "$dmg"
+              xcrun stapler validate "$dmg"
+              hdiutil verify "$dmg"
+            done
+          fi
+
+      - name: Collect artifacts
+        run: >-
+          node apps/desktop/scripts/release-artifacts.mjs --target ${{ matrix.artifact }} --version "$VERSION"
+          --repository "$GITHUB_REPOSITORY" --out release-artifacts
+
+      - name: Verify updater artifacts with the production desktop public key
+        if: github.event_name == 'push' && matrix.bundles == 'app'
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const config=JSON.parse(fs.readFileSync("apps/desktop/src-tauri/tauri.conf.json", "utf8")); fs.writeFileSync(process.env.RUNNER_TEMP+"/updater.pub", config.plugins.updater.pubkey);'
+          for archive in release-artifacts/*.app.tar.gz; do
+            cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example updater_verify -- --verify-archive "$archive" "$VERSION" "$RUNNER_TEMP/updater.pub"
+          done
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: desktop-${{ matrix.artifact }}
+          path: release-artifacts
+          if-no-files-found: error
+
+      - name: Remove signing files
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/opennavo-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/AuthKey.p8"
+
+  publish:
+    needs: [meta, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      CHANNEL: ${{ needs.meta.outputs.channel }}
+      GH_TOKEN: ${{ github.token }}
+      ADMIN_API_BASE: ${{ vars.ADMIN_API_BASE }}
+      CI_RELEASE_TOKEN: ${{ secrets.CI_RELEASE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: Upload and verify GitHub Release
+        run: node apps/desktop/scripts/github-release.mjs --dir release-artifacts --version "$VERSION" --repository "$GITHUB_REPOSITORY"
+
+      - name: Register draft release
+        run: |
+          node apps/desktop/scripts/register-release.mjs --dir release-artifacts --version "$VERSION" --channel "$CHANNEL"
+          echo "- GitHub artifacts are public; clients receive updates only after publishing in admin. Run Update desktop tap after the stable admin release." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Render cask
+        run: >-
+          node apps/desktop/scripts/render-cask.mjs --dir release-artifacts --version "$VERSION"
+          --homepage "$WEB_HOMEPAGE" --out tap/Casks/opennavo.rb
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: homebrew-cask
+          path: tap/Casks/opennavo.rb

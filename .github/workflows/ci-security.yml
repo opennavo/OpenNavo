@@ -1,0 +1,36 @@
+name: Security checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      # Include development tools: production-only audits missed critical tinypool advisories.
+      # Remaining lower-severity upstream issues are tracked in DEPENDENCY_SECURITY.md.
+      - run: pnpm audit --audit-level critical
+      - run: python3 -I tooling/scripts/test_check_notices.py
+      - run: python3 tooling/scripts/check-notices.py
+      - run: node tooling/scripts/check-secrets.mjs --history
+      - run: node --test tooling/scripts/tasks/shared.test.mjs tooling/scripts/check-secrets.test.mjs

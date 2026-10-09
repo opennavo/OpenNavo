@@ -1,0 +1,549 @@
+{
+  "site": {
+    "name": "OpenNavo",
+    "title": "OpenNavo — Mac向けHomebrewアプリストア",
+    "description": "{count}個のMacアプリを閲覧し、紹介とリリースノートを確認。ワンクリックでインストール・更新できます。"
+  },
+  "nav": {
+    "label": "メインナビゲーション",
+    "discover": "見つける",
+    "categories": "カテゴリ",
+    "rankings": "ランキング",
+    "collections": "コレクション",
+    "download": "クライアントをダウンロード",
+    "search": "App を検索",
+    "switchLanguage": "英語",
+    "switchLanguageLabel": "言語を選択",
+    "browse": "見つける",
+    "lists": "Brewfile",
+    "brewfile": "マイBrewfile",
+    "about": "概要",
+    "feedback": "フィードバック"
+  },
+  "sidebar": {
+    "appLabel": "Macクライアント",
+    "appTitle": "OpenNavo for Mac",
+    "appHint": "macOS 13以降 · 無料"
+  },
+  "rail": {
+    "featuredCollection": "おすすめコレクション",
+    "downloadHint": "macOS 13以降 · AppleシリコンとIntel · 無料",
+    "downloadBody": "Macでこれらのアプリをワンクリックでインストール・更新できます。操作はすべて記録されます。"
+  },
+  "home": {
+    "introTitle": "OpenNavo：Mac向けHomebrewアプリストア",
+    "introBody": "{count}個のアプリの紹介とバージョン履歴を掲載。macOSクライアントでワンクリックでインストール・更新できます。",
+    "introDismiss": "紹介を閉じる",
+    "featured": "今週のおすすめ",
+    "popularApps": "人気アプリ",
+    "recentlyUpdated": "最近更新",
+    "viewDetails": "詳細を見る",
+    "allCategories": "すべて",
+    "categoriesLabel": "カテゴリから探す",
+    "popularAppsHint": "過去30日間のHomebrewインストール数",
+    "recentlyUpdatedHint": "新バージョンが公開されました",
+    "weeklyTop": "今週の人気",
+    "weeklyTopHint": "過去30日間のインストール数ランキング",
+    "collections": "コレクション",
+    "viewRankings": "ランキングを見る",
+    "viewAll": "すべて表示",
+    "metaTitle": "Macアプリを探す · OpenNavo",
+    "discoverHeading": "Macアプリを探す"
+  },
+  "footer": {
+    "tagline": "オープンソースのHomebrew用GUIです。インストールはmacOSクライアントまたはbrewコマンドで行います。",
+    "copyright": "© {year} OpenNavo"
+  },
+  "error": {
+    "notFoundTitle": "ページが見つかりません",
+    "notFoundBody": "このページには内容がありません。移動したか、Homebrewから削除された可能性があります。",
+    "serverTitle": "サービスを一時的に利用できません",
+    "serverBody": "ネットワークまたはサービスを一時的に利用できません。しばらくしてから再試行してください。",
+    "backHome": "ホームに戻る",
+    "search": "検索",
+    "requestId": "リクエストID：{id}"
+  },
+  "get": {
+    "label": "{name}を入手",
+    "menuLabel": "{name}の入手方法"
+  },
+  "openInApp": {
+    "title": "OpenNavoをまだインストールしていませんか？",
+    "body": "OpenNavoクライアントが見つかりません。ダウンロードすると{name}をワンクリックでインストールできます。または、インストールコマンドをコピーしてターミナルで実行できます。",
+    "download": "クライアントをダウンロード",
+    "copyInstead": "インストールコマンドをコピーする",
+    "dontAsk": "今後表示しない"
+  },
+  "toast": {
+    "copied": "インストールコマンドをコピーしました",
+    "copyFailed": "クリップボードにアクセスできません。以下のコマンドを手動でコピーしてください",
+    "addedToBrewfile": "{name} を Brewfile リストに追加しました",
+    "brewfileFull": "リストは最大 200 項目です。追加するには、いくつか削除してください"
+  },
+  "catalog": {
+    "appsTitle": "App",
+    "appsMetaTitle": "Mac App カタログ · OpenNavo",
+    "appsDescription": "HomebrewのmacOSアプリの紹介とリリースノート。インストール数、更新日、名前で閲覧できます。",
+    "total": "全 {total} 件",
+    "sortLabel": "並べ替え",
+    "sortPopular": "人気",
+    "sortUpdated": "最近更新",
+    "sortName": "名前",
+    "showDisabled": "無効化済みを表示",
+    "emptyTitle": "まだコンテンツがありません",
+    "emptyDescription": "別の条件で絞り込むか、収録してほしい App をお知らせください。"
+  },
+  "categories": {
+    "title": "カテゴリ",
+    "metaTitle": "Mac ソフトウェアカテゴリ · OpenNavo",
+    "description": "用途別に Homebrew 収録の App を閲覧できます。",
+    "count": "{count} 件",
+    "itemMetaTitle": "{name} ソフトウェアのおすすめ · OpenNavo"
+  },
+  "rankings": {
+    "title": "ランキング",
+    "metaTitle": "Homebrew 人気 Mac ソフトウェアランキング · OpenNavo",
+    "description": "Homebrew 公式のインストール統計に基づくランキングです。毎日更新され、7 日前との変動を表示します。",
+    "periodLabel": "集計期間",
+    "period": {
+      "30d": "過去 30 日",
+      "90d": "過去 90 日",
+      "365d": "過去 365 日"
+    },
+    "category": "カテゴリ",
+    "allCategories": "すべてのカテゴリ"
+  },
+  "search": {
+    "title": "検索",
+    "metaTitle": "「{q}」の検索 · OpenNavo",
+    "resultsTitle": "「{q}」の検索結果",
+    "count": "全 {total} 件",
+    "alsoSearched": "こちらも検索しました：{terms}",
+    "matched": "一致：{name}",
+    "suggest": "収録をリクエスト",
+    "emptyQueryTitle": "キーワードを入力して検索",
+    "emptyQueryDescription": "App の名前、中国語名、または拼音で検索できます。"
+  },
+  "palette": {
+    "packages": "App",
+    "jump": "移動",
+    "searchAll": "「{q}」を検索",
+    "category": "カテゴリ：{name}",
+    "pages": {
+      "discover": "見つける",
+      "categories": "カテゴリ",
+      "rankings": "ランキング",
+      "collections": "コレクション",
+      "download": "クライアントをダウンロード",
+      "brewfile": "Brewfile リスト"
+    }
+  },
+  "package": {
+    "arch": {
+      "arm64": "Apple シリコン",
+      "x86_64": "Intel"
+    },
+    "autoUpdates": "自動更新",
+    "disabled": "無効化済み",
+    "deprecated": "非推奨",
+    "homepage": "ホームページ",
+    "fromTap": "提供元",
+    "stats": {
+      "label": "データ",
+      "installs30d": "過去 30 日間のインストール数",
+      "rank": "{kind}ランキング {rank} 位",
+      "installs365d": "過去1年間のインストール数",
+      "total365": "過去365日間の合計",
+      "latest": "最新バージョン",
+      "size": "ダウンロードサイズ",
+      "cadence": "更新頻度",
+      "releases30d": "過去30日間に{count}回リリース"
+    },
+    "cadence": {
+      "daily": "毎日",
+      "weekly": "毎週",
+      "biweekly": "2週間ごと",
+      "monthly": "毎月",
+      "irregular": "不定期"
+    },
+    "tabs": {
+      "label": "詳細ページのタブ",
+      "overview": "概要",
+      "versions": "バージョン履歴",
+      "dependencies": "依存関係と競合",
+      "details": "インストール詳細"
+    },
+    "disabledNotice": "Homebrewによりこのパッケージは無効化されています：{reason}",
+    "deprecatedNotice": "Homebrewによりこのパッケージは非推奨になっています：{reason}",
+    "noReason": "理由は記載されていません",
+    "replacement": "代替：{token}",
+    "release": {
+      "new": "新バージョン",
+      "title": "{version}の更新内容",
+      "translated": "AI翻訳",
+      "source": {
+        "github_release": "GitHub Releaseより",
+        "sparkle": "アプリ内更新フィードより",
+        "webpage": "公式サイトの更新ページより",
+        "manual": "手動で編集",
+        "editorial": "OpenNavo編集部",
+        "homebrew": "Homebrewのコミット履歴より"
+      },
+      "viewAll": "全{count}バージョンを表示",
+      "noNotes": "このバージョンには個別の更新内容がありません。",
+      "emptyTitle": "バージョン履歴はまだありません",
+      "prerelease": "プレリリース",
+      "filterLabel": "バージョンで絞り込む",
+      "filterAll": "すべて {count}",
+      "filterWithNotes": "更新内容あり {count}",
+      "languageLabel": "本文の言語",
+      "languageTranslated": "中国語",
+      "languageOriginal": "原文",
+      "count30d": "過去 30 日",
+      "count30dUnit": "バージョン",
+      "cadenceHint": {
+        "daily": "ほぼ毎日リリース",
+        "weekly": "週に1回程度リリース",
+        "biweekly": "2週間に1回程度リリース",
+        "monthly": "月に1回程度リリース",
+        "irregular": "リリース時期は不定期"
+      },
+      "brewLabel": "Homebrewへの登録",
+      "brewSync": "≈ 同期",
+      "brewLater": "{time}遅れ",
+      "brewEarlier": "{time}早い",
+      "brewHint": "上流より早いものが{earlier}/{compared}件",
+      "lagMinutes": "{n}分",
+      "lagHours": "{n}時間",
+      "lagDays": "{n}日",
+      "sourcesTitle": "データソース",
+      "sourceInfo": {
+        "webpage": {
+          "title": "公式サイトの更新ページ",
+          "body": "開発者公式サイトの更新情報ページから要点を抽出"
+        },
+        "github_release": {
+          "title": "GitHub Releases",
+          "body": "GitHubで公開されたバージョン情報と公開日時"
+        },
+        "sparkle": {
+          "title": "アプリ内更新フィード",
+          "body": "アプリ内の更新チェックで使用するSparkle appcast"
+        },
+        "manual": {
+          "title": "手動で編集",
+          "body": "編集部が公式発表をもとに整理"
+        },
+        "editorial": {
+          "title": "OpenNavo編集部",
+          "body": "OpenNavoが公式情報をもとに作成した更新内容"
+        },
+        "homebrew": {
+          "title": "Homebrewのコミット履歴",
+          "body": "Homebrewリポジトリにおけるパッケージのバージョン更新コミットと登録日時"
+        }
+      }
+    },
+    "monthly": {
+      "title": "月間平均インストール数",
+      "d30": "過去 30 日",
+      "avg90": "過去90日間の月平均",
+      "avg365": "過去1年間の月平均",
+      "full": "{count}回",
+      "trend": {
+        "rising": "最近インストール数が増加しています",
+        "slowing": "最近インストール数が減少しています。多くの既存ユーザーはアプリ内の更新機能でアップグレードしています",
+        "steady": "インストール数は安定しています"
+      }
+    },
+    "related": "類似アプリ",
+    "screenshots": "スクリーンショット",
+    "caveats": "注意事項",
+    "info": {
+      "homepage": "ホームページ",
+      "binaries": "付属コマンド",
+      "autoUpdates": "自動更新",
+      "autoYes": "アプリ内蔵（auto_updates）",
+      "autoNo": "Homebrewで更新",
+      "uninstall": "アンインストール時",
+      "arch": "アーキテクチャ",
+      "minMacos": "最小システム要件",
+      "license": "ライセンス"
+    },
+    "deps": {
+      "macos": "システム要件",
+      "formulae": "依存するコマンドラインツール",
+      "casks": "依存するアプリ",
+      "emptyTitle": "依存関係なし",
+      "emptyDescription": "インストール時に他のパッケージはインストールされません。",
+      "runtime": "実行時依存関係",
+      "build": "ビルド依存関係",
+      "other": "その他：",
+      "type": {
+        "runtime": "実行時",
+        "build": "ビルド",
+        "test": "テスト",
+        "optional": "任意",
+        "recommended": "推奨",
+        "usesFromMacos": "システム標準を使用",
+        "cask": "App"
+      },
+      "conflicts": "競合",
+      "dependents": "{count}個のパッケージが依存",
+      "metaTitle": "{name}の依存関係と競合 · OpenNavo"
+    },
+    "details": {
+      "tap": "ソースリポジトリ",
+      "names": "その他の名前",
+      "location": "インストール先",
+      "pkgs": "インストーラーパッケージ",
+      "kegOnly": "keg-only",
+      "kegOnlyValue": "/opt/homebrewにはリンクされません。PATHに手動で追加してください",
+      "download": "ダウンロードURL",
+      "source": "Homebrew定義ファイル",
+      "repo": "ソースコード",
+      "metaTitle": "{name}のインストール詳細 · OpenNavo"
+    },
+    "versionsMetaTitle": "{name}のバージョン履歴と更新内容 · OpenNavo",
+    "versionsMetaDescription": "{name}の最新バージョンは{version}（{date}）です。各リリースの変更内容をご覧ください。",
+    "metaTitleCask": "{name}：{summary} — Homebrewでインストール · OpenNavo",
+    "metaDescription": "{summary}。インストールコマンド：{command}。最新バージョンは{version}、過去30日間のインストール数は{installs}回です。"
+  },
+  "collections": {
+    "title": "コレクション",
+    "metaTitle": "Macソフトウェアコレクション · OpenNavo",
+    "description": "用途別にまとめたアプリコレクション。Brewfileとして一括エクスポートできます。",
+    "emptyTitle": "コレクションはまだありません",
+    "itemMetaTitle": "{title} · OpenNavoコレクション",
+    "count": "{count}個",
+    "updated": "{date}更新",
+    "addAll": "すべてBrewfileに追加",
+    "addedAll": "{count}個のパッケージを追加しました",
+    "export": "Brewfileをエクスポート"
+  },
+  "brewfile": {
+    "title": "Brewfile リスト",
+    "metaTitle": "Brewfileジェネレーター · OpenNavo",
+    "description": "インストールしたいアプリをリストに追加してBrewfileを生成すれば、新しいMacにも1つのコマンドですべてインストールできます。",
+    "count": "{count}項目",
+    "emptyTitle": "リストは空です",
+    "emptyDescription": "アプリカードまたは詳細ページの「入手」メニューで「Brewfileに追加」を選択してください。",
+    "browse": "アプリを探す",
+    "fileTitle": "OpenNavoが生成",
+    "copied": "Brewfileをコピーしました",
+    "download": "Brewfileをダウンロード",
+    "usage": "使い方",
+    "usageHint": "ダウンロードしたBrewfileを「ダウンロード」フォルダに置き、上記のコマンドをターミナルで実行してください。インストール済みのパッケージは自動的にスキップされます。",
+    "moveUp": "{name}を上へ移動",
+    "moveDown": "{name}を下へ移動",
+    "remove": "リストから{name}を削除"
+  },
+  "download": {
+    "title": "Mac向けHomebrewアプリストア",
+    "metaTitle": "OpenNavoクライアントをダウンロード · OpenNavo",
+    "description": "アプリをワンクリックでインストール・更新。操作はすべて記録されます。クライアントはお使いのMacのHomebrewを利用し、アカウントは不要です。",
+    "button": "macOS版をダウンロード",
+    "meta": "バージョン{version} · {size} · macOS {macos}以降 · 公開日：{date}",
+    "copySha": "SHA-256チェックサムをコピー",
+    "shaCopied": "SHA-256をコピーしました",
+    "comingTitle": "クライアントは近日公開予定",
+    "comingDescription": "正式版の公開後、こちらからダウンロードできます。今すぐウェブサイトのbrewコマンドをコピーしてソフトウェアをインストールすることもできます。",
+    "brewTitle": "またはHomebrewでインストール",
+    "features": {
+      "install": {
+        "title": "ワンクリックでインストール",
+        "body": "アプリページで「入手」をクリックするとインストールできます。実行されるbrewコマンドも一目で確認できます。"
+      },
+      "updates": {
+        "title": "更新を覚える必要はありません",
+        "body": "利用可能な更新を定期的に確認し、ワンクリックですべて更新できます。アプリ内蔵の更新機能も認識します。"
+      },
+      "history": {
+        "title": "すべての操作を記録",
+        "body": "インストール、更新、アンインストールはすべてローカルの記録に保存されます。失敗時はログを確認して再試行できます。"
+      }
+    },
+    "changelog": "更新履歴"
+  },
+  "feedback": {
+    "title": "フィードバック",
+    "metaTitle": "問題を報告 · OpenNavo",
+    "description": "情報の誤り、インストールの失敗、リンク切れ、または新しいソフトウェアの掲載希望などをお知らせください。",
+    "type": "種類",
+    "types": {
+      "wrong_info": "情報の誤り",
+      "install_failed": "インストール失敗",
+      "broken_link": "リンク切れ",
+      "suggest_package": "掲載の提案",
+      "translation": "翻訳の問題",
+      "other": "その他"
+    },
+    "package": "関連パッケージ：",
+    "removePackage": "このパッケージについてではない",
+    "content": "内容",
+    "contentPlaceholder": "発生した問題、または掲載を提案するソフトウェアとその理由を記入してください。",
+    "contentHint": "{count} / 2000文字、5文字以上",
+    "contact": "連絡先（任意）",
+    "contactPlaceholder": "メールアドレスなど。返信のみに使用します",
+    "submit": "送信",
+    "rateLimited": "送信頻度が高すぎます。しばらくしてからもう一度お試しください。",
+    "failed": "送信に失敗しました。しばらくしてからもう一度お試しください。",
+    "doneTitle": "受け付けました。ありがとうございます！",
+    "doneDescription": "できるだけ早く対応します。連絡先を記入いただいた場合は、対応後に返信します。",
+    "backHome": "ホームに戻る",
+    "suggestPrefill": "掲載の提案：{q}\n\n"
+  },
+  "about": {
+    "title": "OpenNavoについて",
+    "metaTitle": "概要とプライバシー · OpenNavo",
+    "description": "OpenNavoについて、データの出所、情報の取り扱いについてご説明します。",
+    "draft": "審査待ち",
+    "about": {
+      "title": "OpenNavoについて",
+      "body": [
+        "OpenNavoはmacOS向けのHomebrewアプリストアです。ウェブサイトでHomebrew掲載アプリを閲覧・検索し、macOSクライアントでワンクリックでインストール・更新できます。",
+        "OpenNavoはソフトウェアをホストしません。すべてのインストールはお使いのMac上のHomebrewが行い、実行されるコマンドはすべて正確に表示されます。"
+      ]
+    },
+    "data": {
+      "title": "データソース",
+      "body": [
+        "カタログとインストール統計はHomebrew公式API（formulae.brew.sh）から取得し、毎日同期しています。バージョン履歴はGitHub Releases、アプリ内更新フィード、公式サイトの更新ページ、Homebrewのコミット履歴から取得しています。",
+        "中国語の紹介とバージョン情報はプログラムで整理し、手動で抜き取り確認しています。原文へのリンクは常に表示されます。"
+      ]
+    },
+    "privacy": {
+      "title": "プライバシーについて",
+      "body": [
+        "ウェブ版ではアカウントは不要で、インストールしたソフトウェアを収集することもありません。検索キーワードは検索結果の改善のため匿名で記録しますが、IPアドレスは保存しません。Brewfileリストはブラウザ内にのみ保存されます。",
+        "macOSクライアントの使用状況統計はデフォルトで無効です。匿名のクラッシュレポートは、同意いただいた場合にのみ送信されます。フィードバックで提供いただいた連絡先は返信のみに使用します。"
+      ]
+    },
+    "terms": {
+      "title": "利用規約",
+      "body": [
+        "OpenNavoは「現状有姿」で提供されます。ソフトウェアはそれぞれの作者が公開しており、インストールと使用は各ソフトウェアのライセンスに従います。インストール前に信頼できるソースであることをご確認ください。",
+        "OpenNavoは、確認済みの操作を実行するためにHomebrewを呼び出すだけで、バックグラウンドでソフトウェアをインストールすることはありません。"
+      ]
+    },
+    "contact": {
+      "title": "オープンソースとお問い合わせ",
+      "body": [
+        "OpenNavoはオープンソースプロジェクトです。情報の誤り、インストールの失敗、掲載のご希望は、「フィードバック」ページからお知らせください。"
+      ]
+    }
+  },
+  "og": {
+    "footer": "OpenNavo · Homebrewアプリストア"
+  },
+  "languageSuggestion": {
+    "message": "{language}で閲覧しますか？",
+    "switch": "{language}に切り替える",
+    "dismiss": "今後表示しない"
+  },
+  "landing": {
+    "footerNav": "フッターナビゲーション",
+    "hero": {
+      "badge": "Mac向けHomebrewアプリストア",
+      "title": "Macアプリのインストールを",
+      "titleAccent": "もっとシンプルに。",
+      "lede": "**{count}個のアプリ**の説明やバージョン履歴を見て、macOSアプリから**ワンクリックでインストール・更新**。インストールはHomebrewが行い、すべての手順を確認できます。",
+      "ledeFallback": "アプリの説明やバージョン履歴を見て、macOSアプリから**ワンクリックでインストール・更新**。インストールはHomebrewが行い、すべての手順を確認できます。",
+      "download": "Mac版をダウンロード",
+      "browse": "アプリを探す",
+      "followOnX": "{account} をフォロー",
+      "meta": "無料 · macOS 13以降 · AppleシリコンとIntelに対応"
+    },
+    "window": {
+      "label": "OpenNavo Macアプリで「見つける」からアプリをインストールする画面",
+      "mine": "マイライブラリ",
+      "installed": "インストール済み",
+      "updates": "アップデート",
+      "history": "履歴",
+      "settings": "設定",
+      "installing": "{name}をインストール中"
+    },
+    "catalog": {
+      "kicker": "カタログ",
+      "title": "{count}個のアプリを、ここでまとめて。",
+      "body": "カタログはHomebrewから取得し、毎日同期しています。人気ランキングは**直近30日間の実際のインストール数**をもとに作成。**編集部のおすすめ**や**コレクション**も、アプリ探しに役立ちます。",
+      "stats": {
+        "apps": "掲載アプリ数",
+        "updated": "過去24時間に更新",
+        "languages": "対応言語数"
+      }
+    },
+    "details": {
+      "kicker": "バージョン履歴",
+      "title": "すべてのバージョンを記録。",
+      "body": "Homebrewに新しいバージョンが登録されると、ここにも反映され、登録時刻を秒単位で確認できます。私たちが作成した**更新内容**は自動であなたの言語に翻訳され、原文もすぐに確認できます。",
+      "points": {
+        "about": "説明、スクリーンショット、インストール情報を事前に確認",
+        "deps": "依存関係、競合、インストール先をひと目で確認",
+        "languages": "6言語に対応。翻訳がない場合は英語または原文を表示"
+      }
+    },
+    "install": {
+      "kicker": "インストール",
+      "title": "ワンクリックでインストール。",
+      "body": "アプリのページで「入手」をクリックすると、OpenNavoがMac上のHomebrewを使ってインストールします。**実行するコマンド**も**ログのすべての行**も確認できます。管理者権限が必要な場合はmacOSがパスワードを求めます。OpenNavoがパスワードを保存することはありません。",
+      "points": {
+        "queue": "タスクはキューで実行。キャンセルでき、失敗した場合は再試行可能",
+        "confirm": "ウェブから開始したインストールは、アプリで確認してから実行",
+        "history": "インストール、更新、削除の履歴をすべてMacに記録"
+      }
+    },
+    "updates": {
+      "kicker": "アップデート",
+      "title": "更新もおまかせ。",
+      "body": "OpenNavoは毎日更新を確認し、件数を**メニューバー**に表示します。**すべて更新**をワンクリックするだけで完了。自動更新機能のあるアプリは実際のバージョンを確認するため、誤検知もありません。",
+      "points": {
+        "schedule": "毎日決まった時間に確認。通知も設定可能",
+        "pin": "アプリを固定したり、特定のバージョンをスキップしたりできます。「すべて更新」でもその設定が適用されます",
+        "mirror": "ダウンロードソースを切り替え可能。速度測定後に最速のものをおすすめ"
+      },
+      "available": "{count}件の更新があります",
+      "upToDate": "すべて最新です",
+      "open": "OpenNavoを開く"
+    },
+    "more": {
+      "kicker": "その他の機能",
+      "title": "細部まで使いやすく。",
+      "handoff": {
+        "title": "ウェブで見つけて、アプリでインストール",
+        "body": "ウェブで「OpenNavoで開く」をクリック。アプリが実行するコマンドを表示し、確認後にインストールします。",
+        "dialogTitle": "{name}をインストールしますか？",
+        "dialogBody": "このリクエストはウェブページから届きました。次のコマンドを実行します：",
+        "install": "インストール"
+      },
+      "mirrors": {
+        "title": "ダウンロードソースの速度測定",
+        "body": "公式ソースとミラーの速度を測定し、最速のものをおすすめします。Homebrewのセットアップとbrewコマンドで使用でき、いつでも切り替えられます。",
+        "official": "公式ソース",
+        "tuna": "TUNAミラー（清華大学）",
+        "ustc": "中国科学技術大学（USTC）ミラー",
+        "recommended": "おすすめ"
+      },
+      "brewfile": {
+        "title": "新しいMacでも、いつものアプリ",
+        "body": "よく使うアプリをリストに追加して、Brewfileを書き出せます。新しいMacでも、1つのコマンドですべてインストールできます。"
+      },
+      "search": {
+        "title": "⌘Kで検索",
+        "body": "英語名、中国語名、ピンイン、一般的な別名で検索できます。vscodeと入力すればVisual Studio Codeが見つかります。"
+      },
+      "languages": {
+        "title": "6言語に対応",
+        "body": "インターフェースは英語、簡体字中国語、日本語、スペイン語、ポルトガル語、ロシア語に対応。日付や数字も各言語に合わせて表示します。"
+      },
+      "privacy": {
+        "title": "アカウント不要",
+        "body": "ログイン不要。インストール済みのアプリを収集することもありません。Brewfileのリストはブラウザー内に保存されます。"
+      }
+    },
+    "cta": {
+      "title": "次のアプリを見つけましょう。",
+      "body": "OpenNavoは無料で、macOS 13以降に対応しています。ウェブでアプリを探して、brewコマンドをコピーしてインストールすることもできます。"
+    }
+  }
+}

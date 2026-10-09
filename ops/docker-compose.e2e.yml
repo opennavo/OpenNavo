@@ -1,0 +1,47 @@
+name: opennavo-e2e
+services:
+  postgres:
+    image: opennavo-postgres:dev
+    build:
+      context: ../apps/server
+      target: postgres
+    environment:
+      POSTGRES_DB: opennavo_e2e
+      POSTGRES_USER: opennavo
+      POSTGRES_PASSWORD: opennavo-dev-only
+    ports:
+      - '127.0.0.1:55433:5432'
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'opennavo', '-d', 'opennavo_e2e']
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  redis:
+    image: opennavo-redis:dev
+    build:
+      context: ../apps/server
+      target: redis
+    ports:
+      - '127.0.0.1:56380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  minio:
+    image: opennavo-minio:e2e
+    pull_policy: build
+    build:
+      context: ../apps/server
+      dockerfile: ../../ops/Dockerfile.minio
+      target: minio
+    environment:
+      MINIO_ROOT_USER: opennavo-dev
+      MINIO_ROOT_PASSWORD: opennavo-dev-only
+    ports:
+      - '127.0.0.1:19000:9000'
+    healthcheck:
+      test: ['CMD', '/probe']
+      interval: 2s
+      timeout: 3s
+      retries: 60

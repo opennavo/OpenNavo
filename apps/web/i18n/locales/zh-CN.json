@@ -1,0 +1,547 @@
+{
+  "site": {
+    "name": "OpenNavo",
+    "title": "OpenNavo — Mac 上的 Homebrew 应用商店",
+    "description": "浏览 {count} 个 Mac App，查看介绍和版本记录，一键安装与更新。"
+  },
+  "nav": {
+    "label": "主导航",
+    "discover": "发现",
+    "categories": "分类",
+    "rankings": "排行榜",
+    "collections": "合集",
+    "download": "下载客户端",
+    "search": "搜索 App",
+    "switchLanguage": "English",
+    "switchLanguageLabel": "选择语言",
+    "browse": "浏览",
+    "lists": "清单",
+    "brewfile": "我的清单",
+    "about": "关于",
+    "feedback": "反馈"
+  },
+  "sidebar": {
+    "appLabel": "Mac 客户端",
+    "appTitle": "OpenNavo for Mac",
+    "appHint": "macOS 13+ · 免费"
+  },
+  "rail": {
+    "featuredCollection": "精选合集",
+    "downloadHint": "macOS 13+ · Apple 芯片与 Intel · 免费",
+    "downloadBody": "在 Mac 上一键安装和更新这些 App，每次操作都有记录。"
+  },
+  "home": {
+    "introTitle": "OpenNavo：Mac 上的 Homebrew 应用商店",
+    "introBody": "收录 {count} 个 App，提供介绍和版本记录；用 macOS 客户端一键安装和更新。",
+    "introDismiss": "关闭简介",
+    "featured": "本周精选",
+    "popularApps": "热门 App",
+    "recentlyUpdated": "最近更新",
+    "viewDetails": "查看详情",
+    "allCategories": "全部",
+    "categoriesLabel": "按分类浏览",
+    "popularAppsHint": "近 30 天 Homebrew 安装量",
+    "recentlyUpdatedHint": "刚发布新版本",
+    "weeklyTop": "本周热门",
+    "weeklyTopHint": "近 30 天安装量排行",
+    "collections": "合集",
+    "viewRankings": "查看排行榜",
+    "viewAll": "查看全部",
+    "metaTitle": "发现 Mac App · OpenNavo",
+    "discoverHeading": "发现 Mac App"
+  },
+  "footer": {
+    "tagline": "开源的 Homebrew 图形界面。安装通过 macOS 客户端或 brew 命令完成。",
+    "copyright": "© {year} OpenNavo"
+  },
+  "error": {
+    "notFoundTitle": "页面不存在",
+    "notFoundBody": "这个地址没有内容，可能已经移动或被 Homebrew 移除。",
+    "serverTitle": "服务暂时不可用",
+    "serverBody": "网络或服务暂时不可用，稍后重试。",
+    "backHome": "返回首页",
+    "search": "搜索",
+    "requestId": "请求 ID：{id}"
+  },
+  "get": {
+    "label": "获取 {name}",
+    "menuLabel": "获取 {name} 的方式"
+  },
+  "openInApp": {
+    "title": "还没有安装 OpenNavo？",
+    "body": "没有检测到 OpenNavo 客户端。下载后可以一键安装 {name}，也可以复制安装命令到终端执行。",
+    "download": "下载客户端",
+    "copyInstead": "改为复制安装命令",
+    "dontAsk": "不再提示"
+  },
+  "toast": {
+    "copied": "已复制安装命令",
+    "copyFailed": "无法访问剪贴板，请手动复制下面的命令",
+    "addedToBrewfile": "已把 {name} 加入 Brewfile 清单",
+    "brewfileFull": "清单最多 200 项，先删掉一些再加入"
+  },
+  "catalog": {
+    "appsTitle": "App",
+    "appsMetaTitle": "Mac App 大全 · OpenNavo",
+    "appsDescription": "Homebrew 收录的 macOS App，附介绍与版本记录，按安装量、更新时间或名称浏览。",
+    "total": "共 {total} 个",
+    "sortLabel": "排序",
+    "sortPopular": "热门",
+    "sortUpdated": "最近更新",
+    "sortName": "名称",
+    "showDisabled": "显示已停用",
+    "emptyTitle": "这里还没有内容",
+    "emptyDescription": "换个筛选条件试试，或者告诉我们想收录什么。"
+  },
+  "categories": {
+    "title": "分类",
+    "metaTitle": "Mac 软件分类 · OpenNavo",
+    "description": "按用途浏览 Homebrew 收录的 App。",
+    "count": "{count} 个",
+    "itemMetaTitle": "{name}软件推荐 · OpenNavo"
+  },
+  "rankings": {
+    "title": "排行榜",
+    "metaTitle": "Homebrew 最受欢迎的 Mac 软件排行 · OpenNavo",
+    "description": "按 Homebrew 官方安装统计排名，每天更新；变化相对 7 天前。",
+    "periodLabel": "统计周期",
+    "period": {
+      "30d": "近 30 天",
+      "90d": "近 90 天",
+      "365d": "近 365 天"
+    },
+    "category": "分类",
+    "allCategories": "全部分类"
+  },
+  "search": {
+    "title": "搜索",
+    "metaTitle": "搜索「{q}」 · OpenNavo",
+    "resultsTitle": "「{q}」的搜索结果",
+    "count": "{total} 个结果",
+    "alsoSearched": "也搜索了：{terms}",
+    "matched": "匹配：{name}",
+    "suggest": "提交建议收录",
+    "emptyQueryTitle": "输入关键词开始搜索",
+    "emptyQueryDescription": "可以搜 App 名称、中文名或拼音。"
+  },
+  "palette": {
+    "packages": "App",
+    "jump": "跳转",
+    "searchAll": "搜索「{q}」",
+    "category": "分类：{name}",
+    "pages": {
+      "discover": "发现",
+      "categories": "分类",
+      "rankings": "排行榜",
+      "collections": "合集",
+      "download": "下载客户端",
+      "brewfile": "Brewfile 清单"
+    }
+  },
+  "package": {
+    "arch": {
+      "arm64": "Apple 芯片",
+      "x86_64": "Intel"
+    },
+    "autoUpdates": "自带更新",
+    "disabled": "已停用",
+    "deprecated": "已弃用",
+    "homepage": "主页",
+    "fromTap": "来自",
+    "stats": {
+      "label": "数据",
+      "installs30d": "近 30 天安装",
+      "rank": "{kind}榜第 {rank}",
+      "installs365d": "近一年安装",
+      "total365": "365 天累计",
+      "latest": "最新版本",
+      "size": "下载大小",
+      "cadence": "更新节奏",
+      "releases30d": "近 30 天 {count} 个版本"
+    },
+    "cadence": {
+      "daily": "每天",
+      "weekly": "每周",
+      "biweekly": "每两周",
+      "monthly": "每月",
+      "irregular": "不定期"
+    },
+    "tabs": {
+      "label": "详情页签",
+      "overview": "概览",
+      "versions": "版本记录",
+      "dependencies": "依赖与冲突",
+      "details": "安装细节"
+    },
+    "disabledNotice": "Homebrew 已停用此包：{reason}",
+    "deprecatedNotice": "Homebrew 已弃用此包：{reason}",
+    "noReason": "未说明原因",
+    "replacement": "替代：{token}",
+    "release": {
+      "new": "新版本",
+      "title": "{version} 更新内容",
+      "translated": "AI 翻译",
+      "source": {
+        "github_release": "来自 GitHub Release",
+        "sparkle": "来自应用内更新源",
+        "webpage": "来自官网更新页",
+        "manual": "人工整理",
+        "editorial": "OpenNavo 编辑",
+        "homebrew": "来自 Homebrew 提交记录"
+      },
+      "viewAll": "查看全部 {count} 个版本",
+      "noNotes": "这个版本没有单独的更新说明。",
+      "emptyTitle": "还没有版本记录",
+      "prerelease": "预发布",
+      "filterLabel": "版本筛选",
+      "filterAll": "全部 {count}",
+      "filterWithNotes": "有更新说明 {count}",
+      "languageLabel": "正文语言",
+      "languageTranslated": "中文",
+      "languageOriginal": "原文",
+      "count30d": "近 30 天",
+      "count30dUnit": "个版本",
+      "cadenceHint": {
+        "daily": "几乎每天发布",
+        "weekly": "大约每周发布",
+        "biweekly": "大约两周发布一次",
+        "monthly": "大约每月发布",
+        "irregular": "发布时间不固定"
+      },
+      "brewLabel": "Homebrew 收录",
+      "brewSync": "≈ 同步",
+      "brewLater": "晚 {time}",
+      "brewEarlier": "早 {time}",
+      "brewHint": "{earlier}/{compared} 个早于上游",
+      "lagMinutes": "{n} 分钟",
+      "lagHours": "{n} 小时",
+      "lagDays": "{n} 天",
+      "sourcesTitle": "数据来源",
+      "sourceInfo": {
+        "webpage": {
+          "title": "官网更新页",
+          "body": "从开发者官网的更新说明页提取要点"
+        },
+        "github_release": {
+          "title": "GitHub Releases",
+          "body": "项目在 GitHub 发布的版本说明与发布时间"
+        },
+        "sparkle": {
+          "title": "应用内更新源",
+          "body": "App 内置更新检查使用的 Sparkle appcast"
+        },
+        "manual": {
+          "title": "人工整理",
+          "body": "编辑根据官方公告整理"
+        },
+        "editorial": {
+          "title": "OpenNavo 编辑",
+          "body": "OpenNavo 根据官方信息撰写的更新说明"
+        },
+        "homebrew": {
+          "title": "Homebrew 提交记录",
+          "body": "Homebrew 仓库里该包的版本更新提交，得到收录时间"
+        }
+      }
+    },
+    "monthly": {
+      "title": "月均安装量",
+      "d30": "近 30 天",
+      "avg90": "近 90 天月均",
+      "avg365": "近一年月均",
+      "full": "{count} 次",
+      "trend": {
+        "rising": "近期安装在增长",
+        "slowing": "近期安装在放缓，多数老用户靠应用自带更新升级",
+        "steady": "安装量保持稳定"
+      }
+    },
+    "related": "相似应用",
+    "screenshots": "截图",
+    "caveats": "注意事项",
+    "info": {
+      "homepage": "主页",
+      "binaries": "附带命令",
+      "autoUpdates": "自动更新",
+      "autoYes": "应用自带（auto_updates）",
+      "autoNo": "由 Homebrew 更新",
+      "uninstall": "卸载时",
+      "arch": "架构",
+      "minMacos": "最低系统",
+      "license": "许可证"
+    },
+    "deps": {
+      "macos": "系统要求",
+      "formulae": "依赖的命令行工具",
+      "casks": "依赖的 App",
+      "emptyTitle": "没有依赖",
+      "emptyDescription": "安装时不会附带安装其他包。",
+      "runtime": "运行时依赖",
+      "build": "构建依赖",
+      "other": "其他：",
+      "type": {
+        "runtime": "运行时",
+        "build": "构建",
+        "test": "测试",
+        "optional": "可选",
+        "recommended": "推荐",
+        "usesFromMacos": "使用系统自带",
+        "cask": "App"
+      },
+      "conflicts": "冲突",
+      "dependents": "被 {count} 个包依赖",
+      "metaTitle": "{name} 依赖与冲突 · OpenNavo"
+    },
+    "details": {
+      "tap": "来源仓库",
+      "names": "其他名称",
+      "location": "安装位置",
+      "pkgs": "安装包",
+      "kegOnly": "keg-only",
+      "kegOnlyValue": "不链接到 /opt/homebrew，需要手动加入 PATH",
+      "download": "下载地址",
+      "source": "Homebrew 定义文件",
+      "repo": "源代码",
+      "metaTitle": "{name} 安装细节 · OpenNavo"
+    },
+    "versionsMetaTitle": "{name} 版本记录与更新内容 · OpenNavo",
+    "versionsMetaDescription": "{name} 最新版本 {version}（{date}）。查看每个版本更新了什么。",
+    "metaTitleCask": "{name}：{summary} — Homebrew 安装 · OpenNavo",
+    "metaDescription": "{summary}。安装命令：{command}。最新版本 {version}，近 30 天安装 {installs} 次。"
+  },
+  "collections": {
+    "title": "合集",
+    "metaTitle": "Mac 软件合集 · OpenNavo",
+    "description": "按场景整理的 App 合集，可以一次导出为 Brewfile。",
+    "emptyTitle": "还没有合集",
+    "itemMetaTitle": "{title} · OpenNavo 合集",
+    "count": "{count} 款",
+    "updated": "{date} 更新",
+    "addAll": "全部加入 Brewfile 清单",
+    "addedAll": "已加入 {count} 个包",
+    "export": "导出 Brewfile"
+  },
+  "brewfile": {
+    "title": "Brewfile 清单",
+    "metaTitle": "Brewfile 生成器 · OpenNavo",
+    "description": "把想装的 App 加入清单，生成 Brewfile，用一条命令在新 Mac 上全部装好。",
+    "count": "{count} 项",
+    "emptyTitle": "清单是空的",
+    "emptyDescription": "在 App 卡片或详情页的「获取」菜单里选择「加入 Brewfile 清单」。",
+    "browse": "去发现",
+    "fileTitle": "由 OpenNavo 生成",
+    "copied": "已复制 Brewfile",
+    "download": "下载 Brewfile",
+    "usage": "使用方法",
+    "usageHint": "把下载的 Brewfile 放在「下载」文件夹后，在终端执行上面的命令；已经装过的包会自动跳过。",
+    "moveUp": "上移 {name}",
+    "moveDown": "下移 {name}",
+    "remove": "从清单移除 {name}"
+  },
+  "download": {
+    "title": "Mac 上的 Homebrew 应用商店",
+    "metaTitle": "下载 OpenNavo 客户端 · OpenNavo",
+    "description": "一键安装与更新 App，每次操作都有记录。客户端调用你电脑上的 Homebrew，不需要账号。",
+    "button": "下载 macOS 版",
+    "meta": "版本 {version} · {size} · macOS {macos} 及以上 · {date} 发布",
+    "copySha": "复制 SHA-256 校验值",
+    "shaCopied": "已复制 SHA-256",
+    "comingTitle": "客户端即将发布",
+    "comingDescription": "正式版发布后可以在这里下载；现在可以先复制网页上的 brew 命令安装软件。",
+    "brewTitle": "或用 Homebrew 安装",
+    "features": {
+      "install": {
+        "title": "一键安装",
+        "body": "在 App 页点「获取」即可安装，实际执行的 brew 命令一目了然。"
+      },
+      "updates": {
+        "title": "更新不用记",
+        "body": "定时检查可用更新，一键全部更新，自带更新的 App 也能识别。"
+      },
+      "history": {
+        "title": "每次都有记录",
+        "body": "安装、更新、卸载都写进本机记录，失败时可以查看日志并重试。"
+      }
+    },
+    "changelog": "更新日志"
+  },
+  "feedback": {
+    "title": "反馈",
+    "metaTitle": "反馈问题 · OpenNavo",
+    "description": "信息有误、安装失败、链接失效，或者想推荐收录新的软件，都可以告诉我们。",
+    "type": "类型",
+    "types": {
+      "wrong_info": "信息有误",
+      "install_failed": "安装失败",
+      "broken_link": "链接失效",
+      "suggest_package": "建议收录",
+      "translation": "翻译问题",
+      "other": "其他"
+    },
+    "package": "相关的包：",
+    "removePackage": "不针对这个包",
+    "content": "内容",
+    "contentPlaceholder": "描述你遇到的问题，或者想推荐的软件与理由。",
+    "contentHint": "{count} / 2000 字，至少 5 个字",
+    "contact": "联系方式（可选）",
+    "contactPlaceholder": "邮箱或其他方式，只用于回复你",
+    "submit": "提交",
+    "rateLimited": "提交太频繁了，请稍后再试。",
+    "failed": "提交失败，请稍后重试。",
+    "doneTitle": "已收到，谢谢！",
+    "doneDescription": "我们会尽快处理；如果留了联系方式，处理后会回复你。",
+    "backHome": "返回首页",
+    "suggestPrefill": "建议收录：{q}\n\n"
+  },
+  "about": {
+    "title": "关于 OpenNavo",
+    "metaTitle": "关于与隐私 · OpenNavo",
+    "description": "OpenNavo 是什么、数据从哪里来、我们如何对待你的信息。",
+    "draft": "待审",
+    "about": {
+      "title": "OpenNavo 是什么",
+      "body": [
+        "OpenNavo 是 macOS 上的 Homebrew 应用商店：在网页上浏览与搜索 Homebrew 收录的 App，用 macOS 客户端一键安装与更新。",
+        "OpenNavo 不托管任何软件，所有安装都由你电脑上的 Homebrew 完成，执行的命令都会如实显示。"
+      ]
+    },
+    "data": {
+      "title": "数据来源",
+      "body": [
+        "目录与安装统计来自 Homebrew 官方公开 API（formulae.brew.sh），每天同步。版本记录来自 GitHub Releases、应用内更新源、官网更新页和 Homebrew 提交记录。",
+        "中文介绍与版本说明由程序整理并经人工抽查，原文链接始终保留。"
+      ]
+    },
+    "privacy": {
+      "title": "隐私说明",
+      "body": [
+        "网页端不需要账号，也不会收集你安装了哪些软件。搜索关键词会匿名记录用于改进搜索结果，不保存 IP 地址；Brewfile 清单只保存在你的浏览器本地。",
+        "macOS 客户端的使用统计默认关闭，匿名崩溃报告需要你同意后才会发送。反馈时留下的联系方式只用于回复你。"
+      ]
+    },
+    "terms": {
+      "title": "使用条款",
+      "body": [
+        "OpenNavo 按「现状」提供。软件由各自的作者发布，安装与使用遵循它们自己的许可协议；请在安装前确认来源可信。",
+        "OpenNavo 只调用 Homebrew 执行你确认过的操作，不会在后台替你安装软件。"
+      ]
+    },
+    "contact": {
+      "title": "开源与联系",
+      "body": ["OpenNavo 是开源项目。发现信息有误、安装失败或想推荐收录，可以在「反馈」页告诉我们。"]
+    }
+  },
+  "og": {
+    "footer": "OpenNavo · Homebrew 应用商店"
+  },
+  "languageSuggestion": {
+    "message": "是否使用{language}浏览？",
+    "switch": "切换到{language}",
+    "dismiss": "不再提示"
+  },
+  "landing": {
+    "footerNav": "页脚导航",
+    "hero": {
+      "badge": "Mac 上的 Homebrew 应用商店",
+      "title": "装 Mac 软件，",
+      "titleAccent": "本该这么简单。",
+      "lede": "浏览 **{count} 个 App** 的介绍和版本记录，用 macOS 客户端**一键安装、一键更新**。安装由 Homebrew 完成，每一步都看得见。",
+      "ledeFallback": "浏览 App 的介绍和版本记录，用 macOS 客户端**一键安装、一键更新**。安装由 Homebrew 完成，每一步都看得见。",
+      "download": "下载 Mac 版",
+      "browse": "浏览 App",
+      "followOnX": "关注 {account}",
+      "meta": "免费 · macOS 13 及以上 · Apple 芯片与 Intel"
+    },
+    "window": {
+      "label": "OpenNavo 客户端示意：在发现页安装 App",
+      "mine": "我的",
+      "installed": "已安装",
+      "updates": "更新",
+      "history": "更新记录",
+      "settings": "设置",
+      "installing": "安装 {name}"
+    },
+    "catalog": {
+      "kicker": "目录",
+      "title": "{count} 个 App，一处找齐。",
+      "body": "目录来自 Homebrew，每天自动同步。热门榜按**近 30 天的真实安装量**排序，再配上**编辑精选**和**合集**，好用的 App 不难找。",
+      "stats": {
+        "apps": "收录的 App",
+        "updated": "过去 24 小时有新版本",
+        "languages": "界面语言"
+      }
+    },
+    "details": {
+      "kicker": "版本记录",
+      "title": "每个版本，都有记录。",
+      "body": "Homebrew 收录新版本后，这里会跟着更新，收录时间精确到秒。我们撰写的**更新说明**会自动翻译成你的语言，随时可以查看原文。",
+      "points": {
+        "about": "介绍、截图和安装信息，装之前先看清楚",
+        "deps": "依赖、冲突和安装位置一目了然",
+        "languages": "六种语言，缺少译文时回退到英语或原文"
+      }
+    },
+    "install": {
+      "kicker": "安装",
+      "title": "点一下，装好。",
+      "body": "在 App 页点「获取」，OpenNavo 调用你 Mac 上的 Homebrew 完成安装，**执行的命令**和**每一行日志**都看得到。需要管理员权限时由系统弹出密码框，OpenNavo 不会保存密码。",
+      "points": {
+        "queue": "任务排队执行，可以取消，失败可以重试",
+        "confirm": "网页发起的安装，必须在客户端确认后才执行",
+        "history": "每次安装、更新、卸载都写进本机记录"
+      }
+    },
+    "updates": {
+      "kicker": "更新",
+      "title": "更新，不用再记。",
+      "body": "每天定时检查可用更新，数量显示在**菜单栏**；点一下**全部更新**就好。自带更新的 App 会读取真实版本，不会误报。",
+      "points": {
+        "schedule": "每天固定时间检查，有更新时可以发系统通知",
+        "pin": "固定版本或忽略某个版本，全部更新时会跳过",
+        "mirror": "下载源可以切换，测速后推荐最快的"
+      },
+      "available": "{count} 个可用更新",
+      "upToDate": "全部是最新的",
+      "open": "打开 OpenNavo"
+    },
+    "more": {
+      "kicker": "更多",
+      "title": "还有这些细节。",
+      "handoff": {
+        "title": "网页上找到，客户端里装",
+        "body": "在网页上点「在 OpenNavo 中打开」，客户端会显示要执行的命令，你确认后才安装。",
+        "dialogTitle": "安装 {name}？",
+        "dialogBody": "这个请求来自网页。将执行：",
+        "install": "安装"
+      },
+      "mirrors": {
+        "title": "下载源测速",
+        "body": "官方源和镜像先测速，再推荐延迟最低的一个；安装 Homebrew 和执行 brew 命令都用它，可以随时切换。",
+        "official": "官方源",
+        "tuna": "清华 TUNA 镜像",
+        "ustc": "中科大 USTC 镜像",
+        "recommended": "推荐"
+      },
+      "brewfile": {
+        "title": "换新 Mac，一条命令装回来",
+        "body": "把常用的 App 加进清单，导出 Brewfile；在新 Mac 上一条命令全部装好。"
+      },
+      "search": {
+        "title": "⌘K，随时搜索",
+        "body": "支持英文名、中文名、拼音和常用别名，输入 vscode 也能找到 Visual Studio Code。"
+      },
+      "languages": {
+        "title": "六种语言",
+        "body": "界面支持英语、简体中文、日语、西班牙语、葡萄牙语和俄语，日期和数字也按语言显示。"
+      },
+      "privacy": {
+        "title": "不需要账号",
+        "body": "不用登录，也不收集你装了哪些 App。Brewfile 清单只保存在你的浏览器里。"
+      }
+    },
+    "cta": {
+      "title": "从下一个 App 开始。",
+      "body": "OpenNavo 免费，支持 macOS 13 及以上。也可以先在网页上浏览，复制 brew 命令来安装。"
+    }
+  }
+}

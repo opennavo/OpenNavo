@@ -1,0 +1,94 @@
+{
+	{$CADDY_GLOBAL_OPTIONS}
+}
+
+(security) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		?Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' {$PUBLIC_BASE_URL}; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+		-Server
+	}
+}
+
+{$WEB_DOMAIN} {
+	@internalAgent path /agent-api /agent-api/*
+	handle @internalAgent {
+		respond 404
+	}
+	import security
+	encode zstd gzip
+	reverse_proxy {
+		dynamic a {
+			name web-proxy
+			port 3000
+			refresh 10s
+		}
+		lb_policy round_robin
+		lb_try_duration 5s
+	}
+}
+
+{$API_DOMAIN} {
+	@internalAgent path /agent-api /agent-api/*
+	handle @internalAgent {
+		respond 404
+	}
+	import security
+	encode zstd gzip
+	@public path /api/* /healthz /readyz
+	handle @public {
+		reverse_proxy {
+			dynamic a {
+				name api-proxy
+				port 8080
+				refresh 10s
+			}
+			lb_policy round_robin
+			lb_try_duration 5s
+		}
+	}
+	handle {
+		respond 404
+	}
+}
+
+{$ADMIN_DOMAIN} {
+	@internalAgent path /agent-api /agent-api/*
+	handle @internalAgent {
+		respond 404
+	}
+	import security
+	encode zstd gzip
+	handle /mcp {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy mcp-proxy:8790 {
+			flush_interval -1
+			header_up -X-Agent-Gateway-Key
+			header_up -X-Agent-Client-IP
+		}
+	}
+	@mcpOther path /mcp/* /healthz
+	handle @mcpOther {
+		respond 404
+	}
+	handle /admin-api/* {
+		reverse_proxy {
+			dynamic a {
+				name api-proxy
+				port 8080
+				refresh 10s
+			}
+			lb_policy round_robin
+			lb_try_duration 5s
+		}
+	}
+	handle {
+		root * /srv/admin
+		try_files {path} /index.html
+		file_server
+	}
+}

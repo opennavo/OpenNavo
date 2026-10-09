@@ -1,0 +1,1758 @@
+{
+  "addPackageScreenshot": {
+    "body": {
+      "$ref": "#/components/schemas/ScreenshotCreate"
+    },
+    "method": "POST",
+    "model": "AddPackageScreenshotInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/screenshots",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Add screenshot"
+  },
+  "createCategory": {
+    "body": {
+      "$ref": "#/components/schemas/CategoryUpsert"
+    },
+    "method": "POST",
+    "model": "CreateCategoryInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/categories",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:category:edit"
+      ]
+    },
+    "summary": "Create category"
+  },
+  "createCollection": {
+    "body": {
+      "$ref": "#/components/schemas/CollectionUpsert"
+    },
+    "method": "POST",
+    "model": "CreateCollectionInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/collections",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:collection:edit"
+      ]
+    },
+    "summary": "Create collection"
+  },
+  "createFeature": {
+    "body": {
+      "$ref": "#/components/schemas/FeatureUpsert"
+    },
+    "method": "POST",
+    "model": "CreateFeatureInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/features",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:feature:edit"
+      ]
+    },
+    "summary": "Create featured placement"
+  },
+  "createSynonym": {
+    "body": {
+      "$ref": "#/components/schemas/SynonymUpsert"
+    },
+    "method": "POST",
+    "model": "CreateSynonymInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/search/synonyms",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:search:edit"
+      ]
+    },
+    "summary": "Create synonym"
+  },
+  "deleteCategory": {
+    "body": null,
+    "method": "DELETE",
+    "model": "DeleteCategoryInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/categories/{id}",
+    "policy": {
+      "deleteAction": "always",
+      "permissions": [
+        "catalog:category:edit"
+      ]
+    },
+    "summary": "Delete category"
+  },
+  "deleteCollection": {
+    "body": null,
+    "method": "DELETE",
+    "model": "DeleteCollectionInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/collections/{id}",
+    "policy": {
+      "deleteAction": "always",
+      "permissions": [
+        "content:collection:edit"
+      ]
+    },
+    "summary": "Delete collection"
+  },
+  "deleteFeature": {
+    "body": null,
+    "method": "DELETE",
+    "model": "DeleteFeatureInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/features/{id}",
+    "policy": {
+      "deleteAction": "always",
+      "permissions": [
+        "content:feature:edit"
+      ]
+    },
+    "summary": "Delete featured placement"
+  },
+  "deleteGlossaryTerm": {
+    "body": null,
+    "method": "DELETE",
+    "model": "DeleteGlossaryTermInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/glossary/{id}",
+    "policy": {
+      "deleteAction": "always",
+      "permissions": [
+        "content:glossary:edit"
+      ]
+    },
+    "summary": "Move glossary term to trash"
+  },
+  "deletePackageIcon": {
+    "body": null,
+    "method": "DELETE",
+    "model": "DeletePackageIconInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/icon",
+    "policy": {
+      "deleteAction": "always",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Remove icon"
+  },
+  "deletePackageScreenshot": {
+    "body": null,
+    "method": "DELETE",
+    "model": "DeletePackageScreenshotInput",
+    "parameters": {
+      "path": [
+        "id",
+        "screenshotId"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/screenshots/{screenshotId}",
+    "policy": {
+      "deleteAction": "always",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Delete screenshot"
+  },
+  "deleteSynonym": {
+    "body": null,
+    "method": "DELETE",
+    "model": "DeleteSynonymInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/search/synonyms/{id}",
+    "policy": {
+      "deleteAction": "always",
+      "permissions": [
+        "ops:search:edit"
+      ]
+    },
+    "summary": "Delete synonym"
+  },
+  "fixTranslation": {
+    "body": {
+      "$ref": "#/components/schemas/TranslationFix"
+    },
+    "method": "PUT",
+    "model": "FixTranslationInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/translations/fix",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "translation:review"
+      ]
+    },
+    "summary": "Correct a translation in one language"
+  },
+  "getAdminCollection": {
+    "body": null,
+    "method": "GET",
+    "model": "GetAdminCollectionInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "locale"
+      ]
+    },
+    "path": "/collections/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:collection:edit"
+      ]
+    },
+    "summary": "Collection details"
+  },
+  "getAdminPackage": {
+    "body": null,
+    "method": "GET",
+    "model": "GetAdminPackageInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "locale"
+      ]
+    },
+    "path": "/packages/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Package details"
+  },
+  "getAdminRelease": {
+    "body": null,
+    "method": "GET",
+    "model": "GetAdminReleaseInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "locale"
+      ]
+    },
+    "path": "/releases/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Release details"
+  },
+  "getAgentCall": {
+    "body": null,
+    "method": "GET",
+    "model": "GetAgentCallInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/agent/calls/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "Read call summary and changes"
+  },
+  "getAnnouncement": {
+    "body": null,
+    "method": "GET",
+    "model": "GetAnnouncementInput",
+    "parameters": {
+      "path": [],
+      "query": []
+    },
+    "path": "/announcement",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:announcement:edit"
+      ]
+    },
+    "summary": "Read client announcement"
+  },
+  "getCategoryTree": {
+    "body": null,
+    "method": "GET",
+    "model": "GetCategoryTreeInput",
+    "parameters": {
+      "path": [],
+      "query": []
+    },
+    "path": "/categories/tree",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Category tree"
+  },
+  "getContentRevision": {
+    "body": null,
+    "method": "GET",
+    "model": "GetContentRevisionInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/content/revisions/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "Read revision before/after snapshots"
+  },
+  "getDashboardOverview": {
+    "body": null,
+    "method": "GET",
+    "model": "GetDashboardOverviewInput",
+    "parameters": {
+      "path": [],
+      "query": []
+    },
+    "path": "/dashboard/overview",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "dashboard:view"
+      ]
+    },
+    "summary": "Dashboard overview"
+  },
+  "getDesktopRelease": {
+    "body": null,
+    "method": "GET",
+    "model": "GetDesktopReleaseInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/desktop-releases/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "release:desktop:notes"
+      ]
+    },
+    "summary": "Client release details"
+  },
+  "getFeature": {
+    "body": null,
+    "method": "GET",
+    "model": "GetFeatureInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "locale"
+      ]
+    },
+    "path": "/features/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:feature:edit"
+      ]
+    },
+    "summary": "Featured placement details"
+  },
+  "getFeedback": {
+    "body": null,
+    "method": "GET",
+    "model": "GetFeedbackInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/feedback/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:feedback:handle"
+      ]
+    },
+    "summary": "Feedback details"
+  },
+  "getJobRun": {
+    "body": null,
+    "method": "GET",
+    "model": "GetJobRunInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/jobs/runs/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:job:view"
+      ]
+    },
+    "summary": "Job run details"
+  },
+  "getLlmUsage": {
+    "body": null,
+    "method": "GET",
+    "model": "GetLlmUsageInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "months"
+      ]
+    },
+    "path": "/dashboard/llm-usage",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "dashboard:view"
+      ]
+    },
+    "summary": "Monthly LLM usage"
+  },
+  "getTranslationLog": {
+    "body": null,
+    "method": "GET",
+    "model": "GetTranslationLogInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/translations/logs/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "Read AI translation log"
+  },
+  "getTranslationStatus": {
+    "body": null,
+    "method": "GET",
+    "model": "GetTranslationStatusInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "entity",
+        "id",
+        "secondaryId"
+      ]
+    },
+    "path": "/translations/status",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "translation:review"
+      ]
+    },
+    "summary": "Read an object's six-language text and status"
+  },
+  "getTrashItem": {
+    "body": null,
+    "method": "GET",
+    "model": "GetTrashItemInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/content/trash/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "View trash snapshot"
+  },
+  "introspectAgentToken": {
+    "body": null,
+    "method": "POST",
+    "model": "IntrospectAgentTokenInput",
+    "parameters": {
+      "path": [],
+      "query": []
+    },
+    "path": "/introspect",
+    "policy": {
+      "introspection": true
+    },
+    "summary": "Internal token introspection"
+  },
+  "listAdminCatalogChanges": {
+    "body": null,
+    "method": "GET",
+    "model": "ListAdminCatalogChangesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "from",
+        "to",
+        "type",
+        "hasEditorial",
+        "sort"
+      ]
+    },
+    "path": "/catalog/changes",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Query catalog activity changes"
+  },
+  "listAdminCollections": {
+    "body": null,
+    "method": "GET",
+    "model": "ListAdminCollectionsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "status",
+        "q",
+        "locale"
+      ]
+    },
+    "path": "/collections",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:collection:edit"
+      ]
+    },
+    "summary": "List collections"
+  },
+  "listAdminPackages": {
+    "body": null,
+    "method": "GET",
+    "model": "ListAdminPackagesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "kind",
+        "q",
+        "categoryId",
+        "translationStatus",
+        "hasIcon",
+        "hidden",
+        "editorChoice",
+        "deprecated",
+        "disabled",
+        "isFont",
+        "isLibrary",
+        "sort",
+        "locale",
+        "gaps",
+        "gapMode"
+      ]
+    },
+    "path": "/packages",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Package list"
+  },
+  "listAdminReleases": {
+    "body": null,
+    "method": "GET",
+    "model": "ListAdminReleasesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "packageId",
+        "q",
+        "source",
+        "translationStatus",
+        "hidden",
+        "locale",
+        "hasEditorial"
+      ]
+    },
+    "path": "/releases",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Release list"
+  },
+  "listAdminVersions": {
+    "body": null,
+    "method": "GET",
+    "model": "ListAdminVersionsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "packageId",
+        "q",
+        "hasEditorial",
+        "sort"
+      ]
+    },
+    "path": "/versions",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Query all recorded versions and editorial status"
+  },
+  "listAgentCalls": {
+    "body": null,
+    "method": "GET",
+    "model": "ListAgentCallsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "entity",
+        "objectKey",
+        "requestId",
+        "from",
+        "to",
+        "clientId",
+        "tokenId",
+        "tool",
+        "code",
+        "dryRun"
+      ]
+    },
+    "path": "/agent/calls",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "Query Agent call logs"
+  },
+  "listAssets": {
+    "body": null,
+    "method": "GET",
+    "model": "ListAssetsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "kind"
+      ]
+    },
+    "path": "/assets",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Asset list"
+  },
+  "listContentRevisions": {
+    "body": null,
+    "method": "GET",
+    "model": "ListContentRevisionsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "entity",
+        "objectKey",
+        "requestId",
+        "from",
+        "to",
+        "locale",
+        "actorId"
+      ]
+    },
+    "path": "/content/revisions",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "Query content revisions"
+  },
+  "listDesktopReleases": {
+    "body": null,
+    "method": "GET",
+    "model": "ListDesktopReleasesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "channel"
+      ]
+    },
+    "path": "/desktop-releases",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "release:desktop:notes"
+      ]
+    },
+    "summary": "Client release list"
+  },
+  "listFeatures": {
+    "body": null,
+    "method": "GET",
+    "model": "ListFeaturesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "placement",
+        "status",
+        "locale"
+      ]
+    },
+    "path": "/features",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:feature:edit"
+      ]
+    },
+    "summary": "List featured placements"
+  },
+  "listFeedback": {
+    "body": null,
+    "method": "GET",
+    "model": "ListFeedbackInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "status",
+        "type"
+      ]
+    },
+    "path": "/feedback",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:feedback:handle"
+      ]
+    },
+    "summary": "Feedback list"
+  },
+  "listGlossary": {
+    "body": null,
+    "method": "GET",
+    "model": "ListGlossaryInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "q",
+        "doNotTranslate"
+      ]
+    },
+    "path": "/glossary",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:glossary:edit"
+      ]
+    },
+    "summary": "Query glossary"
+  },
+  "listJobRuns": {
+    "body": null,
+    "method": "GET",
+    "model": "ListJobRunsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "jobType",
+        "status"
+      ]
+    },
+    "path": "/jobs/runs",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:job:view"
+      ]
+    },
+    "summary": "Job runs"
+  },
+  "listPackageScreenshots": {
+    "body": null,
+    "method": "GET",
+    "model": "ListPackageScreenshotsInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": []
+    },
+    "path": "/packages/{id}/screenshots",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "List screenshots"
+  },
+  "listPackageVersions": {
+    "body": null,
+    "method": "GET",
+    "model": "ListPackageVersionsInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "current",
+        "size"
+      ]
+    },
+    "path": "/packages/{id}/versions",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:view"
+      ]
+    },
+    "summary": "Versions recorded by Homebrew"
+  },
+  "listQueues": {
+    "body": null,
+    "method": "GET",
+    "model": "ListQueuesInput",
+    "parameters": {
+      "path": [],
+      "query": []
+    },
+    "path": "/jobs/queues",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:job:view"
+      ]
+    },
+    "summary": "Queue status"
+  },
+  "listSynonyms": {
+    "body": null,
+    "method": "GET",
+    "model": "ListSynonymsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "q"
+      ]
+    },
+    "path": "/search/synonyms",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:search:view"
+      ]
+    },
+    "summary": "List synonyms"
+  },
+  "listTopQueries": {
+    "body": null,
+    "method": "GET",
+    "model": "ListTopQueriesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "days",
+        "current",
+        "size"
+      ]
+    },
+    "path": "/search/insights/top",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:search:view"
+      ]
+    },
+    "summary": "Popular search queries"
+  },
+  "listTranslationLogs": {
+    "body": null,
+    "method": "GET",
+    "model": "ListTranslationLogsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "entity",
+        "objectKey",
+        "requestId",
+        "from",
+        "to",
+        "locale",
+        "status"
+      ]
+    },
+    "path": "/translations/logs",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "Query AI translation logs"
+  },
+  "listTranslations": {
+    "body": null,
+    "method": "GET",
+    "model": "ListTranslationsInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "entity",
+        "locale",
+        "status",
+        "stale",
+        "q"
+      ]
+    },
+    "path": "/translations",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "translation:review"
+      ]
+    },
+    "summary": "Query translation status across content types"
+  },
+  "listTrash": {
+    "body": null,
+    "method": "GET",
+    "model": "ListTrashInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "current",
+        "size",
+        "entity",
+        "objectKey",
+        "requestId",
+        "from",
+        "to",
+        "restored"
+      ]
+    },
+    "path": "/content/trash",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "agent:log:view"
+      ]
+    },
+    "summary": "Query trash"
+  },
+  "listZeroResultQueries": {
+    "body": null,
+    "method": "GET",
+    "model": "ListZeroResultQueriesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "days",
+        "current",
+        "size"
+      ]
+    },
+    "path": "/search/insights/zero",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:search:view"
+      ]
+    },
+    "summary": "Zero-result search queries"
+  },
+  "publishCollection": {
+    "body": {
+      "$ref": "#/components/schemas/PublishRequest"
+    },
+    "method": "POST",
+    "model": "PublishCollectionInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/collections/{id}/publish",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:collection:publish"
+      ]
+    },
+    "summary": "Publish collection"
+  },
+  "reorderCategories": {
+    "body": {
+      "$ref": "#/components/schemas/CategoryOrder"
+    },
+    "method": "PUT",
+    "model": "ReorderCategoriesInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/categories/order",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:category:edit"
+      ]
+    },
+    "summary": "Reorder categories"
+  },
+  "reorderPackageScreenshots": {
+    "body": {
+      "$ref": "#/components/schemas/IdList"
+    },
+    "method": "PUT",
+    "model": "ReorderPackageScreenshotsInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/screenshots/order",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Reorder screenshots"
+  },
+  "restoreRevision": {
+    "body": {
+      "$ref": "#/components/schemas/RestoreOptions"
+    },
+    "method": "POST",
+    "model": "RestoreRevisionInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/content/revisions/{id}/restore",
+    "policy": {
+      "deleteAction": "restored-state",
+      "permissions": [
+        "content:revision:restore"
+      ]
+    },
+    "summary": "Restore a specified revision"
+  },
+  "restoreTrash": {
+    "body": null,
+    "method": "POST",
+    "model": "RestoreTrashInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/content/trash/{id}/restore",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:revision:restore"
+      ]
+    },
+    "summary": "Restore deleted object"
+  },
+  "resyncPackage": {
+    "body": null,
+    "method": "POST",
+    "model": "ResyncPackageInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/resync",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:resync"
+      ]
+    },
+    "summary": "Resynchronize"
+  },
+  "retranslateContent": {
+    "body": {
+      "$ref": "#/components/schemas/ContentRetranslate"
+    },
+    "method": "POST",
+    "model": "RetranslateContentInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/translations/retranslate",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "translation:review"
+      ]
+    },
+    "summary": "Retranslate a specified object"
+  },
+  "revertRequest": {
+    "body": null,
+    "method": "POST",
+    "model": "RevertRequestInput",
+    "parameters": {
+      "path": [
+        "requestId"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/content/requests/{requestId}/revert",
+    "policy": {
+      "deleteAction": "restored-state",
+      "permissions": [
+        "content:revision:restore"
+      ]
+    },
+    "summary": "Atomically undo all changes by request ID"
+  },
+  "setCollectionItems": {
+    "body": {
+      "$ref": "#/components/schemas/CollectionItemsUpdate"
+    },
+    "method": "PUT",
+    "model": "SetCollectionItemsInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/collections/{id}/items",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:collection:edit"
+      ]
+    },
+    "summary": "Set collection items"
+  },
+  "setPackageCategories": {
+    "body": {
+      "$ref": "#/components/schemas/PackageCategoriesUpdate"
+    },
+    "method": "PUT",
+    "model": "SetPackageCategoriesInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/categories",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:edit"
+      ]
+    },
+    "summary": "Set categories"
+  },
+  "setPackageIcon": {
+    "body": {
+      "$ref": "#/components/schemas/AssetRef"
+    },
+    "method": "PUT",
+    "model": "SetPackageIconInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/icon",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Set icon"
+  },
+  "triggerJob": {
+    "body": null,
+    "method": "POST",
+    "model": "TriggerJobInput",
+    "parameters": {
+      "path": [
+        "jobType"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/jobs/trigger/{jobType}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:job:trigger"
+      ]
+    },
+    "summary": "Trigger job manually"
+  },
+  "unpublishCollection": {
+    "body": null,
+    "method": "POST",
+    "model": "UnpublishCollectionInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/collections/{id}/unpublish",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:collection:publish"
+      ]
+    },
+    "summary": "Unpublish collection"
+  },
+  "updateAnnouncement": {
+    "body": {
+      "$ref": "#/components/schemas/AnnouncementUpdate"
+    },
+    "method": "PUT",
+    "model": "UpdateAnnouncementInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/announcement",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:announcement:edit"
+      ]
+    },
+    "summary": "Save client announcement source text"
+  },
+  "updateCategory": {
+    "body": {
+      "$ref": "#/components/schemas/CategoryUpsert"
+    },
+    "method": "PUT",
+    "model": "UpdateCategoryInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/categories/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:category:edit"
+      ]
+    },
+    "summary": "Edit category"
+  },
+  "updateCollection": {
+    "body": {
+      "$ref": "#/components/schemas/CollectionUpsert"
+    },
+    "method": "PUT",
+    "model": "UpdateCollectionInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/collections/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:collection:edit"
+      ]
+    },
+    "summary": "Edit collection"
+  },
+  "updateDesktopReleaseNotes": {
+    "body": {
+      "$ref": "#/components/schemas/DesktopNotesUpdate"
+    },
+    "method": "PUT",
+    "model": "UpdateDesktopReleaseNotesInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/desktop-releases/{id}/notes",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "release:desktop:notes"
+      ]
+    },
+    "summary": "Edit client release notes only"
+  },
+  "updateFeature": {
+    "body": {
+      "$ref": "#/components/schemas/FeatureUpsert"
+    },
+    "method": "PUT",
+    "model": "UpdateFeatureInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/features/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:feature:edit"
+      ]
+    },
+    "summary": "Edit featured placement"
+  },
+  "updateFeedback": {
+    "body": {
+      "$ref": "#/components/schemas/FeedbackUpdate"
+    },
+    "method": "PUT",
+    "model": "UpdateFeedbackInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/feedback/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:feedback:handle"
+      ]
+    },
+    "summary": "Handle feedback"
+  },
+  "updatePackageMeta": {
+    "body": {
+      "$ref": "#/components/schemas/PackageMetaUpdate"
+    },
+    "method": "PUT",
+    "model": "UpdatePackageMetaInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/meta",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:edit"
+      ]
+    },
+    "summary": "Edit package information"
+  },
+  "updatePackageScreenshot": {
+    "body": {
+      "$ref": "#/components/schemas/ScreenshotUpdate"
+    },
+    "method": "PUT",
+    "model": "UpdatePackageScreenshotInput",
+    "parameters": {
+      "path": [
+        "id",
+        "screenshotId"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/screenshots/{screenshotId}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Edit screenshot"
+  },
+  "updatePackageText": {
+    "body": {
+      "$ref": "#/components/schemas/PackageTextUpdate"
+    },
+    "method": "PUT",
+    "model": "UpdatePackageTextInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/text",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:package:edit"
+      ]
+    },
+    "summary": "Save app source text"
+  },
+  "updateRelease": {
+    "body": {
+      "$ref": "#/components/schemas/ReleaseUpdate"
+    },
+    "method": "PUT",
+    "model": "UpdateReleaseInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/releases/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "changelog:release:edit"
+      ]
+    },
+    "summary": "Edit release"
+  },
+  "updateSynonym": {
+    "body": {
+      "$ref": "#/components/schemas/SynonymUpsert"
+    },
+    "method": "PUT",
+    "model": "UpdateSynonymInput",
+    "parameters": {
+      "path": [
+        "id"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/search/synonyms/{id}",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "ops:search:edit"
+      ]
+    },
+    "summary": "Edit synonym"
+  },
+  "uploadAsset": {
+    "body": {
+      "oneOf": [
+        {
+          "required": [
+            "file"
+          ]
+        },
+        {
+          "required": [
+            "downloadUrl"
+          ]
+        }
+      ],
+      "properties": {
+        "downloadUrl": {
+          "description": "Downloaded safely by the Go backend; mutually exclusive with file.",
+          "format": "uri",
+          "maxLength": 2048,
+          "pattern": "^https://",
+          "type": "string"
+        },
+        "file": {
+          "format": "binary",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/components/schemas/AssetKind"
+        },
+        "sourceUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "method": "POST",
+    "model": "UploadAssetInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/assets",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "catalog:asset:upload"
+      ]
+    },
+    "summary": "Upload asset"
+  },
+  "upsertGlossaryTerm": {
+    "body": {
+      "$ref": "#/components/schemas/GlossaryTermUpdate"
+    },
+    "method": "PUT",
+    "model": "UpsertGlossaryTermInput",
+    "parameters": {
+      "path": [],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/glossary",
+    "policy": {
+      "deleteAction": "never",
+      "permissions": [
+        "content:glossary:edit"
+      ]
+    },
+    "summary": "Save glossary term"
+  },
+  "upsertReleaseNotes": {
+    "body": {
+      "$ref": "#/components/schemas/EditorialNotesUpdate"
+    },
+    "method": "PUT",
+    "model": "UpsertReleaseNotesInput",
+    "parameters": {
+      "path": [
+        "id",
+        "version"
+      ],
+      "query": [
+        "dryRun"
+      ]
+    },
+    "path": "/packages/{id}/versions/{version}/notes",
+    "policy": {
+      "deleteAction": "clear",
+      "permissions": [
+        "changelog:release:edit"
+      ]
+    },
+    "summary": "Write or clear editorial release notes"
+  }
+}

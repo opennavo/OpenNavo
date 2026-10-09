@@ -1,0 +1,181 @@
+{
+  "getButton": {
+    "get": "Obtener",
+    "open": "Abrir",
+    "installed": "Instaladas",
+    "update": "Actualizaciones",
+    "queued": "En cola",
+    "running": "Procesando",
+    "cancel": "Cancelar",
+    "unavailable": "No disponible"
+  },
+  "action": {
+    "checkUpdates": "Buscar actualizaciones",
+    "updateTo": "Actualizar a {version}",
+    "updateAll": "Actualizar todo ({count})|Actualizar todo ({count})",
+    "retry": "Reintentar",
+    "viewLog": "Ver registro",
+    "cancel": "Cancelar",
+    "openInApp": "Abrir en OpenNavo",
+    "copyInstallCommand": "Copiar comando de instalación",
+    "addToBrewfile": "Añadir a la lista de Brewfile",
+    "inBrewfile": "Ya está en la lista",
+    "uninstall": "Desinstalar",
+    "delete": "Eliminar",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "clear": "Borrar"
+  },
+  "kind": {
+    "cask": "Apps",
+    "formula": "Herramientas de línea de comandos"
+  },
+  "card": {
+    "installs30d": "Instalaciones en 30 días",
+    "version": "Versión",
+    "category": "Categorías"
+  },
+  "nav": {
+    "breadcrumb": "Migas de pan",
+    "pagination": "Paginación",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "page": "Página {page}",
+    "loadMore": "Cargar más",
+    "categories": "Filtrar por categoría"
+  },
+  "installCommand": {
+    "title": "Comando de instalación"
+  },
+  "cask": {
+    "platform": "Sistema y arquitectura",
+    "platforms": "Disponibilidad en plataformas",
+    "version": "Versión disponible",
+    "requirements": "Requisitos del sistema",
+    "formulae": "Dependencias de línea de comandos",
+    "casks": "Dependencias de aplicaciones",
+    "unknown": "Sin confirmar",
+    "noMac": "No se ha declarado compatibilidad con macOS",
+    "rosetta": "Requiere Rosetta",
+    "legacy": "Versiones anteriores disponibles en algunas plataformas",
+    "arm64": "Apple Silicon",
+    "x86_64": "Intel",
+    "declarations": "Contenido de instalación y desinstalación",
+    "install": "Instalar",
+    "uninstall": "Desinstalar",
+    "cleanup": "Eliminar datos de usuario",
+    "source": "Archivo de origen",
+    "target": "Destino declarado",
+    "declaration": "Ver declaración completa",
+    "download": "URL de descarga"
+  },
+  "hero": {
+    "viewDetails": "Ver detalles"
+  },
+  "about": {
+    "title": "Descripción",
+    "machineTranslated": "Traducción con IA",
+    "viewOriginal": "Ver original",
+    "expand": "Mostrar texto completo",
+    "collapse": "Contraer"
+  },
+  "gallery": {
+    "label": "Capturas de pantalla",
+    "item": "Captura de pantalla {index}",
+    "dialog": "Vista previa de la captura de pantalla",
+    "position": "{index} / {total}",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "close": "Cerrar"
+  },
+  "dialog": {
+    "close": "Cerrar",
+    "confirm": "Confirmar",
+    "cancel": "Cancelar"
+  },
+  "toast": {
+    "region": "Notificaciones",
+    "view": "Ver",
+    "close": "Cerrar notificación"
+  },
+  "menu": {
+    "more": "Más acciones"
+  },
+  "palette": {
+    "label": "Panel de comandos",
+    "placeholder": "Buscar apps o acciones",
+    "results": "Resultados de búsqueda",
+    "empty": "No hay resultados coincidentes",
+    "loading": "Buscando…",
+    "hintSelect": "↑↓ Seleccionar",
+    "hintOpen": "↵ Abrir",
+    "hintInstall": "⌘↵ Instalar / actualizar",
+    "hintCopy": "⌘C Copiar comando de brew"
+  },
+  "collection": {
+    "viewAll": "Ver los {count} elementos|Ver los {count} elementos"
+  },
+  "rank": {
+    "up": "Subir {n} puestos|Subir {n} puestos",
+    "down": "Bajar {n} puestos|Bajar {n} puestos",
+    "same": "Sin cambios en la clasificación"
+  },
+  "progress": {
+    "busy": "En curso"
+  },
+  "task": {
+    "queued": "En cola:",
+    "expandLog": "Mostrar registro",
+    "collapseLog": "Ocultar registro"
+  },
+  "log": {
+    "label": "Registro"
+  },
+  "chart": {
+    "other": "Otros",
+    "item": "Elemento",
+    "value": "Valor",
+    "share": "Porcentaje"
+  },
+  "table": {
+    "sortBy": "Ordenar por {label}"
+  },
+  "topNav": {
+    "label": "Navegación principal",
+    "home": "Página de inicio de OpenNavo",
+    "search": "Buscar apps",
+    "download": "Descargar la app",
+    "openMenu": "Abrir menú",
+    "closeMenu": "Cerrar menú"
+  },
+  "version": {
+    "timeline": "Historial de versiones",
+    "latest": "Actualizado",
+    "installed": "Instalado actualmente",
+    "patch": "Parche",
+    "prerelease": "Versión preliminar",
+    "machineTranslation": "Traducción con IA",
+    "noNotes": "Esta versión no tiene notas de actualización propias",
+    "viewOriginal": "Ver original",
+    "expand": "Expandir",
+    "collapse": "Contraer",
+    "updateTo": "Actualizar a esta versión",
+    "showEarlier": "Mostrar {count} versión anterior|Mostrar {count} versiones anteriores",
+    "sources": {
+      "webpage": "Página de actualizaciones oficial",
+      "sparkle": "Fuente de actualizaciones de Sparkle",
+      "github_release": "GitHub Release",
+      "manual": "Editado manualmente",
+      "editorial": "Editado por OpenNavo",
+      "homebrew": "Inclusión en Homebrew"
+    }
+  },
+  "state": {
+    "loadFailedTitle": "Error al cargar",
+    "loadFailedDescription": "La red o el servicio no están disponibles temporalmente. Inténtalo de nuevo más tarde.",
+    "noResultsTitle": "No se ha encontrado «{q}»",
+    "noResultsDescription": "Prueba con el nombre en inglés o el pinyin, o dinos qué te gustaría que incluyéramos.",
+    "offlineTitle": "Sin conexión",
+    "offlineDescription": "Se muestra el catálogo de la caché local. Se actualizará automáticamente al conectarse a Internet."
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@opennavo/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenNavo shared utilities: formatting, Homebrew versions and commands, Brewfiles, deep links, business codes, icon fallbacks, branding, and base messages",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./locales": "./src/locales.gen.ts"
+  },
+  "scripts": {
+    "lint": "node ../../tooling/scripts/lint-frontend.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@opennavo/tokens": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

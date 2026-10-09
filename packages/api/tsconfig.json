@@ -1,0 +1,4 @@
+{
+  "extends": "../../tooling/config/tsconfig.base.json",
+  "include": ["src", "tests", "vitest.config.ts", "vitest.smoke.config.ts"]
+}

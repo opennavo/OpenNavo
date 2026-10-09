@@ -1,0 +1,53 @@
+<script setup lang="ts">
+import { unwrap } from '@opennavo/api';
+import { formatCount } from '@opennavo/shared';
+import { OnCategoriesView, OnErrorState } from '@opennavo/ui';
+import type { OnCategoriesItem } from '@opennavo/ui';
+
+const { locale: useI18nLocale } = useI18n();
+const formattingLocale = computed(() => toAppLocale(useI18nLocale.value));
+
+// Category overview (05 §4): shared OnCategoriesView (ADR-017), top-level cards with descriptions/subcategories.
+const { t, locale } = useI18n();
+const api = useApi();
+const localePath = useLocalePath();
+const NuxtLink = resolveComponent('NuxtLink');
+
+const { data, error, refresh } = await useAsyncData(
+  () => `categories:${locale.value}`,
+  () => unwrap(api.GET('/categories'))
+);
+
+const items = computed<OnCategoriesItem[] | null>(() =>
+  data.value
+    ? data.value
+        .filter(node => !node.hiddenByDefault)
+        .map(node => ({
+          key: node.slug,
+          name: node.name,
+          icon: node.icon,
+          count: t(
+            'categories.count',
+            { count: formatCount(node.packageCount, { locale: formattingLocale.value }) },
+            { plural: node.packageCount }
+          ),
+          description: node.description,
+          children: node.children.map(child => child.name),
+          href: localePath(`/categories/${node.slug}`)
+        }))
+    : null
+);
+
+usePageSeo({ title: () => t('categories.metaTitle'), description: () => t('categories.description') });
+</script>
+
+<template>
+  <OnCategoriesView
+    :title="t('categories.title')"
+    :subtitle="t('categories.description')"
+    :items="error ? [] : items"
+    :link-as="NuxtLink"
+  >
+    <OnErrorState v-if="error" @retry="refresh()" />
+  </OnCategoriesView>
+</template>

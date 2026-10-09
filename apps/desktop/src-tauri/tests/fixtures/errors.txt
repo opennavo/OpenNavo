@@ -1,0 +1,13 @@
+E_CHECKSUM	Error: SHA256 mismatch
+E_DOWNLOAD	curl: (56) The requested URL returned error: 403
+E_DOWNLOAD	Error: Download failed on Cask 'mudlet' with message: Download failed: https://www.mudlet.org/wp-content/files/Mudlet-4.19.1-arm64.dmg
+E_APP_EXISTS	Error: It seems there is already an App at '{{location}}'.
+E_DISABLED	Error: ntfs-3g has been disabled because it requires FUSE!
+E_LOCKED	Error: Another active Homebrew process is already in progress.
+E_SUDO	sudo: a password is required
+E_REQUIRED_BY	because it is required by git 2.16.1, which is currently installed.
+E_NOT_FOUND	Error: No available formula with the name "gtk 3".
+E_FULL_DISK_ACCESS	Error: Unable to remove some files. Please enable Full Disk Access for your terminal under System Settings → Privacy & Security → Full Disk Access.
+E_PERMISSION	chown: /Applications/lghub.app: Operation not permitted
+E_MACOS_VERSION	Error: bartender: This cask does not run on macOS versions older than Golden Gate.
+E_CONFLICT	Error: Cask 'dotnet-sdk-preview' conflicts with 'dotnet-sdk'.

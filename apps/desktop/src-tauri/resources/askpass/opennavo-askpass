@@ -1,0 +1,9 @@
+#!/bin/sh
+# Copy comes from Rust language resources and is passed only as arguments; only sudo reads passwords.
+: "${OPENNAVO_ASKPASS_MESSAGE:?}" "${OPENNAVO_ASKPASS_TITLE:?}" "${OPENNAVO_ASKPASS_OK:?}" "${OPENNAVO_ASKPASS_CANCEL:?}"
+exec /usr/bin/osascript - "$OPENNAVO_ASKPASS_MESSAGE" "$OPENNAVO_ASKPASS_TITLE" "$OPENNAVO_ASKPASS_OK" "$OPENNAVO_ASKPASS_CANCEL" <<'APPLESCRIPT'
+on run argv
+  set r to display dialog (item 1 of argv) default answer "" with hidden answer with title (item 2 of argv) with icon caution buttons {item 4 of argv, item 3 of argv} default button (item 3 of argv) cancel button (item 4 of argv)
+  return text returned of r
+end run
+APPLESCRIPT

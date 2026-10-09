@@ -1,0 +1,9 @@
+apps/admin/**
+**/dist/**
+**/.nuxt/**
+**/.output/**
+**/coverage/**
+packages/api/src/public.d.ts
+packages/api/src/admin.d.ts
+apps/desktop/src/ipc/bindings.ts
+apps/desktop/src-tauri/**

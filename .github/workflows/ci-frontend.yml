@@ -1,0 +1,165 @@
+name: Frontend CI
+
+# Web, admin, desktop, and shared packages (09 section 6.1). Backend/contract checks: ci-server.yml.
+on:
+  push:
+    branches: [main]
+    paths: &frontend-paths
+      - 'apps/**'
+      - 'packages/**'
+      # Shared brand regression tests depend on the logo generator.
+      - 'docs/design/logo/source/**'
+      # Full-stack web E2E depends on backend behavior, so run for backend changes too.
+      - 'apps/server/**'
+      - 'ops/e2e.py'
+      - 'ops/docker-compose.e2e.yml'
+      - '.github/actions/e2e-backend/**'
+      - 'tooling/scripts/tasks/frontend.mjs'
+      - 'tooling/scripts/tasks/shared.mjs'
+      - 'tooling/scripts/workspace.mjs'
+      - 'Makefile'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tooling/config/**'
+      - 'tooling/scripts/lint-frontend.mjs'
+      - 'tooling/scripts/format-frontend.mjs'
+      - '.github/workflows/ci-frontend.yml'
+  pull_request:
+    paths: *frontend-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Generated tokens, API types, and icon subsets must match committed output; IPC bindings require Rust and are checked in the desktop job.
+      - run: pnpm --filter "./packages/*" run gen
+      - run: git diff --exit-code
+      - run: pnpm run format:check
+      - run: pnpm --filter "@opennavo/*" --if-present run lint
+      - run: pnpm --filter "@opennavo/*" --if-present run typecheck
+      - run: pnpm --filter "@opennavo/*" --if-present run test
+      - run: pnpm --filter @opennavo/web --filter @opennavo/admin --filter @opennavo/desktop --filter @opennavo/ui run build
+      - run: pnpm --filter @opennavo/web test:ssr
+      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color .github/workflows/ci-frontend.yml .github/workflows/release-desktop.yml
+
+  desktop:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt, clippy
+      - run: python3 tooling/scripts/check-notices.py --check-rust-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @opennavo/desktop run gen
+      - run: git diff --exit-code apps/desktop/src/ipc/bindings.ts
+      - run: cargo fmt --check
+        working-directory: apps/desktop/src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: apps/desktop/src-tauri
+      - run: cargo test
+        working-directory: apps/desktop/src-tauri
+      # Unsigned debug builds; signing, notarization, and updater artifacts are handled by release-desktop.yml (M5-03).
+      # With an updater public key, Tauri requires the private signing key; forks/PRs lack it, so disable updater artifacts here.
+      - run: pnpm --filter @opennavo/desktop tauri build --debug --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+  # Admin menu/permission E2E (intercepted API; no backend required).
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm --filter @opennavo/admin run e2e
+
+  # Full-stack web E2E (05 section 10): the composite action starts isolated PostgreSQL/Redis/MinIO and the seeded E2E API on 18082.
+  # Write frontend environment variables to GITHUB_ENV; always remove dedicated containers and volumes (03 section 5.5).
+  web-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/e2e-backend
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm --filter @opennavo/web run e2e
+      # Full-stack admin cases (07 section 9) reuse the E2E stack; Playwright starts the admin dev server, with Vite proxying to 18082.
+      - run: pnpm --filter @opennavo/admin exec playwright test e2e/stack.spec.ts
+      # Detail-page Lighthouse (10 M2-08, 05 section 8): production build with a proxy simulating Caddy compression; performance scores warn only in CI.
+      - run: pnpm --filter @opennavo/web build
+      - name: Lighthouse
+        working-directory: apps/web
+        env:
+          NODE_ENV: production
+          HOST: 127.0.0.1
+          PORT: '3000'
+          NUXT_API_BASE_INTERNAL: http://127.0.0.1:18082/api/v1
+          NUXT_PUBLIC_API_BASE: http://127.0.0.1:18082/api/v1
+          NUXT_PUBLIC_SITE_URL: http://localhost:3100
+          NUXT_PUBLIC_I18N_BASE_URL: http://localhost:3100
+        run: |
+          node .output/server/index.mjs &
+          preview_pid=$!
+          PORT=3100 UPSTREAM_PORT=3000 node scripts/compress-proxy.mjs &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" "$preview_pid" 2>/dev/null || true; wait "$proxy_pid" "$preview_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            kill -0 "$preview_pid" "$proxy_pid"
+            curl -sf -o /dev/null http://localhost:3100/apps/visual-studio-code && break
+            sleep 1
+          done
+          curl -fsS -o /dev/null http://localhost:3100/apps/visual-studio-code
+          pnpm run lighthouse
+      - if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: lighthouse
+          path: apps/web/.lighthouseci
+          if-no-files-found: ignore
+      - if: always()
+        run: node tooling/scripts/tasks/server.mjs e2e-down --ci

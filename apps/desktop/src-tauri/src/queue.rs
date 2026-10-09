@@ -1,0 +1,1528 @@
+use crate::{
+    AppError,
+    brew::{
+        args::write_args,
+        env::construct,
+        locate,
+        pty::{Execution, Progress, execute},
+    },
+    db::Database,
+    events::{CoreEvent, EventSink},
+    model::*,
+};
+use std::{
+    collections::{BTreeMap, HashMap},
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
+use tokio::sync::Notify;
+
+type Completion = Arc<dyn Fn(Task) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+struct Control {
+    cancel: Arc<AtomicBool>,
+    notify: Arc<Notify>,
+}
+pub struct TaskQueue {
+    pub database: Database,
+    pub app_control: Arc<dyn crate::running_apps::AppControl>,
+    pub settings: Arc<RwLock<Settings>>,
+    tasks: Mutex<Vec<Task>>,
+    controls: Mutex<HashMap<String, Control>>,
+    logs: PathBuf,
+    askpass: PathBuf,
+    sink: EventSink,
+    wake: Notify,
+    paused: AtomicBool,
+    stopping: AtomicBool,
+    started: AtomicBool,
+    pub read_gate: Arc<tokio::sync::RwLock<()>>,
+    completion: Mutex<Option<Completion>>,
+    retry_delay: Duration,
+    extra_env: Mutex<BTreeMap<String, String>>,
+    installer_url: Mutex<Option<String>>,
+}
+impl TaskQueue {
+    pub fn new(
+        database: Database,
+        settings: Arc<RwLock<Settings>>,
+        logs: PathBuf,
+        askpass: PathBuf,
+        sink: EventSink,
+    ) -> Result<Arc<Self>, AppError> {
+        let tasks = database.recover_tasks(chrono::Utc::now().timestamp_millis())?;
+        let paused = !tasks.is_empty();
+        Ok(Arc::new(Self {
+            database,
+            app_control: Arc::new(crate::running_apps::NativeApps),
+            settings,
+            tasks: Mutex::new(tasks),
+            controls: Mutex::new(HashMap::new()),
+            logs,
+            askpass,
+            sink,
+            wake: Notify::new(),
+            paused: AtomicBool::new(paused),
+            stopping: AtomicBool::new(false),
+            started: AtomicBool::new(false),
+            read_gate: Arc::new(tokio::sync::RwLock::new(())),
+            completion: Mutex::new(None),
+            retry_delay: Duration::from_secs(30),
+            extra_env: Mutex::new(BTreeMap::new()),
+            installer_url: Mutex::new(None),
+        }))
+    }
+    pub fn set_completion(&self, hook: Completion) -> Result<(), AppError> {
+        *self.completion.lock().map_err(poison)? = Some(hook);
+        Ok(())
+    }
+    pub fn start(self: &Arc<Self>) {
+        if self.started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let queue = self.clone();
+        tauri::async_runtime::spawn(async move {
+            queue.run().await;
+        });
+    }
+    pub fn settings(&self) -> Result<Settings, AppError> {
+        Ok(self.settings.read().map_err(poison)?.clone())
+    }
+    pub fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::Acquire)
+    }
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Acquire)
+    }
+    pub fn enqueue(
+        &self,
+        op: TaskOp,
+        target: Option<TaskTarget>,
+        options: TaskOptions,
+        trigger: TaskTrigger,
+    ) -> Result<Task, AppError> {
+        if self.is_stopping() {
+            return Err(AppError::new("E_INTERRUPTED", "queue_stopped"));
+        }
+        write_args(op, target.as_ref(), &options)?;
+        if options.adopt && trigger == TaskTrigger::Schedule {
+            return Err(AppError::new("E_INVALID_ARG", "unattended_adopt"));
+        }
+        if matches!(trigger, TaskTrigger::Schedule | TaskTrigger::Bundle)
+            && (options.quit_running || options.reopen)
+        {
+            return Err(AppError::new("E_INVALID_ARG", "unattended_quit"));
+        }
+        let mut tasks = self.tasks.lock().map_err(poison)?;
+        if self.is_stopping() {
+            return Err(AppError::new("E_INTERRUPTED", "queue_stopped"));
+        }
+        if matches!(
+            trigger,
+            TaskTrigger::Manual | TaskTrigger::Deeplink | TaskTrigger::Retry
+        ) {
+            self.paused.store(false, Ordering::Release);
+        }
+        if let Some(existing) = tasks.iter().find(|t| {
+            matches!(t.state, TaskState::Queued | TaskState::Running)
+                && if target.is_some() {
+                    t.target == target
+                } else {
+                    t.target.is_none() && t.op == op
+                }
+        }) {
+            let task = existing.clone();
+            drop(tasks);
+            self.wake.notify_one();
+            return Ok(task);
+        }
+        let now = chrono::Utc::now().timestamp_millis();
+        let id = uuid::Uuid::now_v7().to_string();
+        let task = Task {
+            id: id.clone(),
+            op,
+            target,
+            options,
+            trigger,
+            state: TaskState::Queued,
+            phase: None,
+            percent: None,
+            bytes_done: None,
+            bytes_total: None,
+            speed_bps: None,
+            step_index: Some(0),
+            step_count: match op {
+                TaskOp::Uninstall => Some(3),
+                TaskOp::Install | TaskOp::Upgrade | TaskOp::Reinstall => Some(4),
+                _ => None,
+            },
+            from_version: None,
+            to_version: None,
+            error: None,
+            exit_code: None,
+            log_path: Some(self.logs.join(format!("{id}.log")).to_string_lossy().into()),
+            created_at: now,
+            started_at: None,
+            finished_at: None,
+        };
+        if trigger == TaskTrigger::Retry
+            && let Some(parent) = self
+                .database
+                .tasks()?
+                .into_iter()
+                .rev()
+                .find(|t| t.target == task.target && t.op == op && t.state == TaskState::Failed)
+        {
+            self.database
+                .set_meta(&format!("task_retry_parent:{id}"), &parent.id)?;
+        }
+        self.database.save_task(&task)?;
+        tasks.push(task.clone());
+        drop(tasks);
+        (self.sink)(CoreEvent::Task(task.clone()));
+        self.wake.notify_one();
+        Ok(task)
+    }
+    pub fn enqueue_many(
+        &self,
+        op: TaskOp,
+        targets: Vec<TaskTarget>,
+        options: TaskOptions,
+        trigger: TaskTrigger,
+    ) -> Result<Vec<Task>, AppError> {
+        if targets.len() > 200 {
+            return Err(AppError::new("E_INVALID_ARG", "too_many_targets"));
+        }
+        for target in &targets {
+            write_args(op, Some(target), &options)?;
+        }
+        targets
+            .into_iter()
+            .map(|target| self.enqueue(op, Some(target), options.clone(), trigger))
+            .collect()
+    }
+    pub fn active(&self) -> Result<Vec<Task>, AppError> {
+        Ok(self
+            .tasks
+            .lock()
+            .map_err(poison)?
+            .iter()
+            .filter(|t| matches!(t.state, TaskState::Queued | TaskState::Running))
+            .cloned()
+            .collect())
+    }
+    pub fn cancel(&self, id: &str) -> Result<(), AppError> {
+        let mut tasks = self.tasks.lock().map_err(poison)?;
+        let task = tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or_else(|| AppError::new("E_INVALID_ARG", "unknown_task"))?;
+        if task.state == TaskState::Queued {
+            task.state = TaskState::Canceled;
+            task.finished_at = Some(chrono::Utc::now().timestamp_millis());
+            self.database.save_task(task)?;
+            (self.sink)(CoreEvent::Task(task.clone()));
+        } else if task.state == TaskState::Running
+            && let Some(control) = self.controls.lock().map_err(poison)?.get(id)
+        {
+            control.cancel.store(true, Ordering::Release);
+            control.notify.notify_one();
+        }
+        Ok(())
+    }
+    pub async fn wait_terminal(&self, id: &str) -> Result<Task, AppError> {
+        loop {
+            let task = self
+                .tasks
+                .lock()
+                .map_err(poison)?
+                .iter()
+                .find(|t| t.id == id)
+                .cloned()
+                .ok_or_else(|| AppError::new("E_NOT_FOUND", "task_id"))?;
+            if !matches!(task.state, TaskState::Queued | TaskState::Running) {
+                return Ok(task);
+            }
+            if self.stopping.load(Ordering::Acquire) {
+                return Err(AppError::new("E_INTERRUPTED", "queue_stopped"));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    pub fn shutdown(&self) {
+        // Share the next/enqueue lock so selected tasks already have cancellation handles and no child starts after quit.
+        let _tasks = self.tasks.lock().ok();
+        self.stopping.store(true, Ordering::Release);
+        if let Ok(controls) = self.controls.lock() {
+            for control in controls.values() {
+                control.cancel.store(true, Ordering::Release);
+                control.notify.notify_one();
+            }
+        }
+        self.wake.notify_one();
+    }
+    pub fn prepare_exit(&self) -> Result<QuitRequested, AppError> {
+        let tasks = self.tasks.lock().map_err(poison)?;
+        let counts = crate::lifecycle::counts(&tasks);
+        if counts.running == 0 && counts.queued == 0 {
+            // Atomically reject new enqueues on idle quit so a task cannot start after the count check.
+            self.stopping.store(true, Ordering::Release);
+            self.wake.notify_one();
+        }
+        Ok(counts)
+    }
+    pub fn log(&self, id: &str, tail: Option<u32>) -> Result<String, AppError> {
+        if tail.is_some_and(|n| n > 10_000) {
+            return Err(AppError::new("E_INVALID_ARG", "log_tail"));
+        }
+        let task = self
+            .database
+            .tasks()?
+            .into_iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| AppError::new("E_INVALID_ARG", "unknown_task"))?;
+        let Some(path) = task.log_path else {
+            return Ok(String::new());
+        };
+        let content = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e.into()),
+        };
+        Ok(if let Some(tail) = tail {
+            content
+                .lines()
+                .skip(content.lines().count().saturating_sub(tail as usize))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            content
+        })
+    }
+    fn next(&self) -> Result<Option<Task>, AppError> {
+        if self.paused.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        let mut tasks = self.tasks.lock().map_err(poison)?;
+        if self.is_stopping() {
+            return Ok(None);
+        }
+        let selected = tasks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.state == TaskState::Queued)
+            .min_by_key(|(_, t)| {
+                (
+                    if matches!(t.trigger, TaskTrigger::Schedule | TaskTrigger::Bundle) {
+                        1
+                    } else {
+                        0
+                    },
+                    t.created_at,
+                    t.id.clone(),
+                )
+            })
+            .map(|(index, _)| index);
+        let Some(index) = selected else {
+            return Ok(None);
+        };
+        let task = &mut tasks[index];
+        if let Some(target) = &task.target {
+            let cached = self
+                .database
+                .meta("installed_cache")?
+                .and_then(|s| serde_json::from_str::<Vec<InstalledItem>>(&s).ok())
+                .unwrap_or_default();
+            let installed = cached
+                .iter()
+                .find(|i| i.kind == target.kind && i.token == target.token);
+            task.from_version = installed.map(|i| {
+                i.actual_version
+                    .clone()
+                    .unwrap_or_else(|| i.installed_version.clone())
+            });
+            task.to_version = if matches!(task.op, TaskOp::Pin | TaskOp::Unpin) {
+                task.from_version.clone()
+            } else if task.op == TaskOp::Uninstall {
+                None
+            } else {
+                crate::catalog::get(&self.database, target.kind, &target.token)?.map(|i| i.version)
+            };
+        }
+        task.state = TaskState::Running;
+        task.phase = Some(TaskPhase::Preparing);
+        task.started_at = Some(chrono::Utc::now().timestamp_millis());
+        self.controls.lock().map_err(poison)?.insert(
+            task.id.clone(),
+            Control {
+                cancel: Arc::new(AtomicBool::new(false)),
+                notify: Arc::new(Notify::new()),
+            },
+        );
+        self.database.save_task(task)?;
+        (self.sink)(CoreEvent::Task(task.clone()));
+        Ok(Some(task.clone()))
+    }
+    fn progress(
+        &self,
+        id: &str,
+        lines: &[String],
+        progress: &Progress,
+        emit: bool,
+    ) -> Result<(), AppError> {
+        if !lines.is_empty() {
+            (self.sink)(CoreEvent::Log(TaskLogEvent {
+                id: id.into(),
+                lines: lines.to_vec(),
+            }));
+        }
+        let mut tasks = self.tasks.lock().map_err(poison)?;
+        if let Some(task) = tasks.iter_mut().find(|t| t.id == id) {
+            if let Some(phase) = progress.phase {
+                task.phase = Some(phase);
+            }
+            task.percent = progress.percent;
+            task.step_index = progress.step_index.or(task.step_index);
+            task.bytes_done = progress.bytes;
+            task.bytes_total = progress.total;
+            task.speed_bps = progress.speed;
+            if progress.from.is_some() {
+                task.from_version = progress.from.clone();
+            }
+            if progress.to.is_some() {
+                task.to_version = progress.to.clone();
+            }
+            if emit {
+                (self.sink)(CoreEvent::Task(task.clone()));
+            }
+        }
+        Ok(())
+    }
+    async fn execute_task(
+        self: &Arc<Self>,
+        task: &Task,
+    ) -> Result<crate::brew::pty::Outcome, AppError> {
+        let settings = self.settings()?;
+        let (cancel, notify) = {
+            let controls = self.controls.lock().map_err(poison)?;
+            let control = controls
+                .get(&task.id)
+                .ok_or_else(|| AppError::new("E_UNKNOWN", "missing_task_control"))?;
+            (control.cancel.clone(), control.notify.clone())
+        };
+        let mut prepared = None;
+        let (executable, args, prefix, cache) = if task.op == TaskOp::InstallHomebrew {
+            let sources = self
+                .installer_url
+                .lock()
+                .map_err(poison)?
+                .clone()
+                .map(|url| vec![url])
+                .unwrap_or_else(|| {
+                    crate::installer::source(&settings)
+                        .iter()
+                        .map(|url| (*url).into())
+                        .collect()
+                });
+            let directory = self.logs.join("installers");
+            let artifact = crate::installer::download_candidates(
+                &directory,
+                &sources,
+                cancel.clone(),
+                notify.clone(),
+                std::path::Path::new(
+                    task.log_path
+                        .as_deref()
+                        .ok_or_else(|| AppError::new("E_UNKNOWN", "missing_task_log"))?,
+                ),
+                |line| {
+                    (self.sink)(CoreEvent::Log(TaskLogEvent {
+                        id: task.id.clone(),
+                        lines: vec![line],
+                    }))
+                },
+            )
+            .await?;
+            let args = vec![artifact.path.to_string_lossy().into()];
+            prepared = Some(artifact);
+            (
+                PathBuf::from("/bin/bash"),
+                args,
+                if std::env::consts::ARCH == "aarch64" {
+                    "/opt/homebrew"
+                } else {
+                    "/usr/local"
+                }
+                .to_owned(),
+                None,
+            )
+        } else {
+            let brew = locate::locate(&settings).await?;
+            let cache = locate::read(&brew, &settings, crate::brew::args::ReadOp::Cache, None)
+                .await
+                .ok()
+                .map(PathBuf::from);
+            (
+                PathBuf::from(brew.path),
+                write_args(task.op, task.target.as_ref(), &task.options)?,
+                brew.prefix,
+                cache,
+            )
+        };
+        if cancel.load(Ordering::Acquire) {
+            return Err(AppError::new("E_INTERRUPTED", "task_canceled"));
+        }
+        let mut env = construct(&settings, &prefix, &self.askpass);
+        if task.op == TaskOp::InstallHomebrew {
+            env.insert("NONINTERACTIVE".into(), "1".into());
+        }
+        env.extend(self.extra_env.lock().map_err(poison)?.clone());
+        #[cfg(debug_assertions)]
+        if std::env::var_os("OPENNAVO_BREW_PATH").is_some() {
+            for key in [
+                "FAKE_BREW_SCENARIO",
+                "FAKE_BREW_PREFIX",
+                "FAKE_BREW_CACHE",
+                "FAKE_BREW_JSON",
+            ] {
+                if let Ok(value) = std::env::var(key) {
+                    env.insert(key.into(), value);
+                }
+            }
+        }
+        let request = Execution {
+            executable,
+            args,
+            env,
+            log_path: PathBuf::from(
+                task.log_path
+                    .as_ref()
+                    .ok_or_else(|| AppError::new("E_UNKNOWN", "missing_task_log"))?,
+            ),
+            op: task.op,
+            cancel: cancel.clone(),
+            grace: Duration::from_secs(5),
+            cache_dir: cache,
+            download_total: {
+                let database = self.database.clone();
+                let target = task.target.clone();
+                crate::blocking(move || match target {
+                    Some(target) => Ok(crate::catalog::get(&database, target.kind, &target.token)?
+                        .and_then(|i| i.download_size)),
+                    None => Ok(None),
+                })
+                .await?
+            },
+        };
+        let identity = if task.op == TaskOp::Upgrade {
+            let target = task
+                .target
+                .as_ref()
+                .ok_or_else(|| AppError::new("E_INVALID_ARG", "target"))?;
+            Some(Arc::new(
+                crate::running_apps::identity(&self.database, &settings, target).await?,
+            ))
+        } else {
+            None
+        };
+        let mut reopen = Vec::new();
+        let mut attempts = 0;
+        loop {
+            if let Some(identity) = &identity {
+                let paths = crate::running_apps::prepare(
+                    identity.clone(),
+                    self.app_control.clone(),
+                    task.options.quit_running
+                        && attempts == 0
+                        && !matches!(task.trigger, TaskTrigger::Schedule | TaskTrigger::Bundle),
+                    cancel.clone(),
+                    notify.clone(),
+                    Duration::from_secs(15),
+                )
+                .await?;
+                reopen.extend(paths);
+                // Reopened apps do not inherit quit consent; lock retries must recheck too.
+                crate::running_apps::prepare(
+                    identity.clone(),
+                    self.app_control.clone(),
+                    false,
+                    cancel.clone(),
+                    notify.clone(),
+                    Duration::ZERO,
+                )
+                .await?;
+            }
+            let queue = self.clone();
+            let id = task.id.clone();
+            let mut last_emit = Instant::now();
+            let request = request.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                execute(request, move |lines, progress| {
+                    let emit = last_emit.elapsed() >= Duration::from_millis(200);
+                    if emit {
+                        last_emit = Instant::now();
+                    }
+                    let _ = queue.progress(&id, lines, progress, emit);
+                })
+            })
+            .await
+            .map_err(|e| {
+                AppError::new("E_UNKNOWN", "executor_panicked").with_detail(e.to_string())
+            })??;
+            if result
+                .parser
+                .error
+                .as_ref()
+                .is_some_and(|e| e.code == "E_LOCKED")
+                && attempts < 3
+                && !cancel.load(Ordering::Acquire)
+            {
+                attempts += 1;
+                tokio::select! {_=tokio::time::sleep(self.retry_delay)=>{},_=notify.notified()=>{}}
+                if cancel.load(Ordering::Acquire) {
+                    return Ok(crate::brew::pty::Outcome {
+                        canceled: true,
+                        ..result
+                    });
+                }
+            } else {
+                drop(prepared);
+                if result.code == 0
+                    && !result.canceled
+                    && !cancel.load(Ordering::Acquire)
+                    && task.options.reopen
+                {
+                    for path in &reopen {
+                        let native = self.app_control.clone();
+                        let path = path.clone();
+                        if crate::blocking(move || native.reopen(&path)).await.is_err() {
+                            log::warn!("Update succeeded, but reopening the app failed");
+                        }
+                    }
+                }
+                return Ok(result);
+            }
+        }
+    }
+    fn finish(
+        &self,
+        id: &str,
+        result: Result<crate::brew::pty::Outcome, AppError>,
+    ) -> Result<Task, AppError> {
+        let mut tasks = self.tasks.lock().map_err(poison)?;
+        let task = tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+            .ok_or_else(|| AppError::new("E_UNKNOWN", "missing_task"))?;
+        match result {
+            Ok(result) => {
+                task.exit_code = Some(result.code);
+                task.state = if result.canceled {
+                    TaskState::Canceled
+                } else if result.code == 0 {
+                    TaskState::Succeeded
+                } else {
+                    TaskState::Failed
+                };
+                if task.state == TaskState::Failed {
+                    task.error = Some(result.parser.error.unwrap_or_else(|| {
+                        AppError::new("E_UNKNOWN", "brew_exit").with_detail(result.code.to_string())
+                    }));
+                }
+                if task.state == TaskState::Succeeded {
+                    task.percent = Some(100.0);
+                    task.phase = Some(TaskPhase::Finishing);
+                    task.step_index = task.step_count.map(|n| n - 1);
+                }
+                task.from_version = result.parser.from_version.or(task.from_version.take());
+                task.to_version = result.parser.to_version.or(task.to_version.take());
+            }
+            Err(error) => {
+                let canceled = self
+                    .controls
+                    .lock()
+                    .map_err(poison)?
+                    .get(id)
+                    .is_some_and(|control| control.cancel.load(Ordering::Acquire));
+                task.state = if canceled || crate::running_apps::deferred(&error) {
+                    TaskState::Canceled
+                } else {
+                    TaskState::Failed
+                };
+                if !canceled {
+                    task.error = Some(error);
+                }
+            }
+        }
+        task.finished_at = Some(chrono::Utc::now().timestamp_millis());
+        self.database.save_task(task)?;
+        self.controls.lock().map_err(poison)?.remove(id);
+        (self.sink)(CoreEvent::Task(task.clone()));
+        Ok(task.clone())
+    }
+    async fn run(self: Arc<Self>) {
+        while !self.stopping.load(Ordering::Acquire) {
+            let notified = self.wake.notified();
+            let queue = self.clone();
+            let task = match crate::blocking(move || queue.next()).await {
+                Ok(Some(task)) => task,
+                Ok(None) => {
+                    notified.await;
+                    continue;
+                }
+                Err(error) => {
+                    log::error!("Task queue stopped: {}", error.code);
+                    break;
+                }
+            };
+            let gate = if task.op == TaskOp::Update {
+                Some(self.read_gate.clone().write_owned().await)
+            } else {
+                None
+            };
+            let result = self.execute_task(&task).await;
+            drop(gate);
+            let queue = self.clone();
+            let id = task.id.clone();
+            if let Ok(task) = crate::blocking(move || queue.finish(&id, result)).await {
+                let completion = self.completion.lock().ok().and_then(|hook| hook.clone());
+                if !self.is_stopping()
+                    && let Some(completion) = completion
+                {
+                    completion(task.clone()).await;
+                }
+                if task.op == TaskOp::Cleanup && task.state == TaskState::Succeeded {
+                    let database = self.database.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        database.prune(chrono::Utc::now().timestamp_millis())
+                    })
+                    .await;
+                }
+            }
+        }
+    }
+}
+fn poison<T>(_: std::sync::PoisonError<T>) -> AppError {
+    AppError::new("E_UNKNOWN", "queue_poisoned")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    fn fixture(
+        scenario: &str,
+    ) -> (
+        tempfile::TempDir,
+        Arc<TaskQueue>,
+        Arc<Mutex<Vec<CoreEvent>>>,
+    ) {
+        let directory = tempfile::tempdir().expect("directory");
+        let database = Database::open(&directory.path().join("test.db")).expect("database");
+        let settings = Settings {
+            brew_path: Some(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fake-brew/brew")
+                    .to_string_lossy()
+                    .into(),
+            ),
+            ..Default::default()
+        };
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let output = events.clone();
+        let mut queue = TaskQueue::new(
+            database,
+            Arc::new(RwLock::new(settings)),
+            directory.path().join("logs"),
+            directory.path().join("askpass"),
+            Arc::new(move |event| output.lock().expect("events").push(event)),
+        )
+        .expect("queue");
+        crate::running_apps::tests::cache_apps(&queue.database, &["calibre"]);
+        Arc::get_mut(&mut queue).expect("unique queue").app_control =
+            Arc::new(crate::running_apps::tests::FakeApps::default());
+        Arc::get_mut(&mut queue).expect("unique queue").retry_delay = Duration::from_millis(20);
+        queue
+            .extra_env
+            .lock()
+            .expect("environment")
+            .insert("FAKE_BREW_SCENARIO".into(), scenario.into());
+        (directory, queue, events)
+    }
+    fn target(token: &str) -> TaskTarget {
+        TaskTarget {
+            kind: Kind::Cask,
+            token: token.into(),
+        }
+    }
+    async fn terminal(queue: &TaskQueue, id: &str) -> Task {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let task = queue
+                    .database
+                    .tasks()
+                    .expect("task")
+                    .into_iter()
+                    .find(|t| t.id == id)
+                    .expect("exists");
+                if !matches!(task.state, TaskState::Queued | TaskState::Running) {
+                    return task;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("terminal state timeout")
+    }
+    #[tokio::test]
+    async fn five_scenarios_cancel_retry_and_logs() {
+        for (scenario, code) in [
+            ("install_ok", None),
+            ("checksum_fail", Some("E_CHECKSUM")),
+            ("sudo_cancel", Some("E_SUDO")),
+            ("locked", Some("E_LOCKED")),
+            ("slow", None),
+        ] {
+            let (_directory, queue, events) = fixture(scenario);
+            let task = queue
+                .enqueue(
+                    TaskOp::Install,
+                    Some(target("inkscape")),
+                    TaskOptions::default(),
+                    TaskTrigger::Manual,
+                )
+                .expect("enqueue");
+            let duplicate = queue
+                .enqueue(
+                    TaskOp::Upgrade,
+                    Some(target("inkscape")),
+                    TaskOptions::default(),
+                    TaskTrigger::Manual,
+                )
+                .expect("deduplicate");
+            assert_eq!(task.id, duplicate.id);
+            queue.start();
+            if scenario == "slow" {
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    loop {
+                        if queue.active().expect("active")[0].state == TaskState::Running {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("start");
+                // Wait for actual simulator output to avoid canceling before process startup on busy machines.
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        if queue
+                            .log(&task.id, None)
+                            .expect("logs")
+                            .contains("==> Downloading")
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("simulator starts downloading");
+                queue.cancel(&task.id).expect("cancel");
+            }
+            let result = terminal(&queue, &task.id).await;
+            assert_eq!(
+                result.error.as_ref().map(|e| e.code.as_str()),
+                code,
+                "{scenario}"
+            );
+            assert_eq!(
+                result.state,
+                if scenario == "slow" {
+                    TaskState::Canceled
+                } else if code.is_some() {
+                    TaskState::Failed
+                } else {
+                    TaskState::Succeeded
+                }
+            );
+            let log = queue.log(&task.id, None).expect("logs");
+            assert!(log.contains("==> Downloading"));
+            if scenario == "locked" {
+                assert_eq!(
+                    log.matches("Another active Homebrew process").count(),
+                    4,
+                    "Initial attempt plus three retries"
+                );
+            }
+            {
+                let events = events.lock().expect("events");
+                assert!(events.iter().any(|e| matches!(e, CoreEvent::Log(_))));
+                assert!(
+                    events
+                        .iter()
+                        .any(|e| matches!(e,CoreEvent::Task(t) if t.state==result.state))
+                );
+            }
+            if scenario == "checksum_fail" {
+                queue
+                    .extra_env
+                    .lock()
+                    .expect("environment")
+                    .insert("FAKE_BREW_SCENARIO".into(), "install_ok".into());
+                let retry = queue
+                    .enqueue(
+                        TaskOp::Install,
+                        Some(target("inkscape")),
+                        TaskOptions::default(),
+                        TaskTrigger::Retry,
+                    )
+                    .expect("retry");
+                assert_ne!(retry.id, task.id);
+                assert_eq!(
+                    queue
+                        .database
+                        .meta(&format!("task_retry_parent:{}", retry.id))
+                        .expect("relationship"),
+                    Some(task.id.clone())
+                );
+                assert_eq!(
+                    terminal(&queue, &retry.id).await.state,
+                    TaskState::Succeeded
+                );
+            }
+            queue.shutdown();
+        }
+    }
+    #[tokio::test]
+    async fn priorities_serial_execution_and_queued_cancellation() {
+        let (_directory, queue, events) = fixture("install_ok");
+        let bundle = queue
+            .enqueue(
+                TaskOp::Install,
+                Some(target("bundle")),
+                TaskOptions::default(),
+                TaskTrigger::Bundle,
+            )
+            .expect("batch");
+        let scheduled = queue
+            .enqueue(
+                TaskOp::Install,
+                Some(target("schedule")),
+                TaskOptions::default(),
+                TaskTrigger::Schedule,
+            )
+            .expect("scheduled");
+        let manual = queue
+            .enqueue(
+                TaskOp::Install,
+                Some(target("manual")),
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .expect("manual");
+        queue.cancel(&scheduled.id).expect("cancel queued task");
+        queue.start();
+        assert_eq!(
+            terminal(&queue, &bundle.id).await.state,
+            TaskState::Succeeded
+        );
+        assert_eq!(
+            terminal(&queue, &manual.id).await.state,
+            TaskState::Succeeded
+        );
+        let mut running: Vec<_> = events
+            .lock()
+            .expect("events")
+            .iter()
+            .filter_map(|e| {
+                if let CoreEvent::Task(t) = e {
+                    if t.state == TaskState::Running && t.phase == Some(TaskPhase::Preparing) {
+                        Some((t.id.clone(), t.started_at))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // Progress heartbeats may repeat Preparing before the simulator produces output.
+        // Compare execution transitions, retaining started_at so a second start is not hidden.
+        running.dedup();
+        assert_eq!(
+            running.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            vec![manual.id.clone(), bundle.id.clone()]
+        );
+        let ended = queue.database.tasks().expect("persist");
+        let manual = ended.iter().find(|t| t.id == manual.id).expect("manual");
+        let bundle = ended.iter().find(|t| t.id == bundle.id).expect("batch");
+        assert!(bundle.started_at >= manual.finished_at);
+        queue.shutdown();
+    }
+    #[tokio::test]
+    async fn startup_marks_interrupted_and_requires_manual_resume() {
+        let (directory, queue, _) = fixture("install_ok");
+        let mut interrupted = queue
+            .enqueue(
+                TaskOp::Install,
+                Some(target("interrupted")),
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .expect("task");
+        interrupted.state = TaskState::Running;
+        queue.database.save_task(&interrupted).expect("persist");
+        let queued = queue
+            .enqueue(
+                TaskOp::Install,
+                Some(target("queued")),
+                TaskOptions::default(),
+                TaskTrigger::Bundle,
+            )
+            .expect("queued");
+        let recovered = TaskQueue::new(
+            queue.database.clone(),
+            queue.settings.clone(),
+            directory.path().join("logs"),
+            directory.path().join("askpass"),
+            Arc::new(|_| {}),
+        )
+        .expect("recover");
+        let ended = queue
+            .database
+            .tasks()
+            .expect("record")
+            .into_iter()
+            .find(|t| t.id == interrupted.id)
+            .expect("interrupt");
+        assert_eq!(ended.error.expect("error").code, "E_INTERRUPTED");
+        assert_eq!(ended.state, TaskState::Failed);
+        recovered.start();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            recovered.active().expect("paused")[0].state,
+            TaskState::Queued
+        );
+        let resumed = recovered
+            .enqueue(
+                TaskOp::Install,
+                Some(target("queued")),
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .expect("continue");
+        assert_eq!(resumed.id, queued.id);
+        assert_eq!(
+            terminal(&recovered, &queued.id).await.state,
+            TaskState::Succeeded
+        );
+        recovered.shutdown();
+        queue.shutdown();
+    }
+    #[test]
+    fn history_clear_preserves_active_tasks() {
+        let (_directory, queue, _) = fixture("install_ok");
+        let task = queue
+            .enqueue(
+                TaskOp::Upgrade,
+                Some(target("calibre")),
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .expect("queued");
+        for (index, state) in [
+            TaskState::Succeeded,
+            TaskState::Failed,
+            TaskState::Canceled,
+            TaskState::Running,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut copy = task.clone();
+            copy.id = format!("clear-{index}");
+            copy.state = state;
+            queue.database.save_task(&copy).expect("save");
+        }
+        assert_eq!(queue.database.clear_history().expect("clear"), 3);
+        let retained = queue.database.tasks().expect("read");
+        assert_eq!(retained.len(), 2);
+        assert!(
+            retained
+                .iter()
+                .all(|task| matches!(task.state, TaskState::Queued | TaskState::Running))
+        );
+        assert_eq!(queue.database.clear_history().expect("clear again"), 0);
+    }
+
+    #[tokio::test]
+    async fn history_export_is_persistent_and_filtered() {
+        let (directory, queue, _) = fixture("install_ok");
+        let task = queue
+            .enqueue(
+                TaskOp::Upgrade,
+                Some(target("calibre")),
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .expect("update");
+        queue.start();
+        terminal(&queue, &task.id).await;
+        let query = HistoryQuery {
+            q: Some("CALIBRE".into()),
+            ops: vec![TaskOp::Upgrade],
+            states: vec![TaskState::Succeeded],
+            target: None,
+            include_scheduled_updates: false,
+            from: None,
+            to: None,
+            limit: 20,
+            offset: 0,
+        };
+        let page = queue.database.history(&query).expect("history");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].from_version.as_deref(), Some("5.4.2"));
+        assert!(
+            queue
+                .database
+                .history(&HistoryQuery {
+                    states: vec![TaskState::Running],
+                    ..query
+                })
+                .is_err()
+        );
+        let path = directory.path().join("history.csv");
+        assert_eq!(
+            crate::commands::tasks::export_csv(&queue.database, &path).expect("export"),
+            1
+        );
+        assert!(
+            std::fs::read_to_string(path)
+                .expect("CSV")
+                .contains("5.5.0")
+        );
+        queue.shutdown();
+    }
+    #[tokio::test]
+    async fn catalog_and_installed_cache_supply_task_versions_and_download_size() {
+        let (_tmp, queue, events) = fixture("install_ok");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../apps/server/testdata/desktop");
+        let info: crate::catalog::SnapshotInfo =
+            serde_json::from_slice(&std::fs::read(path.join("latest.json")).unwrap()).unwrap();
+        crate::catalog::import_file(&queue.database, &path.join("catalog.json.gz"), &info, 1)
+            .unwrap();
+        let catalog = crate::catalog::get(&queue.database, Kind::Cask, "visual-studio-code")
+            .unwrap()
+            .unwrap();
+        let task = queue
+            .enqueue(
+                TaskOp::Install,
+                Some(target("visual-studio-code")),
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .unwrap();
+        queue.start();
+        let result = terminal(&queue, &task.id).await;
+        assert_eq!(result.to_version, Some(catalog.version));
+        assert!(events.lock().unwrap().iter().any(|event|matches!(event,CoreEvent::Task(t) if t.id==task.id && t.bytes_total==catalog.download_size && t.bytes_total.is_some())));
+        queue.shutdown();
+    }
+    #[tokio::test]
+    async fn homebrew_installer_downloads_local_file_executes_and_refreshes_environment() {
+        use std::io::{Read, Write};
+        let tmp = tempfile::tempdir().unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let saved = events.clone();
+        let core = crate::core::DesktopCore::open(
+            tmp.path().join("data"),
+            tmp.path().join("cache"),
+            tmp.path().join("askpass"),
+            Arc::new(move |event| saved.lock().unwrap().push(event)),
+        )
+        .unwrap();
+        let destination = tmp.path().join("prefix/bin/brew");
+        {
+            let mut settings = core.settings.write().unwrap();
+            settings.brew_path = Some(destination.to_string_lossy().into());
+            settings.mirror = MirrorChoice {
+                key: "local_test".into(),
+                api_domain: Some("https://api.example.test".into()),
+                brew_git_remote: Some("https://git.example.test/brew".into()),
+                bottle_domain: None,
+                core_git_remote: None,
+            };
+        }
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/install.sh", server.local_addr().unwrap());
+        let worker = std::thread::spawn(move || {
+            let (mut socket, _) = server.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut input = [0; 8192];
+            assert!(socket.read(&mut input).unwrap() > 0);
+            let body = include_str!("../tests/fixtures/install_homebrew.sh");
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        *core.queue.installer_url.lock().unwrap() = Some(url);
+        {
+            let mut env = core.queue.extra_env.lock().unwrap();
+            env.insert(
+                "FAKE_INSTALL_DEST".into(),
+                destination.to_string_lossy().into(),
+            );
+            env.insert(
+                "FAKE_INSTALL_SOURCE".into(),
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fake-brew/brew")
+                    .to_string_lossy()
+                    .into(),
+            );
+        }
+        core.queue.start();
+        let task = core
+            .queue
+            .enqueue(
+                TaskOp::InstallHomebrew,
+                None,
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .unwrap();
+        let result = terminal(&core.queue, &task.id).await;
+        assert_eq!(result.state, TaskState::Succeeded, "{:?}", result.error);
+        tokio::time::timeout(Duration::from_secs(5),async { while !events.lock().unwrap().iter().any(|e| matches!(e,CoreEvent::Env(info) if info.brew.as_ref().is_some_and(|brew| brew.path==destination.to_string_lossy()))) { tokio::time::sleep(Duration::from_millis(10)).await; } }).await.unwrap();
+        assert!(
+            core.queue
+                .log(&task.id, None)
+                .unwrap()
+                .contains("Installation successful")
+        );
+        assert!(
+            write_args(
+                TaskOp::InstallHomebrew,
+                Some(&target("foo")),
+                &TaskOptions::default()
+            )
+            .is_err()
+        );
+        assert_eq!(
+            crate::installer::source(&Settings::default()),
+            &[crate::installer::OFFICIAL]
+        );
+        assert_eq!(
+            crate::installer::source(&core.current_settings().unwrap()),
+            &[crate::installer::MIRROR, crate::installer::OFFICIAL]
+        );
+        worker.join().unwrap();
+        core.queue.shutdown();
+    }
+    #[tokio::test]
+    async fn installer_download_can_cancel_and_sudo_failure_is_mapped() {
+        use std::io::{Read, Write};
+        for canceled in [true, false] {
+            let (_tmp, queue, _) = fixture("install_ok");
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/install.sh", listener.local_addr().unwrap());
+            let accepted = Arc::new(AtomicBool::new(false));
+            let flag = accepted.clone();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut input = [0; 4096];
+                assert!(socket.read(&mut input).unwrap() > 0);
+                flag.store(true, Ordering::Release);
+                if canceled {
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                let body = "#!/bin/bash\n# Homebrew test installer\nprintf 'sudo: a password is required\\n'\nexit 1\n";
+                let _ = write!(
+                    socket,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            });
+            *queue.installer_url.lock().unwrap() = Some(url);
+            queue.start();
+            let task = queue
+                .enqueue(
+                    TaskOp::InstallHomebrew,
+                    None,
+                    TaskOptions::default(),
+                    TaskTrigger::Manual,
+                )
+                .unwrap();
+            if canceled {
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while !accepted.load(Ordering::Acquire) {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                queue.cancel(&task.id).unwrap();
+            }
+            let result = terminal(&queue, &task.id).await;
+            if canceled {
+                assert_eq!(result.state, TaskState::Canceled);
+            } else {
+                assert_eq!(result.state, TaskState::Failed);
+                assert_eq!(result.error.unwrap().code, "E_SUDO");
+            }
+            server.join().unwrap();
+            queue.shutdown();
+        }
+    }
+    #[tokio::test]
+    async fn permission_failure_then_upgrade_emits_only_changes_and_survives_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let output = events.clone();
+        // Test only outcome-based inference/persistence, without system preflight.
+        let open = || {
+            let core = crate::core::DesktopCore::open(
+                tmp.path().join("data"),
+                tmp.path().join("cache"),
+                tmp.path().join("askpass"),
+                Arc::new(|_| {}),
+            )
+            .unwrap();
+            core.infer_permissions_only();
+            core
+        };
+        let core = crate::core::DesktopCore::open(
+            tmp.path().join("data"),
+            tmp.path().join("cache"),
+            tmp.path().join("askpass"),
+            Arc::new(move |event| output.lock().unwrap().push(event)),
+        )
+        .unwrap();
+        core.infer_permissions_only();
+        // Sync scans also read simulated app metadata so completion callbacks cannot replace running-state preflight cache with an empty directory.
+        let app_path = tmp.path().join("Example.app");
+        std::fs::create_dir_all(app_path.join("Contents")).unwrap();
+        std::fs::write(app_path.join("Contents/Info.plist"), "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>test.example</string></dict></plist>").unwrap();
+        let wrapper = tmp.path().join("brew");
+        let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake-brew/brew");
+        std::fs::write(&wrapper, format!(r#"#!/usr/bin/python3 -I
+import json, os, sys
+if sys.argv[1:2] == ['info']:
+    print(json.dumps({{'casks':[{{'token':'example','version':'1','installed':'1','artifacts':[{{'app':[{app_path:?}]}}]}}]}}))
+else:
+    os.execv({fake:?}, [{fake:?}] + sys.argv[1:])
+"#)).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        core.settings.write().unwrap().brew_path = Some(wrapper.to_string_lossy().into());
+        crate::settings::save_file(
+            &core.data_dir.join("settings.json"),
+            &core.current_settings().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            core.detect_environment().await.unwrap().app_management,
+            PermissionState::Unknown
+        );
+        core.queue.start();
+        for (scenario, op, state, count) in [
+            (
+                "permission_denied",
+                TaskOp::Upgrade,
+                PermissionState::Denied,
+                1,
+            ),
+            (
+                "permission_denied",
+                TaskOp::Upgrade,
+                PermissionState::Denied,
+                1,
+            ),
+            ("install_ok", TaskOp::Install, PermissionState::Denied, 1),
+            ("install_ok", TaskOp::Upgrade, PermissionState::Granted, 2),
+            ("install_ok", TaskOp::Uninstall, PermissionState::Granted, 2),
+        ] {
+            crate::running_apps::tests::cache_apps(&core.database, &["example"]);
+            core.queue
+                .extra_env
+                .lock()
+                .unwrap()
+                .insert("FAKE_BREW_SCENARIO".into(), scenario.into());
+            let task = core
+                .queue
+                .enqueue(
+                    op,
+                    Some(target("example")),
+                    TaskOptions::default(),
+                    TaskTrigger::Manual,
+                )
+                .unwrap();
+            let ended = terminal(&core.queue, &task.id).await;
+            if scenario == "permission_denied" {
+                assert_eq!(ended.error.as_ref().unwrap().code, "E_PERMISSION");
+                assert!(
+                    core.queue
+                        .log(&task.id, None)
+                        .unwrap()
+                        .contains("/Applications/Example.app: Operation not permitted")
+                );
+            } else {
+                assert_eq!(ended.state, TaskState::Succeeded);
+            }
+            // Do not start the next task before its predecessor's completion callback; await this callback's final notification.
+            tokio::time::timeout(Duration::from_secs(8), async {
+                loop {
+                    if core.database.meta("app_management").unwrap().as_deref()
+                        == Some(if state == PermissionState::Denied {
+                            "denied"
+                        } else {
+                            "granted"
+                        })
+                        && events
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|event| matches!(event, CoreEvent::Env(_)))
+                            .count()
+                            == count
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                core.detect_environment().await.unwrap().app_management,
+                state
+            );
+            assert_eq!(
+                open().detect_environment().await.unwrap().app_management,
+                state
+            );
+        }
+        core.queue.shutdown();
+    }
+    #[tokio::test]
+    async fn running_update_is_deferred_without_brew_and_next_task_continues() {
+        use crate::running_apps::tests::{FakeApps, cache_apps, process};
+        let (_tmp, mut queue, _) = fixture("install_ok");
+        cache_apps(&queue.database, &["target", "other"]);
+        let apps = Arc::new(FakeApps::default());
+        apps.processes.lock().unwrap().push(process("target", 1));
+        Arc::get_mut(&mut queue).unwrap().app_control = apps.clone();
+        let blocked = queue
+            .enqueue(
+                TaskOp::Upgrade,
+                Some(target("target")),
+                TaskOptions::default(),
+                TaskTrigger::Schedule,
+            )
+            .unwrap();
+        let next = queue
+            .enqueue(
+                TaskOp::Upgrade,
+                Some(target("other")),
+                TaskOptions::default(),
+                TaskTrigger::Schedule,
+            )
+            .unwrap();
+        queue.start();
+        let ended = terminal(&queue, &blocked.id).await;
+        assert_eq!(ended.state, TaskState::Canceled);
+        assert_eq!(ended.error.unwrap().code, "E_APP_RUNNING");
+        assert_eq!(ended.exit_code, None);
+        assert!(queue.log(&blocked.id, None).unwrap().is_empty());
+        assert_eq!(terminal(&queue, &next.id).await.state, TaskState::Succeeded);
+        assert!(apps.quits.lock().unwrap().is_empty());
+        queue.shutdown();
+    }
+
+    #[tokio::test]
+    async fn confirmed_update_reopens_only_on_success_and_refusal_skips_brew() {
+        use crate::running_apps::tests::{FakeApps, cache_apps, process};
+        for (scenario, refused, expected) in [
+            ("install_ok", false, TaskState::Succeeded),
+            ("checksum_fail", false, TaskState::Failed),
+            ("install_ok", true, TaskState::Canceled),
+        ] {
+            let (_tmp, mut queue, _) = fixture(scenario);
+            cache_apps(&queue.database, &["target"]);
+            let apps = Arc::new(FakeApps::default());
+            apps.processes.lock().unwrap().push(process("target", 1));
+            apps.refuse.store(refused, Ordering::Release);
+            Arc::get_mut(&mut queue).unwrap().app_control = apps.clone();
+            let options = TaskOptions {
+                quit_running: true,
+                reopen: true,
+                ..Default::default()
+            };
+            assert!(
+                queue
+                    .enqueue(
+                        TaskOp::Upgrade,
+                        Some(target("target")),
+                        options.clone(),
+                        TaskTrigger::Schedule
+                    )
+                    .is_err()
+            );
+            let task = queue
+                .enqueue(
+                    TaskOp::Upgrade,
+                    Some(target("target")),
+                    options,
+                    TaskTrigger::Manual,
+                )
+                .unwrap();
+            queue.start();
+            let ended = terminal(&queue, &task.id).await;
+            assert_eq!(ended.state, expected);
+            assert_eq!(
+                apps.reopened.lock().unwrap().len(),
+                usize::from(expected == TaskState::Succeeded)
+            );
+            if refused {
+                assert!(queue.log(&task.id, None).unwrap().is_empty());
+            }
+            queue.shutdown();
+        }
+    }
+
+    #[test]
+    fn restart_drops_quit_authorization() {
+        let (_tmp, queue, _) = fixture("install_ok");
+        queue
+            .enqueue(
+                TaskOp::Upgrade,
+                Some(target("target")),
+                TaskOptions {
+                    quit_running: true,
+                    reopen: true,
+                    ..Default::default()
+                },
+                TaskTrigger::Manual,
+            )
+            .unwrap();
+        let recovered = queue.database.recover_tasks(1).unwrap();
+        assert!(!recovered[0].options.quit_running);
+        assert!(!recovered[0].options.reopen);
+    }
+}

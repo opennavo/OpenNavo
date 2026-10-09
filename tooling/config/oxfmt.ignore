@@ -1,0 +1,15 @@
+apps/admin/**
+apps/server/**
+docs/**
+docs/design/**
+packages/tokens/dist/**
+packages/tokens/tokens.json
+pnpm-lock.yaml
+packages/api/src/public.d.ts
+packages/api/src/admin.d.ts
+packages/ui/src/icons/lucide.ts
+apps/desktop/src/ipc/bindings.ts
+apps/desktop/src/ipc/mock-data/catalog.json
+apps/desktop/src-tauri/**
+docs/legal/third-party/**
+apps/mcp/third-party/**

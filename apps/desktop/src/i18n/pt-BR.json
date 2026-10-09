@@ -1,0 +1,852 @@
+{
+  "app": {
+    "name": "OpenNavo"
+  },
+  "nav": {
+    "browse": "Explorar",
+    "mine": "Minha conta",
+    "discover": "Descobrir",
+    "categories": "Categorias",
+    "rankings": "Ranking",
+    "installed": "Instalados",
+    "updates": "Atualizações",
+    "history": "Histórico de atualizações",
+    "settings": "Configurações",
+    "updatesBadge": "{count} atualização disponível | {count} atualizações disponíveis"
+  },
+  "env": {
+    "label": "Homebrew",
+    "checking": "Verificando…",
+    "checkingHint": "Lendo o ambiente Homebrew local",
+    "ready": "Homebrew disponível",
+    "noBrew": "Homebrew não instalado",
+    "noBrewHint": "Clique para iniciar a instalação",
+    "version": "{version} · {arch}",
+    "mirrors": {
+      "official": "Fonte oficial",
+      "tuna": "Espelho TUNA da Universidade de Tsinghua",
+      "ustc": "Espelho USTC da Universidade de Ciência e Tecnologia da China",
+      "aliyun": "Espelho do Alibaba Cloud"
+    }
+  },
+  "toolbar": {
+    "back": "Voltar",
+    "forward": "Avançar",
+    "search": "Pesquisar {count} app | Pesquisar {count} apps",
+    "searchShort": "Buscar apps",
+    "taskRunning": "{action} {name}",
+    "taskQueued": "Mais {count} na fila | Mais {count} na fila"
+  },
+  "rail": {
+    "title": "Visão geral",
+    "subtitle": "Status local do Homebrew",
+    "installed": "Instalados",
+    "updates": "Atualizações disponíveis",
+    "updatesHint": "Download de cerca de {size}",
+    "updatesNone": "Tudo atualizado",
+    "disk": "Uso de disco",
+    "diskHint": "Incluindo cache: {size}",
+    "lastCheck": "Última verificação",
+    "lastCheckAuto": "Automático todos os dias às {time}",
+    "lastCheckManual": "Verificação automática desativada",
+    "never": "Ainda não verificado",
+    "weeklyTop": "Em alta nesta semana",
+    "weeklyTopHint": "Instalações de apps nos últimos 30 dias"
+  },
+  "common": {
+    "empty": "Ainda não há conteúdo",
+    "refreshFailed": "Não foi possível carregar parte do conteúdo. O conteúdo carregado anteriormente foi mantido.",
+    "notFound": "Este conteúdo está indisponível ou foi removido",
+    "loadMore": "Carregar mais",
+    "viewAll": "Ver tudo",
+    "viewRankings": "Ver ranking",
+    "retry": "Tentar novamente",
+    "loading": "Carregando…",
+    "more": "Mais ações",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "cancel": "Cancelar",
+    "close": "Fechar",
+    "count": "{count} app | {count} apps"
+  },
+  "offline": {
+    "title": "Não foi possível conectar ao serviço OpenNavo",
+    "description": "Exibindo o catálogo local; capturas de tela, histórico de versões e coleções ficam disponíveis quando houver conexão com a internet."
+  },
+  "discover": {
+    "featured": "Destaques da semana",
+    "viewDetails": "Ver detalhes",
+    "allCategories": "Todos",
+    "categoriesLabel": "Categorias",
+    "popularApps": "Apps populares",
+    "popularAppsHint": "Instalações do Homebrew nos últimos 30 dias",
+    "recentlyUpdated": "Atualizados recentemente",
+    "recentlyUpdatedHint": "Apps com novas versões lançadas recentemente",
+    "collections": "Coleções",
+    "installCollection": "Coleções para instalar com um clique",
+    "collectionCount": "{title} · {count} app | {title} · {count} apps"
+  },
+  "categories": {
+    "title": "Categorias",
+    "subtitle": "{count} categoria para explorar por finalidade | {count} categorias para explorar por finalidade",
+    "packages": "{count} app | {count} apps",
+    "empty": "Ainda não há pacotes nesta categoria",
+    "sortLabel": "Ordenar",
+    "sorts": {
+      "popular": "Populares",
+      "updated": "Atualizados recentemente",
+      "name": "Nome"
+    }
+  },
+  "rankings": {
+    "title": "Ranking",
+    "subtitle": "Estatísticas oficiais de instalação do Homebrew, atualizadas diariamente",
+    "periodLabel": "Período",
+    "periods": {
+      "installs30d": "30 dias",
+      "installs90d": "90 dias",
+      "installs365d": "Um ano"
+    },
+    "noStats": "Sem estatísticas"
+  },
+  "search": {
+    "title": "Buscar",
+    "results": "{count} resultado para “{q}” | {count} resultados para “{q}”",
+    "empty": "Nenhum resultado para “{q}”",
+    "emptyHint": "Tente outra palavra-chave ou busque pelo nome em inglês ou pela abreviação em pinyin",
+    "alias": "Aliases: {name}",
+    "prompt": "Digite um nome, finalidade ou comando para começar a busca"
+  },
+  "collections": {
+    "title": "Coleções",
+    "subtitle": "Selecione uma combinação de apps e instale todos de uma vez",
+    "empty": "Ainda não há coleções",
+    "items": "{count} app | {count} apps",
+    "install": "Coleções para instalar com um clique",
+    "installTitle": "Instalar a coleção “{title}”",
+    "installDescription": "{count} pacote será instalado em sequência. Os já instalados serão ignorados. | {count} pacotes serão instalados em sequência. Os já instalados serão ignorados.",
+    "installConfirm": "Começar a instalação",
+    "allInstalled": "Todos os pacotes da coleção já estão instalados",
+    "installed": "Instalados",
+    "queued": "{count} adicionado à fila | {count} adicionados à fila",
+    "offline": "A coleção fica disponível quando houver conexão com a internet"
+  },
+  "package": {
+    "arch": {
+      "arm64": "Apple Silicon",
+      "x86_64": "Intel"
+    },
+    "autoUpdates": "Atualização integrada",
+    "disabled": "Desativado",
+    "deprecated": "Descontinuado",
+    "homepage": "Página inicial",
+    "fromTap": "Fonte",
+    "stats": {
+      "label": "Dados",
+      "installs30d": "Instalações nos últimos 30 dias",
+      "rank": "{kind}º lugar: {rank}",
+      "installs365d": "Instalações no último ano",
+      "total365": "Total em 365 dias",
+      "latest": "Versão mais recente",
+      "size": "Tamanho do download",
+      "cadence": "Frequência de atualizações",
+      "releases30d": "{count} versão nos últimos 30 dias | {count} versões nos últimos 30 dias"
+    },
+    "cadence": {
+      "daily": "Diariamente",
+      "weekly": "Semanalmente",
+      "biweekly": "A cada duas semanas",
+      "monthly": "Mensalmente",
+      "irregular": "Irregular"
+    },
+    "tabs": {
+      "label": "Abas de detalhes",
+      "overview": "Visão geral",
+      "versions": "Histórico de versões",
+      "dependencies": "Dependências e conflitos",
+      "details": "Detalhes da instalação"
+    },
+    "disabledNotice": "O Homebrew desativou este pacote: {reason}",
+    "deprecatedNotice": "O Homebrew descontinuou este pacote: {reason}",
+    "noReason": "Motivo não informado",
+    "replacement": "Alternativa: {token}",
+    "release": {
+      "new": "Novidades",
+      "title": "Novidades da versão {version}",
+      "translated": "Traduzido para chinês",
+      "source": {
+        "github_release": "Do GitHub Releases",
+        "sparkle": "Da fonte de atualizações do app",
+        "webpage": "Da página de atualizações oficial",
+        "manual": "Organizado manualmente",
+        "editorial": "Editoria OpenNavo",
+        "homebrew": "Do histórico de commits do Homebrew"
+      },
+      "viewAll": "Ver todas as {count} versões | Ver todas as {count} versões",
+      "noNotes": "Esta versão não tem notas de atualização específicas.",
+      "emptyTitle": "Ainda não há histórico de versões",
+      "prerelease": "Pré-lançamento",
+      "filterLabel": "Filtrar versões",
+      "filterAll": "Todos {count} | Todos {count}",
+      "filterWithNotes": "Com notas {count} | Com notas {count}",
+      "filterMine": "Instalados por mim {count} | Instalados por mim {count}",
+      "languageLabel": "Idioma do conteúdo",
+      "languageTranslated": "Chinês",
+      "languageOriginal": "Original",
+      "mineEmpty": "Nenhuma das versões carregadas foi instalada por você",
+      "count30d": "Últimos 30 dias",
+      "count30dUnit": "versão | versões",
+      "cadenceHint": {
+        "daily": "Lançamentos quase diários",
+        "weekly": "Lançamentos aproximadamente semanais",
+        "biweekly": "Lançamentos aproximadamente quinzenais",
+        "monthly": "Lançamentos aproximadamente mensais",
+        "irregular": "Lançamentos irregulares"
+      },
+      "brewLabel": "Inclusão no Homebrew",
+      "brewSync": "≈ Sincronizado",
+      "brewLater": "{time} depois",
+      "brewEarlier": "{time} antes",
+      "brewHint": "{earlier}/{compared} anteriores à versão upstream",
+      "lagMinutes": "{n} min",
+      "lagHours": "{n} h",
+      "lagDays": "{n} dia | {n} dias",
+      "sourcesTitle": "Fontes dos dados",
+      "sourceInfo": {
+        "webpage": {
+          "title": "Página de atualizações oficial",
+          "body": "Principais informações extraídas da página de notas de atualização do site do desenvolvedor"
+        },
+        "github_release": {
+          "title": "GitHub Releases",
+          "body": "Notas de versão e datas de lançamento publicadas pelo projeto no GitHub"
+        },
+        "sparkle": {
+          "title": "Fonte de atualizações do app",
+          "body": "Appcast do Sparkle usado pelo verificador de atualizações integrado ao app"
+        },
+        "manual": {
+          "title": "Organizado manualmente",
+          "body": "Organizado pela equipe com base em anúncios oficiais"
+        },
+        "editorial": {
+          "title": "Editoria OpenNavo",
+          "body": "Notas de atualização escritas pelo OpenNavo com base em informações oficiais"
+        },
+        "homebrew": {
+          "title": "Histórico de commits do Homebrew",
+          "body": "Commit de atualização da versão deste pacote no repositório do Homebrew, com a data de inclusão"
+        },
+        "local": {
+          "title": "Histórico local",
+          "body": "Cada instalação e atualização que você fez pelo OpenNavo"
+        }
+      },
+      "localUpgrade": "Em {time}, você atualizou para esta versão pelo OpenNavo, de {from} · Duração: {duration}",
+      "localInstall": "Em {time}, você instalou esta versão pelo OpenNavo · Duração: {duration}",
+      "notify": "Notificar quando houver uma nova versão",
+      "notifyHint": "Para todos os apps · Notificações do sistema + indicador no menu",
+      "pin": "Fixar na versão atual",
+      "pinHint": "Equivale a brew pin; ignorado por “Atualizar tudo”",
+      "pinHintSelfUpdate": "Equivale a brew pin; mas o atualizador integrado de {name} ainda pode atualizá-lo"
+    },
+    "monthly": {
+      "title": "Média mensal de instalações",
+      "d30": "Últimos 30 dias",
+      "avg90": "Média mensal nos últimos 90 dias",
+      "avg365": "Média mensal no último ano",
+      "full": "{count} instalação | {count} instalações",
+      "trend": {
+        "rising": "As instalações recentes estão aumentando",
+        "slowing": "As instalações recentes estão diminuindo; a maioria dos usuários antigos atualiza pelo próprio app",
+        "steady": "Instalações estáveis"
+      }
+    },
+    "related": "Apps semelhantes",
+    "screenshots": "Capturas de tela",
+    "caveats": "Observações",
+    "info": {
+      "homepage": "Página inicial",
+      "binaries": "Comandos incluídos",
+      "autoUpdates": "Atualização automática",
+      "autoYes": "Integrada ao app (auto_updates)",
+      "autoNo": "Atualizado pelo Homebrew",
+      "uninstall": "Ao desinstalar",
+      "arch": "Arquitetura",
+      "minMacos": "Sistema mínimo",
+      "license": "Licença"
+    },
+    "deps": {
+      "macos": "Requisitos do sistema",
+      "formulae": "Ferramentas de linha de comando necessárias",
+      "casks": "Apps necessários",
+      "emptyTitle": "Sem dependências",
+      "emptyDescription": "A instalação não incluirá outros pacotes.",
+      "runtime": "Dependências de execução",
+      "build": "Dependências de compilação",
+      "other": "Outros:",
+      "type": {
+        "runtime": "Execução",
+        "build": "Compilação",
+        "test": "Teste",
+        "optional": "Opcional",
+        "recommended": "Recomendado",
+        "usesFromMacos": "Usar o que vem com o sistema",
+        "cask": "Apps"
+      },
+      "conflicts": "Conflitos",
+      "dependents": "Usado por {count} pacote | Usado por {count} pacotes"
+    },
+    "details": {
+      "tap": "Repositório de origem",
+      "names": "Outros nomes",
+      "location": "Local de instalação",
+      "pkgs": "Pacote de instalação",
+      "kegOnly": "keg-only",
+      "kegOnlyValue": "Não é vinculado a /opt/homebrew; é preciso adicioná-lo manualmente ao PATH",
+      "download": "Endereço de download",
+      "source": "Arquivo de definição do Homebrew",
+      "repo": "Código-fonte"
+    },
+    "installed": "Versão {version} instalada",
+    "installedSelfUpdated": "Versão {version} instalada (o app se atualizou automaticamente)",
+    "installedAt": "Instalado em {date}",
+    "updateTo": "Atualizar para {version}",
+    "open": "Abrir",
+    "getNeedsBrew": "Instale o Homebrew primeiro",
+    "actions": {
+      "label": "Mais ações",
+      "uninstall": "Desinstalar",
+      "reinstall": "Reinstalar",
+      "pin": "Fixar versão",
+      "unpin": "Desafixar versão",
+      "reveal": "Mostrar no Finder",
+      "copyCommand": "Copiar comando brew",
+      "web": "Ver no site"
+    },
+    "uninstallConfirm": {
+      "title": "Desinstalar {name}?",
+      "description": "O comando {command} será executado.",
+      "zap": "Excluir também os dados do app (--zap)",
+      "confirm": "Desinstalar"
+    },
+    "commandCopied": "Comando brew copiado",
+    "offline": "Conecte-se à internet para ver capturas de tela e mais informações",
+    "notFound": "Este pacote não está no catálogo local",
+    "pinned": "Fixado",
+    "localSince": "Você atualizou para esta versão em {date}"
+  },
+  "library": {
+    "title": "Instalados",
+    "summary": "{count} item · {size} | {count} itens · {size}",
+    "summaryCount": "{count} item | {count} itens",
+    "filterPlaceholder": "Filtrar instalados…",
+    "refresh": "Atualizar",
+    "empty": "Você ainda não instalou nenhum software pelo Homebrew",
+    "emptyFiltered": "Nenhum item corresponde aos critérios",
+    "columns": {
+      "name": "Nome",
+      "version": "Versão",
+      "size": "Tamanho",
+      "installedAt": "Instalado em",
+      "status": "Status",
+      "actions": "Ações"
+    },
+    "status": {
+      "installed": "Instalados",
+      "latest": "Atualizado",
+      "outdated": "Atualizações disponíveis",
+      "pinned": "Fixado",
+      "selfUpdated": "Atualizado (o app se atualizou automaticamente)",
+      "running": "Atualizando {percent}",
+      "runningUnknown": "Processando",
+      "queued": "Na fila",
+      "unknown": "Desconhecido"
+    },
+    "dependency": "Dependência · Usado por {names}",
+    "storage": {
+      "title": "Armazenamento",
+      "total": "Total: {size}",
+      "caption": "Uso de disco",
+      "apps": "Apps",
+      "cache": "Cache de downloads"
+    },
+    "cleanup": {
+      "title": "Limpar cache",
+      "description": "Versões antigas e cache de downloads; equivale a brew cleanup.",
+      "button": "Liberar {size}",
+      "none": "Não há cache para limpar"
+    },
+    "backup": {
+      "title": "Backup e migração",
+      "description": "Exporte todos os pacotes para um Brewfile e restaure-os com um clique no seu novo Mac.",
+      "export": "Exportar",
+      "restore": "Restaurar",
+      "exported": "{count} pacote exportado | {count} pacotes exportados"
+    },
+    "restore": {
+      "title": "Restaurar do Brewfile",
+      "summary": "{ready} podem ser instalados · {installed} já instalados · {unsupported} não são compatíveis no momento",
+      "install": "Instalar {count} | Instalar {count}",
+      "status": {
+        "ready": "Pode ser instalado",
+        "installed": "Instalados",
+        "skipped": "Nenhuma ação necessária",
+        "unsupported": "Não compatível no momento",
+        "invalid": "Inválido",
+        "not_found": "Não encontrado"
+      }
+    },
+    "health": {
+      "title": "Verificação de integridade",
+      "ok": "brew doctor não encontrou problemas",
+      "warnings": "{count} aviso | {count} avisos",
+      "run": "Executar verificação",
+      "running": "Verificando…"
+    }
+  },
+  "updates": {
+    "title": "Atualizações",
+    "summary": "{count} atualização disponível · cerca de {size} para baixar | {count} atualizações disponíveis · cerca de {size} para baixar",
+    "summaryNone": "Tudo atualizado",
+    "lastCheck": "Última verificação {time}",
+    "check": "Verificar atualizações",
+    "checking": "Verificando…",
+    "updateAll": "Atualizar tudo",
+    "changelog": "Notas da versão",
+    "update": "Atualizações",
+    "ignore": "Ignorar esta versão",
+    "ignored": "{name} {version} ignorado",
+    "pinned": "Fixado; não será atualizado",
+    "patch": "Correções",
+    "empty": "Todos os softwares estão atualizados",
+    "emptyHint": "Novas versões aparecerão aqui",
+    "queued": "{count} adicionado à fila | {count} adicionados à fila",
+    "history": {
+      "title": "Histórico de atualizações",
+      "subtitle": "Este Mac · {count} nos últimos 30 dias | Este Mac · {count} nos últimos 30 dias",
+      "filterLabel": "Resultado",
+      "all": "Todos",
+      "succeeded": "Sucesso",
+      "failed": "Falha",
+      "today": "Hoje · {date}",
+      "yesterday": "Ontem · {date}",
+      "viewLog": "Ver registro",
+      "retry": "Tentar novamente",
+      "canceled": "Cancelado",
+      "batch": "{action} {count} {kind} | {action} {count} {kind}",
+      "empty": "Ainda não há histórico de atualizações"
+    },
+    "month": {
+      "title": "Este mês",
+      "since": "De {date} até hoje",
+      "updated": "Atualizado",
+      "updatedUnit": "vezes",
+      "successRate": "Taxa de sucesso",
+      "successHint": "{count} falha | {count} falhas"
+    },
+    "auto": {
+      "title": "Atualização automática",
+      "subtitle": "Executado conforme programado pelo assistente em segundo plano",
+      "check": "Verificar todos os dias às {time}",
+      "checkHint": "brew update + outdated",
+      "casks": "Instalar atualizações de apps automaticamente",
+      "casksHint": "Quando desativado, apenas envia notificações",
+      "greedy": "Incluir apps com atualizador próprio",
+      "greedyHint": "Equivale a --greedy"
+    },
+    "mirror": {
+      "switch": "Alternar",
+      "latency": "Tudo pelo espelho · {ms} ms"
+    },
+    "next": {
+      "today": "Hoje às {time}",
+      "tomorrow": "Amanhã às {time}",
+      "title": "Próxima verificação",
+      "text": "{time}. Se o Mac estiver em repouso, a verificação será feita quando ele despertar.",
+      "off": "A verificação automática está desativada. Você pode ativá-la nos Ajustes."
+    },
+    "log": {
+      "title": "Registro de {name}",
+      "empty": "Nenhum registro"
+    }
+  },
+  "history": {
+    "clear": "Limpar histórico",
+    "clearDescription": "Tem certeza de que deseja limpar todo o histórico de atualizações? Esta ação não pode ser desfeita e não afetará os App instalados nem as tarefas em andamento.",
+    "cleared": "Histórico de atualizações limpo",
+    "title": "Histórico de atualizações",
+    "subtitle": "Todas as instalações, atualizações e desinstalações neste Mac",
+    "search": "Filtrar por nome",
+    "exportCsv": "Exportar CSV",
+    "exported": "{count} registro exportado | {count} registros exportados",
+    "empty": "Ainda não há registros",
+    "duration": "{time}"
+  },
+  "settings": {
+    "title": "Configurações",
+    "sections": {
+      "general": "Geral",
+      "mirrors": "Fonte de download",
+      "homebrew": "Homebrew",
+      "privacy": "Privacidade",
+      "about": "Sobre"
+    },
+    "general": {
+      "followSystem": "Seguir o sistema (atual: {language})",
+      "systemDialogsRestartHint": "A linguagem das caixas de diálogo do sistema será alterada após reiniciar o OpenNavo.",
+      "language": "Idioma da interface",
+      "launchAtLogin": "Abrir ao iniciar sessão",
+      "launchAtLoginHint": "Após a inicialização, mostrar apenas o ícone na barra de menus",
+      "keepInMenuBar": "Manter na barra de menus ao fechar a janela",
+      "trayShowCount": "Mostrar atualizações disponíveis na barra de menus",
+      "notifyUpdates": "Notificar quando houver atualizações disponíveis",
+      "zapByDefault": "Excluir também os dados do app por padrão ao desinstalar",
+      "zapByDefaultHint": "Equivale a brew uninstall --zap",
+      "updates": "Verificar atualizações",
+      "autoCheck": "Verificar atualizações automaticamente todos os dias",
+      "checkTime": "Horário da verificação",
+      "runBrewUpdate": "Atualizar o índice do Homebrew antes de verificar",
+      "runBrewUpdateHint": "brew update"
+    },
+    "mirrors": {
+      "title": "Fonte de download",
+      "description": "Aplica-se aos metadados da API, aos pacotes binários Bottle e ao repositório Git do próprio brew.",
+      "copyEnv": "Copiar variáveis de ambiente do terminal",
+      "envCopied": "Copiado. Cole no terminal ou na configuração do shell",
+      "envHint": "Afeta apenas o brew iniciado pelo OpenNavo. Para usar a mesma fonte no terminal, copie as variáveis abaixo."
+    },
+    "homebrew": {
+      "path": "Caminho do brew",
+      "auto": "Detectar automaticamente",
+      "version": "Versão",
+      "prefix": "Prefixo de instalação",
+      "analytics": "Enviar estatísticas anônimas ao Homebrew",
+      "analyticsFollow": "Seguir as configurações do próprio brew",
+      "analyticsOff": "Desativar (HOMEBREW_NO_ANALYTICS=1)",
+      "missing": "Homebrew não encontrado",
+      "install": "Instalar Homebrew"
+    },
+    "privacy": {
+      "crashReports": "Enviar relatórios anônimos de falha",
+      "crashReportsHint": "Desativado por padrão; ao ativar, apenas a pilha de chamadas no momento da falha será enviada",
+      "appManagement": "Gerenciamento de apps",
+      "appManagementHint": "Necessário para atualizar e desinstalar apps",
+      "fullDiskAccess": "Acesso Total ao Disco",
+      "fullDiskAccessHint": "Necessário para excluir os dados do app durante a desinstalação",
+      "enable": "Ativar",
+      "waiting": "Aguardando…",
+      "granted": "Ativado",
+      "denied": "Desativado",
+      "unknown": "Não foi possível verificar",
+      "clearSearch": "Limpar buscas recentes"
+    },
+    "about": {
+      "openSource": "Agradecimentos de código aberto",
+      "view": "Ver",
+      "draft": "Aguardando revisão",
+      "version": "Versão {version}",
+      "website": "Site",
+      "feedback": "Enviar feedback",
+      "privacy": "Privacidade",
+      "catalog": "Catálogo local: {count} pacote, sincronizado {time} | Catálogo local: {count} pacotes, sincronizados {time}",
+      "sync": "Sincronizar agora"
+    },
+    "saved": "Salvo"
+  },
+  "mirrors": {
+    "official": "Oficial",
+    "probe": "Testar novamente",
+    "probing": "Testando…",
+    "fastest": "Mais rápida",
+    "recommended": "Recomendada",
+    "unavailable": "Indisponível",
+    "configFailed": "Não foi possível carregar a lista de mirrors agora. Apenas a fonte oficial está disponível.",
+    "slowOfficial": "A fonte oficial está lenta ({official}). {name} responde em {latency}.",
+    "failedOfficial": "Não foi possível acessar a fonte oficial. {name} responde em {latency}.",
+    "useSuggested": "Usar {name}",
+    "selectedFailed": "A fonte selecionada não passou no teste de velocidade. A instalação por ela pode falhar."
+  },
+  "welcome": {
+    "title": "Boas-vindas ao OpenNavo",
+    "subtitle": "Antes de começar, vamos verificar este Mac. Leva apenas alguns segundos.",
+    "checks": "Verificação do sistema",
+    "checking": "Verificando…",
+    "detectFailed": "A verificação não foi concluída.",
+    "redetect": "Verificar novamente",
+    "macos": "macOS {version} · {arch}",
+    "macosOk": "Compatível",
+    "clt": "Ferramentas de Linha de Comando do Xcode",
+    "cltOk": "Instalados",
+    "cltMissing": "Instalado junto com o Homebrew",
+    "homebrew": "Homebrew",
+    "homebrewOk": "{version} · {prefix}",
+    "homebrewMissing": "Não encontrado. {prefix} está vazio",
+    "source": {
+      "title": "Fonte de download",
+      "official": "Fonte oficial",
+      "mirror": "Outro espelho",
+      "mirrorMissing": "Lista de espelhos indisponível",
+      "retry": "Tentar novamente",
+      "hint": "As próximas instalações e atualizações também usarão esta fonte. Você pode mudar para outro espelho em Ajustes → Fonte de download.",
+      "hintBrew": "O OpenNavo usa esta fonte para instalar e atualizar apps. As variáveis de mirror definidas no Terminal não são lidas."
+    },
+    "install": "Instalar Homebrew",
+    "passwordHint": "A instalação exige a senha de administrador. O sistema exibirá uma caixa de diálogo; o OpenNavo não armazenará sua senha.",
+    "skip": "Pular e dar uma olhada",
+    "failed": {
+      "title": "O Homebrew não foi instalado",
+      "E_SUDO": "Nenhuma senha de administrador foi informada, então a instalação foi cancelada.",
+      "E_DOWNLOAD": "Não foi possível baixar o instalador. Tente outra fonte de download.",
+      "viewLog": "Ver log",
+      "logTitle": "Log de instalação do Homebrew"
+    },
+    "permissions": {
+      "title": "Permissões",
+      "required": "Obrigatório",
+      "optional": "Opcional",
+      "enable": "Ativar",
+      "waiting": "Aguardando…",
+      "granted": "Ativado",
+      "confirm": "Já ativei",
+      "startHint": "Ative o Gerenciamento de apps para começar.",
+      "appManagement": {
+        "title": "Permita que o OpenNavo gerencie apps",
+        "body": "Necessário para atualizar e desinstalar apps.",
+        "enable": "Ativar gerenciamento de apps"
+      },
+      "fullDiskAccess": {
+        "title": "Acesso Total ao Disco",
+        "body": "Necessário para excluir os dados do app durante a desinstalação. Você pode ativá-lo mais tarde.",
+        "enable": "Ativar Acesso Total ao Disco"
+      }
+    },
+    "done": "Começar",
+    "arch": {
+      "arm64": "Apple Silicon",
+      "x86_64": "Intel"
+    }
+  },
+  "permission": {
+    "relaunch": {
+      "body": "Ativado nos Ajustes do Sistema. Reabra o OpenNavo para aplicar a alteração.",
+      "action": "Reabrir"
+    },
+    "guide": {
+      "appManagement": "Gerenciamento de apps",
+      "fullDiskAccess": "Acesso Total ao Disco",
+      "dragTitle": "Arraste o OpenNavo para a lista acima",
+      "plusTitle": "Clique em + abaixo da lista e selecione OpenNavo",
+      "toggleHint": "Se o OpenNavo já estiver na lista, basta ativar a chave ao lado dele.",
+      "dragLabel": "Arraste o ícone do OpenNavo",
+      "close": "Fechar",
+      "done": {
+        "appManagement": "O OpenNavo agora pode gerenciar apps",
+        "fullDiskAccess": "O Acesso Total ao Disco está ativado"
+      },
+      "doneHint": "Se o macOS pedir para encerrar e reabrir, clique nessa opção."
+    },
+    "prompt": {
+      "appManagement": {
+        "title": "Permita que o OpenNavo gerencie apps",
+        "body": "O macOS impediu o OpenNavo de modificar os apps abaixo. Ative o Gerenciamento de apps e tente novamente."
+      },
+      "fullDiskAccess": {
+        "title": "Acesso Total ao Disco necessário",
+        "body": "Os apps abaixo foram removidos, mas seus dados não foram excluídos. Para excluí-los, é necessário o Acesso Total ao Disco. Ative-o e tente novamente para concluir a desinstalação."
+      },
+      "enable": "Ativar",
+      "waiting": "Aguardando…",
+      "retry": "Tentar novamente",
+      "retryAll": "Tentar novamente tudo",
+      "later": "Mais tarde"
+    },
+    "uninstall": {
+      "title": "A exclusão dos dados do app requer Acesso Total ao Disco",
+      "body": "Ative antes de desinstalar ou desmarque a opção para remover apenas o app."
+    }
+  },
+  "deeplink": {
+    "installTitle": "Instalar {name}?",
+    "installDescription": "Uma página da web solicitou a instalação deste app no Mac. Ao confirmar, o comando abaixo será executado. Se cancelar, nada será feito.",
+    "installConfirm": "Instalar",
+    "formulaUnsupported": "O OpenNavo inclui apenas apps (Homebrew Cask); este link aponta para uma ferramenta de linha de comando."
+  },
+  "tray": {
+    "available": "{count} atualização disponível | {count} atualizações disponíveis",
+    "upToDate": "Tudo está atualizado",
+    "upToDateHint": "As novas versões aparecerão aqui",
+    "running": {
+      "upgrade": "Atualizando {name}",
+      "install": "Instalando {name}",
+      "uninstall": "Desinstalando {name}",
+      "other": "Processando {name}"
+    },
+    "queued": "Mais {count} na fila | Mais {count} na fila",
+    "update": "Atualizações",
+    "updateAll": "Atualizar tudo ({count}) | Atualizar tudo ({count})",
+    "more": "Mais {count} no OpenNavo | Mais {count} no OpenNavo",
+    "open": "Abrir o OpenNavo",
+    "settings": "Configurações",
+    "queuedToast": "Adicionado à fila"
+  },
+  "quit": {
+    "title": "{n} tarefa não foi concluída | {n} tarefas não foram concluídas",
+    "description": "Sair interromperá as instalações em andamento. As concluídas não serão afetadas.",
+    "confirm": "Sair mesmo assim",
+    "cancel": "Continuar em execução"
+  },
+  "restore": {
+    "title": "{n} tarefa não foi concluída da última vez | {n} tarefas não foram concluídas da última vez",
+    "description": "Ao continuar, as tarefas serão executadas na ordem original. Ao desistir, elas serão canceladas.",
+    "resume": "Continuar",
+    "discard": "Desistir"
+  },
+  "updater": {
+    "title": "Atualização do app",
+    "current": "Versão atual {version}",
+    "check": "Verificar atualizações",
+    "latest": "Você já está usando a versão mais recente",
+    "available": "Nova versão {version}",
+    "install": "Baixar e instalar",
+    "downloading": "Baixando {percent}",
+    "installed": "Instalado. A mudança terá efeito após reiniciar",
+    "restart": "Reiniciar",
+    "busy": "Há uma tarefa em andamento. Reinicie quando ela terminar",
+    "failed": "Falha ao verificar atualizações"
+  },
+  "palette": {
+    "placeholder": "Buscar apps ou ações",
+    "apps": "Apps",
+    "actions": "Ações",
+    "navigation": "Ir",
+    "open": "Abrir",
+    "install": "Instalar",
+    "update": "Atualizar {name}",
+    "reveal": "Mostrar {name} no Finder",
+    "viewAll": "Ver todos os resultados para “{q}”",
+    "goTo": "Ir para {page}",
+    "installedVersion": "Versão {version} instalada",
+    "updatable": "Atualizações disponíveis",
+    "copied": "{command} copiado"
+  },
+  "tasks": {
+    "ops": {
+      "install": "Instalar",
+      "upgrade": "Atualizações",
+      "uninstall": "Desinstalar",
+      "reinstall": "Reinstalar",
+      "pin": "Fixar versão",
+      "unpin": "Desafixar versão",
+      "cleanup": "Limpar cache",
+      "update": "Atualizar o Homebrew",
+      "install_homebrew": "Instalar Homebrew"
+    },
+    "running": {
+      "install": "Instalando {name}",
+      "upgrade": "Atualizando {name}",
+      "uninstall": "Desinstalando {name}",
+      "reinstall": "Reinstalando {name}",
+      "pin": "Fixando {name}",
+      "unpin": "Desafixando {name}",
+      "cleanup": "Limpando o cache",
+      "update": "Atualizando o Homebrew",
+      "install_homebrew": "Instalando o Homebrew"
+    },
+    "phases": {
+      "preparing": "Preparando",
+      "fetching": "Obtendo informações",
+      "downloading": "Baixando",
+      "installing": "Instalar",
+      "linking": "Vinculando",
+      "cleaning": "Limpando",
+      "uninstalling": "Desinstalar",
+      "updating": "Atualizando o índice",
+      "finishing": "Concluído"
+    },
+    "step": "Etapa {index} de {count}: {phase} | Etapa {index} de {count}: {phase}",
+    "remaining": "Restam aproximadamente {time}",
+    "queue": "Na fila",
+    "oneAtATime": "O brew executa uma tarefa por vez",
+    "triggers": {
+      "manual": "Manual",
+      "schedule": "Automático",
+      "deeplink": "Web",
+      "bundle": "Em lote",
+      "retry": "Tentar novamente"
+    },
+    "succeeded": "{action} de {name} concluída",
+    "failed": "Falha ao {action} {name}"
+  },
+  "errors": {
+    "E_APP_RUNNING": "O app está em execução. A atualização foi adiada; encerre o app e tente novamente.",
+    "E_APP_QUIT_FAILED": "O app não foi encerrado. A atualização foi adiada; salve seu trabalho, encerre o app e tente novamente.",
+    "E_APP_CHECK_FAILED": "Não foi possível verificar se o app está em execução. A atualização foi adiada; atualize a lista de apps instalados e tente novamente.",
+    "actionFailed": "A operação não foi concluída",
+    "E_BREW_NOT_FOUND": "É necessário instalar o Homebrew primeiro",
+    "E_INVALID_ARG": "Parâmetro inválido",
+    "E_CHECKSUM": "Download interrompido: divergência na verificação SHA-256",
+    "E_DOWNLOAD": "Falha no download. Verifique a conexão ou troque a fonte de download",
+    "E_APP_EXISTS": "Já existe um App com o mesmo nome no local de instalação. A operação não foi concluída; confira o registro. Ao tentar instalar novamente, a verificação será refeita e uma confirmação de adoção será solicitada.",
+    "E_NOT_FOUND": "Este pacote não foi encontrado no Homebrew",
+    "E_DISABLED": "O Homebrew desativou este pacote",
+    "E_LOCKED": "Outro processo do Homebrew está em execução. A tentativa será feita novamente automaticamente em breve",
+    "E_PERMISSION": "Sem permissão para modificar este app. Permita o acesso nos Ajustes do Sistema",
+    "E_FULL_DISK_ACCESS": "A exclusão dos dados do app requer Acesso Total ao Disco",
+    "E_SUDO": "É necessária a senha de administrador",
+    "E_MACOS_VERSION": "A versão do sistema não atende aos requisitos",
+    "E_REQUIRED_BY": "Não é possível desinstalar: outros pacotes dependem dele",
+    "E_CONFLICT": "Conflito com um pacote instalado",
+    "E_INTERRUPTED": "Tarefa interrompida",
+    "E_TIMEOUT": "Sem resposta por muito tempo",
+    "E_UNKNOWN": "Falha na operação. Você pode consultar o registro",
+    "E_NETWORK": "Não foi possível conectar ao serviço OpenNavo"
+  },
+  "installConfirm": {
+    "title": "Adotar o {name} existente?",
+    "description": "Já existe um App no local de instalação. Confirme para tentar gerenciá-lo com Homebrew. Após a adoção, você poderá atualizá-lo e desinstalá-lo pelo OpenNavo.",
+    "matchHint": "A adoção exige que o aplicativo existente corresponda ao pacote de instalação. Se não corresponder, a adoção falhará sem forçar a substituição.",
+    "confirm": "Confirmar adoção",
+    "blockedTitle": "Ainda não é possível instalar {name}",
+    "blockedDescription": "Não foi possível verificar o local de instalação ou o aplicativo existente. Nenhuma instalação ou adoção foi realizada. Confira o aplicativo e os detalhes da instalação e tente novamente."
+  },
+  "runningApps": {
+    "title": "Há apps em execução",
+    "description": "Salve seu trabalho antes de encerrar o app para atualizá-lo.",
+    "batchDescription": "Estes apps estão em execução. Salve seu trabalho e escolha entre ignorá-los ou encerrá-los para atualizar.",
+    "later": "Mais tarde",
+    "skip": "Ignorar estes apps",
+    "quit": "Encerrar e atualizar",
+    "quitAll": "Encerrar os apps e atualizar",
+    "reopen": "Abrir novamente após uma atualização bem-sucedida",
+    "quitHint": "Se um app continuar aberto ou você cancelar o encerramento, a atualização dele será adiada. Os apps não serão encerrados à força.",
+    "deferred": "Adiada"
+  },
+  "page": {
+    "comingSoon": "O conteúdo desta página será disponibilizado em uma tarefa futura."
+  },
+  "brewfile": {
+    "title": "Minha lista",
+    "description": "Salve apps para instalar juntos ou exportar. A lista fica apenas neste dispositivo.",
+    "count": "{count} item | {count} itens",
+    "emptyTitle": "A lista está vazia",
+    "emptyDescription": "Selecione “Adicionar à minha lista” nos detalhes do app ou no menu de um app instalado.",
+    "browse": "Explorar",
+    "fileTitle": "Gerado pelo OpenNavo",
+    "download": "Exportar Brewfile",
+    "moveUp": "Mover {name} para cima",
+    "moveDown": "Mover {name} para baixo",
+    "remove": "Remover {name} da lista",
+    "add": "Adicionar à minha lista",
+    "inList": "Na minha lista",
+    "removeShort": "Remover da minha lista",
+    "added": "Adicionado à minha lista",
+    "full": "Limite de 200 apps. Remova um primeiro.",
+    "saveFailed": "Não foi possível salvar ou ler a lista. Verifique o armazenamento e tente novamente.",
+    "install": "Instalar {count} apps",
+    "installHint": "Apps instalados, na fila ou indisponíveis são ignorados.",
+    "copy": "Copiar Brewfile",
+    "exported": "Brewfile exportado",
+    "installTitle": "Instalar apps da minha lista"
+  }
+}

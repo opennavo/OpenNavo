@@ -1,0 +1,8 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Preserve upstream evidence bytes: inventory SHA-256 hashes cover original files.
+/docs/legal/third-party/licenses/** -text
+/apps/server/third-party/licenses/** -text
+/apps/mcp/third-party/licenses/** -text
+/apps/desktop/src-tauri/resources/third-party/licenses/** -text

@@ -1,0 +1,280 @@
+{
+  "roles": [
+    {
+      "code": "R_SUPER",
+      "name": "Super administrator"
+    },
+    {
+      "code": "R_ADMIN",
+      "name": "Administrator"
+    },
+    {
+      "code": "R_EDITOR",
+      "name": "Editor"
+    },
+    {
+      "code": "R_REVIEWER",
+      "name": "Translation reviewer"
+    },
+    {
+      "code": "R_OPS",
+      "name": "Operations"
+    },
+    {
+      "code": "R_AGENT",
+      "name": "Agent"
+    }
+  ],
+  "permissions": [
+    {
+      "code": "dashboard:view",
+      "name": "View dashboard",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_REVIEWER",
+        "R_OPS",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "catalog:package:view",
+      "name": "View packages",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_REVIEWER",
+        "R_OPS",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "catalog:package:edit",
+      "name": "Edit package details, categories, visibility and recommendations",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "catalog:package:resync",
+      "name": "Resynchronize",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_OPS",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "catalog:asset:upload",
+      "name": "Upload icons and screenshots",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "catalog:category:edit",
+      "name": "Edit categories",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "content:collection:edit",
+      "name": "Edit collections",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "content:collection:publish",
+      "name": "Publish/unpublish collections",
+      "roles": [
+        "R_ADMIN",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "content:feature:edit",
+      "name": "Edit featured placements",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "changelog:release:edit",
+      "name": "Hide releases and edit source text",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "translation:review",
+      "name": "Edit and review translations",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_REVIEWER",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "ops:job:view",
+      "name": "View jobs",
+      "roles": [
+        "R_ADMIN",
+        "R_OPS",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "ops:job:trigger",
+      "name": "Trigger jobs manually",
+      "roles": [
+        "R_ADMIN",
+        "R_OPS",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "ops:search:view",
+      "name": "Search insights",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_OPS",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "ops:search:edit",
+      "name": "Manage synonyms",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "ops:feedback:handle",
+      "name": "Handle feedback",
+      "roles": [
+        "R_ADMIN",
+        "R_EDITOR",
+        "R_OPS",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "release:desktop:edit",
+      "name": "Edit client releases",
+      "roles": [
+        "R_ADMIN",
+        "R_OPS"
+      ]
+    },
+    {
+      "code": "release:desktop:publish",
+      "name": "Publish/roll back clients",
+      "roles": [
+        "R_ADMIN"
+      ]
+    },
+    {
+      "code": "system:config:edit",
+      "name": "Remote configuration and mirrors",
+      "roles": [
+        "R_ADMIN",
+        "R_OPS"
+      ]
+    },
+    {
+      "code": "system:user:edit",
+      "name": "Manage administrators",
+      "roles": []
+    },
+    {
+      "code": "system:role:edit",
+      "name": "Roles and permissions",
+      "roles": []
+    },
+    {
+      "code": "system:audit:view",
+      "name": "Audit logs",
+      "roles": [
+        "R_ADMIN"
+      ]
+    },
+    {
+      "code": "i18n:settings",
+      "name": "Translation AI settings",
+      "roles": [
+        "R_ADMIN"
+      ]
+    },
+    {
+      "code": "system:github:edit",
+      "name": "GitHub settings",
+      "roles": [
+        "R_ADMIN"
+      ]
+    },
+    {
+      "code": "content:glossary:edit",
+      "name": "Manage glossary",
+      "roles": [
+        "R_ADMIN",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "agent:log:view",
+      "name": "Agent and AI logs",
+      "roles": [
+        "R_ADMIN",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "content:revision:restore",
+      "name": "Content revisions and restoration",
+      "roles": [
+        "R_ADMIN",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "agent:manage",
+      "name": "Agent access management",
+      "roles": []
+    },
+    {
+      "code": "content:announcement:edit",
+      "name": "Client announcements",
+      "roles": [
+        "R_ADMIN",
+        "R_AGENT"
+      ]
+    },
+    {
+      "code": "release:desktop:notes",
+      "name": "Client release notes",
+      "roles": [
+        "R_ADMIN",
+        "R_AGENT"
+      ]
+    }
+  ]
+}

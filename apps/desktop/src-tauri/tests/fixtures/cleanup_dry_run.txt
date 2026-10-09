@@ -1,0 +1,5 @@
+Would remove: /opt/homebrew/Cellar/node/22.0.0 (2,400 files, 60.5MB)
+Would remove: /Users/example/Library/Caches/Homebrew/downloads/archive.tar.gz (512KB)
+Would remove (broken link): /opt/homebrew/bin/unused
+Would remove (empty directory): /opt/homebrew/Cellar/unused
+==> This operation would free approximately 61MB of disk space.

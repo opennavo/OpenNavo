@@ -1,0 +1,85 @@
+name: opennavo-dev
+services:
+  postgres:
+    image: opennavo-postgres:dev
+    build:
+      context: ../apps/server
+      target: postgres
+    environment:
+      POSTGRES_DB: opennavo
+      POSTGRES_USER: opennavo
+      POSTGRES_PASSWORD: opennavo-dev-only
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U opennavo -d opennavo']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: opennavo-redis:dev
+    build:
+      context: ../apps/server
+      target: redis
+    ports:
+      - '127.0.0.1:56379:6379'
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  minio:
+    image: opennavo-minio:dev
+    pull_policy: build
+    build:
+      context: ../apps/server
+      dockerfile: ../../ops/Dockerfile.minio
+      target: minio
+    environment:
+      MINIO_ROOT_USER: opennavo-dev
+      MINIO_ROOT_PASSWORD: opennavo-dev-only
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', '/probe']
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  storage-init:
+    profiles: ['bootstrap']
+    image: opennavo-storage-init:dev
+    pull_policy: build
+    build:
+      context: ../apps/server
+      dockerfile: ../../ops/Dockerfile.minio
+      target: storage-init
+    env_file: ../apps/server/.env.example
+    environment:
+      S3_ENDPOINT: minio:9000
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: 'no'
+  asynqmon:
+    image: opennavo-asynqmon:dev
+    build:
+      context: ../apps/server
+      target: asynqmon
+    command: ['--redis-addr=redis:6379', '--port=8080', '--enable-metrics-exporter']
+    ports:
+      - '127.0.0.1:8081:8080'
+    depends_on:
+      redis:
+        condition: service_healthy
+volumes:
+  minio-data:
+  postgres-data:
+  redis-data:

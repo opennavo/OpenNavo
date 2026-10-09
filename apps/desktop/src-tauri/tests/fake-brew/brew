@@ -1,0 +1,81 @@
+#!/usr/bin/python3 -I
+# Simulator emits only public log excerpts; never runs brew or system write commands.
+import json
+import os
+from pathlib import Path
+import signal
+import sys
+import time
+
+fixtures = Path(__file__).resolve().parent.parent / 'fixtures'
+args = sys.argv[1:]
+if args == ['--version']:
+    print('Homebrew 7.0.7')
+    sys.exit(0)
+if args == ['--prefix']:
+    print(os.environ.get('FAKE_BREW_PREFIX', '/tmp/opennavo_fake_prefix'))
+    sys.exit(0)
+if args == ['--cache']:
+    print(os.environ.get('FAKE_BREW_CACHE', '/tmp/opennavo_fake_cache'))
+    sys.exit(0)
+if args and args[0] in ('info', 'outdated'):
+    fixture = os.environ.get('FAKE_BREW_JSON')
+    if fixture:
+        print(Path(fixture).read_text())
+    else:
+        print(json.dumps({'formulae': [], 'casks': []}))
+    sys.exit(0)
+if args == ['doctor']:
+    print((fixtures / 'doctor.txt').read_text(), file=sys.stderr, end='')
+    sys.exit(1)
+if args == ['cleanup', '--prune=all', '--dry-run']:
+    print((fixtures / 'cleanup_dry_run.txt').read_text(), end='')
+    sys.exit(0)
+if len(args) == 4 and args[:2] == ['bundle', 'dump'] and args[2].startswith('--file=') and args[3] == '--force':
+    Path(args[2][len('--file='):]).write_text((fixtures / 'Brewfile').read_text())
+    sys.exit(0)
+scenario = os.environ.get('FAKE_BREW_SCENARIO', 'install_ok')
+if scenario == 'homebrew7_upgrade':
+    cache = Path(os.environ['FAKE_BREW_CACHE']) / 'downloads'
+    cache.mkdir(parents=True, exist_ok=True)
+    partial = cache / 'sourcegit.zip.incomplete'
+    for index, line in enumerate((fixtures / 'upgrade_homebrew7.txt').read_text().splitlines()):
+        if index == 0:
+            partial.write_bytes(bytes(40))
+        elif index == 1:
+            partial.write_bytes(bytes(100))
+            partial.rename(cache / 'sourcegit.zip')
+        print(line, flush=True)
+        # Cover silent sampling after download and upgrade output that omits Installing Cask.
+        time.sleep(0.6)
+    sys.exit(0)
+if scenario == 'slow':
+    # Cancellation tests cover both SIGINT-responsive children and those requiring SIGKILL escalation.
+    if os.environ.get('FAKE_BREW_IGNORE_SIGNALS'):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    else:
+        signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
+    # Announce readiness only after installing both signal dispositions.
+    print((fixtures / 'download.txt').read_text().splitlines()[0], flush=True)
+    print('FAKE_BREW_READY', flush=True)
+    time.sleep(30)
+print((fixtures / 'download.txt').read_text().splitlines()[0], flush=True)
+for percent in ('5.0', '40.0', '100.0'):
+    print('################ ' + percent + '%', end='\r', flush=True)
+    time.sleep(0.04)
+print()
+if scenario == 'permission_denied':
+    print("Error: /Applications/Example.app: Operation not permitted", flush=True)
+    sys.exit(1)
+code = {'checksum_fail': 'E_CHECKSUM', 'sudo_cancel': 'E_SUDO', 'locked': 'E_LOCKED'}.get(scenario)
+if code:
+    for line in (fixtures / 'errors.txt').read_text().splitlines():
+        error, text = line.split('\t', 1)
+        if error == code:
+            print(text, flush=True)
+            sys.exit(1)
+if args and args[0] == 'upgrade':
+    print((fixtures / 'upgrade.txt').read_text(), end='', flush=True)
+print((fixtures / 'install.txt').read_text(), end='', flush=True)
+sys.exit(0)

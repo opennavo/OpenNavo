@@ -1,0 +1,1965 @@
+{
+  "cursor": 60,
+  "categories": [
+    {
+      "slug": "ai",
+      "parent": null,
+      "icon": "lucide:sparkles",
+      "sort": 10,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "AI Tools",
+        "zh-CN": "AI 工具"
+      }
+    },
+    {
+      "slug": "developer-tools",
+      "parent": null,
+      "icon": "lucide:code-xml",
+      "sort": 20,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Developer Tools",
+        "zh-CN": "开发工具"
+      }
+    },
+    {
+      "slug": "terminal",
+      "parent": null,
+      "icon": "lucide:square-terminal",
+      "sort": 30,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Terminal & Shell",
+        "zh-CN": "终端与 Shell"
+      }
+    },
+    {
+      "slug": "databases",
+      "parent": null,
+      "icon": "lucide:database",
+      "sort": 50,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Databases",
+        "zh-CN": "数据库"
+      }
+    },
+    {
+      "slug": "virtualization",
+      "parent": null,
+      "icon": "lucide:boxes",
+      "sort": 60,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Virtualization & Containers",
+        "zh-CN": "虚拟化与容器"
+      }
+    },
+    {
+      "slug": "productivity",
+      "parent": null,
+      "icon": "lucide:zap",
+      "sort": 70,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Productivity",
+        "zh-CN": "效率"
+      }
+    },
+    {
+      "slug": "writing",
+      "parent": null,
+      "icon": "lucide:notebook-pen",
+      "sort": 80,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Writing & Notes",
+        "zh-CN": "写作与笔记"
+      }
+    },
+    {
+      "slug": "office",
+      "parent": null,
+      "icon": "lucide:briefcase",
+      "sort": 90,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Office",
+        "zh-CN": "办公"
+      }
+    },
+    {
+      "slug": "browsers",
+      "parent": null,
+      "icon": "lucide:globe",
+      "sort": 100,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Browsers",
+        "zh-CN": "浏览器"
+      }
+    },
+    {
+      "slug": "communication",
+      "parent": null,
+      "icon": "lucide:message-circle",
+      "sort": 110,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Communication",
+        "zh-CN": "通讯"
+      }
+    },
+    {
+      "slug": "design",
+      "parent": null,
+      "icon": "lucide:pen-tool",
+      "sort": 120,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Design",
+        "zh-CN": "设计"
+      }
+    },
+    {
+      "slug": "media",
+      "parent": null,
+      "icon": "lucide:clapperboard",
+      "sort": 130,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Audio & Video",
+        "zh-CN": "影音"
+      }
+    },
+    {
+      "slug": "utilities",
+      "parent": null,
+      "icon": "lucide:wrench",
+      "sort": 140,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Utilities",
+        "zh-CN": "系统工具"
+      }
+    },
+    {
+      "slug": "menu-bar",
+      "parent": null,
+      "icon": "lucide:panel-top",
+      "sort": 150,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Menu Bar",
+        "zh-CN": "菜单栏"
+      }
+    },
+    {
+      "slug": "network",
+      "parent": null,
+      "icon": "lucide:network",
+      "sort": 160,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Networking",
+        "zh-CN": "网络"
+      }
+    },
+    {
+      "slug": "security",
+      "parent": null,
+      "icon": "lucide:shield",
+      "sort": 170,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Security & Privacy",
+        "zh-CN": "安全与隐私"
+      }
+    },
+    {
+      "slug": "drivers",
+      "parent": null,
+      "icon": "lucide:cpu",
+      "sort": 180,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Drivers & Hardware",
+        "zh-CN": "驱动与硬件"
+      }
+    },
+    {
+      "slug": "games",
+      "parent": null,
+      "icon": "lucide:gamepad-2",
+      "sort": 190,
+      "hiddenByDefault": false,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Games",
+        "zh-CN": "游戏"
+      }
+    },
+    {
+      "slug": "education",
+      "parent": null,
+      "icon": "lucide:graduation-cap",
+      "sort": 200,
+      "hiddenByDefault": false,
+      "appliesTo": "both",
+      "name": {
+        "en-US": "Education & Science",
+        "zh-CN": "教育与科研"
+      }
+    },
+    {
+      "slug": "fonts",
+      "parent": null,
+      "icon": "lucide:type",
+      "sort": 210,
+      "hiddenByDefault": true,
+      "appliesTo": "cask",
+      "name": {
+        "en-US": "Fonts",
+        "zh-CN": "字体"
+      }
+    }
+  ],
+  "items": [
+    {
+      "apps": [
+        "1Password.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "security"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "1Password",
+        "zh-CN": "1Password 密码管理"
+      },
+      "downloadSize": 77,
+      "hidden": false,
+      "homepage": "https://1password.com/",
+      "installs30d": 75000,
+      "installs365d": 1050000,
+      "installs90d": 300000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "1Password",
+      "names": [
+        "1Password",
+        "1Password 密码管理"
+      ],
+      "pinyin": "mimaguanlimimaguanli mmglmmgl",
+      "popularity": 7.5,
+      "rank30d": 26,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for 1Password",
+        "zh-CN": "管理密码与安全共享"
+      },
+      "tags": [
+        "security"
+      ],
+      "token": "1password",
+      "version": "8.12.0",
+      "versionChangedAt": "2026-09-29T23:00:00Z"
+    },
+    {
+      "apps": [
+        "AltTab.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "utilities"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "AltTab",
+        "zh-CN": "AltTab 窗口切换"
+      },
+      "downloadSize": 75,
+      "hidden": false,
+      "homepage": "https://alt-tab-macos.netlify.app/",
+      "installs30d": 80000,
+      "installs365d": 1120000,
+      "installs90d": 320000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "AltTab",
+      "names": [
+        "AltTab",
+        "AltTab 窗口切换"
+      ],
+      "pinyin": "chuangkouqiehuanchuangkouqiehuan ckqhckqh",
+      "popularity": 8,
+      "rank30d": 21,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for AltTab",
+        "zh-CN": "用缩略图快速切换窗口"
+      },
+      "tags": [
+        "utilities"
+      ],
+      "token": "alt-tab",
+      "version": "7.25.0",
+      "versionChangedAt": "2026-09-30T04:00:00Z"
+    },
+    {
+      "apps": [
+        "AppCleaner.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "utilities"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "AppCleaner",
+        "zh-CN": "AppCleaner 卸载助手"
+      },
+      "downloadSize": 77,
+      "hidden": false,
+      "homepage": "https://freemacsoft.net/appcleaner/",
+      "installs30d": 77000,
+      "installs365d": 1078000,
+      "installs90d": 308000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "AppCleaner",
+      "names": [
+        "AppCleaner",
+        "AppCleaner 卸载助手"
+      ],
+      "pinyin": "xiezaizhushouxiezaizhushou xzzsxzzs",
+      "popularity": 7.7,
+      "rank30d": 24,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for AppCleaner",
+        "zh-CN": "查找应用关联文件"
+      },
+      "tags": [
+        "utilities"
+      ],
+      "token": "appcleaner",
+      "version": "3.7.0",
+      "versionChangedAt": "2026-09-30T01:00:00Z"
+    },
+    {
+      "apps": [
+        "Bitwarden.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "security"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Bitwarden",
+        "zh-CN": "Bitwarden 密码管理"
+      },
+      "downloadSize": 79,
+      "hidden": false,
+      "homepage": "https://bitwarden.com/",
+      "installs30d": 76000,
+      "installs365d": 1064000,
+      "installs90d": 304000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Bitwarden",
+      "names": [
+        "Bitwarden",
+        "Bitwarden 密码管理"
+      ],
+      "pinyin": "mimaguanlimimaguanli mmglmmgl",
+      "popularity": 7.6,
+      "rank30d": 25,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Bitwarden",
+        "zh-CN": "保存并同步密码与凭据"
+      },
+      "tags": [
+        "security"
+      ],
+      "token": "bitwarden",
+      "version": "2026.9.0",
+      "versionChangedAt": "2026-09-30T00:00:00Z"
+    },
+    {
+      "apps": [
+        "calibre.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "education"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Calibre",
+        "zh-CN": "Calibre 电子书管理"
+      },
+      "downloadSize": 75,
+      "hidden": false,
+      "homepage": "https://calibre-ebook.com/",
+      "installs30d": 67000,
+      "installs365d": 938000,
+      "installs90d": 268000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Calibre",
+      "names": [
+        "Calibre",
+        "Calibre 电子书管理"
+      ],
+      "pinyin": "dianzishuguanlidianzishuguanli dzsgldzsgl",
+      "popularity": 6.7,
+      "rank30d": 34,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Calibre",
+        "zh-CN": "整理、转换与阅读电子书"
+      },
+      "tags": [
+        "education"
+      ],
+      "token": "calibre",
+      "version": "8.10.0",
+      "versionChangedAt": "2026-09-29T15:00:00Z"
+    },
+    {
+      "apps": [
+        "Claude.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "ai"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Claude",
+        "zh-CN": "Claude AI 助手"
+      },
+      "downloadSize": 73,
+      "hidden": false,
+      "homepage": "https://claude.ai/",
+      "installs30d": 68000,
+      "installs365d": 952000,
+      "installs90d": 272000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Claude",
+      "names": [
+        "Claude",
+        "Claude AI 助手"
+      ],
+      "pinyin": "zhushouzhushou zszs",
+      "popularity": 6.8,
+      "rank30d": 33,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Claude",
+        "zh-CN": "对话、写作与代码辅助"
+      },
+      "tags": [
+        "ai"
+      ],
+      "token": "claude",
+      "version": "1.0.0",
+      "versionChangedAt": "2026-09-29T16:00:00Z"
+    },
+    {
+      "apps": [
+        "Discord.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "communication"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Discord",
+        "zh-CN": "Discord 社区聊天"
+      },
+      "downloadSize": 76,
+      "hidden": false,
+      "homepage": "https://discord.com/",
+      "installs30d": 86000,
+      "installs365d": 1204000,
+      "installs90d": 344000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Discord",
+      "names": [
+        "Discord",
+        "Discord 社区聊天"
+      ],
+      "pinyin": "shequliaotianshequliaotian sqltsqlt",
+      "popularity": 8.6,
+      "rank30d": 15,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Discord",
+        "zh-CN": "语音、视频与社区交流"
+      },
+      "tags": [
+        "communication"
+      ],
+      "token": "discord",
+      "version": "0.0.360",
+      "versionChangedAt": "2026-09-30T10:00:00Z"
+    },
+    {
+      "apps": [
+        "Docker.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "virtualization"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Docker Desktop",
+        "zh-CN": "Docker 容器桌面"
+      },
+      "downloadSize": 82,
+      "hidden": false,
+      "homepage": "https://www.docker.com/products/docker-desktop/",
+      "installs30d": 89000,
+      "installs365d": 1246000,
+      "installs90d": 356000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Docker Desktop",
+      "names": [
+        "Docker Desktop",
+        "Docker 容器桌面"
+      ],
+      "pinyin": "rongqizhuomianrongqizhuomian rqzmrqzm",
+      "popularity": 8.9,
+      "rank30d": 12,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Docker Desktop",
+        "zh-CN": "管理本地容器与开发环境"
+      },
+      "tags": [
+        "virtualization"
+      ],
+      "token": "docker-desktop",
+      "version": "4.50.0",
+      "versionChangedAt": "2026-09-30T13:00:00Z"
+    },
+    {
+      "apps": [
+        "Figma.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "design"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Figma",
+        "zh-CN": "Figma 设计工具"
+      },
+      "downloadSize": 74,
+      "hidden": false,
+      "homepage": "https://www.figma.com/",
+      "installs30d": 88000,
+      "installs365d": 1232000,
+      "installs90d": 352000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Figma",
+      "names": [
+        "Figma",
+        "Figma 设计工具"
+      ],
+      "pinyin": "shejigongjushejigongju sjgjsjgj",
+      "popularity": 8.8,
+      "rank30d": 13,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Figma",
+        "zh-CN": "协作设计界面与交互原型"
+      },
+      "tags": [
+        "design"
+      ],
+      "token": "figma",
+      "version": "126.0.0",
+      "versionChangedAt": "2026-09-30T12:00:00Z"
+    },
+    {
+      "apps": [
+        "Firefox.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "browsers"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Firefox",
+        "zh-CN": "Firefox 浏览器"
+      },
+      "downloadSize": 74,
+      "hidden": false,
+      "homepage": "https://www.mozilla.org/firefox/",
+      "installs30d": 95000,
+      "installs365d": 1330000,
+      "installs90d": 380000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Firefox",
+      "names": [
+        "Firefox",
+        "Firefox 浏览器"
+      ],
+      "pinyin": "liulanqiliulanqi llqllq",
+      "popularity": 9.5,
+      "rank30d": 6,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Firefox",
+        "zh-CN": "注重隐私的网页浏览器"
+      },
+      "tags": [
+        "browsers"
+      ],
+      "token": "firefox",
+      "version": "143.0",
+      "versionChangedAt": "2026-09-30T19:00:00Z"
+    },
+    {
+      "apps": [],
+      "autoUpdates": false,
+      "binaries": [],
+      "categories": [
+        "fonts"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Fira Code",
+        "zh-CN": "Fira Code 字体"
+      },
+      "downloadSize": 79,
+      "hidden": false,
+      "homepage": "https://github.com/tonsky/FiraCode",
+      "installs30d": 62000,
+      "installs365d": 868000,
+      "installs90d": 248000,
+      "isFont": true,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Fira Code",
+      "names": [
+        "Fira Code",
+        "Fira Code 字体"
+      ],
+      "pinyin": "zitiziti ztzt",
+      "popularity": 6.2,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Fira Code",
+        "zh-CN": "带编程连字的等宽字体"
+      },
+      "tags": [
+        "fonts"
+      ],
+      "token": "font-fira-code",
+      "version": "6.2",
+      "versionChangedAt": "2026-09-29T10:00:00Z"
+    },
+    {
+      "apps": [],
+      "autoUpdates": false,
+      "binaries": [],
+      "categories": [
+        "fonts"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Hack",
+        "zh-CN": "Hack 等宽字体"
+      },
+      "downloadSize": 76,
+      "hidden": false,
+      "homepage": "https://sourcefoundry.org/hack/",
+      "installs30d": 61000,
+      "installs365d": 854000,
+      "installs90d": 244000,
+      "isFont": true,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Hack",
+      "names": [
+        "Hack",
+        "Hack 等宽字体"
+      ],
+      "pinyin": "dengkuanzitidengkuanziti dkztdkzt",
+      "popularity": 6.1,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Hack",
+        "zh-CN": "清晰易读的编程字体"
+      },
+      "tags": [
+        "fonts"
+      ],
+      "token": "font-hack",
+      "version": "3.003",
+      "versionChangedAt": "2026-09-29T09:00:00Z"
+    },
+    {
+      "apps": [],
+      "autoUpdates": false,
+      "binaries": [],
+      "categories": [
+        "fonts"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "JetBrains Mono",
+        "zh-CN": "JetBrains Mono 字体"
+      },
+      "downloadSize": 86,
+      "hidden": false,
+      "homepage": "https://www.jetbrains.com/lp/mono/",
+      "installs30d": 63000,
+      "installs365d": 882000,
+      "installs90d": 252000,
+      "isFont": true,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "JetBrains Mono",
+      "names": [
+        "JetBrains Mono",
+        "JetBrains Mono 字体"
+      ],
+      "pinyin": "zitiziti ztzt",
+      "popularity": 6.3,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for JetBrains Mono",
+        "zh-CN": "适合阅读代码的等宽字体"
+      },
+      "tags": [
+        "fonts"
+      ],
+      "token": "font-jetbrains-mono",
+      "version": "2.304",
+      "versionChangedAt": "2026-09-29T11:00:00Z"
+    },
+    {
+      "apps": [
+        "Ghostty.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "terminal"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Ghostty",
+        "zh-CN": "Ghostty 终端"
+      },
+      "downloadSize": 74,
+      "hidden": false,
+      "homepage": "https://ghostty.org/",
+      "iconUrl": "https://cdn.example.test/icons/e2e/ghostty/dark-256.png",
+      "installs30d": 99000,
+      "installs365d": 1386000,
+      "installs90d": 396000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Ghostty",
+      "names": [
+        "Ghostty",
+        "Ghostty 终端"
+      ],
+      "pinyin": "zhongduanzhongduan zdzd",
+      "popularity": 9.9,
+      "rank30d": 2,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Ghostty",
+        "zh-CN": "快速、原生的终端模拟器"
+      },
+      "tags": [
+        "terminal"
+      ],
+      "token": "ghostty",
+      "version": "1.3.0",
+      "versionChangedAt": "2026-09-30T23:00:00Z"
+    },
+    {
+      "apps": [
+        "Google Chrome.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "browsers"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Google Chrome",
+        "zh-CN": "Chrome 浏览器"
+      },
+      "downloadSize": 87,
+      "hidden": false,
+      "homepage": "https://www.google.com/chrome/",
+      "installs30d": 96000,
+      "installs365d": 1344000,
+      "installs90d": 384000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Google Chrome",
+      "names": [
+        "Google Chrome",
+        "Chrome 浏览器"
+      ],
+      "pinyin": "liulanqiliulanqi llqllq",
+      "popularity": 9.6,
+      "rank30d": 5,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Google Chrome",
+        "zh-CN": "浏览网页并同步书签"
+      },
+      "tags": [
+        "browsers"
+      ],
+      "token": "google-chrome",
+      "version": "141.0.7390.0",
+      "versionChangedAt": "2026-09-30T20:00:00Z"
+    },
+    {
+      "apps": [
+        "IINA.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "media"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "IINA",
+        "zh-CN": "IINA 播放器"
+      },
+      "downloadSize": 71,
+      "hidden": false,
+      "homepage": "https://iina.io/",
+      "installs30d": 92000,
+      "installs365d": 1288000,
+      "installs90d": 368000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "IINA",
+      "names": [
+        "IINA",
+        "IINA 播放器"
+      ],
+      "pinyin": "bofangqibofangqi bfqbfq",
+      "popularity": 9.2,
+      "rank30d": 9,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for IINA",
+        "zh-CN": "播放视频、音乐与流媒体"
+      },
+      "tags": [
+        "media"
+      ],
+      "token": "iina",
+      "version": "1.4.0",
+      "versionChangedAt": "2026-09-30T16:00:00Z"
+    },
+    {
+      "apps": [
+        "iTerm.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "terminal"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "iTerm2",
+        "zh-CN": "iTerm2 终端"
+      },
+      "downloadSize": 73,
+      "hidden": false,
+      "homepage": "https://iterm2.com/",
+      "installs30d": 97000,
+      "installs365d": 1358000,
+      "installs90d": 388000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "iTerm2",
+      "names": [
+        "iTerm2",
+        "iTerm2 终端"
+      ],
+      "pinyin": "zhongduanzhongduan zdzd",
+      "popularity": 9.7,
+      "rank30d": 4,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for iTerm2",
+        "zh-CN": "分屏、搜索与自动化终端"
+      },
+      "tags": [
+        "terminal"
+      ],
+      "token": "iterm2",
+      "version": "3.6.0",
+      "versionChangedAt": "2026-09-30T21:00:00Z"
+    },
+    {
+      "apps": [
+        "KeepingYouAwake.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "menu-bar"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "KeepingYouAwake",
+        "zh-CN": "KeepingYouAwake 防休眠"
+      },
+      "downloadSize": 82,
+      "hidden": false,
+      "homepage": "https://keepingyouawake.app/",
+      "installs30d": 78000,
+      "installs365d": 1092000,
+      "installs90d": 312000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "KeepingYouAwake",
+      "names": [
+        "KeepingYouAwake",
+        "KeepingYouAwake 防休眠"
+      ],
+      "pinyin": "fangxiumianfangxiumian fxmfxm",
+      "popularity": 7.8,
+      "rank30d": 23,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for KeepingYouAwake",
+        "zh-CN": "在菜单栏控制电脑休眠"
+      },
+      "tags": [
+        "menu-bar"
+      ],
+      "token": "keepingyouawake",
+      "version": "1.6.0",
+      "versionChangedAt": "2026-09-30T02:00:00Z"
+    },
+    {
+      "apps": [
+        "Keka.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "utilities"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Keka",
+        "zh-CN": "Keka 压缩工具"
+      },
+      "downloadSize": 71,
+      "hidden": false,
+      "homepage": "https://www.keka.io/",
+      "installs30d": 79000,
+      "installs365d": 1106000,
+      "installs90d": 316000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Keka",
+      "names": [
+        "Keka",
+        "Keka 压缩工具"
+      ],
+      "pinyin": "yasuogongjuyasuogongju ysgjysgj",
+      "popularity": 7.9,
+      "rank30d": 22,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Keka",
+        "zh-CN": "压缩、加密与解压文件"
+      },
+      "tags": [
+        "utilities"
+      ],
+      "token": "keka",
+      "version": "1.5.0",
+      "versionChangedAt": "2026-09-30T03:00:00Z"
+    },
+    {
+      "apps": [
+        "LibreOffice.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "office"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "LibreOffice",
+        "zh-CN": "LibreOffice 办公套件"
+      },
+      "downloadSize": 79,
+      "hidden": false,
+      "homepage": "https://www.libreoffice.org/",
+      "installs30d": 64000,
+      "installs365d": 896000,
+      "installs90d": 256000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "LibreOffice",
+      "names": [
+        "LibreOffice",
+        "LibreOffice 办公套件"
+      ],
+      "pinyin": "bangongtaojianbangongtaojian bgtjbgtj",
+      "popularity": 6.4,
+      "rank30d": 37,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for LibreOffice",
+        "zh-CN": "编辑文档、表格与演示文稿"
+      },
+      "tags": [
+        "office"
+      ],
+      "token": "libreoffice",
+      "version": "25.8.0",
+      "versionChangedAt": "2026-09-29T12:00:00Z"
+    },
+    {
+      "apps": [
+        "logioptionsplus.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "drivers"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Logi Options+",
+        "zh-CN": "罗技设备设置"
+      },
+      "downloadSize": 85,
+      "hidden": false,
+      "homepage": "https://www.logitech.com/software/logi-options-plus.html",
+      "installs30d": 65000,
+      "installs365d": 910000,
+      "installs90d": 260000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Logi Options+",
+      "names": [
+        "Logi Options+",
+        "罗技设备设置"
+      ],
+      "pinyin": "luojishebeishezhiluojishebeishezhi ljsbszljsbsz",
+      "popularity": 6.5,
+      "rank30d": 36,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Logi Options+",
+        "zh-CN": "配置鼠标与键盘快捷操作"
+      },
+      "tags": [
+        "drivers"
+      ],
+      "token": "logi-options-plus",
+      "version": "1.95.0",
+      "versionChangedAt": "2026-09-29T13:00:00Z"
+    },
+    {
+      "apps": [
+        "Notion.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "office"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Notion",
+        "zh-CN": "Notion 工作空间"
+      },
+      "downloadSize": 74,
+      "hidden": false,
+      "homepage": "https://www.notion.so/",
+      "installs30d": 90000,
+      "installs365d": 1260000,
+      "installs90d": 360000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Notion",
+      "names": [
+        "Notion",
+        "Notion 工作空间"
+      ],
+      "pinyin": "gongzuokongjiangongzuokongjian gzkjgzkj",
+      "popularity": 9,
+      "rank30d": 11,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Notion",
+        "zh-CN": "协作笔记、文档与项目管理"
+      },
+      "tags": [
+        "office"
+      ],
+      "token": "notion",
+      "version": "4.20.0",
+      "versionChangedAt": "2026-09-30T14:00:00Z"
+    },
+    {
+      "apps": [
+        "Obsidian.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "writing"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Obsidian",
+        "zh-CN": "Obsidian 笔记"
+      },
+      "downloadSize": 75,
+      "hidden": false,
+      "homepage": "https://obsidian.md/",
+      "installs30d": 91000,
+      "installs365d": 1274000,
+      "installs90d": 364000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Obsidian",
+      "names": [
+        "Obsidian",
+        "Obsidian 笔记"
+      ],
+      "pinyin": "bijibiji bjbj",
+      "popularity": 9.1,
+      "rank30d": 10,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Obsidian",
+        "zh-CN": "用双向链接组织本地笔记"
+      },
+      "tags": [
+        "writing"
+      ],
+      "token": "obsidian",
+      "version": "1.9.0",
+      "versionChangedAt": "2026-09-30T15:00:00Z"
+    },
+    {
+      "apps": [
+        "OrbStack.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "virtualization"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "OrbStack",
+        "zh-CN": "OrbStack 虚拟化"
+      },
+      "downloadSize": 75,
+      "hidden": false,
+      "homepage": "https://orbstack.dev/",
+      "installs30d": 72000,
+      "installs365d": 1008000,
+      "installs90d": 288000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "OrbStack",
+      "names": [
+        "OrbStack",
+        "OrbStack 虚拟化"
+      ],
+      "pinyin": "xunihuaxunihua xnhxnh",
+      "popularity": 7.2,
+      "rank30d": 29,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for OrbStack",
+        "zh-CN": "轻量容器与虚拟机管理"
+      },
+      "tags": [
+        "virtualization"
+      ],
+      "token": "orbstack",
+      "version": "2.0.0",
+      "versionChangedAt": "2026-09-29T20:00:00Z"
+    },
+    {
+      "apps": [
+        "Postman.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "developer-tools"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Postman",
+        "zh-CN": "Postman 接口调试"
+      },
+      "downloadSize": 76,
+      "hidden": false,
+      "homepage": "https://www.postman.com/",
+      "installs30d": 71000,
+      "installs365d": 994000,
+      "installs90d": 284000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Postman",
+      "names": [
+        "Postman",
+        "Postman 接口调试"
+      ],
+      "pinyin": "jiekoudiaoshijiekoudiaoshi jkdsjkds",
+      "popularity": 7.1,
+      "rank30d": 30,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Postman",
+        "zh-CN": "设计、调试与测试接口"
+      },
+      "tags": [
+        "developer-tools"
+      ],
+      "token": "postman",
+      "version": "11.65.0",
+      "versionChangedAt": "2026-09-29T19:00:00Z"
+    },
+    {
+      "apps": [
+        "Proxyman.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "network"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Proxyman",
+        "zh-CN": "Proxyman 网络调试"
+      },
+      "downloadSize": 76,
+      "hidden": false,
+      "homepage": "https://proxyman.io/",
+      "installs30d": 73000,
+      "installs365d": 1022000,
+      "installs90d": 292000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Proxyman",
+      "names": [
+        "Proxyman",
+        "Proxyman 网络调试"
+      ],
+      "pinyin": "wangluodiaoshiwangluodiaoshi wldswlds",
+      "popularity": 7.3,
+      "rank30d": 28,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Proxyman",
+        "zh-CN": "捕获与调试网络请求"
+      },
+      "tags": [
+        "network"
+      ],
+      "token": "proxyman",
+      "version": "5.25.0",
+      "versionChangedAt": "2026-09-29T21:00:00Z"
+    },
+    {
+      "apps": [
+        "Raycast.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "productivity"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Raycast",
+        "zh-CN": "Raycast 启动器"
+      },
+      "downloadSize": 76,
+      "hidden": false,
+      "homepage": "https://www.raycast.com/",
+      "installs30d": 94000,
+      "installs365d": 1316000,
+      "installs90d": 376000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Raycast",
+      "names": [
+        "Raycast",
+        "Raycast 启动器"
+      ],
+      "pinyin": "qidongqiqidongqi qdqqdq",
+      "popularity": 9.4,
+      "rank30d": 7,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Raycast",
+        "zh-CN": "快速启动、搜索与自动化"
+      },
+      "tags": [
+        "productivity"
+      ],
+      "token": "raycast",
+      "version": "1.100.0",
+      "versionChangedAt": "2026-09-30T18:00:00Z"
+    },
+    {
+      "apps": [
+        "Rectangle.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "utilities"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Rectangle",
+        "zh-CN": "Rectangle 窗口管理"
+      },
+      "downloadSize": 75,
+      "hidden": false,
+      "homepage": "https://rectangleapp.com/",
+      "installs30d": 93000,
+      "installs365d": 1302000,
+      "installs90d": 372000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Rectangle",
+      "names": [
+        "Rectangle",
+        "Rectangle 窗口管理"
+      ],
+      "pinyin": "chuangkouguanlichuangkouguanli ckglckgl",
+      "popularity": 9.3,
+      "rank30d": 8,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Rectangle",
+        "zh-CN": "用快捷键排列桌面窗口"
+      },
+      "tags": [
+        "utilities"
+      ],
+      "token": "rectangle",
+      "version": "0.90",
+      "versionChangedAt": "2026-09-30T17:00:00Z"
+    },
+    {
+      "apps": [
+        "Slack.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "communication"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Slack",
+        "zh-CN": "Slack 团队通讯"
+      },
+      "downloadSize": 73,
+      "hidden": false,
+      "homepage": "https://slack.com/",
+      "installs30d": 87000,
+      "installs365d": 1218000,
+      "installs90d": 348000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Slack",
+      "names": [
+        "Slack",
+        "Slack 团队通讯"
+      ],
+      "pinyin": "tuanduitongxuntuanduitongxun tdtxtdtx",
+      "popularity": 8.7,
+      "rank30d": 14,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Slack",
+        "zh-CN": "团队频道与工作消息协作"
+      },
+      "tags": [
+        "communication"
+      ],
+      "token": "slack",
+      "version": "4.45.0",
+      "versionChangedAt": "2026-09-30T11:00:00Z"
+    },
+    {
+      "apps": [
+        "Spotify.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "media"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Spotify",
+        "zh-CN": "Spotify 音乐"
+      },
+      "downloadSize": 75,
+      "hidden": false,
+      "homepage": "https://www.spotify.com/",
+      "installs30d": 83000,
+      "installs365d": 1162000,
+      "installs90d": 332000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Spotify",
+      "names": [
+        "Spotify",
+        "Spotify 音乐"
+      ],
+      "pinyin": "yinleyinle ylyl",
+      "popularity": 8.3,
+      "rank30d": 18,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Spotify",
+        "zh-CN": "发现音乐、播客与播放列表"
+      },
+      "tags": [
+        "media"
+      ],
+      "token": "spotify",
+      "version": "1.2.70",
+      "versionChangedAt": "2026-09-30T07:00:00Z"
+    },
+    {
+      "apps": [
+        "Stats.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "menu-bar"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Stats",
+        "zh-CN": "Stats 系统监控"
+      },
+      "downloadSize": 73,
+      "hidden": false,
+      "homepage": "https://github.com/exelban/stats",
+      "installs30d": 81000,
+      "installs365d": 1134000,
+      "installs90d": 324000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Stats",
+      "names": [
+        "Stats",
+        "Stats 系统监控"
+      ],
+      "pinyin": "xitongjiankongxitongjiankong xtjkxtjk",
+      "popularity": 8.1,
+      "rank30d": 20,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Stats",
+        "zh-CN": "在菜单栏查看系统资源"
+      },
+      "tags": [
+        "menu-bar"
+      ],
+      "token": "stats",
+      "version": "2.12.0",
+      "versionChangedAt": "2026-09-30T05:00:00Z"
+    },
+    {
+      "apps": [
+        "Steam.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "games"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Steam",
+        "zh-CN": "Steam 游戏平台"
+      },
+      "downloadSize": 72,
+      "hidden": false,
+      "homepage": "https://store.steampowered.com/",
+      "installs30d": 66000,
+      "installs365d": 924000,
+      "installs90d": 264000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Steam",
+      "names": [
+        "Steam",
+        "Steam 游戏平台"
+      ],
+      "pinyin": "youxipingtaiyouxipingtai yxptyxpt",
+      "popularity": 6.6,
+      "rank30d": 35,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Steam",
+        "zh-CN": "管理游戏库与社区"
+      },
+      "tags": [
+        "games"
+      ],
+      "token": "steam",
+      "version": "1.0.0",
+      "versionChangedAt": "2026-09-29T14:00:00Z"
+    },
+    {
+      "apps": [
+        "TablePlus.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "databases"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "TablePlus",
+        "zh-CN": "TablePlus 数据库工具"
+      },
+      "downloadSize": 76,
+      "hidden": false,
+      "homepage": "https://tableplus.com/",
+      "installs30d": 70000,
+      "installs365d": 980000,
+      "installs90d": 280000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "TablePlus",
+      "names": [
+        "TablePlus",
+        "TablePlus 数据库工具"
+      ],
+      "pinyin": "shujukugongjushujukugongju sjkgjsjkgj",
+      "popularity": 7,
+      "rank30d": 31,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for TablePlus",
+        "zh-CN": "连接与管理多种数据库"
+      },
+      "tags": [
+        "databases"
+      ],
+      "token": "tableplus",
+      "version": "6.8.0",
+      "versionChangedAt": "2026-09-29T18:00:00Z"
+    },
+    {
+      "apps": [
+        "Tailscale.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "network"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Tailscale",
+        "zh-CN": "Tailscale 私有网络"
+      },
+      "downloadSize": 77,
+      "hidden": false,
+      "homepage": "https://tailscale.com/",
+      "installs30d": 74000,
+      "installs365d": 1036000,
+      "installs90d": 296000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Tailscale",
+      "names": [
+        "Tailscale",
+        "Tailscale 私有网络"
+      ],
+      "pinyin": "siyouwangluosiyouwangluo sywlsywl",
+      "popularity": 7.4,
+      "rank30d": 27,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Tailscale",
+        "zh-CN": "连接设备与私有网络"
+      },
+      "tags": [
+        "network"
+      ],
+      "token": "tailscale",
+      "version": "1.90.0",
+      "versionChangedAt": "2026-09-29T22:00:00Z"
+    },
+    {
+      "apps": [
+        "Telegram.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "communication"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Telegram",
+        "zh-CN": "Telegram 即时通讯"
+      },
+      "downloadSize": 75,
+      "hidden": false,
+      "homepage": "https://telegram.org/",
+      "installs30d": 85000,
+      "installs365d": 1190000,
+      "installs90d": 340000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Telegram",
+      "names": [
+        "Telegram",
+        "Telegram 即时通讯"
+      ],
+      "pinyin": "jishitongxunjishitongxun jstxjstx",
+      "popularity": 8.5,
+      "rank30d": 16,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Telegram",
+        "zh-CN": "跨设备发送消息与文件"
+      },
+      "tags": [
+        "communication"
+      ],
+      "token": "telegram",
+      "version": "6.3.0",
+      "versionChangedAt": "2026-09-30T09:00:00Z"
+    },
+    {
+      "apps": [
+        "Visual Studio Code.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [
+        "code"
+      ],
+      "categories": [
+        "developer-tools"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Visual Studio Code",
+        "zh-CN": "VS Code 编辑器"
+      },
+      "downloadSize": 87,
+      "hidden": false,
+      "homepage": "https://code.visualstudio.com/",
+      "iconUrl": "https://cdn.example.test/icons/e2e/visual-studio-code/dark-256.png",
+      "installs30d": 100000,
+      "installs365d": 1400000,
+      "installs90d": 400000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Visual Studio Code",
+      "names": [
+        "Visual Studio Code",
+        "VS Code 编辑器",
+        "vscode",
+        "VS Code"
+      ],
+      "pinyin": "bianjiqibianjiqi bjqbjq",
+      "popularity": 10,
+      "rank30d": 1,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Visual Studio Code",
+        "zh-CN": "代码编辑、调试与扩展开发"
+      },
+      "tags": [
+        "developer-tools"
+      ],
+      "token": "visual-studio-code",
+      "version": "1.140.0",
+      "versionChangedAt": "2026-10-01T00:00:00Z"
+    },
+    {
+      "apps": [
+        "VLC.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "media"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "VLC",
+        "zh-CN": "VLC 媒体播放器"
+      },
+      "downloadSize": 71,
+      "hidden": false,
+      "homepage": "https://www.videolan.org/vlc/",
+      "installs30d": 82000,
+      "installs365d": 1148000,
+      "installs90d": 328000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "VLC",
+      "names": [
+        "VLC",
+        "VLC 媒体播放器"
+      ],
+      "pinyin": "meitibofangqimeitibofangqi mtbfqmtbfq",
+      "popularity": 8.2,
+      "rank30d": 19,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for VLC",
+        "zh-CN": "播放常见音视频格式"
+      },
+      "tags": [
+        "media"
+      ],
+      "token": "vlc",
+      "version": "3.0.22",
+      "versionChangedAt": "2026-09-30T06:00:00Z"
+    },
+    {
+      "apps": [
+        "WeChat.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "communication"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "WeChat",
+        "zh-CN": "微信"
+      },
+      "downloadSize": 73,
+      "hidden": false,
+      "homepage": "https://mac.weixin.qq.com/",
+      "iconUrl": "https://cdn.example.test/icons/e2e/wechat/light-256.png",
+      "installs30d": 98000,
+      "installs365d": 1372000,
+      "installs90d": 392000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "WeChat",
+      "names": [
+        "WeChat",
+        "微信"
+      ],
+      "pinyin": "weixinweixin wxwx",
+      "popularity": 9.8,
+      "rank30d": 3,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for WeChat",
+        "zh-CN": "消息、通话与文件分享"
+      },
+      "tags": [
+        "communication"
+      ],
+      "token": "wechat",
+      "version": "4.1.0",
+      "versionChangedAt": "2026-09-30T22:00:00Z"
+    },
+    {
+      "apps": [
+        "Zed.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "developer-tools"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Zed",
+        "zh-CN": "Zed 代码编辑器"
+      },
+      "downloadSize": 72,
+      "hidden": false,
+      "homepage": "https://zed.dev/",
+      "installs30d": 69000,
+      "installs365d": 966000,
+      "installs90d": 276000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Zed",
+      "names": [
+        "Zed",
+        "Zed 代码编辑器"
+      ],
+      "pinyin": "daimabianjiqidaimabianjiqi dmbjqdmbjq",
+      "popularity": 6.9,
+      "rank30d": 32,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Zed",
+        "zh-CN": "快速协作代码编辑"
+      },
+      "tags": [
+        "developer-tools"
+      ],
+      "token": "zed",
+      "version": "0.210.0",
+      "versionChangedAt": "2026-09-29T17:00:00Z"
+    },
+    {
+      "apps": [
+        "zoom.us.app"
+      ],
+      "autoUpdates": true,
+      "binaries": [],
+      "categories": [
+        "communication"
+      ],
+      "deprecated": false,
+      "disabled": false,
+      "displayName": {
+        "en-US": "Zoom",
+        "zh-CN": "Zoom 视频会议"
+      },
+      "downloadSize": 71,
+      "hidden": false,
+      "homepage": "https://zoom.us/",
+      "installs30d": 84000,
+      "installs365d": 1176000,
+      "installs90d": 336000,
+      "isFont": false,
+      "isLibrary": false,
+      "kind": "cask",
+      "name": "Zoom",
+      "names": [
+        "Zoom",
+        "Zoom 视频会议"
+      ],
+      "pinyin": "shipinhuiyishipinhuiyi sphysphy",
+      "popularity": 8.4,
+      "rank30d": 17,
+      "summary": {
+        "en-US": "Deterministic E2E fixture for Zoom",
+        "zh-CN": "线上会议与屏幕共享"
+      },
+      "tags": [
+        "communication"
+      ],
+      "token": "zoom",
+      "version": "6.5.0",
+      "versionChangedAt": "2026-09-30T08:00:00Z"
+    }
+  ]
+}

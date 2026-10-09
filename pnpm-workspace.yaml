@@ -1,0 +1,84 @@
+packages:
+  - apps/web
+  - apps/desktop
+  - apps/admin
+  - apps/admin/packages/*
+  - packages/*
+
+catalog:
+  '@fontsource-variable/inter': ^5.2.0
+  '@iconify-json/lucide': ^1.2.0
+  '@iconify/types': ^2.0.0
+  '@iconify/utils': ^3.1.0
+  '@iconify/vue': ^5.0.0
+  '@lhci/cli': ^0.15.1
+  '@nuxt/fonts': ^0.14.0
+  '@nuxtjs/i18n': ^10.0.0
+  '@nuxtjs/seo': ^5.0.0
+  '@playwright/test': ~1.63.0
+  '@redocly/cli': ^2.0.0
+  '@resvg/resvg-js': ^2.6.2
+  '@soybeanjs/eslint-config-vue': ^0.0.2
+  '@stoplight/prism-cli': ^5.0.0
+  '@tauri-apps/api': ~2.12.0
+  '@tauri-apps/cli': ~2.12.0
+  '@tauri-apps/plugin-dialog': ~2.8.1
+  '@tauri-apps/plugin-opener': ~2.7.0
+  '@tauri-apps/plugin-process': ~2.4.0
+  '@tauri-apps/plugin-updater': ~2.13.1
+  '@types/node': ~25.7.0
+  '@unocss/nuxt': ~66.6.0
+  '@unocss/reset': ~66.6.0
+  '@vitejs/plugin-vue': ^6.0.0
+  '@vitest/coverage-v8': ^5.0.0
+  '@vue/test-utils': ^2.5.0
+  '@vueuse/core': ^14.0.0
+  eslint: ~10.3.0
+  ioredis: ^5.11.1
+  isomorphic-dompurify: ^4.4.0
+  jsdom: ^29.0.0
+  markdown-it: ^15.0.2
+  naive-ui: ~2.44.1
+  nuxt: ~4.5.0
+  openapi-fetch: ~0.17.0
+  openapi-typescript: ~7.13.0
+  oxfmt: ^0.49.0
+  oxlint: ^1.64.0
+  pinia: ~3.0.0
+  satori: ^0.35.0
+  subset-font: ^2.9.0
+  typescript: ~6.0.0
+  unocss: ~66.6.0
+  unstorage: ^1.17.5
+  vite: ~8.0.0
+  vitest: ^5.0.0
+  vue: ~3.5.0
+  vue-i18n: ^11.4.8
+  vue-router: ^5.2.0
+  vue-tsc: ^3.0.0
+
+ignoredBuiltDependencies:
+  - '@parcel/watcher'
+  - '@scarf/scarf'
+
+linkWorkspacePackages: true
+
+onlyBuiltDependencies:
+  - esbuild
+  - simple-git-hooks
+  - vue-demi
+
+shamefullyHoist: true
+
+# Target exact vulnerable transitive versions; avoid unrelated major upgrades.
+overrides:
+  'micromatch@4.0.7': 4.0.8
+  'fflate@0.7.3': 0.7.5
+  'simple-git@3.36.0': 4.0.2
+
+  'tinypool@2.1.0': 2.2.0
+  'lodash@<4.18.1': 4.18.1
+  'tmp@<0.2.7': 0.2.7
+  'uuid@8.3.2': 11.1.1
+  'basic-ftp@5.3.1': 6.2.2
+  'esbuild@0.27.7': 0.28.2

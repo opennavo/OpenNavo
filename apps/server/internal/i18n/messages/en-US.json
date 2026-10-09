@@ -1,0 +1,21 @@
+{
+  "0000": "ok",
+  "1001": "Invalid request parameters",
+  "1002": "Resource not found",
+  "1003": "Resource already exists",
+  "1004": "Permission denied",
+  "1005": "Too many requests",
+  "1006": "Operation unavailable in the current state",
+  "1007": "Unsupported or oversized file",
+  "1101": "Invalid username or password",
+  "1102": "Account locked. Try again in 15 minutes",
+  "1201": "Download the catalog snapshot again",
+  "1301": "Upstream service unavailable",
+  "1302": "Language service unavailable",
+  "5000": "Service temporarily unavailable",
+  "7777": "Session invalid. Sign in again",
+  "7778": "Password changed. Sign in again",
+  "8888": "Sign in required",
+  "8889": "Account disabled",
+  "9999": "Access token expired"
+}

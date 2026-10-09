@@ -1,0 +1,66 @@
+<script setup lang="ts">
+import { OnLogo } from '@opennavo/ui';
+
+// Landing footer (08 §10.14): brand/copy, locale selector moved here on mobile, two internal-link groups.
+const { t } = useI18n();
+const localePath = useLocalePath();
+const year = new Date().getFullYear();
+
+const columns = computed(() => [
+  {
+    key: 'browse',
+    title: t('nav.browse'),
+    links: (['discover', 'categories', 'rankings', 'collections'] as const).map(key => ({
+      key,
+      label: t(`nav.${key}`),
+      href: localePath(`/${key}`)
+    }))
+  },
+  {
+    key: 'site',
+    title: t('site.name'),
+    links: (['download', 'brewfile', 'about', 'feedback'] as const).map(key => ({
+      key,
+      label: t(`nav.${key}`),
+      href: localePath(`/${key}`)
+    }))
+  }
+]);
+</script>
+
+<template>
+  <footer class="border-t border-t-solid border-line-subtle">
+    <div
+      class="mx-auto box-border flex max-w-1240px flex-col gap-40px px-24px pb-32px pt-48px md:flex-row md:justify-between"
+    >
+      <div class="flex max-w-360px flex-col items-start gap-14px">
+        <NuxtLink
+          :to="localePath('/')"
+          class="inline-flex rounded-tiny no-underline outline-none focus-visible:shadow-focus-ring"
+        >
+          <OnLogo wordmark />
+        </NuxtLink>
+        <p class="m-0 text-13px leading-[1.65] text-ink-secondary">{{ t('footer.tagline') }}</p>
+        <LanguageSwitch align="start" />
+      </div>
+      <nav class="grid grid-cols-2 gap-x-64px gap-y-24px" :aria-label="t('landing.footerNav')">
+        <div v-for="column in columns" :key="column.key" class="flex flex-col gap-12px">
+          <h2 class="m-0 text-label text-ink-tertiary">{{ column.title }}</h2>
+          <ul class="m-0 flex list-none flex-col gap-10px p-0">
+            <li v-for="link in column.links" :key="link.key">
+              <NuxtLink
+                :to="link.href"
+                class="rounded-tiny text-13.5px text-ink-secondary no-underline outline-none transition-colors duration-fast ease-standard hover:text-ink-primary focus-visible:shadow-focus-ring"
+              >
+                {{ link.label }}
+              </NuxtLink>
+            </li>
+          </ul>
+        </div>
+      </nav>
+    </div>
+    <p class="m-0 mx-auto box-border max-w-1240px px-24px pb-32px text-12px text-ink-tertiary">
+      {{ t('footer.copyright', { year }) }}
+    </p>
+  </footer>
+</template>

@@ -1,0 +1,6 @@
+tap "homebrew/core"
+tap "homebrew/cask"
+brew "ripgrep"
+brew "node"
+cask "visual-studio-code"
+cask "ghostty"

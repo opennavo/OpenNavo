@@ -1,0 +1,202 @@
+{
+  "categories": [
+    {
+      "slug": "ai",
+      "zh": "AI 工具",
+      "en": "AI Tools",
+      "icon": "lucide:sparkles",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 10
+    },
+    {
+      "slug": "developer-tools",
+      "zh": "开发工具",
+      "en": "Developer Tools",
+      "icon": "lucide:code-xml",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 20
+    },
+    {
+      "slug": "terminal",
+      "zh": "终端与 Shell",
+      "en": "Terminal & Shell",
+      "icon": "lucide:square-terminal",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 30
+    },
+    {
+      "slug": "languages",
+      "zh": "编程语言与运行时",
+      "en": "Languages & Runtimes",
+      "icon": "lucide:braces",
+      "appliesTo": "formula",
+      "hidden": false,
+      "sort": 40
+    },
+    {
+      "slug": "databases",
+      "zh": "数据库",
+      "en": "Databases",
+      "icon": "lucide:database",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 50
+    },
+    {
+      "slug": "virtualization",
+      "zh": "虚拟化与容器",
+      "en": "Virtualization & Containers",
+      "icon": "lucide:boxes",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 60
+    },
+    {
+      "slug": "productivity",
+      "zh": "效率",
+      "en": "Productivity",
+      "icon": "lucide:zap",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 70
+    },
+    {
+      "slug": "writing",
+      "zh": "写作与笔记",
+      "en": "Writing & Notes",
+      "icon": "lucide:notebook-pen",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 80
+    },
+    {
+      "slug": "office",
+      "zh": "办公",
+      "en": "Office",
+      "icon": "lucide:briefcase",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 90
+    },
+    {
+      "slug": "browsers",
+      "zh": "浏览器",
+      "en": "Browsers",
+      "icon": "lucide:globe",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 100
+    },
+    {
+      "slug": "communication",
+      "zh": "通讯",
+      "en": "Communication",
+      "icon": "lucide:message-circle",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 110
+    },
+    {
+      "slug": "design",
+      "zh": "设计",
+      "en": "Design",
+      "icon": "lucide:pen-tool",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 120
+    },
+    {
+      "slug": "media",
+      "zh": "影音",
+      "en": "Audio & Video",
+      "icon": "lucide:clapperboard",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 130
+    },
+    {
+      "slug": "utilities",
+      "zh": "系统工具",
+      "en": "Utilities",
+      "icon": "lucide:wrench",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 140
+    },
+    {
+      "slug": "menu-bar",
+      "zh": "菜单栏",
+      "en": "Menu Bar",
+      "icon": "lucide:panel-top",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 150
+    },
+    {
+      "slug": "network",
+      "zh": "网络",
+      "en": "Networking",
+      "icon": "lucide:network",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 160
+    },
+    {
+      "slug": "security",
+      "zh": "安全与隐私",
+      "en": "Security & Privacy",
+      "icon": "lucide:shield",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 170
+    },
+    {
+      "slug": "drivers",
+      "zh": "驱动与硬件",
+      "en": "Drivers & Hardware",
+      "icon": "lucide:cpu",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 180
+    },
+    {
+      "slug": "games",
+      "zh": "游戏",
+      "en": "Games",
+      "icon": "lucide:gamepad-2",
+      "appliesTo": "cask",
+      "hidden": false,
+      "sort": 190
+    },
+    {
+      "slug": "education",
+      "zh": "教育与科研",
+      "en": "Education & Science",
+      "icon": "lucide:graduation-cap",
+      "appliesTo": "both",
+      "hidden": false,
+      "sort": 200
+    },
+    {
+      "slug": "fonts",
+      "zh": "字体",
+      "en": "Fonts",
+      "icon": "lucide:type",
+      "appliesTo": "cask",
+      "hidden": true,
+      "sort": 210
+    },
+    {
+      "slug": "libraries",
+      "zh": "库与依赖",
+      "en": "Libraries",
+      "icon": "lucide:library",
+      "appliesTo": "formula",
+      "hidden": true,
+      "sort": 220
+    }
+  ]
+}

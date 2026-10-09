@@ -1,0 +1,549 @@
+{
+  "site": {
+    "name": "OpenNavo",
+    "title": "OpenNavo — la tienda de aplicaciones Homebrew para Mac",
+    "description": "Explora {count} app para Mac, consulta las notas de versión e instálala o actualízala con un solo clic. | Explora {count} apps para Mac, consulta las notas de versión e instálalas o actualízalas con un solo clic."
+  },
+  "nav": {
+    "label": "Navegación principal",
+    "discover": "Explorar",
+    "categories": "Categorías",
+    "rankings": "Clasificación",
+    "collections": "Colecciones",
+    "download": "Descargar la app",
+    "search": "Buscar apps",
+    "switchLanguage": "Inglés",
+    "switchLanguageLabel": "Elegir idioma",
+    "browse": "Explorar",
+    "lists": "Lista",
+    "brewfile": "Mi lista",
+    "about": "Acerca de",
+    "feedback": "Comentarios"
+  },
+  "sidebar": {
+    "appLabel": "Cliente para Mac",
+    "appTitle": "OpenNavo para Mac",
+    "appHint": "macOS 13+ · Gratis"
+  },
+  "rail": {
+    "featuredCollection": "Colecciones destacadas",
+    "downloadHint": "macOS 13+ · Apple Silicon e Intel · Gratis",
+    "downloadBody": "Instala y actualiza estas apps en Mac con un clic; cada operación queda registrada."
+  },
+  "home": {
+    "introTitle": "OpenNavo: la tienda de aplicaciones Homebrew para Mac",
+    "introBody": "Incluye {count} app, cada una con una descripción y notas de versión. Instálalas y actualízalas con un solo clic desde la app para macOS. | Incluye {count} apps, cada una con una descripción y notas de versión. Instálalas y actualízalas con un solo clic desde la app para macOS.",
+    "introDismiss": "Cerrar introducción",
+    "featured": "Selección de la semana",
+    "popularApps": "Apps populares",
+    "recentlyUpdated": "Actualizaciones recientes",
+    "viewDetails": "Ver detalles",
+    "allCategories": "Todas",
+    "categoriesLabel": "Explorar por categoría",
+    "popularAppsHint": "Instalaciones de Homebrew en los últimos 30 días",
+    "recentlyUpdatedHint": "Nueva versión publicada",
+    "weeklyTop": "Populares esta semana",
+    "weeklyTopHint": "Clasificación por instalaciones en los últimos 30 días",
+    "collections": "Colecciones",
+    "viewRankings": "Ver clasificación",
+    "viewAll": "Ver todo",
+    "metaTitle": "Descubre apps para Mac · OpenNavo",
+    "discoverHeading": "Descubre apps para Mac"
+  },
+  "footer": {
+    "tagline": "Interfaz gráfica de código abierto para Homebrew. La instalación se realiza desde el cliente de macOS o con el comando brew.",
+    "copyright": "© {year} OpenNavo"
+  },
+  "error": {
+    "notFoundTitle": "Página no encontrada",
+    "notFoundBody": "Esta dirección no contiene nada; es posible que se haya movido o que Homebrew la haya eliminado.",
+    "serverTitle": "El servicio no está disponible temporalmente",
+    "serverBody": "La red o el servicio no están disponibles temporalmente. Inténtalo de nuevo más tarde.",
+    "backHome": "Volver al inicio",
+    "search": "Buscar",
+    "requestId": "ID de solicitud: {id}"
+  },
+  "get": {
+    "label": "Obtener {name}",
+    "menuLabel": "Cómo obtener {name}"
+  },
+  "openInApp": {
+    "title": "¿Aún no tienes OpenNavo?",
+    "body": "No se ha detectado el cliente de OpenNavo. Descárgalo para instalar {name} con un clic o copia el comando de instalación y ejecútalo en el terminal.",
+    "download": "Descargar la app",
+    "copyInstead": "Copiar el comando de instalación",
+    "dontAsk": "No volver a mostrar"
+  },
+  "toast": {
+    "copied": "Comando de instalación copiado",
+    "copyFailed": "No se puede acceder al portapapeles. Copia el comando siguiente manualmente",
+    "addedToBrewfile": "{name} se ha añadido a la lista de Brewfile",
+    "brewfileFull": "La lista admite un máximo de 200 elementos. Elimina algunos antes de añadir más"
+  },
+  "catalog": {
+    "appsTitle": "Apps",
+    "appsMetaTitle": "Catálogo de apps para Mac · OpenNavo",
+    "appsDescription": "Apps de macOS en Homebrew con descripciones y notas de versión. Explora por instalaciones, actualizaciones o nombre.",
+    "total": "{total} en total | {total} en total",
+    "sortLabel": "Ordenar",
+    "sortPopular": "Popularidad",
+    "sortUpdated": "Actualizaciones recientes",
+    "sortName": "Nombre",
+    "showDisabled": "Mostrar desactivadas",
+    "emptyTitle": "Todavía no hay contenido",
+    "emptyDescription": "Prueba con otros filtros o dinos qué te gustaría que incluyéramos."
+  },
+  "categories": {
+    "title": "Categorías",
+    "metaTitle": "Categorías de software para Mac · OpenNavo",
+    "description": "Explora las apps incluidas en Homebrew por categoría.",
+    "count": "{count} app | {count} apps",
+    "itemMetaTitle": "Recomendaciones de software para Mac: {name} · OpenNavo"
+  },
+  "rankings": {
+    "title": "Clasificación",
+    "metaTitle": "Clasificación del software para Mac más popular de Homebrew · OpenNavo",
+    "description": "Clasificación según las estadísticas oficiales de instalaciones de Homebrew, actualizada a diario; variación respecto a hace 7 días.",
+    "periodLabel": "Periodo de estadísticas",
+    "period": {
+      "30d": "Últimos 30 días",
+      "90d": "Últimos 90 días",
+      "365d": "Últimos 365 días"
+    },
+    "category": "Categorías",
+    "allCategories": "Todas las categorías"
+  },
+  "search": {
+    "title": "Buscar",
+    "metaTitle": "Buscar «{q}» · OpenNavo",
+    "resultsTitle": "Resultados de búsqueda de «{q}»",
+    "count": "{total} resultado | {total} resultados",
+    "alsoSearched": "También se buscó: {terms}",
+    "matched": "Coincidencia: {name}",
+    "suggest": "Sugerir una app para incluir",
+    "emptyQueryTitle": "Escribe palabras clave para empezar a buscar",
+    "emptyQueryDescription": "Puedes buscar por nombre de app en inglés, nombre en chino o pinyin."
+  },
+  "palette": {
+    "packages": "Apps",
+    "jump": "Ir",
+    "searchAll": "Buscar «{q}»",
+    "category": "Categoría: {name}",
+    "pages": {
+      "discover": "Explorar",
+      "categories": "Categorías",
+      "rankings": "Clasificación",
+      "collections": "Colecciones",
+      "download": "Descargar la app",
+      "brewfile": "Lista de Brewfile"
+    }
+  },
+  "package": {
+    "arch": {
+      "arm64": "Chip Apple",
+      "x86_64": "Intel"
+    },
+    "autoUpdates": "Actualización integrada",
+    "disabled": "Desactivada",
+    "deprecated": "Obsoleta",
+    "homepage": "Inicio",
+    "fromTap": "De",
+    "stats": {
+      "label": "Datos",
+      "installs30d": "Instalaciones en los últimos 30 días",
+      "rank": "Puesto {rank} en {kind}",
+      "installs365d": "Instalaciones del último año",
+      "total365": "Total de los últimos 365 días",
+      "latest": "Última versión",
+      "size": "Tamaño de descarga",
+      "cadence": "Frecuencia de actualización",
+      "releases30d": "{count} versión en 30 días | {count} versiones en 30 días"
+    },
+    "cadence": {
+      "daily": "A diario",
+      "weekly": "Semanalmente",
+      "biweekly": "Cada dos semanas",
+      "monthly": "Mensualmente",
+      "irregular": "Irregular"
+    },
+    "tabs": {
+      "label": "Pestañas de detalles",
+      "overview": "Resumen",
+      "versions": "Historial de versiones",
+      "dependencies": "Dependencias y conflictos",
+      "details": "Detalles de instalación"
+    },
+    "disabledNotice": "Homebrew ha deshabilitado este paquete: {reason}",
+    "deprecatedNotice": "Homebrew ha marcado este paquete como obsoleto: {reason}",
+    "noReason": "No se indica el motivo",
+    "replacement": "Alternativa: {token}",
+    "release": {
+      "new": "Novedades",
+      "title": "Novedades de {version}",
+      "translated": "Traducción por IA",
+      "source": {
+        "github_release": "De GitHub Release",
+        "sparkle": "Del canal de actualización de la aplicación",
+        "webpage": "De la página de actualizaciones oficial",
+        "manual": "Editado manualmente",
+        "editorial": "Editado por OpenNavo",
+        "homebrew": "Del historial de commits de Homebrew"
+      },
+      "viewAll": "Ver las {count} versiones | Ver las {count} versiones",
+      "noNotes": "Esta versión no tiene notas de actualización específicas.",
+      "emptyTitle": "Aún no hay historial de versiones",
+      "prerelease": "Versión preliminar",
+      "filterLabel": "Filtro de versiones",
+      "filterAll": "Todos: {count} | Todos: {count}",
+      "filterWithNotes": "Con notas: {count} | Con notas: {count}",
+      "languageLabel": "Idioma del contenido",
+      "languageTranslated": "Chino",
+      "languageOriginal": "Original",
+      "count30d": "Últimos 30 días",
+      "count30dUnit": "versión | versiones",
+      "cadenceHint": {
+        "daily": "Se publica casi a diario",
+        "weekly": "Se publica aproximadamente cada semana",
+        "biweekly": "Se publica aproximadamente cada dos semanas",
+        "monthly": "Se publica aproximadamente cada mes",
+        "irregular": "La frecuencia de publicación es irregular"
+      },
+      "brewLabel": "Inclusión en Homebrew",
+      "brewSync": "≈ sincronizado",
+      "brewLater": "{time} más tarde",
+      "brewEarlier": "{time} antes",
+      "brewHint": "{earlier} de {compared} anteriores a la versión upstream",
+      "lagMinutes": "{n} min",
+      "lagHours": "{n} h",
+      "lagDays": "{n} día | {n} días",
+      "sourcesTitle": "Fuentes de datos",
+      "sourceInfo": {
+        "webpage": {
+          "title": "Página de actualizaciones oficial",
+          "body": "Puntos clave extraídos de la página de notas de actualización del sitio oficial del desarrollador"
+        },
+        "github_release": {
+          "title": "GitHub Releases",
+          "body": "Notas de versión y fechas de publicación del proyecto en GitHub"
+        },
+        "sparkle": {
+          "title": "Canal de actualización de la aplicación",
+          "body": "Appcast de Sparkle usado por la comprobación de actualizaciones integrada en la app"
+        },
+        "manual": {
+          "title": "Editado manualmente",
+          "body": "Notas de actualización recopiladas por el equipo editorial a partir de anuncios oficiales"
+        },
+        "editorial": {
+          "title": "Editado por OpenNavo",
+          "body": "Notas de actualización redactadas por OpenNavo a partir de información oficial"
+        },
+        "homebrew": {
+          "title": "Historial de commits de Homebrew",
+          "body": "Commits de actualización de versión del paquete en el repositorio de Homebrew; indican cuándo se añadió"
+        }
+      }
+    },
+    "monthly": {
+      "title": "Instalaciones mensuales medias",
+      "d30": "Últimos 30 días",
+      "avg90": "Media mensual de los últimos 90 días",
+      "avg365": "Media mensual del último año",
+      "full": "{count} instalación | {count} instalaciones",
+      "trend": {
+        "rising": "Las instalaciones recientes están aumentando",
+        "slowing": "Las instalaciones recientes se están ralentizando; la mayoría de los usuarios existentes actualiza desde la propia aplicación",
+        "steady": "Las instalaciones se mantienen estables"
+      }
+    },
+    "related": "Aplicaciones similares",
+    "screenshots": "Capturas de pantalla",
+    "caveats": "Avisos",
+    "info": {
+      "homepage": "Inicio",
+      "binaries": "Comandos incluidos",
+      "autoUpdates": "Actualización automática",
+      "autoYes": "Integrada en la app (auto_updates)",
+      "autoNo": "Actualizada por Homebrew",
+      "uninstall": "Al desinstalar",
+      "arch": "Arquitectura",
+      "minMacos": "Sistema mínimo",
+      "license": "Licencia"
+    },
+    "deps": {
+      "macos": "Requisitos del sistema",
+      "formulae": "Herramientas de línea de comandos requeridas",
+      "casks": "Apps requeridas",
+      "emptyTitle": "Sin dependencias",
+      "emptyDescription": "La instalación no incluirá otros paquetes.",
+      "runtime": "Dependencias de ejecución",
+      "build": "Dependencias de compilación",
+      "other": "Otros:",
+      "type": {
+        "runtime": "Ejecución",
+        "build": "Compilación",
+        "test": "Pruebas",
+        "optional": "Opcional",
+        "recommended": "Recomendado",
+        "usesFromMacos": "Usar la versión del sistema",
+        "cask": "Apps"
+      },
+      "conflicts": "Conflictos",
+      "dependents": "Usado por {count} paquete | Usado por {count} paquetes",
+      "metaTitle": "Dependencias y conflictos de {name} · OpenNavo"
+    },
+    "details": {
+      "tap": "Repositorio de origen",
+      "names": "Otros nombres",
+      "location": "Ubicación de instalación",
+      "pkgs": "Paquete de instalación",
+      "kegOnly": "keg-only",
+      "kegOnlyValue": "No se enlaza a /opt/homebrew; debes añadirlo manualmente a PATH",
+      "download": "URL de descarga",
+      "source": "Archivo de definición de Homebrew",
+      "repo": "Código fuente",
+      "metaTitle": "Detalles de instalación de {name} · OpenNavo"
+    },
+    "versionsMetaTitle": "Historial de versiones y novedades de {name} · OpenNavo",
+    "versionsMetaDescription": "Última versión de {name}: {version} ({date}). Consulta los cambios de cada versión.",
+    "metaTitleCask": "{name}: {summary} — Instalación con Homebrew · OpenNavo",
+    "metaDescription": "{summary}. Instalar: {command}. Última versión {version}, {installs} instalación en los últimos 30 días. | {summary}. Instalar: {command}. Última versión {version}, {installs} instalaciones en los últimos 30 días."
+  },
+  "collections": {
+    "title": "Colecciones",
+    "metaTitle": "Colecciones de software para Mac · OpenNavo",
+    "description": "Colecciones de apps organizadas por uso, exportables como Brewfile.",
+    "emptyTitle": "Aún no hay colecciones",
+    "itemMetaTitle": "{title} · Colección de OpenNavo",
+    "count": "{count} elemento | {count} elementos",
+    "updated": "Actualizado el {date}",
+    "addAll": "Añadir todo a la lista de Brewfile",
+    "addedAll": "Se ha añadido {count} paquete | Se han añadido {count} paquetes",
+    "export": "Exportar Brewfile"
+  },
+  "brewfile": {
+    "title": "Lista de Brewfile",
+    "metaTitle": "Generador de Brewfile · OpenNavo",
+    "description": "Añade las apps que quieras instalar a la lista y genera un Brewfile para instalarlas todas en un Mac nuevo con un solo comando.",
+    "count": "{count} elemento | {count} elementos",
+    "emptyTitle": "La lista está vacía",
+    "emptyDescription": "En la tarjeta de una app o en su página de detalles, selecciona «Añadir a la lista de Brewfile» en el menú «Obtener».",
+    "browse": "Explorar",
+    "fileTitle": "Generado por OpenNavo",
+    "copied": "Brewfile copiado",
+    "download": "Descargar Brewfile",
+    "usage": "Cómo usarlo",
+    "usageHint": "Coloca el Brewfile descargado en la carpeta «Descargas» y ejecuta el comando anterior en el terminal. Los paquetes ya instalados se omitirán automáticamente.",
+    "moveUp": "Subir {name}",
+    "moveDown": "Bajar {name}",
+    "remove": "Eliminar {name} de la lista"
+  },
+  "download": {
+    "title": "La tienda de aplicaciones Homebrew para Mac",
+    "metaTitle": "Descargar el cliente de OpenNavo · OpenNavo",
+    "description": "Instala y actualiza apps con un clic; cada operación queda registrada. El cliente usa Homebrew en tu ordenador y no requiere una cuenta.",
+    "button": "Descargar para macOS",
+    "meta": "Versión {version} · {size} · macOS {macos} o posterior · publicado el {date}",
+    "copySha": "Copiar suma de comprobación SHA-256",
+    "shaCopied": "SHA-256 copiado",
+    "comingTitle": "El cliente estará disponible próximamente",
+    "comingDescription": "Podrás descargarlo aquí cuando se publique la versión estable. Mientras tanto, puedes copiar los comandos brew de la web para instalar software.",
+    "brewTitle": "O instalar con Homebrew",
+    "features": {
+      "install": {
+        "title": "Instalación con un clic",
+        "body": "Haz clic en «Obtener» en la página de una app para instalarla; el comando brew que se ejecutará se muestra claramente."
+      },
+      "updates": {
+        "title": "Olvídate de recordar las actualizaciones",
+        "body": "Comprueba periódicamente si hay actualizaciones disponibles y actualízalas todas con un clic. También detecta las apps con actualización integrada."
+      },
+      "history": {
+        "title": "Cada operación queda registrada",
+        "body": "Las instalaciones, actualizaciones y desinstalaciones se registran localmente. Si algo falla, puedes consultar el registro e intentarlo de nuevo."
+      }
+    },
+    "changelog": "Registro de cambios"
+  },
+  "feedback": {
+    "title": "Comentarios",
+    "metaTitle": "Informar de un problema · OpenNavo",
+    "description": "Si la información es incorrecta, la instalación falla, un enlace no funciona o quieres recomendar un software, cuéntanoslo.",
+    "type": "Tipo",
+    "types": {
+      "wrong_info": "Información incorrecta",
+      "install_failed": "Error de instalación",
+      "broken_link": "Enlace no válido",
+      "suggest_package": "Recomendar una app",
+      "translation": "Problema de traducción",
+      "other": "Otros"
+    },
+    "package": "Paquete relacionado:",
+    "removePackage": "No relacionado con este paquete",
+    "content": "Contenido",
+    "contentPlaceholder": "Describe el problema que has encontrado o el software que quieres recomendar y por qué.",
+    "contentHint": "{count} / 2000 caracteres; mínimo 5",
+    "contact": "Datos de contacto (opcional)",
+    "contactPlaceholder": "Correo electrónico u otro medio; solo lo usaremos para responderte",
+    "submit": "Enviar",
+    "rateLimited": "Has enviado demasiadas solicitudes. Inténtalo de nuevo más tarde.",
+    "failed": "No se ha podido enviar. Inténtalo de nuevo más tarde.",
+    "doneTitle": "Recibido, ¡gracias!",
+    "doneDescription": "Lo revisaremos lo antes posible. Si has dejado datos de contacto, te responderemos cuando lo hayamos tramitado.",
+    "backHome": "Volver al inicio",
+    "suggestPrefill": "Recomendar una app: {q}\n\n"
+  },
+  "about": {
+    "title": "Acerca de OpenNavo",
+    "metaTitle": "Acerca de y privacidad · OpenNavo",
+    "description": "Qué es OpenNavo, de dónde proceden los datos y cómo tratamos tu información.",
+    "draft": "Pendiente de revisión",
+    "about": {
+      "title": "Qué es OpenNavo",
+      "body": [
+        "OpenNavo es la tienda de aplicaciones Homebrew para macOS: explora y busca en la web las apps incluidas en Homebrew e instálalas y actualízalas con un clic desde el cliente para macOS.",
+        "OpenNavo no aloja ningún software. Homebrew, instalado en tu ordenador, se encarga de todas las instalaciones y los comandos que se ejecutan se muestran claramente."
+      ]
+    },
+    "data": {
+      "title": "Fuentes de datos",
+      "body": [
+        "El catálogo y las estadísticas de instalaciones proceden de la API pública oficial de Homebrew (formulae.brew.sh) y se sincronizan a diario. El historial de versiones procede de GitHub Releases, los canales de actualización de las aplicaciones, las páginas de actualizaciones oficiales y el historial de commits de Homebrew.",
+        "Las descripciones en chino y las notas de versión se recopilan mediante procesos automatizados y se revisan manualmente por muestreo. Siempre se conserva el enlace al texto original."
+      ]
+    },
+    "privacy": {
+      "title": "Privacidad",
+      "body": [
+        "La web no requiere una cuenta ni recopila qué software has instalado. Las búsquedas se registran de forma anónima para mejorar los resultados, sin guardar direcciones IP. La lista de Brewfile solo se guarda localmente en tu navegador.",
+        "Las estadísticas de uso del cliente para macOS están desactivadas de forma predeterminada. Los informes anónimos de errores solo se envían si das tu consentimiento. Los datos de contacto que proporciones al enviar comentarios solo se utilizan para responderte."
+      ]
+    },
+    "terms": {
+      "title": "Términos de uso",
+      "body": [
+        "OpenNavo se proporciona «tal cual». El software lo publican sus respectivos autores; su instalación y uso están sujetos a sus propias licencias. Comprueba que la fuente sea de confianza antes de instalarlo.",
+        "OpenNavo solo usa Homebrew para realizar las operaciones que confirmes; no instala software en segundo plano en tu nombre."
+      ]
+    },
+    "contact": {
+      "title": "Código abierto y contacto",
+      "body": [
+        "OpenNavo es un proyecto de código abierto. Si detectas información incorrecta, errores de instalación o quieres recomendar una app, puedes avisarnos en la página «Comentarios»."
+      ]
+    }
+  },
+  "og": {
+    "footer": "OpenNavo · Tienda de aplicaciones Homebrew"
+  },
+  "languageSuggestion": {
+    "message": "¿Quieres navegar en {language}?",
+    "switch": "Cambiar a {language}",
+    "dismiss": "No volver a sugerir"
+  },
+  "landing": {
+    "footerNav": "Navegación del pie de página",
+    "hero": {
+      "badge": "La tienda de apps de Homebrew para Mac",
+      "title": "Instalar apps para Mac",
+      "titleAccent": "debería ser así de fácil.",
+      "lede": "Explora **{count} app** con descripciones y notas de la versión y, después, **instala y actualiza con un solo clic** desde la app para macOS. Homebrew se encarga de la instalación y puedes ver cada paso. | Explora **{count} apps** con descripciones y notas de la versión y, después, **instala y actualiza con un solo clic** desde la app para macOS. Homebrew se encarga de la instalación y puedes ver cada paso.",
+      "ledeFallback": "Explora apps con descripciones y notas de la versión y, después, **instala y actualiza con un solo clic** desde la app para macOS. Homebrew se encarga de la instalación y puedes ver cada paso.",
+      "download": "Descargar para Mac",
+      "browse": "Explorar apps",
+      "followOnX": "Seguir a {account}",
+      "meta": "Gratis · macOS 13 o posterior · Apple silicon e Intel"
+    },
+    "window": {
+      "label": "La app OpenNavo para Mac instala una app desde Descubrir",
+      "mine": "Biblioteca",
+      "installed": "Instaladas",
+      "updates": "Actualizaciones",
+      "history": "Historial",
+      "settings": "Ajustes",
+      "installing": "Instalando {name}"
+    },
+    "catalog": {
+      "kicker": "Catálogo",
+      "title": "{count} app, todo en un mismo lugar. | {count} apps, todo en un mismo lugar.",
+      "body": "El catálogo procede de Homebrew y se sincroniza a diario. Las clasificaciones se basan en **instalaciones reales de los últimos 30 días**, y las **selecciones del equipo editorial** y las **colecciones** te ayudan a encontrar las mejores apps.",
+      "stats": {
+        "apps": "Apps en el catálogo",
+        "updated": "Actualizado en las últimas 24 horas",
+        "languages": "Idiomas de la interfaz"
+      }
+    },
+    "details": {
+      "kicker": "Historial de versiones",
+      "title": "Cada versión queda registrada.",
+      "body": "Cuando Homebrew incorpora una nueva versión, aparece aquí con la hora exacta del commit. Las **notas de la versión** que redactamos se traducen automáticamente a tu idioma; puedes consultar el original con un clic.",
+      "points": {
+        "about": "Descripciones, capturas de pantalla y detalles de instalación antes de instalar",
+        "deps": "Dependencias, conflictos y ubicaciones de instalación de un vistazo",
+        "languages": "Seis idiomas, con el inglés o el original como alternativa cuando falta una traducción"
+      }
+    },
+    "install": {
+      "kicker": "Instalación",
+      "title": "Un clic y listo.",
+      "body": "Pulsa Obtener en la página de una app y OpenNavo ejecutará Homebrew en tu Mac para instalarla. Puedes ver **el comando exacto** y **cada línea del registro**. Si se necesitan permisos de administrador, macOS te pedirá la contraseña; OpenNavo nunca la guarda.",
+      "points": {
+        "queue": "Las tareas se ejecutan en una cola, se pueden cancelar y se pueden reintentar si fallan",
+        "confirm": "Las instalaciones iniciadas en la web solo se ejecutan después de que las confirmes en la app",
+        "history": "Cada instalación, actualización y desinstalación queda registrada en tu Mac"
+      }
+    },
+    "updates": {
+      "kicker": "Actualizaciones",
+      "title": "Actualizaciones bajo control.",
+      "body": "OpenNavo busca actualizaciones a diario y muestra el número en la **barra de menús**. Con un clic en **Actualizar todo**, se encarga del resto. Además, comprueba la versión real de las apps que se actualizan por sí mismas para evitar avisos falsos.",
+      "points": {
+        "schedule": "Comprobaciones diarias a una hora determinada, con notificaciones opcionales",
+        "pin": "Fija una app o ignora una versión; Actualizar todo la dejará intacta",
+        "mirror": "Cambia la fuente de descarga; tras una prueba de velocidad, se recomienda la más rápida"
+      },
+      "available": "{count} actualización disponible | {count} actualizaciones disponibles",
+      "upToDate": "Todo está actualizado",
+      "open": "Abrir OpenNavo"
+    },
+    "more": {
+      "kicker": "Y mucho más",
+      "title": "Los detalles marcan la diferencia.",
+      "handoff": {
+        "title": "Encuentra en la web, instala en la app",
+        "body": "Pulsa Abrir en OpenNavo en la web. La app muestra el comando que ejecutará y solo instala después de que lo confirmes.",
+        "dialogTitle": "¿Instalar {name}?",
+        "dialogBody": "Esta solicitud procede de una página web. OpenNavo ejecutará:",
+        "install": "Instalar"
+      },
+      "mirrors": {
+        "title": "Prueba de velocidad de mirrors",
+        "body": "OpenNavo comprueba la fuente oficial y los mirrors y recomienda el más rápido. Se usa al configurar Homebrew y al ejecutar comandos brew, y puedes cambiarlo cuando quieras.",
+        "official": "Fuente oficial",
+        "tuna": "Mirror TUNA (Tsinghua)",
+        "ustc": "Mirror USTC",
+        "recommended": "Recomendado"
+      },
+      "brewfile": {
+        "title": "Mac nuevo, las mismas apps",
+        "body": "Añade tus apps a una lista y exporta un Brewfile. En un Mac nuevo, un solo comando las instala todas."
+      },
+      "search": {
+        "title": "Busca con ⌘K",
+        "body": "Busca por nombre en inglés, nombre en chino, pinyin o alias habituales. Si escribes vscode, encontrarás Visual Studio Code."
+      },
+      "languages": {
+        "title": "Seis idiomas",
+        "body": "La interfaz está disponible en inglés, chino simplificado, japonés, español, portugués y ruso, con fechas y números adaptados a cada idioma."
+      },
+      "privacy": {
+        "title": "No necesitas una cuenta",
+        "body": "No necesitas iniciar sesión y no recopilamos qué apps tienes instaladas. Tu lista de Brewfile permanece en el navegador."
+      }
+    },
+    "cta": {
+      "title": "Empieza con tu próxima app.",
+      "body": "OpenNavo es gratis y funciona con macOS 13 o posterior. También puedes explorar la web y copiar el comando brew para instalar."
+    }
+  }
+}

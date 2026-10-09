@@ -1,0 +1,36 @@
+{
+  "name": "opennavo",
+  "private": true,
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
+  },
+  "scripts": {
+    "prepare": "simple-git-hooks",
+    "lint": "node tooling/scripts/workspace.mjs lint",
+    "test": "node tooling/scripts/workspace.mjs test",
+    "build": "node tooling/scripts/workspace.mjs build",
+    "gen": "node tooling/scripts/workspace.mjs gen",
+    "check:secrets": "node tooling/scripts/check-secrets.mjs",
+    "check:secrets:history": "node tooling/scripts/check-secrets.mjs --history",
+    "format:check": "node tooling/scripts/format-frontend.mjs --check",
+    "format": "node tooling/scripts/format-frontend.mjs --write"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@redocly/cli": "catalog:",
+    "@soybeanjs/eslint-config-vue": "catalog:",
+    "@stoplight/prism-cli": "catalog:",
+    "eslint": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "simple-git-hooks": "2.13.1",
+    "typescript": "catalog:"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "node tooling/scripts/pre-commit.mjs",
+    "commit-msg": "node tooling/scripts/commit-msg.mjs \"$1\""
+  }
+}

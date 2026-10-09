@@ -1,0 +1,6 @@
+# OpenAPI validation configuration: CI runs `npx @redocly/cli lint apps/server/api/*.openapi.yaml --config apps/server/api/redocly.yaml`
+extends:
+  - recommended
+rules:
+  operation-4xx-response: off      # Errors use the default response
+  no-server-example.com: off       # Domain is a placeholder

@@ -1,0 +1,86 @@
+name: Release backend images
+on:
+  push:
+    tags: ['server-v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-backend-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: server
+            image: opennavo-server
+          - target: ops
+            image: opennavo-ops
+          - target: postgres
+            image: opennavo-postgres
+          - target: asynqmon
+            image: opennavo-asynqmon
+          - target: redis
+            image: opennavo-redis
+          - target: caddy
+            image: opennavo-caddy
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=local,enable=${{ github.event_name == 'workflow_dispatch' }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: apps/server
+          pull: true
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max
+  deployment-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/upload-artifact@v6
+        with:
+          name: backend-deployment-${{ github.ref_name }}
+          include-hidden-files: true
+          path: |
+            LICENSE
+            NOTICE
+            docs/legal/THIRD_PARTY.md
+            docs/security/DEPENDENCY_SECURITY.md
+            docs/legal/third-party/
+            ops/.env.example
+            ops/docker-compose.prod.yml
+            ops/caddy/Caddyfile
+            ops/prometheus/*.yml
+            ops/grafana/
+            ops/migrate.sh
+            ops/backup.sh
+            ops/restore.sh
+            ops/rollout.py
+            ops/GUIDE.md

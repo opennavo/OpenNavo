@@ -1,0 +1,1609 @@
+{
+  "system": {
+    "title": "OpenNavo Admin",
+    "updateTitle": "Notificación de actualización del sistema",
+    "updateContent": "Se ha detectado una nueva versión del sistema. ¿Quieres actualizar la página ahora?",
+    "updateConfirm": "Actualizar ahora",
+    "updateCancel": "Más tarde"
+  },
+  "common": {
+    "action": "Acción",
+    "add": "Añadir",
+    "addSuccess": "Añadido correctamente",
+    "backToHome": "Volver al inicio",
+    "batchDelete": "Eliminar en lote",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "check": "Marcar",
+    "selectAll": "Seleccionar todo",
+    "expandColumn": "Expandir columna",
+    "columnSetting": "Configuración de columnas",
+    "config": "Configuración",
+    "confirm": "Confirmar",
+    "delete": "Eliminar",
+    "deleteSuccess": "Eliminado correctamente",
+    "confirmDelete": "¿Seguro que quieres eliminarlo?",
+    "edit": "Editar",
+    "warning": "Advertencia",
+    "error": "Error",
+    "index": "N.º",
+    "keywordSearch": "Introduce una palabra clave para buscar",
+    "logout": "Cerrar sesión",
+    "logoutConfirm": "¿Seguro que quieres cerrar sesión?",
+    "lookForward": "Próximamente",
+    "modify": "Modificar",
+    "modifySuccess": "Modificado correctamente",
+    "noData": "Sin datos",
+    "operate": "Operar",
+    "pleaseCheckValue": "Comprueba que el valor introducido sea válido",
+    "refresh": "Actualizar",
+    "reset": "Restablecer",
+    "search": "Buscar",
+    "switch": "Cambiar",
+    "tip": "Aviso",
+    "trigger": "Activar",
+    "update": "Actualizar",
+    "updateSuccess": "Actualizado correctamente",
+    "userCenter": "Centro de usuario",
+    "yesOrNo": {
+      "yes": "Sí",
+      "no": "No"
+    }
+  },
+  "request": {
+    "logout": "Cerrar la sesión del usuario después de que falle la solicitud",
+    "logoutMsg": "El estado del usuario no es válido; vuelve a iniciar sesión",
+    "logoutWithModal": "Mostrar un cuadro de diálogo después de que falle la solicitud y, después, cerrar la sesión del usuario",
+    "logoutWithModalMsg": "El estado del usuario no es válido; vuelve a iniciar sesión",
+    "refreshToken": "El token solicitado ha caducado; actualizar el token",
+    "tokenExpired": "El token solicitado ha caducado"
+  },
+  "theme": {
+    "themeDrawerTitle": "Configuración del tema",
+    "tabs": {
+      "appearance": "Apariencia",
+      "layout": "Diseño",
+      "general": "General",
+      "preset": "Preajustes"
+    },
+    "appearance": {
+      "themeSchema": {
+        "title": "Modo del tema",
+        "light": "Modo claro",
+        "dark": "Modo oscuro",
+        "auto": "Seguir el sistema"
+      },
+      "grayscale": "Escala de grises",
+      "colourWeakness": "Modo para deficiencias de visión cromática",
+      "themeColor": {
+        "title": "Color del tema",
+        "primary": "Principal",
+        "info": "Información",
+        "success": "Éxito",
+        "warning": "Advertencia",
+        "error": "Error",
+        "followPrimary": "Seguir el color principal"
+      },
+      "themeRadius": {
+        "title": "Radio de borde del tema"
+      },
+      "recommendColor": "Aplicar algoritmo de color recomendado",
+      "recommendColorDesc": "El algoritmo de color recomendado se basa en",
+      "preset": {
+        "title": "Preajustes del tema",
+        "apply": "Aplicar",
+        "applySuccess": "Preajuste aplicado correctamente",
+        "default": {
+          "name": "Preajuste predeterminado",
+          "desc": "Preajuste del tema predeterminado de Soybean"
+        },
+        "dark": {
+          "name": "Preajuste oscuro",
+          "desc": "Preajuste de tema oscuro para usar por la noche"
+        },
+        "compact": {
+          "name": "Preajuste compacto",
+          "desc": "Preajuste de diseño compacto para pantallas pequeñas"
+        },
+        "azir": {
+          "name": "Preajuste de Azir",
+          "desc": "Estilo frío y elegante en tonos apagados, preferido por Azir"
+        }
+      }
+    },
+    "layout": {
+      "layoutMode": {
+        "title": "Modo de diseño",
+        "vertical": "Menú lateral",
+        "vertical-mix": "Menú lateral mixto",
+        "vertical-hybrid-header-first": "Híbrido lateral: encabezado primero",
+        "horizontal": "Menú superior",
+        "top-hybrid-sidebar-first": "Híbrido superior: barra lateral primero",
+        "top-hybrid-header-first": "Híbrido superior: encabezado primero",
+        "vertical_detail": "Diseño con el menú a la izquierda y el contenido a la derecha.",
+        "vertical-mix_detail": "Diseño con dos menús laterales: el de primer nivel en la zona izquierda oscura y el de segundo nivel en la zona izquierda clara.",
+        "vertical-hybrid-header-first_detail": "Diseño híbrido lateral con el menú de primer nivel arriba, el de segundo nivel en la zona izquierda oscura y el de tercer nivel en la zona izquierda clara.",
+        "horizontal_detail": "Diseño con el menú en la parte superior y el contenido debajo.",
+        "top-hybrid-sidebar-first_detail": "Diseño híbrido superior con el menú de primer nivel a la izquierda y el de segundo nivel arriba.",
+        "top-hybrid-header-first_detail": "Diseño híbrido superior con el menú de primer nivel arriba y el de segundo nivel a la izquierda."
+      },
+      "tab": {
+        "title": "Configuración de las pestañas",
+        "visible": "Mostrar barra de pestañas",
+        "cache": "Caché de información de la barra de pestañas",
+        "cacheTip": "Conservar la información de la barra de pestañas al salir de la página",
+        "height": "Altura de las pestañas",
+        "mode": {
+          "title": "Estilo de las pestañas",
+          "slider": "Deslizante",
+          "chrome": "Estilo de Google Chrome",
+          "button": "Botones"
+        },
+        "closeByMiddleClick": "Cerrar pestañas con el botón central del ratón",
+        "closeByMiddleClickTip": "Permitir cerrar pestañas haciendo clic en ellas con el botón central del ratón"
+      },
+      "header": {
+        "title": "Configuración del encabezado",
+        "height": "Altura del encabezado",
+        "breadcrumb": {
+          "visible": "Mostrar migas de pan",
+          "showIcon": "Mostrar icono de migas de pan"
+        }
+      },
+      "sider": {
+        "title": "Configuración de la barra lateral",
+        "inverted": "Barra lateral oscura",
+        "width": "Ancho de la barra lateral",
+        "collapsedWidth": "Ancho de la barra lateral plegada",
+        "mixWidth": "Ancho de la barra lateral en el diseño mixto",
+        "mixCollapsedWidth": "Ancho de la barra lateral plegada en el diseño mixto",
+        "mixChildMenuWidth": "Ancho del submenú en el diseño mixto",
+        "autoSelectFirstMenu": "Seleccionar automáticamente el primer submenú",
+        "autoSelectFirstMenuTip": "Al hacer clic en un menú de primer nivel, se selecciona automáticamente el primer submenú y se navega hasta su nivel más profundo"
+      },
+      "footer": {
+        "title": "Configuración del pie de página",
+        "visible": "Mostrar pie de página",
+        "fixed": "Fijar pie de página",
+        "height": "Altura del pie de página",
+        "right": "Alinear el pie de página a la derecha"
+      },
+      "content": {
+        "title": "Configuración del área de contenido",
+        "scrollMode": {
+          "title": "Modo de desplazamiento",
+          "tip": "Con el desplazamiento del tema solo se desplaza la parte principal; el desplazamiento exterior permite desplazar juntos el encabezado y el pie de página",
+          "wrapper": "Contenedor",
+          "content": "Contenido"
+        },
+        "page": {
+          "animate": "Animación de transición de página",
+          "mode": {
+            "title": "Tipo de animación de página",
+            "fade-slide": "Deslizar",
+            "fade": "Desvanecer",
+            "fade-bottom": "Desvanecer desde abajo",
+            "fade-scale": "Desvanecer y escalar",
+            "zoom-fade": "Zoom y desvanecimiento",
+            "zoom-out": "Alejar",
+            "none": "Ninguna"
+          }
+        },
+        "fixedHeaderAndTab": "Fijar encabezado y barra de pestañas"
+      }
+    },
+    "general": {
+      "title": "Configuración general",
+      "watermark": {
+        "title": "Configuración de la marca de agua",
+        "visible": "Mostrar marca de agua a pantalla completa",
+        "text": "Texto personalizado de la marca de agua",
+        "enableUserName": "Activar marca de agua con el nombre de usuario",
+        "enableTime": "Mostrar la hora actual",
+        "timeFormat": "Formato de hora"
+      },
+      "multilingual": {
+        "title": "Configuración de idiomas",
+        "visible": "Mostrar el botón de idiomas"
+      },
+      "globalSearch": {
+        "title": "Configuración de búsqueda global",
+        "visible": "Mostrar el botón de búsqueda global"
+      }
+    },
+    "configOperation": {
+      "copyConfig": "Copiar configuración",
+      "copySuccessMsg": "Copia realizada correctamente. Sustituye la variable themeSettings en src/theme/settings.ts",
+      "resetConfig": "Restablecer configuración",
+      "resetSuccessMsg": "Restablecimiento realizado correctamente"
+    }
+  },
+  "route": {
+    "403": "Sin permisos",
+    "404": "Página no encontrada",
+    "500": "Error del servidor",
+    "login": "Iniciar sesión",
+    "iframe-page": "Iframe",
+    "dashboard": "Panel de control",
+    "catalog": "Catálogo",
+    "catalog_package": "Paquetes",
+    "catalog_package-detail": "Detalles del paquete",
+    "catalog_category": "Categorías",
+    "content": "Contenido",
+    "content_collection": "Colecciones",
+    "content_collection-detail": "Detalles de la colección",
+    "content_feature": "Destacados",
+    "content_glossary": "Glosario",
+    "content_announcement": "Anuncio",
+    "changelog": "Registro de cambios",
+    "changelog_release": "Versiones",
+    "changelog_review": "Traducciones",
+    "ops": "Operaciones",
+    "ops_job": "Tareas",
+    "ops_search": "Estadísticas de búsqueda",
+    "ops_feedback": "Comentarios",
+    "ops_agent-log": "Registros de Agent e IA",
+    "release": "Escritorio",
+    "release_desktop": "Versiones de escritorio",
+    "release_mirror": "Espejos de descarga",
+    "release_config": "Configuración remota",
+    "system": "Sistema",
+    "system_user": "Administradores",
+    "system_role": "Roles y permisos",
+    "system_translation": "Configuración de la IA de traducción",
+    "system_github": "Configuración de GitHub",
+    "system_agent": "Acceso de Agent",
+    "system_audit": "Registro de auditoría",
+    "user-center": "Centro de usuario"
+  },
+  "page": {
+    "shared": {
+      "flags": {
+        "hidden": "Oculto",
+        "editorChoice": "Recomendado",
+        "deprecated": "Obsoleto",
+        "disabled": "Desactivado",
+        "font": "Fuente"
+      },
+      "translationStatus": {
+        "none": "Ninguna",
+        "source": "Original",
+        "machine": "Automática",
+        "manual": "Manual",
+        "pending": "En cola",
+        "failed": "Fallida"
+      },
+      "i18n": {
+        "sourceLocale": "Idioma de origen",
+        "sourceHint": "Escribe solo el texto original; la IA traducirá los demás idiomas",
+        "required": "Introduce el texto original",
+        "translations": "Otros idiomas",
+        "translationsSummary": "{done}/{total} idioma traducido · despliega para editar | {done}/{total} idiomas traducidos · despliega para editar",
+        "autoPlaceholder": "Déjalo vacío para usar la traducción de IA"
+      },
+      "changelogStatus": {
+        "none": "Ninguno",
+        "ok": "Correcto",
+        "error": "Error"
+      },
+      "publishStatus": {
+        "draft": "Borrador",
+        "scheduled": "Programado",
+        "published": "Publicado",
+        "archived": "Fuera de línea"
+      },
+      "any": "Cualquiera",
+      "yes": "Sí",
+      "no": "No",
+      "saved": "Guardado",
+      "viewOnSite": "Ver en el sitio",
+      "updatedBy": "{name} · {time}",
+      "empty": "—",
+      "locale": {
+        "zh-CN": "Chino",
+        "en-US": "Inglés"
+      },
+      "markdown": {
+        "edit": "Editar",
+        "preview": "Vista previa"
+      },
+      "charCount": "{count} / {max}"
+    },
+    "dashboard": {
+      "scale": "Catálogo",
+      "total": "Aplicaciones",
+      "fonts": "Fuentes",
+      "disabled": "Desactivados",
+      "disabledHint": "Obsoletos {deprecated} · ocultos {hidden}",
+      "coverage": "Cobertura",
+      "coverageHint": "Todas las apps válidas; excluye fuentes y apps desactivadas, ocultas o eliminadas",
+      "sixLocaleContentHint": "Los resúmenes y las descripciones deben estar completos y actualizados en los seis idiomas. Los idiomas alternativos no cuentan.",
+      "coverageItems": {
+        "zhSummary": "Resumen en chino",
+        "primaryCategory": "Categoría principal",
+        "icon": "Icono",
+        "latestVersionNotes": "Notas de la versión más reciente",
+        "sixLocaleContent": "Contenido completo en seis idiomas"
+      },
+      "sync": "Estado de sincronización",
+      "syncItems": {
+        "catalog": "Sincronización del catálogo",
+        "analytics": "Estadísticas de instalación",
+        "snapshot": "Instantánea de escritorio"
+      },
+      "syncState": {
+        "ok": "Correcta",
+        "late": "Retrasada",
+        "never": "Nunca se ha ejecutado"
+      },
+      "syncEvery": {
+        "catalog": "Cada 15 min",
+        "analytics": "Cada día a las 03:00",
+        "snapshot": "Cada hora"
+      },
+      "failed24h": "Tareas fallidas en las últimas 24 h",
+      "viewJobs": "Tareas",
+      "snapshotInfo": "Cursor {cursor} · {count} paquete | Cursor {cursor} · {count} paquetes",
+      "llm": "Uso de LLM",
+      "llmModel": "Modelo {model}",
+      "llmTokens": "Tokens este mes",
+      "llmBudget": "Presupuesto {budget}",
+      "llmSpend": "Aproximadamente {spend}, presupuesto {budget}",
+      "pendingPackages": "Falta el resumen en chino",
+      "pendingReleases": "Notas de la versión pendientes de traducir",
+      "needsReview": "Traducciones de IA",
+      "viewReview": "Traducciones",
+      "todo": "Pendientes",
+      "feedbackOpen": "Comentarios pendientes",
+      "viewFeedback": "Comentarios",
+      "usage": "Tokens de LLM en los últimos 6 meses",
+      "usageSeries": {
+        "translate_content": "Traducción de contenido",
+        "enrich_package": "Enriquecimiento de paquetes (retirado)",
+        "translate_release": "Resúmenes de versiones (retirado)"
+      },
+      "hermes": {
+        "title": "Hermes de hoy",
+        "view": "Ver registros",
+        "writes": "Escrituras",
+        "translations": "Traducciones con IA",
+        "failures": "Errores",
+        "date": "Recuento por fecha UTC · {date}"
+      },
+      "refreshedAt": "Se actualiza cada 60 s · actualizado {time}"
+    },
+    "catalog": {
+      "package": {
+        "title": "Paquetes",
+        "keyword": "Palabra clave",
+        "keywordPlaceholder": "Token o nombre (en cualquier idioma)",
+        "category": "Categoría",
+        "translationStatus": "Traducción",
+        "hasIcon": "Icono",
+        "hasIconOptions": {
+          "yes": "Con icono",
+          "no": "Sin icono"
+        },
+        "sort": "Ordenar",
+        "sortOptions": {
+          "popular": "Popularidad",
+          "updated": "Actualizados recientemente",
+          "name": "Nombre",
+          "created": "Fecha de creación"
+        },
+        "columns": {
+          "icon": "Icono",
+          "name": "Nombre",
+          "version": "Versión",
+          "installs30d": "Instalaciones en 30 días",
+          "rank": "Posición",
+          "category": "Categoría principal",
+          "summary": "Resumen",
+          "changelog": "Notas de versión",
+          "flags": "Indicadores",
+          "updateTime": "Actualizado"
+        },
+        "resync": "Volver a sincronizar",
+        "resyncQueued": "En cola para sincronizar: {token}"
+      },
+      "packageDetail": {
+        "installs30d": "{count} instalación en 30 días | {count} instalaciones en 30 días",
+        "tabs": {
+          "basic": "Información básica",
+          "i18n": "Texto y traducciones",
+          "categories": "Categorías",
+          "assets": "Icono y capturas de pantalla",
+          "changelog": "Notas de la versión",
+          "audit": "Actividad"
+        },
+        "basic": {
+          "homebrew": "Campos de Homebrew",
+          "homebrewHint": "De Homebrew, solo lectura",
+          "names": "Nombres",
+          "descEn": "Descripción en inglés",
+          "homepage": "Página web",
+          "downloadUrl": "URL de descarga",
+          "downloadSize": "Tamaño de descarga",
+          "downloadSizeUnit": "Bytes",
+          "downloadSizeHint": "Se detecta automáticamente. Rellénalo solo si no se puede detectar; se volverá a detectar después de cada actualización de versión.",
+          "accentColor": "Color de acento",
+          "accentColorHint": "Se calcula automáticamente al establecer el icono. También puedes definirlo manualmente.",
+          "accentColorClear": "Borrar",
+          "tap": "Tap",
+          "raw": "JSON sin procesar",
+          "editable": "Editable",
+          "developer": "Desarrollador",
+          "repoUrl": "Repositorio de GitHub",
+          "tags": "Etiquetas",
+          "tagsHint": "Hasta 10 etiquetas, de 20 caracteres cada una",
+          "hidden": "Oculto",
+          "hiddenHint": "Los paquetes ocultos no aparecen en el sitio ni en la aplicación",
+          "editorChoice": "Recomendación del editor",
+          "notes": "Notas internas",
+          "save": "Guardar"
+        },
+        "i18n": {
+          "hint": "Idioma de origen: {locale}. Cuando cambie el texto de origen, la IA volverá a traducir los demás idiomas; las modificaciones en otro idioma son correcciones manuales y se aplican de inmediato.",
+          "displayName": "Nombre visible",
+          "summary": "Resumen en una línea",
+          "summaryHint": "En chino, se recomiendan hasta 30 caracteres",
+          "summaryTooLong": "Supera la longitud recomendada, pero puedes guardarlo",
+          "description": "Acerca de",
+          "sources": {
+            "homebrew": "Homebrew",
+            "rule": "Regla",
+            "llm": "LLM",
+            "human": "Persona"
+          },
+          "model": "Modelo {model}",
+          "translatedAt": "Traducido {time}",
+          "stale": "El texto de origen ha cambiado; se está rehaciendo esta traducción",
+          "makeSource": "Usar este idioma como origen",
+          "save": "Guardar",
+          "saved": "Guardado"
+        },
+        "categories": {
+          "title": "Categorías",
+          "hint": "Hasta 3, una de ellas principal",
+          "primary": "Principal",
+          "add": "Añadir categoría",
+          "sources": {
+            "rule": "Regla",
+            "llm": "LLM",
+            "human": "Persona"
+          },
+          "confidence": "Confianza {value}",
+          "max": "Hasta 3 categorías",
+          "needPrimary": "Elige una categoría principal",
+          "empty": "Todavía no hay categorías",
+          "save": "Guardar categorías"
+        },
+        "assets": {
+          "icon": "Icono",
+          "iconSources": {
+            "manual": "Subido manualmente",
+            "harvester": "Recolector de iconos",
+            "homepage": "Página web"
+          },
+          "noIcon": "Sin icono",
+          "uploadIcon": "Subir icono",
+          "removeIcon": "Quitar icono",
+          "removeIconConfirm": "El sitio mostrará una letra como marcador de posición. ¿Quieres quitar el icono?",
+          "uploadHint": "PNG, JPEG o WebP, hasta 5 MB",
+          "screenshots": "Capturas de pantalla",
+          "screenshotsHint": "Arrastra para cambiar el orden",
+          "uploadScreenshot": "Subir captura de pantalla",
+          "caption": "Descripción (la IA traduce a otros idiomas)",
+          "theme": "Tema",
+          "themes": {
+            "dark": "Oscuro",
+            "light": "Claro"
+          },
+          "deleteScreenshotConfirm": "¿Eliminar esta captura de pantalla?",
+          "noScreenshots": "No hay capturas de pantalla",
+          "tooLarge": "El archivo supera los 5 MB",
+          "badType": "Solo se admiten PNG, JPEG y WebP"
+        },
+        "changelog": {
+          "sources": "Commits de Homebrew",
+          "excluded": "Obtención de commits excluida",
+          "fetchEnabled": "Obtención de commits activada",
+          "excludeFetch": "Excluir de la obtención",
+          "resumeFetch": "Reanudar la obtención",
+          "excludeConfirm": "Al excluir esta app, se dejarán de obtener sus commits y se omitirán las tareas en cola. ¿Quieres excluirla?",
+          "resumeConfirm": "La obtención se reanudará en el próximo ciclo programado. ¿Quieres continuar?",
+          "reloadSettings": "Volver a cargar la configuración de obtención",
+          "exclusionHint": "Solo controla los commits de Homebrew. No afecta a la sincronización del catálogo ni de las estadísticas de instalaciones, ni al historial de versiones guardado.",
+          "sourcesHint": "Se obtienen automáticamente para registrar cuándo se incorporó cada versión a Homebrew",
+          "columns": {
+            "type": "Tipo",
+            "config": "Configuración",
+            "status": "Último estado",
+            "nextFetch": "Próxima consulta"
+          },
+          "types": {
+            "github_releases": "GitHub Releases",
+            "sparkle": "Sparkle",
+            "webpage": "Página web",
+            "homebrew_commits": "Commits de Homebrew"
+          },
+          "status": {
+            "never": "Nunca obtenido",
+            "ok": "Correcto",
+            "not_modified": "Sin cambios",
+            "error": "Error",
+            "rate_limited": "Límite de solicitudes alcanzado",
+            "not_found": "No encontrado"
+          },
+          "failCount": "{count} fallo consecutivo | {count} fallos consecutivos",
+          "noSources": "Aún no hay registros de commits",
+          "versions": "Versiones incluidas en Homebrew",
+          "versionColumns": {
+            "version": "Versión",
+            "firstSeen": "Visto por primera vez",
+            "committed": "Incluido",
+            "commit": "Commit",
+            "release": "Notas de la versión"
+          },
+          "linked": "Vinculado",
+          "unlinked": "Sin vincular"
+        },
+        "audit": {
+          "columns": {
+            "time": "Fecha y hora",
+            "actor": "Actor",
+            "action": "Acción",
+            "entity": "Objeto",
+            "ip": "IP"
+          },
+          "diff": "Cambios",
+          "before": "Antes",
+          "after": "Después",
+          "system": "Sistema"
+        }
+      },
+      "category": {
+        "title": "Categorías",
+        "saveOrder": "Guardar orden",
+        "orderChanged": "El orden ha cambiado; guarda para aplicar los cambios",
+        "columns": {
+          "icon": "Icono",
+          "name": "Nombre",
+          "languages": "Idiomas",
+          "slug": "Slug",
+          "appliesTo": "Se aplica a",
+          "packageCount": "Paquetes",
+          "visible": "Visible",
+          "hiddenByDefault": "Oculta de forma predeterminada"
+        },
+        "appliesTo": {
+          "cask": "Apps",
+          "formula": "CLI",
+          "both": "Todo"
+        },
+        "addRoot": "Nueva categoría",
+        "addChild": "Añadir subcategoría",
+        "editTitle": "Editar categoría",
+        "addTitle": "Nueva categoría",
+        "deleteConfirm": "¿Eliminar «{name}»? No se pueden eliminar las categorías que tengan subcategorías o paquetes.",
+        "form": {
+          "parent": "Categoría superior",
+          "parentNone": "Ninguna (nivel superior)",
+          "slug": "Slug",
+          "slugInvalid": "Usa solo letras minúsculas, números y guiones; debe empezar por una letra o un número",
+          "icon": "Icono",
+          "iconInvalid": "Usa lucide:nombre-del-icono",
+          "iconHint": "Por ejemplo, lucide:code-xml",
+          "name": "Nombre",
+          "description": "Descripción",
+          "required": "Obligatorio"
+        }
+      }
+    },
+    "ops": {
+      "job": {
+        "queues": "Colas",
+        "queuesEmpty": "No hay datos de cola (está vacía cuando el worker no está en ejecución)",
+        "autoRefresh": "Se actualiza cada 10 s",
+        "queueFields": {
+          "pending": "Pendientes",
+          "active": "En ejecución",
+          "scheduled": "Programada",
+          "retry": "Reintentos",
+          "archived": "Archivados",
+          "processedToday": "Procesados hoy",
+          "failedToday": "Fallidos hoy"
+        },
+        "trigger": "Ejecutar ahora",
+        "triggerConfirm": "¿Ejecutar «{job}» ahora? No volverá a iniciarse mientras ya esté en ejecución.",
+        "triggered": "Se ha activado «{job}»",
+        "runs": "Ejecuciones de tareas",
+        "types": {
+          "catalog_sync": "Sincronización del catálogo",
+          "analytics_sync": "Sincronización de estadísticas de instalaciones",
+          "snapshot_build": "Instantánea de escritorio",
+          "enrich_schedule": "Programador de enriquecimiento (retirado)",
+          "translate_schedule": "Programador de resúmenes de versiones (retirado)",
+          "changelog_schedule": "Programador de commits de Homebrew",
+          "assets_icons": "Recopilación de iconos (retirada)",
+          "assets_download-size": "Detección del tamaño de descarga",
+          "cleanup": "Limpieza"
+        },
+        "triggers": {
+          "schedule": "Programada",
+          "manual": "Manual",
+          "event": "Evento"
+        },
+        "statuses": {
+          "running": "En ejecución",
+          "succeeded": "Correcta",
+          "failed": "Fallida",
+          "partial": "Éxito parcial"
+        },
+        "columns": {
+          "type": "Tipo",
+          "trigger": "Desencadenante",
+          "status": "Estado",
+          "startedAt": "Inicio",
+          "duration": "Duración",
+          "stats": "Estadísticas",
+          "error": "Error"
+        },
+        "filters": {
+          "type": "Tipo",
+          "status": "Estado"
+        },
+        "detail": "Ejecución de tarea",
+        "stats": "Estadísticas",
+        "error": "Error"
+      },
+      "search": {
+        "tabs": {
+          "top": "Términos de búsqueda populares",
+          "zero": "Consultas sin resultados",
+          "synonyms": "Sinónimos"
+        },
+        "days": "Periodo",
+        "daysOption": "Último {days} día | Últimos {days} días",
+        "columns": {
+          "query": "Término de búsqueda",
+          "count": "Búsquedas",
+          "zeroCount": "Resultados nulos",
+          "clicks": "Clics",
+          "ctr": "Porcentaje de clics",
+          "topClicked": "Más clicados",
+          "terms": "Términos",
+          "enabled": "Activado",
+          "updated": "Actualizado"
+        },
+        "addSynonym": "Añadir sinónimo",
+        "newSynonym": "Nuevo sinónimo",
+        "editSynonym": "Editar sinónimo",
+        "terms": "Términos",
+        "termsHint": "De 2 a 10 términos, de hasta 40 caracteres cada uno; al buscar cualquier término se encontrarán los demás",
+        "termsInvalid": "Usa entre 2 y 10 términos",
+        "deleteConfirm": "¿Eliminar el sinónimo «{terms}»?"
+      },
+      "feedback": {
+        "title": "Comentarios",
+        "status": "Estado",
+        "type": "Tipo",
+        "statuses": {
+          "open": "Pendiente",
+          "in_progress": "En curso",
+          "resolved": "Resuelto",
+          "rejected": "Rechazado"
+        },
+        "types": {
+          "wrong_info": "Información incorrecta",
+          "install_failed": "Error de instalación",
+          "broken_link": "Enlace roto",
+          "suggest_package": "Proponer un paquete",
+          "translation": "Problema de traducción",
+          "other": "Otro"
+        },
+        "columns": {
+          "type": "Tipo",
+          "package": "Paquete",
+          "content": "Contenido",
+          "platform": "Plataforma",
+          "errorCode": "Código de error",
+          "contact": "Contacto",
+          "status": "Estado",
+          "createTime": "Fecha de envío"
+        },
+        "handle": "Gestionar",
+        "handleTitle": "Gestionar comentario #{id}",
+        "handlerNote": "Nota de gestión",
+        "handled": "Gestionado por {name} el {time}"
+      },
+      "agentLog": {
+        "tabs": {
+          "calls": "Llamadas de Hermes",
+          "translations": "Traducciones de IA",
+          "revisions": "Revisiones",
+          "trash": "Papelera"
+        },
+        "columns": {
+          "time": "Hora",
+          "client": "Cliente del agente",
+          "tool": "Herramienta",
+          "objects": "Objetos",
+          "result": "Resultado",
+          "duration": "Duración",
+          "requestId": "ID de solicitud",
+          "object": "Objeto",
+          "locales": "Idiomas",
+          "model": "Modelo",
+          "tokens": "Tokens",
+          "actor": "Autor",
+          "version": "Versión",
+          "locale": "Idioma",
+          "action": "Acción",
+          "deletedAt": "Eliminado",
+          "expiresAt": "Se conserva hasta",
+          "state": "Estado"
+        },
+        "filters": {
+          "tool": "Nombre de la herramienta",
+          "requestId": "ID de solicitud",
+          "dryRun": "Tipo de llamada",
+          "status": "Estado",
+          "locale": "Idioma",
+          "entity": "Tipo de objeto",
+          "objectKey": "Clave del objeto",
+          "state": "Estado"
+        },
+        "entities": {
+          "package": "App",
+          "release": "Notas de la versión",
+          "category": "Categoría",
+          "collection": "Colección",
+          "collection_item": "Elemento de colección",
+          "feature": "Destacado",
+          "screenshot": "Captura de pantalla",
+          "glossary": "Término del glosario",
+          "synonym": "Sinónimo",
+          "announcement": "Anuncio",
+          "desktop_release": "Versión de escritorio",
+          "mirror": "Espejo de descarga",
+          "feedback": "Comentarios",
+          "asset": "Recurso"
+        },
+        "actorTypes": {
+          "admin": "Administrador",
+          "agent": "Agente",
+          "system": "Sistema"
+        },
+        "translationStatus": {
+          "succeeded": "Correcto",
+          "failed": "Error",
+          "stale": "Obsoleto"
+        },
+        "actions": {
+          "create": "Creado",
+          "update": "Actualizado",
+          "delete": "Eliminado",
+          "restore": "Restaurado",
+          "translate": "Traducido"
+        },
+        "realCall": "Llamada real",
+        "dryRun": "Vista previa",
+        "succeeded": "Correcto",
+        "detail": "Detalles",
+        "revert": "Revertir",
+        "revertConfirm": "¿Revertir todos los cambios realizados por la llamada de {tool} (solicitud {requestId})? La reversión también quedará registrada como una revisión y podrá restaurarse más adelante.",
+        "reverted": "Revertido; se han restaurado {count} objetos",
+        "revertedBy": "Revertido por la solicitud",
+        "operationId": "Operación administrativa",
+        "paramsSummary": "Resumen de parámetros (censurados)",
+        "resultSummary": "Resumen del resultado",
+        "tokenDetail": "Entrada {prompt} · salida {completion} · razonamiento {reasoning} · en caché {cached}",
+        "retry": "Volver a traducir",
+        "retried": "Se ha vuelto a añadir a la cola de traducción",
+        "compare": "Comparar",
+        "restore": "Restaurar",
+        "restoreRevisionConfirm": "¿Restaurar {object} a la versión v{version}? Después, se volverá a traducir automáticamente.",
+        "restored": "Restaurado",
+        "affectedUrls": "Páginas públicas afectadas",
+        "notRestored": "No restaurado",
+        "restoredItems": "Restaurados",
+        "inTrash": "En la papelera",
+        "restoredAt": "Restaurado el {time}",
+        "view": "Ver",
+        "restoreTrashConfirm": "¿Restaurar «{label}»? Conservará su ID original y su URL pública.",
+        "deletedBy": "Eliminado por {actor} a las {time}"
+      }
+    },
+    "system": {
+      "agent": {
+        "settingsTitle": "Interruptor principal y límites",
+        "enabled": "Activar acceso de Agent",
+        "enabledHint": "Al desactivarlo, se pausan todos los Agent; todos los tokens dejarán de funcionar en un plazo de 30 segundos",
+        "pauseTitle": "Pausar acceso de Agent",
+        "pauseConfirm": "En un plazo de 30 segundos, ningún token podrá realizar llamadas y la ejecución diaria de Hermes fallará. ¿Quieres pausar el acceso de todos modos?",
+        "limits": {
+          "callsPerMinute": "Llamadas por minuto",
+          "writesPerDay": "Escrituras al día",
+          "llmOpsPerDay": "Operaciones de LLM al día",
+          "batchLimit": "Límite de tamaño por lote"
+        },
+        "limitsHint": "Se contabilizan por token y se restablecen a las 00:00 UTC; las operaciones de LLM incluyen las traducciones automáticas posteriores a las escrituras y las retraducciones",
+        "saveSettings": "Guardar configuración",
+        "mcpUrl": "URL de conexión MCP",
+        "configTitle": "Configuración de conexión de Hermes",
+        "configHint": "Añade esto a ~/.hermes/config.yaml y el token a OPENNAVO_TOKEN en ~/.hermes/.env. Después, ejecuta /reload-mcp en Hermes. Cuando Hermes se conecte, se actualizará «Último uso» en la lista de tokens.",
+        "copy": "Copiar",
+        "copied": "Copiado",
+        "updatedAt": "Configuración actualizada: {time}",
+        "clientsTitle": "Clientes de Agent",
+        "addClient": "Nuevo cliente",
+        "editClient": "Editar cliente",
+        "clientName": "Nombre",
+        "clientNamePlaceholder": "Por ejemplo: Hermes · ordenador de casa",
+        "clientNameRequired": "Introduce un nombre",
+        "clientNotes": "Notas",
+        "clientHint": "Cada cliente obtiene una cuenta de máquina (R_AGENT) que no puede iniciar sesión en el panel de administración; los registros de auditoría la muestran como autor de las acciones",
+        "clientEnabled": "Activado",
+        "clientDisabled": "Desactivado",
+        "enableClient": "Activar",
+        "disableClient": "Desactivar",
+        "enableClientConfirm": "¿Activar «{name}»? Sus tokens que sigan siendo válidos volverán a funcionar.",
+        "disableClientConfirm": "¿Desactivar «{name}»? Todos sus tokens dejarán de funcionar en un plazo de 30 segundos; los tokens no se eliminarán.",
+        "tokens": "Tokens",
+        "tokensOf": "Tokens de {name}",
+        "tokensHint": "En la lista solo se muestra el prefijo; el token completo solo se muestra una vez, al crearlo",
+        "addToken": "Nuevo token",
+        "editToken": "Editar token",
+        "tokenName": "Nombre",
+        "tokenNamePlaceholder": "Por ejemplo: actualización diaria",
+        "tokenNameRequired": "Introduce un nombre para el token",
+        "permissions": "Permisos",
+        "selectAll": "Seleccionar todo",
+        "permissionCount": "{picked} de {total} seleccionados",
+        "permissionsHint": "Hermes no puede ver ni usar las herramientas asociadas a los permisos que no estén seleccionados; los permisos de Sistema, lanzamientos para escritorio, réplicas y configuración remota nunca se pueden conceder",
+        "allowDelete": "Permitir eliminación",
+        "allowDeleteHint": "Si se desactiva, no se podrá eliminar nada; si se activa, los elementos eliminados irán primero a la papelera y podrán restaurarse durante 30 días",
+        "expiresAt": "Caduca",
+        "expiry": {
+          "default": "En 90 días",
+          "custom": "En una fecha",
+          "never": "Nunca"
+        },
+        "expiryInvalid": "Elige una fecha y hora futuras",
+        "ipAllowlist": "IP de origen",
+        "ipAllowlistHint": "Opcional; introduce direcciones IP o rangos CIDR (por ejemplo, 203.0.113.0/24). Déjalo vacío para permitir cualquier dirección",
+        "revoke": "Revocar",
+        "revokeConfirm": "¿Revocar el token «{name}»? El cambio surtirá efecto en un plazo de 30 segundos y no se puede deshacer; tendrás que crear otro token.",
+        "revoked": "Revocado",
+        "neverExpires": "No caduca nunca",
+        "expiringSoon": "Caduca pronto",
+        "tokenStatus": {
+          "active": "Activo",
+          "expired": "Caducado",
+          "revoked": "Revocado"
+        },
+        "tokenCreatedTitle": "Token creado",
+        "tokenCreatedWarning": "El token solo se muestra esta vez. Cópialo y guárdalo ahora; no podrás volver a verlo cuando cierres esta ventana.",
+        "tokenPlaintext": "Token de «{name}»",
+        "tokenSaved": "Lo he guardado",
+        "columns": {
+          "clientName": "Cliente",
+          "status": "Estado",
+          "activeTokens": "Tokens activos",
+          "lastUsed": "Último uso",
+          "createdAt": "Fecha de creación",
+          "tokenName": "Token",
+          "permissions": "Permisos",
+          "allowDelete": "Puede eliminar",
+          "expiresAt": "Fecha de caducidad"
+        },
+        "permissionGroups": {
+          "dashboard": "Panel",
+          "catalog": "Catálogo",
+          "content": "Contenido",
+          "changelog": "Notas de la versión",
+          "ops": "Operaciones",
+          "release": "Aplicación de escritorio",
+          "other": "Otros"
+        },
+        "permissionLabels": {
+          "dashboard_view": "Ver el panel (solo lectura)",
+          "catalog_package_view": "Ver apps, versiones, el árbol de categorías y los recursos",
+          "catalog_package_edit": "Editar los detalles, el texto, las categorías, la visibilidad y las selecciones de las apps",
+          "catalog_package_resync": "Volver a sincronizar apps",
+          "catalog_asset_upload": "Iconos y capturas de pantalla",
+          "catalog_category_edit": "Crear, editar, eliminar y reordenar categorías",
+          "content_collection_edit": "Crear, editar y eliminar colecciones y sus elementos",
+          "content_collection_publish": "Publicar y retirar colecciones",
+          "content_feature_edit": "Destacados",
+          "content_glossary_edit": "Glosario",
+          "content_announcement_edit": "Anuncio de escritorio",
+          "changelog_release_edit": "Redactar notas de la versión y ocultar versiones",
+          "translation_review": "Ver el estado de las traducciones, volver a traducir y corregir traducciones",
+          "ops_job_view": "Ver tareas y colas",
+          "ops_job_trigger": "Ejecutar tareas manualmente",
+          "ops_search_view": "Ver información sobre las búsquedas",
+          "ops_search_edit": "Mantener sinónimos",
+          "ops_feedback_handle": "Gestionar comentarios",
+          "agent_log_view": "Ver registros de Agent e IA",
+          "content_revision_restore": "Restaurar revisiones, revertir llamadas y restaurar desde la papelera",
+          "release_desktop_notes": "Redactar notas de lanzamiento para escritorio"
+        }
+      },
+      "github": {
+        "title": "Configuración de GitHub",
+        "scope": "Configura el PAT de GitHub que se usa para consultar el historial de commits de Homebrew y aumentar la cuota de solicitudes de la API.",
+        "permissionsHint": "Usa un PAT de acceso detallado con permisos de lectura para repositorios públicos. No se necesitan permisos de escritura.",
+        "permissionsLink": "Ver detalles de permisos de GitHub",
+        "token": "Token de acceso personal de GitHub (PAT)",
+        "tokenPlaceholder": "Introduce un PAT nuevo o deja el campo en blanco para conservar el token actual",
+        "tokenHint": "El token se almacena cifrado y no se muestra después de guardarlo",
+        "tokenSource": {
+          "admin": "PAT de administración configurado",
+          "none": "No hay ningún token configurado; se usarán solicitudes sin autenticar"
+        },
+        "save": "Guardar PAT",
+        "clearToken": "Borrar PAT de administración",
+        "clearNone": "Al borrar el PAT de administración, se usarán solicitudes sin autenticar, con una cuota menor. ¿Continuar?",
+        "effect": "Se aplica a la próxima solicitud de consulta; no es necesario reiniciar",
+        "loadFailed": "No se pudo cargar la configuración. Haz clic en Actualizar para volver a intentarlo.",
+        "saveFailed": "No se guardó el PAT. Comprueba los datos o vuelve a intentarlo más tarde.",
+        "invalidToken": "El PAT no debe contener espacios en blanco ni caracteres no ASCII y no debe superar los 4096 caracteres."
+      },
+      "translation": {
+        "title": "Configuración de la IA de traducción",
+        "scope": "Configura la IA que se usa para traducir contenido automáticamente. Los textos de la interfaz se siguen sincronizando con las herramientas de desarrollo.",
+        "enabled": "Activar traducción automática",
+        "baseUrl": "URL de la pasarela",
+        "apiKey": "Clave API",
+        "keyPlaceholder": "Déjalo en blanco para conservar la clave existente",
+        "keyHint": "La clave se almacena cifrada y no se muestra después de guardarla",
+        "keySource": {
+          "admin": "Clave de administrador configurada",
+          "environment": "Se está usando la clave del entorno",
+          "none": "No hay ninguna clave configurada"
+        },
+        "clearKey": "Borrar clave de administrador",
+        "clearHint": "Al guardar, se usará la clave del entorno. Desactiva la traducción si no hay ninguna clave de entorno disponible.",
+        "model": "Modelo de traducción",
+        "reasoningEffort": "Nivel de razonamiento",
+        "low": "Bajo",
+        "medium": "Medio",
+        "high": "Alto",
+        "monthlyTokenBudget": "Presupuesto mensual de tokens",
+        "hardCap": "Límite máximo del servidor: {count} tokens",
+        "save": "Guardar configuración",
+        "effect": "Se aplica en la siguiente llamada a una tarea, sin necesidad de reiniciar",
+        "loadFailed": "No se pudo cargar la configuración. Selecciona Actualizar para volver a intentarlo.",
+        "saveFailed": "No se guardó la configuración. Comprueba los datos o vuelve a intentarlo más tarde.",
+        "invalidUrl": "Introduce una URL completa de la pasarela HTTP(S), sin credenciales, parámetros de consulta ni fragmento. En producción, se requiere HTTPS.",
+        "invalidModel": "Introduce un nombre de modelo sin espacios.",
+        "invalidBudget": "El presupuesto debe ser un número entero positivo.",
+        "fetchModels": "Obtener modelos",
+        "modelPlaceholder": "Selecciona o introduce el nombre de un modelo",
+        "modelsHint": "Los modelos se cargan automáticamente con la configuración. Después de cambiar la URL o la clave, vuelve a obtenerlos sin guardar. También puedes introducir el nombre de un modelo.",
+        "modelsFailed": "No se pudieron obtener los modelos. Comprueba la URL y la clave de la puerta de enlace y vuelve a intentarlo, o introduce el nombre de un modelo.",
+        "modelsEmpty": "La puerta de enlace no devolvió ningún modelo disponible. Puedes introducir el nombre de un modelo.",
+        "keyRequired": "La traducción requiere una clave API. Desactiva la traducción o conserva una clave de entorno antes de borrarla."
+      },
+      "user": {
+        "title": "Administradores",
+        "userName": "Nombre de usuario",
+        "userNameInvalid": "De 3 a 32 letras, números, guiones bajos, puntos o guiones",
+        "nickName": "Apodo",
+        "email": "Correo electrónico",
+        "roles": "Roles",
+        "status": "Estado",
+        "statusOptions": {
+          "1": "Activo",
+          "2": "Desactivado"
+        },
+        "lastLogin": "Último acceso",
+        "locked": "Bloqueado",
+        "password": "Contraseña inicial",
+        "newPassword": "Nueva contraseña",
+        "passwordInvalid": "Al menos 10 caracteres",
+        "addTitle": "Nuevo administrador",
+        "editTitle": "Editar administrador",
+        "resetPassword": "Restablecer contraseña",
+        "resetPasswordTitle": "Restablecer la contraseña de «{name}»",
+        "resetDone": "Contraseña restablecida; las sesiones de esa persona se han cerrado",
+        "forceLogout": "Forzar cierre de sesión",
+        "forceLogoutConfirm": "¿Cerrar ahora todas las sesiones de «{name}»?",
+        "forceLogoutDone": "Sesión cerrada",
+        "deleteConfirm": "¿Eliminar al administrador «{name}»?",
+        "self": "Cuenta actual",
+        "more": "Más"
+      },
+      "role": {
+        "title": "Roles",
+        "permissions": "Permisos",
+        "builtin": "Integrado",
+        "users": "{count} usuario|{count} usuarios",
+        "superAll": "Los superadministradores tienen todos los permisos y no necesitan configurarlos por separado",
+        "savePermissions": "Guardar permisos",
+        "roleCode": "Código del rol",
+        "roleCodeInvalid": "Empieza por R_ y solo contiene letras mayúsculas, números y guiones bajos",
+        "roleName": "Nombre",
+        "roleDesc": "Descripción",
+        "status": "Estado",
+        "addTitle": "Nuevo rol",
+        "editTitle": "Editar rol",
+        "deleteConfirm": "¿Eliminar el rol «{name}»?",
+        "groups": {
+          "dashboard": "Panel",
+          "catalog": "Catálogo",
+          "content": "Contenido",
+          "changelog": "Notas de la versión",
+          "translation": "Traducción",
+          "ops": "Operaciones",
+          "release": "Aplicación de escritorio",
+          "system": "Sistema"
+        },
+        "selectRole": "Selecciona un rol a la izquierda para ver y editar sus permisos"
+      },
+      "audit": {
+        "title": "Registro de auditoría",
+        "actor": "Usuario",
+        "actorId": "ID del usuario",
+        "entityType": "Tipo de objeto",
+        "action": "Acción",
+        "actionPlaceholder": "Por ejemplo, catalog.package.update",
+        "range": "Intervalo de tiempo"
+      }
+    },
+    "userCenter": {
+      "profile": "Perfil",
+      "nickName": "Apodo",
+      "email": "Correo electrónico",
+      "avatarUrl": "URL del avatar",
+      "save": "Guardar perfil",
+      "password": "Cambiar contraseña",
+      "oldPassword": "Contraseña actual",
+      "newPassword": "Nueva contraseña",
+      "confirmPassword": "Confirmar nueva contraseña",
+      "passwordInvalid": "Al menos 10 caracteres",
+      "mismatch": "Las nuevas contraseñas no coinciden",
+      "changePassword": "Cambiar contraseña",
+      "passwordChanged": "Contraseña cambiada; vuelve a iniciar sesión"
+    },
+    "content": {
+      "glossary": {
+        "title": "Glosario",
+        "add": "Añadir término",
+        "addTitle": "Añadir término",
+        "editTitle": "Editar término",
+        "search": "Buscar términos",
+        "type": "Tipo",
+        "term": "Término",
+        "termPlaceholder": "Una palabra del texto original, por ejemplo, Homebrew",
+        "termRequired": "Introduce un término",
+        "translations": "Traducciones fijas",
+        "fixedTranslation": "Traducción fija",
+        "doNotTranslate": "No traducir",
+        "doNotTranslateHint": "Mantén las marcas, los comandos y términos similares tal como están",
+        "keepOriginal": "Mantener tal cual",
+        "formHint": "Rellena solo los idiomas que necesiten una traducción fija. Se aplicará a partir de la próxima traducción automática; las traducciones existentes no cambiarán",
+        "updatedAt": "Actualizado",
+        "deleteConfirm": "¿Eliminar el término «{term}»? Se enviará a la papelera y se podrá restaurar durante 30 días.",
+        "deleted": "Eliminado; se puede restaurar desde la papelera"
+      },
+      "announcement": {
+        "title": "Anuncio de escritorio",
+        "enabled": "Mostrar anuncio",
+        "enabledHint": "Al activarlo, aparece en la parte superior de la aplicación de escritorio",
+        "sourceLocale": "Idioma original",
+        "titleField": "Título",
+        "body": "Cuerpo",
+        "required": "El título y el cuerpo son obligatorios mientras se muestre el anuncio",
+        "translateHint": "Escribe solo el original; los otros cinco idiomas se traducen automáticamente al guardar",
+        "save": "Guardar",
+        "saved": "Guardado; se están traduciendo los demás idiomas",
+        "translations": "Estado de traducción por idioma",
+        "locale": "Idioma",
+        "status": "Estado",
+        "content": "Contenido",
+        "updatedAt": "Actualizado",
+        "statuses": {
+          "source": "Original",
+          "machine": "Traducción con IA",
+          "manual": "Corregido manualmente",
+          "pending": "Traduciendo",
+          "failed": "Error",
+          "missing": "Falta",
+          "skipped": "Omitido"
+        }
+      },
+      "collection": {
+        "title": "Colecciones",
+        "create": "Nueva colección",
+        "keyword": "Título o slug",
+        "status": "Estado",
+        "columns": {
+          "cover": "Portada",
+          "title": "Título",
+          "slug": "Slug",
+          "items": "Elementos",
+          "status": "Estado",
+          "publishAt": "Publicado",
+          "sort": "Orden",
+          "updated": "Actualizado"
+        },
+        "publish": "Publicar",
+        "unpublish": "Retirar del sitio",
+        "publishConfirm": "¿Publicar «{title}»? Será visible en el sitio.",
+        "unpublishConfirm": "¿Retirar «{title}» del sitio? Dejará de mostrarse.",
+        "published": "Publicada",
+        "unpublished": "Retirada del sitio",
+        "deleteConfirm": "¿Eliminar la colección «{title}»?",
+        "scheduledAt": "Programada para {time}"
+      },
+      "collectionDetail": {
+        "newTitle": "Nueva colección",
+        "basic": "Información básica",
+        "slug": "Slug",
+        "slugInvalid": "Usa letras minúsculas, números y guiones; debe empezar por una letra o un número",
+        "titleField": "Título",
+        "subtitle": "Subtítulo",
+        "body": "Cuerpo",
+        "cover": "Portada",
+        "uploadCover": "Subir portada",
+        "removeCover": "Quitar portada",
+        "sort": "Orden",
+        "unpublishAt": "Retirar del sitio el",
+        "items": "Elementos",
+        "itemsHint": "Arrastra para cambiar el orden; máximo 100",
+        "addPackage": "Buscar y añadir un paquete",
+        "note": "Nota (idioma original: {locale})",
+        "disabledPackage": "Desactivado; oculto en el sitio",
+        "duplicate": "Ya está en la colección",
+        "maxItems": "Hasta 100 elementos",
+        "emptyItems": "Aún no hay elementos",
+        "save": "Guardar",
+        "saved": "Guardado",
+        "publish": "Publicar",
+        "publishNow": "Publicar ahora",
+        "schedule": "Programar",
+        "publishAt": "Publicar el",
+        "preview": "Vista previa del sitio",
+        "previewLocale": "Idioma de vista previa",
+        "created": "Creada; continúa con los elementos"
+      },
+      "feature": {
+        "title": "Espacios destacados",
+        "create": "Nueva ubicación destacada",
+        "placement": "Ubicación",
+        "placements": {
+          "home_hero": "Sección principal de la página de inicio",
+          "home_secondary": "Sección secundaria de la página de inicio",
+          "category_top": "Parte superior de la categoría"
+        },
+        "category": "Categoría",
+        "categoryRequired": "Selecciona una categoría para la ubicación superior de categoría",
+        "targetType": "Tipo de objetivo",
+        "targetTypes": {
+          "package": "Paquete",
+          "collection": "Colección",
+          "url": "Enlace"
+        },
+        "target": "Objetivo",
+        "targetRequired": "Selecciona un destino",
+        "packageSearch": "Buscar paquetes",
+        "collectionSelect": "Selecciona una colección",
+        "url": "Dirección URL",
+        "glowColor": "Color del resplandor",
+        "badge": "Insignia",
+        "featureTitle": "Título",
+        "subtitle": "Segunda línea",
+        "body": "Cuerpo",
+        "bodyHint": "Solo se permite **negrita**",
+        "bodyInvalid": "El cuerpo solo permite el formato **negrita**",
+        "ctaLabel": "Texto del botón",
+        "startsAt": "Hora de inicio",
+        "endsAt": "Finaliza",
+        "range": "Periodo",
+        "status": "Estado",
+        "sort": "Orden",
+        "columns": {
+          "placement": "Ubicación",
+          "title": "Título",
+          "target": "Destino",
+          "range": "Programación",
+          "status": "Estado",
+          "sort": "Orden"
+        },
+        "editTitle": "Editar ubicación destacada",
+        "deleteConfirm": "¿Eliminar la ubicación destacada «{title}»?",
+        "preview": "Vista previa del sitio",
+        "zh": "Texto en chino",
+        "en": "Texto en inglés"
+      }
+    },
+    "changelog": {
+      "release": {
+        "title": "Versiones",
+        "package": "Paquete",
+        "packagePlaceholder": "Buscar paquetes",
+        "keyword": "Palabra clave",
+        "keywordPlaceholder": "Token o versión",
+        "source": "Fuente",
+        "sources": {
+          "editorial": "Edición de OpenNavo",
+          "github_release": "Lanzamiento de GitHub",
+          "sparkle": "Sparkle",
+          "webpage": "Página de notas de la versión",
+          "manual": "Seleccionado manualmente"
+        },
+        "translationStatus": "Estado de traducción",
+        "translationStatuses": {
+          "none": "Ninguna",
+          "source": "Original",
+          "machine": "Automática",
+          "manual": "Manual",
+          "pending": "En cola",
+          "failed": "Fallida",
+          "skipped": "Omitida"
+        },
+        "hidden": "Oculto",
+        "columns": {
+          "package": "Paquete",
+          "version": "Versión",
+          "title": "Título",
+          "publishedAt": "Publicado",
+          "source": "Fuente",
+          "translation": "Traducción",
+          "fetchedAt": "Obtenido"
+        },
+        "editTranslation": "Editar traducción",
+        "retranslate": "Volver a traducir",
+        "retranslateConfirm": "¿Volver a traducir {name} {version}? Esto consumirá cuota de LLM.",
+        "retranslateQueued": "En cola para traducir",
+        "hide": "Ocultar",
+        "show": "Mostrar",
+        "hiddenDone": "Oculto",
+        "shownDone": "Visible",
+        "more": "Más"
+      },
+      "editor": {
+        "original": "Original",
+        "noOriginal": "No hay texto original",
+        "translation": "Traducción",
+        "summary": "Resumen",
+        "sections": "Puntos destacados agrupados",
+        "area": "Área",
+        "item": "Punto destacado",
+        "addSection": "Añadir área",
+        "addItem": "Añadir punto destacado",
+        "body": "Traducción completa",
+        "preview": "Vista previa del sitio",
+        "save": "Guardar (corrección manual, se aplica de inmediato)",
+        "saved": "Guardado",
+        "failReason": "Error en la traducción: {reason}",
+        "stale": "El original ha cambiado; esta traducción podría estar desactualizada",
+        "maxSections": "Hasta 8 áreas",
+        "maxItems": "Hasta 6 puntos destacados por área"
+      },
+      "notes": {
+        "tabVersions": "Versiones · escribir notas de la versión",
+        "tabReleases": "Notas de la versión",
+        "title": "Versiones en Homebrew",
+        "hint": "Escribe nuestras propias notas de la versión en el idioma original; los demás idiomas se traducirán automáticamente",
+        "keywordPlaceholder": "Token o versión",
+        "sortLabel": "Ordenar",
+        "sort": {
+          "updated": "Añadidos recientemente",
+          "popular": "Popularidad"
+        },
+        "columns": {
+          "app": "App",
+          "version": "Versión",
+          "rank": "Posición",
+          "committed": "Añadido a Homebrew",
+          "firstSeen": "Visto por primera vez",
+          "notes": "Notas de la versión"
+        },
+        "written": "Escrito",
+        "notWritten": "Sin escribir",
+        "historical": "Hay notas antiguas del proyecto original",
+        "write": "Escribir notas",
+        "edit": "Editar notas",
+        "translations": "Traducciones",
+        "clear": "Borrar",
+        "clearConfirm": "¿Borrar las notas de la versión que escribimos para {token} {version}? Solo se eliminarán nuestras notas; se pueden recuperar desde la papelera o el historial de revisiones.",
+        "cleared": "Borrado",
+        "editorTitle": "Notas de la versión de {token} {version}",
+        "sourceLocale": "Idioma original",
+        "publishedAt": "Fecha (opcional; por defecto, cuando se añadió a Homebrew)",
+        "titleField": "Título (opcional)",
+        "titlePlaceholder": "Por ejemplo: versión 2.0",
+        "summary": "Resumen de una línea",
+        "sections": "Destacados agrupados",
+        "sectionsHint": "Hasta {groups} grupos, con un máximo de {items} elementos cada uno; nombres de grupo de hasta {area} caracteres y elementos de hasta {item} caracteres",
+        "addGroup": "Añadir grupo",
+        "removeGroup": "Eliminar grupo",
+        "areaPlaceholder": "Nombre del grupo, por ejemplo: Novedades",
+        "itemPlaceholder": "Destacado",
+        "addItem": "Añadir destacado",
+        "body": "Cuerpo (opcional, Markdown)",
+        "bodyPlaceholder": "Solo si hace falta más detalle",
+        "translateHint": "Los otros cinco idiomas se traducirán automáticamente al guardar",
+        "save": "Guardar",
+        "saved": "Guardado; se están traduciendo los demás idiomas",
+        "errors": {
+          "summaryRequired": "Escribe un resumen de una línea",
+          "summaryTooLong": "El resumen puede tener como máximo {summary} caracteres",
+          "titleTooLong": "El título puede tener como máximo {title} caracteres",
+          "tooManyGroups": "Como máximo, {groups} grupos",
+          "areaRequired": "Todos los grupos deben tener un nombre",
+          "areaTooLong": "Los nombres de grupo pueden tener como máximo {area} caracteres",
+          "itemsRequired": "Todos los grupos deben tener al menos un destacado",
+          "tooManyItems": "Como máximo, {items} destacados por grupo",
+          "itemTooLong": "Cada destacado puede tener como máximo {item} caracteres"
+        }
+      },
+      "translations": {
+        "title": "Gestión de traducciones",
+        "hint": "Las traducciones de IA se publican directamente, sin revisión. «*» indica que el original ha cambiado y la traducción podría estar desactualizada. Corregir un idioma no afecta a los demás.",
+        "search": "Buscar objetos",
+        "entity": "Tipo de objeto",
+        "locale": "Idioma",
+        "status": "Estado",
+        "stale": "El original ha cambiado",
+        "staleOnly": "El original ha cambiado",
+        "upToDate": "Actualizado",
+        "columns": {
+          "object": "Objeto",
+          "updatedAt": "Actualizado"
+        },
+        "entities": {
+          "package": "App",
+          "release": "Notas de la versión",
+          "category": "Categoría",
+          "collection": "Colección",
+          "collection_item": "Elemento de colección",
+          "feature": "Funcionalidad",
+          "screenshot": "Captura de pantalla",
+          "desktop_release": "Versión de escritorio",
+          "mirror": "Espejo de descarga",
+          "announcement": "Anuncio"
+        },
+        "statuses": {
+          "source": "Original",
+          "machine": "IA",
+          "manual": "Manual",
+          "pending": "Traduciendo",
+          "failed": "Error",
+          "missing": "Falta",
+          "skipped": "Omitido"
+        },
+        "fix": "Corregir",
+        "fixTitle": "Corregir traducción · {label}",
+        "fixLocale": "Idioma",
+        "fixHint": "Solo cambia este idioma; al guardar, se marcará como corregido manualmente",
+        "noTextFields": "Este objeto no contiene texto que se pueda corregir aquí",
+        "saveFix": "Guardar corrección",
+        "fixed": "Corrección guardada",
+        "retranslate": "Volver a traducir",
+        "retranslateTitle": "Volver a traducir · {label}",
+        "retranslateHint": "Elige los idiomas que quieres volver a traducir; esto consume cuota de traducción",
+        "queued": "En cola para traducir",
+        "fields": {
+          "displayName": "Nombre visible",
+          "summary": "Resumen de una línea",
+          "description": "Descripción",
+          "title": "Título",
+          "subtitle": "Subtítulo",
+          "body": "Cuerpo",
+          "badge": "Insignia",
+          "ctaLabel": "Texto del botón",
+          "name": "Nombre",
+          "caption": "Pie de foto",
+          "note": "Recomendación",
+          "notes": "Notas de la versión",
+          "bodyMarkdown": "Cuerpo"
+        }
+      }
+    },
+    "release": {
+      "desktop": {
+        "title": "Versiones del cliente",
+        "channel": "Canal",
+        "channels": {
+          "stable": "Estable",
+          "beta": "Beta"
+        },
+        "statuses": {
+          "draft": "Borrador",
+          "published": "Publicado",
+          "rolled_back": "Revertido"
+        },
+        "columns": {
+          "version": "Versión",
+          "channel": "Canal",
+          "status": "Estado",
+          "minMacos": "Versión mínima de macOS",
+          "artifacts": "Artefactos",
+          "published": "Publicado",
+          "createTime": "Creado"
+        },
+        "targets": {
+          "darwin-aarch64": "Apple Silicon",
+          "darwin-x86_64": "Intel",
+          "dmg-universal": "DMG"
+        },
+        "unsigned": "Sin firmar",
+        "draftHint": "Los borradores se registran mediante el flujo de publicación; no se crean aquí",
+        "editNotes": "Editar notas",
+        "notesTitle": "Notas de la versión {version}",
+        "notes": "Notas de la versión",
+        "minMacos": "Versión mínima de macOS",
+        "publish": "Publicar",
+        "publishConfirm": "¿Publicar {version} en el canal «{channel}»? Se sobrescribirá desktop/{channelKey}/latest.json y los clientes recibirán la actualización.",
+        "publishDone": "Publicado",
+        "rollback": "Revertir",
+        "rollbackConfirm": "¿Revertir {version} en el canal «{channel}»? El manifiesto volverá a la versión publicada anterior.",
+        "rollbackDone": "Revertido",
+        "more": "Más"
+      },
+      "mirror": {
+        "title": "Mirrors de descarga",
+        "create": "Añadir mirror",
+        "editTitle": "Editar espejo",
+        "columns": {
+          "key": "Clave",
+          "name": "Nombre",
+          "apiDomain": "Dominio de API",
+          "bottleDomain": "Dominio de Bottle",
+          "probeUrl": "URL de prueba",
+          "recommended": "Recomendado",
+          "enabled": "Activado",
+          "sort": "Orden"
+        },
+        "form": {
+          "key": "Clave",
+          "name": "Nombre",
+          "apiDomain": "Dominio de API",
+          "bottleDomain": "Dominio de Bottle",
+          "brewGitRemote": "Repositorio Git remoto de Homebrew",
+          "coreGitRemote": "Repositorio Git remoto de Homebrew Core",
+          "probeUrl": "URL de prueba",
+          "recommended": "Recomendado",
+          "enabled": "Activado",
+          "sort": "Orden",
+          "keyInvalid": "Solo se permiten letras minúsculas, números y guiones",
+          "urlInvalid": "Usa una URL que empiece por https://",
+          "officialHint": "Deja las cuatro direcciones vacías para usar la fuente oficial",
+          "officialLocked": "Esta es la fuente oficial: el cliente siempre la ofrece, por lo que no se pueden cambiar su key ni sus cuatro direcciones, ni desactivarla.",
+          "probeUrlHint": "El cliente envía una solicitud HEAD a esta URL para medir la latencia y muestra el resultado junto a la fuente de descarga.",
+          "recommendedHint": "Al activar «Recomendado», el cliente muestra una etiqueta. Esto no cambia la selección predeterminada, que es la fuente oficial."
+        },
+        "officialRow": "El cliente siempre la ofrece",
+        "deleteConfirm": "¿Eliminar el mirror «{name}»? Los clientes que ya lo hayan elegido seguirán usando las direcciones guardadas hasta que el usuario elija otra fuente."
+      },
+      "config": {
+        "title": "Configuración remota",
+        "columns": {
+          "key": "Clave",
+          "value": "Valor",
+          "description": "Descripción",
+          "updated": "Actualizado"
+        },
+        "editTitle": "Editar {key}",
+        "value": "Valor (JSON)",
+        "description": "Descripción",
+        "invalidJson": "JSON no válido",
+        "sectionTitle": "Título de la sección",
+        "paragraphs": "Cuerpo (separa los párrafos con líneas en blanco)",
+        "draft": "Marcar como pendiente de revisión",
+        "moduleCount": "El contenido en el idioma de origen se traduce automáticamente al guardarlo; la sección de código abierto se mantiene en inglés y no se traduce. Se han incluido {count} dependencias; puedes expandir JSON para editar la lista."
+      }
+    },
+    "placeholder": "Esta página se implementará en una tarea posterior",
+    "login": {
+      "common": {
+        "loginOrRegister": "Iniciar sesión / Registrarse",
+        "userNamePlaceholder": "Introduce el nombre de usuario",
+        "phonePlaceholder": "Introduce el número de teléfono",
+        "codePlaceholder": "Introduce el código de verificación",
+        "passwordPlaceholder": "Introduce la contraseña",
+        "confirmPasswordPlaceholder": "Vuelve a introducir la contraseña",
+        "codeLogin": "Inicio de sesión con código de verificación",
+        "confirm": "Confirmar",
+        "back": "Volver",
+        "validateSuccess": "Verificación superada",
+        "loginSuccess": "Inicio de sesión correcto",
+        "welcomeBack": "¡Te damos la bienvenida de nuevo, {userName}!",
+        "subtitle": "Panel de administración de la tienda de aplicaciones de Homebrew",
+        "login": "Iniciar sesión"
+      },
+      "pwdLogin": {
+        "title": "Inicio de sesión con contraseña",
+        "rememberMe": "Recordarme",
+        "forgetPassword": "¿Has olvidado la contraseña?",
+        "register": "Registrarse",
+        "otherAccountLogin": "Iniciar sesión con otra cuenta",
+        "otherLoginMode": "Otros métodos de inicio de sesión",
+        "superAdmin": "Superadministrador",
+        "admin": "Administrador",
+        "user": "Usuario",
+        "forgetPasswordHint": "Si has olvidado la contraseña, pide a un superadministrador que la restablezca."
+      },
+      "codeLogin": {
+        "title": "Inicio de sesión con código de verificación",
+        "getCode": "Obtener código de verificación",
+        "reGetCode": "Volver a obtener en {time}s",
+        "sendCodeSuccess": "Código de verificación enviado correctamente",
+        "imageCodePlaceholder": "Introduce el código de verificación de la imagen"
+      },
+      "register": {
+        "title": "Registrarse",
+        "agreement": "He leído y acepto",
+        "protocol": "《Acuerdo de usuario》",
+        "policy": "《Política de privacidad》"
+      },
+      "resetPwd": {
+        "title": "Restablecer contraseña"
+      },
+      "bindWeChat": {
+        "title": "Vincular WeChat"
+      }
+    }
+  },
+  "form": {
+    "required": "Este campo es obligatorio",
+    "userName": {
+      "required": "Introduce el nombre de usuario",
+      "invalid": "El formato del nombre de usuario no es correcto"
+    },
+    "phone": {
+      "required": "Introduce el número de teléfono",
+      "invalid": "El formato del número de teléfono no es correcto"
+    },
+    "pwd": {
+      "required": "Introduce la contraseña",
+      "invalid": "Entre 6 y 18 caracteres; incluye letras, números y guiones bajos"
+    },
+    "confirmPwd": {
+      "required": "Vuelve a introducir la contraseña",
+      "invalid": "Las contraseñas no coinciden"
+    },
+    "code": {
+      "required": "Introduce el código de verificación",
+      "invalid": "El formato del código de verificación no es correcto"
+    },
+    "email": {
+      "required": "Introduce el correo electrónico",
+      "invalid": "El formato del correo electrónico no es correcto"
+    }
+  },
+  "dropdown": {
+    "closeCurrent": "Cerrar actual",
+    "closeOther": "Cerrar los demás",
+    "closeLeft": "Cerrar los de la izquierda",
+    "closeRight": "Cerrar los de la derecha",
+    "closeAll": "Cerrar todo",
+    "pin": "Fijar pestaña",
+    "unpin": "Desfijar pestaña"
+  },
+  "icon": {
+    "themeConfig": "Configuración del tema",
+    "themeSchema": "Esquema del tema",
+    "lang": "Cambiar idioma",
+    "fullscreen": "Pantalla completa",
+    "fullscreenExit": "Salir de pantalla completa",
+    "reload": "Actualizar página",
+    "collapse": "Contraer menú",
+    "expand": "Expandir menú",
+    "pin": "Fijar",
+    "unpin": "Desfijar"
+  },
+  "datatable": {
+    "itemCount": "{total} elemento|{total} elementos",
+    "fixed": {
+      "left": "Fijar a la izquierda",
+      "right": "Fijar a la derecha",
+      "unFixed": "Desfijar"
+    }
+  }
+}

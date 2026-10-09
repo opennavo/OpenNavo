@@ -1,0 +1,265 @@
+package snapshot
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/opennavo/opennavo/server/gen/publicapi"
+	"github.com/opennavo/opennavo/server/internal/i18n"
+	"github.com/opennavo/opennavo/server/internal/store"
+	"gorm.io/gorm"
+)
+
+type File struct {
+	Key  string
+	Data []byte
+}
+type Bundle struct {
+	Info   publicapi.CatalogSnapshotInfo
+	Record store.SnapshotRecord
+	Files  []File
+}
+
+func localized(values map[string]*string) (publicapi.LocalizedNullableString, error) {
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return publicapi.LocalizedNullableString{}, err
+	}
+	var out publicapi.LocalizedNullableString
+	err = json.Unmarshal(raw, &out)
+	return out, err
+}
+func catalogItems(ctx context.Context, view *store.Store, packages []store.PublicPackage) ([]publicapi.CatalogItem, error) {
+	ids := make([]int64, 0, len(packages))
+	for _, p := range packages {
+		ids = append(ids, p.ID)
+	}
+	texts, err := view.SnapshotTexts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	names, summaries := map[int64]map[string]*string{}, map[int64]map[string]*string{}
+	for _, p := range packages {
+		names[p.ID] = map[string]*string{}
+		summaries[p.ID] = map[string]*string{}
+		if p.DescEN != nil && *p.DescEN != "" {
+			summaries[p.ID]["en-US"] = p.DescEN
+		}
+	}
+	for _, text := range texts {
+		if text.DisplayName != nil {
+			names[text.PackageID][text.Locale] = text.DisplayName
+		}
+		if text.Summary != nil {
+			summaries[text.PackageID][text.Locale] = text.Summary
+		}
+	}
+	result := make([]publicapi.CatalogItem, 0, len(packages))
+	for _, p := range packages {
+		// Read structure from the same view; never copy negotiated English fallback text into other language maps.
+		if p.SourceLocale == "" {
+			p.SourceLocale = "en-US"
+		}
+		p.I18n.DisplayName = names[p.ID]["zh-CN"]
+		entry, err := item(p, p)
+		if err != nil {
+			return nil, err
+		}
+		source := publicapi.Locale(p.SourceLocale)
+		entry.SourceLocale = &source
+		entry.DisplayName, err = localized(names[p.ID])
+		if err != nil {
+			return nil, err
+		}
+		entry.Summary, err = localized(summaries[p.ID])
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+func categoryData(categories []store.SnapshotCategory) ([]publicapi.CatalogBaseCategory, map[string]map[string]string, error) {
+	result := make([]publicapi.CatalogBaseCategory, 0, len(categories))
+	names := map[string]map[string]string{}
+	for _, locale := range supportedLocales() {
+		names[locale] = map[string]string{}
+	}
+	for _, category := range categories {
+		raw, err := json.Marshal(category)
+		if err != nil {
+			return nil, nil, err
+		}
+		var base publicapi.CatalogBaseCategory
+		if err = json.Unmarshal(raw, &base); err != nil {
+			return nil, nil, err
+		}
+		result = append(result, base)
+		for locale, name := range category.Name {
+			if target, ok := names[locale]; ok && name != "" {
+				target[category.Slug] = name
+			}
+		}
+	}
+	return result, names, nil
+}
+func compress(value any) ([]byte, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	if _, err = writer.Write(raw); err != nil {
+		return nil, err
+	}
+	if err = writer.Close(); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+func (s *Service) bundle(ctx context.Context, allowSkip bool) (Bundle, bool, error) {
+	var result Bundle
+	skip := false
+	err := s.Store.CatalogRead(ctx, func(view *store.Store) error {
+		now := s.now()
+		_, cursor, err := view.CatalogBounds(ctx)
+		if err != nil {
+			return err
+		}
+		previous, err := view.LatestSnapshot(ctx)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if previous.ID != 0 && !now.After(previous.CreatedAt) {
+			now = previous.CreatedAt.Add(time.Nanosecond)
+		}
+		version := now.UnixMilli()
+		if previous.TextPacks != nil {
+			version = max(version, previous.TextPacks.EnUS.Version+1)
+		}
+		if allowSkip && previous.ID != 0 && now.Sub(previous.CreatedAt) < 24*time.Hour && cursor <= previous.Seq {
+			analytics, err := view.LastAnalytics(ctx)
+			if err != nil {
+				return err
+			}
+			var classification struct{ At time.Time }
+			if err = view.DB.WithContext(ctx).Raw("SELECT GREATEST(COALESCE((SELECT max(updated_at) FROM categories),'epoch'::timestamptz),COALESCE((SELECT max(updated_at) FROM category_i18n),'epoch'::timestamptz)) AS at").Scan(&classification).Error; err != nil {
+				return err
+			}
+			if !analytics.After(previous.CreatedAt) && !classification.At.After(previous.CreatedAt) {
+				result.Info = info(previous)
+				skip = true
+				return nil
+			}
+		}
+		packages, err := view.SnapshotPackages(ctx, "en-US")
+		if err != nil {
+			return err
+		}
+		items, err := catalogItems(ctx, view, packages)
+		if err != nil {
+			return err
+		}
+		categories, err := view.SnapshotCategories(ctx)
+		if err != nil {
+			return err
+		}
+		baseCategories, names, err := categoryData(categories)
+		if err != nil {
+			return err
+		}
+		base := publicapi.CatalogBaseSnapshot{FormatVersion: 2, GeneratedAt: now, Cursor: cursor, Categories: baseCategories, Items: []publicapi.CatalogBaseItem{}}
+		packs := map[string]publicapi.CatalogTextPack{}
+		for _, locale := range supportedLocales() {
+			packs[locale] = publicapi.CatalogTextPack{FormatVersion: 2, Locale: publicapi.Locale(locale), Version: version, Cursor: cursor, GeneratedAt: now, Items: []publicapi.CatalogTextItem{}, Categories: []publicapi.CatalogTextCategory{}}
+		}
+		for _, item := range items {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return err
+			}
+			var entry publicapi.CatalogBaseItem
+			if err = json.Unmarshal(raw, &entry); err != nil {
+				return err
+			}
+			base.Items = append(base.Items, entry)
+			var values struct {
+				Names     map[string]*string `json:"displayName"`
+				Summaries map[string]*string `json:"summary"`
+			}
+			if err = json.Unmarshal(raw, &values); err != nil {
+				return err
+			}
+			for _, locale := range supportedLocales() {
+				name, summary := values.Names[locale], values.Summaries[locale]
+				if name == nil && summary == nil {
+					continue
+				}
+				pack := packs[locale]
+				pack.Items = append(pack.Items, publicapi.CatalogTextItem{Kind: publicapi.CatalogTextItemKind(item.Kind), Token: item.Token, DisplayName: name, Summary: summary})
+				packs[locale] = pack
+			}
+		}
+		metadata := map[string]publicapi.CatalogTextPackInfo{}
+		// Use stable category structure order so map iteration cannot produce irreproducible file hashes.
+		for _, locale := range supportedLocales() {
+			pack := packs[locale]
+			for _, category := range categories {
+				if name, ok := names[locale][category.Slug]; ok {
+					pack.Categories = append(pack.Categories, publicapi.CatalogTextCategory{Slug: category.Slug, Name: name})
+				}
+			}
+			data, err := compress(pack)
+			if err != nil {
+				return err
+			}
+			hash := sha256.Sum256(data)
+			digest := hex.EncodeToString(hash[:])
+			key := fmt.Sprintf("snapshots/text-v2-%s-%d-%s.json.gz", locale, version, digest[:12])
+			result.Files = append(result.Files, File{key, data})
+			metadata[locale] = publicapi.CatalogTextPackInfo{Locale: publicapi.Locale(locale), Cursor: cursor, Version: version, Url: s.Objects.URL(key), Sha256: digest, Bytes: int64(len(data))}
+		}
+		data, err := compress(base)
+		if err != nil {
+			return err
+		}
+		hash := sha256.Sum256(data)
+		digest := hex.EncodeToString(hash[:])
+		key := fmt.Sprintf("snapshots/base-v2-%d-%s.json.gz", cursor, digest[:12])
+		result.Files = append([]File{{key, data}}, result.Files...)
+		raw, err := json.Marshal(metadata)
+		if err != nil {
+			return err
+		}
+		var manifest publicapi.CatalogTextPacks
+		if err = json.Unmarshal(raw, &manifest); err != nil {
+			return err
+		}
+		result.Record = store.SnapshotRecord{FormatVersion: 2, Seq: cursor, ItemCount: len(items), StorageKey: key, URL: s.Objects.URL(key), SHA256: digest, Bytes: int64(len(data)), CreatedAt: now, TextPacks: &manifest}
+		result.Info = info(result.Record)
+		return nil
+	})
+	return result, skip, err
+}
+
+// BuildLocal uses a read-only transaction; it publishes no objects and changes neither metadata nor run records.
+func (s *Service) BuildLocal(ctx context.Context) (Bundle, error) {
+	bundle, _, err := s.bundle(ctx, false)
+	return bundle, err
+}
+
+func supportedLocales() []string {
+	out := make([]string, 0, len(i18n.Locales))
+	for _, locale := range i18n.Locales {
+		out = append(out, string(locale))
+	}
+	return out
+}

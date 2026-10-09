@@ -1,0 +1,52 @@
+{
+  "name": "@elegant-router/core",
+  "version": "0.3.8",
+  "description": "A plugin to create router elegantly",
+  "author": {
+    "name": "Soybean",
+    "email": "soybeanjs@outlook.com",
+    "url": "https://github.com/soybeanjs"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/soybeanjs/elegant-router",
+  "repository": {
+    "url": "https://github.com/soybeanjs/elegant-router.git"
+  },
+  "bugs": {
+    "url": "https://github.com/soybeanjs/elegant-router/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "chokidar": "3.6.0",
+    "consola": "3.2.3",
+    "fast-glob": "3.3.2",
+    "kolorist": "1.8.0",
+    "micromatch": "4.0.7"
+  },
+  "devDependencies": {
+    "@types/micromatch": "4.0.9",
+    "@types/node": "22.0.0",
+    "typescript": "5.5.4",
+    "unbuild": "2.0.0"
+  },
+  "scripts": {
+    "build": "pnpm typecheck && unbuild",
+    "stub": "unbuild --stub",
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  }
+}

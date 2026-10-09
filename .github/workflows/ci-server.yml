@@ -1,0 +1,111 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths: &backend-paths
+      - 'apps/server/**'
+      - 'apps/mcp/**'
+      - 'packages/shared/src/locales.json'
+      - 'ops/**'
+      - 'tooling/scripts/tasks/server.mjs'
+      - 'tooling/scripts/tasks/shared.mjs'
+      - 'tooling/scripts/workspace.mjs'
+      - 'Makefile'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/ci-server.yml'
+      - '.github/workflows/ci-mcp.yml'
+      - '.github/workflows/release-mcp.yml'
+      - '.github/workflows/release-server.yml'
+  pull_request:
+    paths: *backend-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mcp:
+    uses: ./.github/workflows/ci-mcp.yml
+
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter opennavo --ignore-scripts
+      - run: pnpm exec redocly lint apps/server/api/public.openapi.yaml apps/server/api/admin.openapi.yaml --config apps/server/api/redocly.yaml
+      - run: make gen-server
+      - run: git diff --exit-code
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 ../../.github/workflows/ci-server.yml ../../.github/workflows/release-server.yml ../../.github/workflows/ci-mcp.yml ../../.github/workflows/release-mcp.yml
+        working-directory: apps/server
+
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: opennavo
+          POSTGRES_USER: opennavo
+          POSTGRES_PASSWORD: opennavo-dev-only
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U opennavo -d opennavo"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+      redis:
+        image: redis:8
+        ports: ['56379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter opennavo --ignore-scripts
+      - run: make migrate seed
+      - run: make lint-server
+      # Integration tests start PostgreSQL/Redis containers for each case; internal/http alone exceeds go test's default 10-minute timeout.
+      - run: go test -race -tags=integration -timeout 30m ./...
+        working-directory: apps/server
+      - run: go tool govulncheck ./...
+        working-directory: apps/server
+      - run: make build-server
+
+  deployment-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: node tooling/scripts/tasks/server.mjs deploy-lint

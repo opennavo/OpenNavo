@@ -1,0 +1,90 @@
+[
+  {
+    "name": "empty",
+    "languages": [],
+    "expected": "en-US"
+  },
+  {
+    "name": "unsupported",
+    "languages": [
+      "fr-FR",
+      "de-DE"
+    ],
+    "expected": "en-US"
+  },
+  {
+    "name": "first-supported",
+    "languages": [
+      "fr-FR",
+      "ja-JP",
+      "ru-RU"
+    ],
+    "expected": "ja-JP"
+  },
+  {
+    "name": "region-zh",
+    "languages": [
+      "zh-Hant-TW"
+    ],
+    "expected": "zh-CN"
+  },
+  {
+    "name": "region-es",
+    "languages": [
+      "es-MX"
+    ],
+    "expected": "es-ES"
+  },
+  {
+    "name": "region-pt",
+    "languages": [
+      "pt-PT"
+    ],
+    "expected": "pt-BR"
+  },
+  {
+    "name": "underscore",
+    "languages": [
+      "RU_ru"
+    ],
+    "expected": "ru-RU"
+  },
+  {
+    "name": "case",
+    "languages": [
+      "JA-jp"
+    ],
+    "expected": "ja-JP"
+  },
+  {
+    "name": "english-first",
+    "languages": [
+      "en-GB",
+      "zh-CN"
+    ],
+    "expected": "en-US"
+  },
+  {
+    "name": "chinese-first",
+    "languages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "expected": "zh-CN"
+  },
+  {
+    "name": "space",
+    "languages": [
+      "  pt_BR  "
+    ],
+    "expected": "pt-BR"
+  },
+  {
+    "name": "unknown-then-ru",
+    "languages": [
+      "und",
+      "ru"
+    ],
+    "expected": "ru-RU"
+  }
+]

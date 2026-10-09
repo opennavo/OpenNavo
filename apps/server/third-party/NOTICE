@@ -1,0 +1,21 @@
+OpenNavo
+Copyright 2026 The OpenNavo Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It includes the following third-party materials, which keep their own licenses:
+
+- apps/admin is based on soybean-admin v2.2.0
+  (https://github.com/soybeanjs/soybean-admin), Copyright (c) 2021 Soybean,
+  MIT License. The original license is kept in apps/admin/LICENSE and the
+  local modifications are listed in apps/admin/UPSTREAM.md.
+
+- apps/web/public/fonts contains subsets of Noto Sans SC and Noto Sans JP,
+  SIL Open Font License 1.1 (apps/web/public/fonts/OFL.txt and
+  apps/web/public/fonts/OFL-NotoSansJP.txt).
+
+- apps/server/testdata/homebrew contains responses downloaded from the public
+  Homebrew API (https://formulae.brew.sh). The data comes from Homebrew/homebrew-cask
+  and Homebrew/homebrew-core, BSD 2-Clause License.
+
+The full list of third-party dependencies and their licenses is generated into
+apps/server/seeds/about.json (tooling/scripts/about-inventory.py) and shown on the About page.

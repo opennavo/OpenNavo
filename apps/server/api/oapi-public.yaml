@@ -1,0 +1,10 @@
+package: publicapi
+output: gen/publicapi/publicapi.gen.go
+generate:
+  models: true
+  gin-server: true
+  strict-server: true
+  embedded-spec: true
+output-options:
+  # Generate types for CDN file schemas too; they have no dedicated HTTP routes.
+  skip-prune: true

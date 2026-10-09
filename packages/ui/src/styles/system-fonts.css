@@ -1,0 +1,15 @@
+/* Shared web and desktop typography uses local fonts; OG image fonts remain separate. */
+:root {
+  --on-font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --on-font-family-sans-zh: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --on-font-family-sans-ja: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+  --on-font-family-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+:lang(zh) {
+  --on-font-family-sans: var(--on-font-family-sans-zh);
+}
+
+:lang(ja) {
+  --on-font-family-sans: var(--on-font-family-sans-ja);
+}

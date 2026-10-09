@@ -1,0 +1,1488 @@
+{
+  "formatVersion": 1,
+  "lockDigests": {
+    "pnpm-lock.yaml": "97961a58e1bf0c68aff176cc698bceb5174d88f4b9196c9c49092f263d456fda",
+    "apps/server/go.mod": "a02d924bf923d478e96870e6f8e36cf116ac364dd5269274351a66fc2999acda",
+    "apps/server/go.sum": "270184faa8d0510aafa4b7f4c2056678c59b506f5e424633b2f0b74961501203",
+    "apps/mcp/uv.lock": "7cf1c9389ae8f28702b943baabd723ab3badbc21fbfcee5d816cb2b431718220",
+    "apps/desktop/src-tauri/Cargo.lock": "e9ccd458898873e04b33ed28be6b32302c82204cf8b27d4205e08a0b5bf322a3"
+  },
+  "scopeNote": "runtime-candidate includes platform-conditional and bundled/build-time dependencies; conservative notices, not proof of runtime reachability",
+  "modules": [
+    {
+      "ecosystem": "Python",
+      "name": "aiofile",
+      "version": "3.12.3",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/aiofile/3.12.3/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/aiofile/3.12.3/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "aiofile-3.12.3.dist-info/licenses/LICENCE",
+          "path": "licenses/ec640150e03774d1b5264fb268f3829dc36745551109131ebf6dd0a59d5ec3eb.txt",
+          "sha256": "ec640150e03774d1b5264fb268f3829dc36745551109131ebf6dd0a59d5ec3eb"
+        },
+        {
+          "source": "aiofile-3.12.3.dist-info/licenses/LICENCE.md",
+          "path": "licenses/ec640150e03774d1b5264fb268f3829dc36745551109131ebf6dd0a59d5ec3eb.txt",
+          "sha256": "ec640150e03774d1b5264fb268f3829dc36745551109131ebf6dd0a59d5ec3eb"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/annotated-types/0.8.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/annotated-types/0.8.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "annotated_types-0.8.0.dist-info/licenses/LICENSE",
+          "path": "licenses/fe1049884b1a0d9342901e88e07f32925d24b3121d9972b6a6805fb9824b095d.txt",
+          "sha256": "fe1049884b1a0d9342901e88e07f32925d24b3121d9972b6a6805fb9824b095d"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "anyio",
+      "version": "4.15.1",
+      "license": "MIT",
+      "url": "https://pypi.org/project/anyio/4.15.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/anyio/4.15.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "anyio-4.15.1.dist-info/licenses/LICENSE",
+          "path": "licenses/5361ac9dc58f2ef5fd2e9b09c68297c17f04950909bbc8023bdb82eacf22c2b0.txt",
+          "sha256": "5361ac9dc58f2ef5fd2e9b09c68297c17f04950909bbc8023bdb82eacf22c2b0"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "attrs",
+      "version": "26.1.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/attrs/26.1.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/attrs/26.1.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "attrs-26.1.0.dist-info/licenses/LICENSE",
+          "path": "licenses/882115c95dfc2af1eeb6714f8ec6d5cbcabf667caff8729f42420da63f714e9f.txt",
+          "sha256": "882115c95dfc2af1eeb6714f8ec6d5cbcabf667caff8729f42420da63f714e9f"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "authlib",
+      "version": "1.8.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/authlib/1.8.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/authlib/1.8.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "authlib-1.8.0.dist-info/licenses/LICENSE",
+          "path": "licenses/8e1b48518de9c6cd00cb48c7fe5b8023fd90d5552ca12ebe7362a0df30ddbe45.txt",
+          "sha256": "8e1b48518de9c6cd00cb48c7fe5b8023fd90d5552ca12ebe7362a0df30ddbe45"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "beartype",
+      "version": "0.22.9",
+      "license": "MIT",
+      "url": "https://pypi.org/project/beartype/0.22.9/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/beartype/0.22.9/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "beartype-0.22.9.dist-info/licenses/LICENSE",
+          "path": "licenses/190740b4e331916e1f67ea837bd5980fe45d48fe1cb26a9375431122c784e027.txt",
+          "sha256": "190740b4e331916e1f67ea837bd5980fe45d48fe1cb26a9375431122c784e027"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "cachetools",
+      "version": "7.2.1",
+      "license": "MIT",
+      "url": "https://pypi.org/project/cachetools/7.2.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/cachetools/7.2.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "cachetools-7.2.1.dist-info/licenses/LICENSE",
+          "path": "licenses/28c000b52b0ee27138a68ef778227e4057046e86b65f62f1cacb99b0cc49e0d2.txt",
+          "sha256": "28c000b52b0ee27138a68ef778227e4057046e86b65f62f1cacb99b0cc49e0d2"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "caio",
+      "version": "0.12.9",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/caio/0.12.9/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/caio/0.12.9/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "caio-0.12.9.dist-info/licenses/COPYING",
+          "path": "licenses/c79de288bfd6d645a0c668a9e64672ad15f4f0279af216d8dcf20b9699603329.txt",
+          "sha256": "c79de288bfd6d645a0c668a9e64672ad15f4f0279af216d8dcf20b9699603329"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "cffi",
+      "version": "2.1.1",
+      "license": "MIT-0",
+      "url": "https://pypi.org/project/cffi/2.1.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/cffi/2.1.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "cffi-2.1.1.dist-info/licenses/LICENSE",
+          "path": "licenses/5ba24ddc57067f9249add644c3afc41a5d6dc37e23433ef759d95df370b0af63.txt",
+          "sha256": "5ba24ddc57067f9249add644c3afc41a5d6dc37e23433ef759d95df370b0af63"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "click",
+      "version": "8.5.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/click/8.5.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/click/8.5.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "click-8.5.0.dist-info/licenses/LICENSE.txt",
+          "path": "licenses/9a8ad106a394e853bfe21f42f4e72d592819a22805d991b5f3275029292b658d.txt",
+          "sha256": "9a8ad106a394e853bfe21f42f4e72d592819a22805d991b5f3275029292b658d"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "cryptography",
+      "version": "50.0.2",
+      "license": "Apache-2.0 OR BSD-3-Clause",
+      "url": "https://pypi.org/project/cryptography/50.0.2/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/cryptography/50.0.2/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "cryptography-50.0.2.dist-info/licenses/LICENSE",
+          "path": "licenses/3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb.txt",
+          "sha256": "3e0c7c091a948b82533ba98fd7cbb40432d6f1a9acbf85f5922d2f99a93ae6bb"
+        },
+        {
+          "source": "cryptography-50.0.2.dist-info/licenses/LICENSE.APACHE",
+          "path": "licenses/aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe.txt",
+          "sha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe"
+        },
+        {
+          "source": "cryptography-50.0.2.dist-info/licenses/LICENSE.BSD",
+          "path": "licenses/602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb.txt",
+          "sha256": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "cyclopts",
+      "version": "5.2.0",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/cyclopts/5.2.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/cyclopts/5.2.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "cyclopts-5.2.0.dist-info/licenses/LICENSE",
+          "path": "licenses/f14b20048c12393cb9920065c47fadc030210b0f9cab9849ce0a68a063ededc5.txt",
+          "sha256": "f14b20048c12393cb9920065c47fadc030210b0f9cab9849ce0a68a063ededc5"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "dnspython",
+      "version": "2.8.0",
+      "license": "ISC",
+      "url": "https://pypi.org/project/dnspython/2.8.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/dnspython/2.8.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "dnspython-2.8.0.dist-info/licenses/LICENSE",
+          "path": "licenses/c3ea3ff5654b329c19d3bc5f7481af623c3dded4a6145585499f843ad3d741cd.txt",
+          "sha256": "c3ea3ff5654b329c19d3bc5f7481af623c3dded4a6145585499f843ad3d741cd"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "docstring-parser",
+      "version": "0.18.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/docstring-parser/0.18.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/docstring-parser/0.18.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "docstring_parser-0.18.0.dist-info/licenses/LICENSE.md",
+          "path": "licenses/dfe514a337ae8417abd31a8af707bbd6172b03e5430bb083e145899ea97a3eea.txt",
+          "sha256": "dfe514a337ae8417abd31a8af707bbd6172b03e5430bb083e145899ea97a3eea"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "email-validator",
+      "version": "2.3.0",
+      "license": "Unlicense",
+      "url": "https://pypi.org/project/email-validator/2.3.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/email-validator/2.3.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "email_validator-2.3.0.dist-info/licenses/LICENSE",
+          "path": "licenses/672179752e109134a3fb2bdd0780b29fdb7a03974f0f586a13aead5129562d4c.txt",
+          "sha256": "672179752e109134a3fb2bdd0780b29fdb7a03974f0f586a13aead5129562d4c"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "exceptiongroup",
+      "version": "1.3.1",
+      "license": "MIT",
+      "url": "https://pypi.org/project/exceptiongroup/1.3.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/exceptiongroup/1.3.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "exceptiongroup-1.3.1.dist-info/licenses/LICENSE",
+          "path": "licenses/6e5070d765031e0ad403a1cbf90ae6d19a0228f802e320b7acff460aa72ed47c.txt",
+          "sha256": "6e5070d765031e0ad403a1cbf90ae6d19a0228f802e320b7acff460aa72ed47c"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "fastmcp",
+      "version": "4.0.11",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/fastmcp/4.0.11/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/fastmcp/4.0.11/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "fastmcp-4.0.11.dist-info/licenses/LICENSE",
+          "path": "licenses/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "fastmcp-slim",
+      "version": "4.0.11",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/fastmcp-slim/4.0.11/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/fastmcp-slim/4.0.11/json",
+        "licenseTextSource": "https://raw.githubusercontent.com/PrefectHQ/fastmcp/v4.0.11/LICENSE"
+      },
+      "licenseFiles": [
+        {
+          "source": "https://raw.githubusercontent.com/PrefectHQ/fastmcp/v4.0.11/LICENSE",
+          "path": "licenses/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "griffelib",
+      "version": "2.3.2",
+      "license": "ISC",
+      "url": "https://pypi.org/project/griffelib/2.3.2/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/griffelib/2.3.2/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "griffelib-2.3.2.dist-info/licenses/LICENSE",
+          "path": "licenses/d746d07b994c49910d0212f098ec5981658f95cadb82d725ad52d72afb99ad88.txt",
+          "sha256": "d746d07b994c49910d0212f098ec5981658f95cadb82d725ad52d72afb99ad88"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "h11",
+      "version": "0.16.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/h11/0.16.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/h11/0.16.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "h11-0.16.0.dist-info/licenses/LICENSE.txt",
+          "path": "licenses/37db5bb85926db28a427a25867f10b1232003aea1be69ccb851138adb8e6f361.txt",
+          "sha256": "37db5bb85926db28a427a25867f10b1232003aea1be69ccb851138adb8e6f361"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "httpcore2",
+      "version": "2.13.1",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/httpcore2/2.13.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/httpcore2/2.13.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "httpcore2-2.13.1.dist-info/licenses/LICENSE.md",
+          "path": "licenses/c4df125c807b0613501e943a5c92496dd11d2c16604ce396097a8dde396304d9.txt",
+          "sha256": "c4df125c807b0613501e943a5c92496dd11d2c16604ce396097a8dde396304d9"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "httpx2",
+      "version": "2.13.1",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/httpx2/2.13.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/httpx2/2.13.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "httpx2-2.13.1.dist-info/licenses/LICENSE.md",
+          "path": "licenses/7e7d6dbaf7fe160d39fd6e84fd02c33cab96bcbea34d36998d545bceb4a19c30.txt",
+          "sha256": "7e7d6dbaf7fe160d39fd6e84fd02c33cab96bcbea34d36998d545bceb4a19c30"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "httpx2-jsfetch",
+      "version": "1.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/httpx2-jsfetch/1.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/httpx2-jsfetch/1.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "httpx2_jsfetch-1.0.dist-info/licenses/LICENSE.md",
+          "path": "licenses/7e7d6dbaf7fe160d39fd6e84fd02c33cab96bcbea34d36998d545bceb4a19c30.txt",
+          "sha256": "7e7d6dbaf7fe160d39fd6e84fd02c33cab96bcbea34d36998d545bceb4a19c30"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "idna",
+      "version": "3.20",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/idna/3.20/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/idna/3.20/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "idna-3.20.dist-info/licenses/LICENSE.md",
+          "path": "licenses/1a9a4f0e3d479a27240ddd59a9137a66ab4a0f9dfdc8ca6188cc0bfd85187f04.txt",
+          "sha256": "1a9a4f0e3d479a27240ddd59a9137a66ab4a0f9dfdc8ca6188cc0bfd85187f04"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jaraco-classes",
+      "version": "3.4.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/jaraco-classes/3.4.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jaraco-classes/3.4.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jaraco.classes-3.4.0.dist-info/LICENSE",
+          "path": "licenses/86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741.txt",
+          "sha256": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jaraco-context",
+      "version": "6.1.2",
+      "license": "MIT",
+      "url": "https://pypi.org/project/jaraco-context/6.1.2/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jaraco-context/6.1.2/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jaraco_context-6.1.2.dist-info/licenses/LICENSE",
+          "path": "licenses/9755a18519666e5f0f4cae3daad3d7012bcae48a600b31237d75e9fe134e6683.txt",
+          "sha256": "9755a18519666e5f0f4cae3daad3d7012bcae48a600b31237d75e9fe134e6683"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jaraco-functools",
+      "version": "4.6.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/jaraco-functools/4.6.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jaraco-functools/4.6.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jaraco_functools-4.6.0.dist-info/licenses/LICENSE",
+          "path": "licenses/9755a18519666e5f0f4cae3daad3d7012bcae48a600b31237d75e9fe134e6683.txt",
+          "sha256": "9755a18519666e5f0f4cae3daad3d7012bcae48a600b31237d75e9fe134e6683"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jeepney",
+      "version": "0.9.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/jeepney/0.9.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jeepney/0.9.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jeepney-0.9.0.dist-info/licenses/LICENSE",
+          "path": "licenses/1b22b049b5267d6dfc23a67bf4a84d8ec04b9fdfb1a51d360e42b4342c8b4154.txt",
+          "sha256": "1b22b049b5267d6dfc23a67bf4a84d8ec04b9fdfb1a51d360e42b4342c8b4154"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "joserfc",
+      "version": "1.7.5",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/joserfc/1.7.5/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/joserfc/1.7.5/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "joserfc-1.7.5.dist-info/licenses/LICENSE",
+          "path": "licenses/19ee1fafcc9ec4217fc32b8a651d820538c789cf4041cb4e46b4b176a5f2a9c8.txt",
+          "sha256": "19ee1fafcc9ec4217fc32b8a651d820538c789cf4041cb4e46b4b176a5f2a9c8"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jsonref",
+      "version": "1.1.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/jsonref/1.1.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jsonref/1.1.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jsonref-1.1.0.dist-info/licenses/LICENSE",
+          "path": "licenses/c93d594f97a1bc45d04908cd47c707cd7ff078f038a011443e0049ed28da3f31.txt",
+          "sha256": "c93d594f97a1bc45d04908cd47c707cd7ff078f038a011443e0049ed28da3f31"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jsonschema",
+      "version": "4.26.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/jsonschema/4.26.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jsonschema/4.26.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jsonschema-4.26.0.dist-info/licenses/COPYING",
+          "path": "licenses/4f92a015a13c4d1a040bef018aa13430b4f1bc73b41b16bb846c346766de7439.txt",
+          "sha256": "4f92a015a13c4d1a040bef018aa13430b4f1bc73b41b16bb846c346766de7439"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jsonschema-path",
+      "version": "0.5.0",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/jsonschema-path/0.5.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jsonschema-path/0.5.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jsonschema_path-0.5.0.dist-info/licenses/LICENSE",
+          "path": "licenses/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "jsonschema-specifications",
+      "version": "2025.9.1",
+      "license": "MIT",
+      "url": "https://pypi.org/project/jsonschema-specifications/2025.9.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/jsonschema-specifications/2025.9.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "jsonschema_specifications-2025.9.1.dist-info/licenses/COPYING",
+          "path": "licenses/42dcd63495f87b4eb7c7757afa379bb55a53f94afd7a5f657d9adf57236e515c.txt",
+          "sha256": "42dcd63495f87b4eb7c7757afa379bb55a53f94afd7a5f657d9adf57236e515c"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "keyring",
+      "version": "25.7.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/keyring/25.7.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/keyring/25.7.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "keyring-25.7.0.dist-info/licenses/LICENSE",
+          "path": "licenses/5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d.txt",
+          "sha256": "5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "markdown-it-py",
+      "version": "4.2.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/markdown-it-py/4.2.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/markdown-it-py/4.2.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "markdown_it_py-4.2.0.dist-info/licenses/LICENSE",
+          "path": "licenses/4a2260d6e2cd0f5a151a1e86dbfe7d3ed552b1e2beabf9941c1ba5c49cbce484.txt",
+          "sha256": "4a2260d6e2cd0f5a151a1e86dbfe7d3ed552b1e2beabf9941c1ba5c49cbce484"
+        },
+        {
+          "source": "markdown_it_py-4.2.0.dist-info/licenses/LICENSE.markdown-it",
+          "path": "licenses/792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473.txt",
+          "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "mcp",
+      "version": "2.3.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/mcp/2.3.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/mcp/2.3.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "mcp-2.3.0.dist-info/licenses/LICENSE",
+          "path": "licenses/5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d.txt",
+          "sha256": "5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "mcp-types",
+      "version": "2.3.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/mcp-types/2.3.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/mcp-types/2.3.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "mcp_types-2.3.0.dist-info/licenses/LICENSE",
+          "path": "licenses/5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d.txt",
+          "sha256": "5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "mdurl",
+      "version": "0.1.2",
+      "license": "MIT",
+      "url": "https://pypi.org/project/mdurl/0.1.2/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/mdurl/0.1.2/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "mdurl-0.1.2.dist-info/LICENSE",
+          "path": "licenses/7c605df6e28667a9603118e98274f64a49ce3eed0d26fccce9534a345e0ef955.txt",
+          "sha256": "7c605df6e28667a9603118e98274f64a49ce3eed0d26fccce9534a345e0ef955"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "more-itertools",
+      "version": "11.1.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/more-itertools/11.1.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/more-itertools/11.1.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "more_itertools-11.1.0.dist-info/licenses/LICENSE",
+          "path": "licenses/09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46.txt",
+          "sha256": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "openapi-pydantic",
+      "version": "0.6.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/openapi-pydantic/0.6.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/openapi-pydantic/0.6.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "openapi_pydantic-0.6.0.dist-info/licenses/LICENSE",
+          "path": "licenses/8fdba18804738841e069c993bea44d931e45c3aa02bc4ba7f78160435cc3d009.txt",
+          "sha256": "8fdba18804738841e069c993bea44d931e45c3aa02bc4ba7f78160435cc3d009"
+        },
+        {
+          "source": "openapi_pydantic/v3/v3_0/license.py",
+          "path": "licenses/2a1c9cc888e1d47ae84acd046e0e116fa5bb29815b0f115bb64148f0925c52f4.txt",
+          "sha256": "2a1c9cc888e1d47ae84acd046e0e116fa5bb29815b0f115bb64148f0925c52f4"
+        },
+        {
+          "source": "openapi_pydantic/v3/v3_1/license.py",
+          "path": "licenses/bbc8b2ab939f67c18b43b6b4ad61f33daa69354e0990bd211bff27ffc8e09a8a.txt",
+          "sha256": "bbc8b2ab939f67c18b43b6b4ad61f33daa69354e0990bd211bff27ffc8e09a8a"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "opentelemetry-api",
+      "version": "1.45.1",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/opentelemetry-api/1.45.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/opentelemetry-api/1.45.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "opentelemetry_api-1.45.1.dist-info/licenses/LICENSE",
+          "path": "licenses/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "packaging",
+      "version": "26.3",
+      "license": "Apache-2.0 OR BSD-2-Clause",
+      "url": "https://pypi.org/project/packaging/26.3/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/packaging/26.3/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "packaging-26.3.dist-info/licenses/LICENSE",
+          "path": "licenses/cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48.txt",
+          "sha256": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48"
+        },
+        {
+          "source": "packaging-26.3.dist-info/licenses/LICENSE.APACHE",
+          "path": "licenses/0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594.txt",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "source": "packaging-26.3.dist-info/licenses/LICENSE.BSD",
+          "path": "licenses/b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5.txt",
+          "sha256": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pathable",
+      "version": "0.6.0",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/pathable/0.6.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pathable/0.6.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pathable-0.6.0.dist-info/licenses/LICENSE",
+          "path": "licenses/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "platformdirs",
+      "version": "4.12.3",
+      "license": "MIT",
+      "url": "https://pypi.org/project/platformdirs/4.12.3/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/platformdirs/4.12.3/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "platformdirs-4.12.3.dist-info/licenses/LICENSE",
+          "path": "licenses/29e0fd62e929850e86eb28c3fdccf0cefdf4fa94879011cffb3d0d4bed6d4db6.txt",
+          "sha256": "29e0fd62e929850e86eb28c3fdccf0cefdf4fa94879011cffb3d0d4bed6d4db6"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "py-key-value-aio",
+      "version": "0.4.6",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/py-key-value-aio/0.4.6/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/py-key-value-aio/0.4.6/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "py_key_value_aio-0.4.6.dist-info/licenses/LICENSE",
+          "path": "licenses/d09dfd49388d9bff8ecf258700abebbd77d25da2903cd21f362e074f242a1601.txt",
+          "sha256": "d09dfd49388d9bff8ecf258700abebbd77d25da2903cd21f362e074f242a1601"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pycparser",
+      "version": "3.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/pycparser/3.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pycparser/3.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pycparser-3.0.dist-info/licenses/LICENSE",
+          "path": "licenses/0c846399369ea76ddd7b5c44fe6d16497415fcf015f5cbb508c24bf98b81c5b1.txt",
+          "sha256": "0c846399369ea76ddd7b5c44fe6d16497415fcf015f5cbb508c24bf98b81c5b1"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pydantic",
+      "version": "2.13.5",
+      "license": "MIT",
+      "url": "https://pypi.org/project/pydantic/2.13.5/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pydantic/2.13.5/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pydantic-2.13.5.dist-info/licenses/LICENSE",
+          "path": "licenses/a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3.txt",
+          "sha256": "a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pydantic-core",
+      "version": "2.46.5",
+      "license": "MIT",
+      "url": "https://pypi.org/project/pydantic-core/2.46.5/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pydantic-core/2.46.5/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pydantic_core-2.46.5.dist-info/licenses/LICENSE",
+          "path": "licenses/2afdd30d54b4d62b6f488a6bcc1546e84ec5061f13f4209c03d012348783795a.txt",
+          "sha256": "2afdd30d54b4d62b6f488a6bcc1546e84ec5061f13f4209c03d012348783795a"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pydantic-settings",
+      "version": "2.15.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/pydantic-settings/2.15.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pydantic-settings/2.15.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pydantic_settings-2.15.0.dist-info/licenses/LICENSE",
+          "path": "licenses/eb355a753e020346d33d83bf9769135b89fc610568ac531a01c295bcee7fd998.txt",
+          "sha256": "eb355a753e020346d33d83bf9769135b89fc610568ac531a01c295bcee7fd998"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pygments",
+      "version": "2.21.0",
+      "license": "BSD-2-Clause",
+      "url": "https://pypi.org/project/pygments/2.21.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pygments/2.21.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pygments-2.21.0.dist-info/licenses/AUTHORS",
+          "path": "licenses/71a83872ad82f57be692cf827e048e2cd51d45169cfa1ea3f28706d97a872c0f.txt",
+          "sha256": "71a83872ad82f57be692cf827e048e2cd51d45169cfa1ea3f28706d97a872c0f"
+        },
+        {
+          "source": "pygments-2.21.0.dist-info/licenses/LICENSE",
+          "path": "licenses/a9d66f1d526df02e29dce73436d34e56e8632f46c275bbdffc70569e882f9f17.txt",
+          "sha256": "a9d66f1d526df02e29dce73436d34e56e8632f46c275bbdffc70569e882f9f17"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pyjwt",
+      "version": "2.15.1",
+      "license": "MIT",
+      "url": "https://pypi.org/project/pyjwt/2.15.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pyjwt/2.15.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pyjwt-2.15.1.dist-info/licenses/AUTHORS.rst",
+          "path": "licenses/925ce43461029eedbf558ec0b7cf7fc4b045def5120ebb97937c70814071cf07.txt",
+          "sha256": "925ce43461029eedbf558ec0b7cf7fc4b045def5120ebb97937c70814071cf07"
+        },
+        {
+          "source": "pyjwt-2.15.1.dist-info/licenses/LICENSE",
+          "path": "licenses/797a7a20231d4c433e9f1911db1731d06b5828b98f499819a034f7c0f56f5ce5.txt",
+          "sha256": "797a7a20231d4c433e9f1911db1731d06b5828b98f499819a034f7c0f56f5ce5"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pyperclip",
+      "version": "1.11.0",
+      "license": "BSD",
+      "url": "https://pypi.org/project/pyperclip/1.11.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pyperclip/1.11.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pyperclip-1.11.0.dist-info/licenses/AUTHORS.txt",
+          "path": "licenses/df4ed864ae3275816030fadb3c89a3b72a30de0973325f8faea5414bdd8e6ceb.txt",
+          "sha256": "df4ed864ae3275816030fadb3c89a3b72a30de0973325f8faea5414bdd8e6ceb"
+        },
+        {
+          "source": "pyperclip-1.11.0.dist-info/licenses/LICENSE.txt",
+          "path": "licenses/a72b0acc9389e4c17ced890ef1b03455e04978d39e25636099b93efb76b74ead.txt",
+          "sha256": "a72b0acc9389e4c17ced890ef1b03455e04978d39e25636099b93efb76b74ead"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "python-dotenv",
+      "version": "1.2.4",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/python-dotenv/1.2.4/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/python-dotenv/1.2.4/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "python_dotenv-1.2.4.dist-info/licenses/LICENSE",
+          "path": "licenses/80619b7049f08c81683ad0e01f08f257a840652dd71ee83146d36658c7d2c2b9.txt",
+          "sha256": "80619b7049f08c81683ad0e01f08f257a840652dd71ee83146d36658c7d2c2b9"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "python-multipart",
+      "version": "0.0.32",
+      "license": "Apache-2.0",
+      "url": "https://pypi.org/project/python-multipart/0.0.32/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/python-multipart/0.0.32/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "python_multipart-0.0.32.dist-info/licenses/LICENSE.txt",
+          "path": "licenses/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pywin32",
+      "version": "312",
+      "license": "PSF",
+      "url": "https://pypi.org/project/pywin32/312/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pywin32/312/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "adodbapi/license.txt",
+          "path": "licenses/5ea2f23c7f00c3006bacf267183e816d8d4b6dc95ea57a4ddb0ff81de6d8719e.txt",
+          "sha256": "5ea2f23c7f00c3006bacf267183e816d8d4b6dc95ea57a4ddb0ff81de6d8719e"
+        },
+        {
+          "source": "pythonwin/License.txt",
+          "path": "licenses/a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924.txt",
+          "sha256": "a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924"
+        },
+        {
+          "source": "pythonwin/pywin/idle/LICENSE.txt",
+          "path": "licenses/a0fa1e7b8a4230055685e796548ac084a6c0eea395294574093bba72efd9191b.txt",
+          "sha256": "a0fa1e7b8a4230055685e796548ac084a6c0eea395294574093bba72efd9191b"
+        },
+        {
+          "source": "pywin32-312.dist-info/licenses/adodbapi/license.txt",
+          "path": "licenses/5ea2f23c7f00c3006bacf267183e816d8d4b6dc95ea57a4ddb0ff81de6d8719e.txt",
+          "sha256": "5ea2f23c7f00c3006bacf267183e816d8d4b6dc95ea57a4ddb0ff81de6d8719e"
+        },
+        {
+          "source": "pywin32-312.dist-info/licenses/com/License.txt",
+          "path": "licenses/fad39c18fc3825fa278db1c86fd52cf88d7c525b3c2fbf7817fa383cbae4d423.txt",
+          "sha256": "fad39c18fc3825fa278db1c86fd52cf88d7c525b3c2fbf7817fa383cbae4d423"
+        },
+        {
+          "source": "pywin32-312.dist-info/licenses/com/win32comext/mapi/src/MAPIStubLibrary/LICENSE",
+          "path": "licenses/1c4cf44d2fb8bf2d10214d6da80cc9e05502824cc4460f35be4c7bcb4cde53da.txt",
+          "sha256": "1c4cf44d2fb8bf2d10214d6da80cc9e05502824cc4460f35be4c7bcb4cde53da"
+        },
+        {
+          "source": "pywin32-312.dist-info/licenses/pythonwin/License.txt",
+          "path": "licenses/a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924.txt",
+          "sha256": "a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924"
+        },
+        {
+          "source": "pywin32-312.dist-info/licenses/pythonwin/Scintilla/License.txt",
+          "path": "licenses/57ec79bbeab4fd1cf7460a7ad450d2ab01471810459aeae9e75e4c66b472095f.txt",
+          "sha256": "57ec79bbeab4fd1cf7460a7ad450d2ab01471810459aeae9e75e4c66b472095f"
+        },
+        {
+          "source": "pywin32-312.dist-info/licenses/pythonwin/pywin/idle/LICENSE.txt",
+          "path": "licenses/a0fa1e7b8a4230055685e796548ac084a6c0eea395294574093bba72efd9191b.txt",
+          "sha256": "a0fa1e7b8a4230055685e796548ac084a6c0eea395294574093bba72efd9191b"
+        },
+        {
+          "source": "pywin32-312.dist-info/licenses/win32/License.txt",
+          "path": "licenses/a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924.txt",
+          "sha256": "a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924"
+        },
+        {
+          "source": "win32/License.txt",
+          "path": "licenses/a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924.txt",
+          "sha256": "a74d826efb242db087b850348e20abbfd591b51e2081f2048735290913872924"
+        },
+        {
+          "source": "win32com/License.txt",
+          "path": "licenses/fad39c18fc3825fa278db1c86fd52cf88d7c525b3c2fbf7817fa383cbae4d423.txt",
+          "sha256": "fad39c18fc3825fa278db1c86fd52cf88d7c525b3c2fbf7817fa383cbae4d423"
+        },
+        {
+          "source": "win32comext/License.txt",
+          "path": "licenses/fad39c18fc3825fa278db1c86fd52cf88d7c525b3c2fbf7817fa383cbae4d423.txt",
+          "sha256": "fad39c18fc3825fa278db1c86fd52cf88d7c525b3c2fbf7817fa383cbae4d423"
+        },
+        {
+          "source": "win32comext/mapi/NOTICE.md",
+          "path": "licenses/dedf997c8f5568a0e0aff57d009f501226ea30c401323d67912b6a8f8735a825.txt",
+          "sha256": "dedf997c8f5568a0e0aff57d009f501226ea30c401323d67912b6a8f8735a825"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pywin32-ctypes",
+      "version": "0.2.3",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/pywin32-ctypes/0.2.3/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pywin32-ctypes/0.2.3/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pywin32_ctypes-0.2.3.dist-info/LICENSE.txt",
+          "path": "licenses/dfa83b3e2709adfcdb838d9ad55823ca674abb780e60563d9dd9544ccbf785e9.txt",
+          "sha256": "dfa83b3e2709adfcdb838d9ad55823ca674abb780e60563d9dd9544ccbf785e9"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "pyyaml",
+      "version": "6.0.3",
+      "license": "MIT",
+      "url": "https://pypi.org/project/pyyaml/6.0.3/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/pyyaml/6.0.3/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "pyyaml-6.0.3.dist-info/licenses/LICENSE",
+          "path": "licenses/8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4.txt",
+          "sha256": "8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "referencing",
+      "version": "0.37.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/referencing/0.37.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/referencing/0.37.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "referencing-0.37.0.dist-info/licenses/COPYING",
+          "path": "licenses/42dcd63495f87b4eb7c7757afa379bb55a53f94afd7a5f657d9adf57236e515c.txt",
+          "sha256": "42dcd63495f87b4eb7c7757afa379bb55a53f94afd7a5f657d9adf57236e515c"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "rich",
+      "version": "15.0.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/rich/15.0.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/rich/15.0.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "rich-15.0.0.dist-info/licenses/LICENSE",
+          "path": "licenses/deed7c17a4318158190a3ea239cc879a5a50271cebb98ae7025f48fbe58dca15.txt",
+          "sha256": "deed7c17a4318158190a3ea239cc879a5a50271cebb98ae7025f48fbe58dca15"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "rich-rst",
+      "version": "2.2.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/rich-rst/2.2.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/rich-rst/2.2.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "rich_rst-2.2.0.dist-info/licenses/LICENSE",
+          "path": "licenses/afd4029d4a3f931ff188b56413dc125a8de083130164a4b6019731dff935523a.txt",
+          "sha256": "afd4029d4a3f931ff188b56413dc125a8de083130164a4b6019731dff935523a"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "rpds-py",
+      "version": "2026.9.1",
+      "license": "MIT",
+      "url": "https://pypi.org/project/rpds-py/2026.9.1/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/rpds-py/2026.9.1/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "rpds_py-2026.9.1.dist-info/licenses/LICENSE",
+          "path": "licenses/314e4e91be3baa93c0fb4bccc9e4e97cd643eb839b065af921782c2175fe9909.txt",
+          "sha256": "314e4e91be3baa93c0fb4bccc9e4e97cd643eb839b065af921782c2175fe9909"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "secretstorage",
+      "version": "3.5.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/secretstorage/3.5.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/secretstorage/3.5.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "secretstorage-3.5.0.dist-info/licenses/LICENSE",
+          "path": "licenses/e700357592bb93704cb040ce4a6663a85292716a4041b6a267f598f21658466f.txt",
+          "sha256": "e700357592bb93704cb040ce4a6663a85292716a4041b6a267f598f21658466f"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "sse-starlette",
+      "version": "3.5.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/sse-starlette/3.5.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/sse-starlette/3.5.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "sse_starlette-3.5.0.dist-info/licenses/AUTHORS",
+          "path": "licenses/c2ff63d2ecf128bbda8ab1b2016830a5da124202fbb97168685bb9946aed3f1a.txt",
+          "sha256": "c2ff63d2ecf128bbda8ab1b2016830a5da124202fbb97168685bb9946aed3f1a"
+        },
+        {
+          "source": "sse_starlette-3.5.0.dist-info/licenses/LICENSE",
+          "path": "licenses/80af6bfccbebd2c14d4aab96695cab9950e177190cc80f5ef819e99996883e8e.txt",
+          "sha256": "80af6bfccbebd2c14d4aab96695cab9950e177190cc80f5ef819e99996883e8e"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "starlette",
+      "version": "1.7.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/starlette/1.7.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/starlette/1.7.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "starlette-1.7.0.dist-info/licenses/LICENSE.md",
+          "path": "licenses/dcb95677a02240243187e964f941847d19b17821cf99e5afae684fab328c19bf.txt",
+          "sha256": "dcb95677a02240243187e964f941847d19b17821cf99e5afae684fab328c19bf"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "truststore",
+      "version": "0.10.4",
+      "license": "MIT",
+      "url": "https://pypi.org/project/truststore/0.10.4/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/truststore/0.10.4/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "truststore-0.10.4.dist-info/licenses/LICENSE",
+          "path": "licenses/33be7b7e8fa4fd19b1760e1a8ed8a668bdab852c91b692dd41424bcb725a9fca.txt",
+          "sha256": "33be7b7e8fa4fd19b1760e1a8ed8a668bdab852c91b692dd41424bcb725a9fca"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "license": "PSF-2.0",
+      "url": "https://pypi.org/project/typing-extensions/4.16.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/typing-extensions/4.16.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "typing_extensions-4.16.0.dist-info/licenses/LICENSE",
+          "path": "licenses/3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf.txt",
+          "sha256": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "license": "MIT",
+      "url": "https://pypi.org/project/typing-inspection/0.4.4/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/typing-inspection/0.4.4/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "typing_inspection-0.4.4.dist-info/licenses/LICENSE",
+          "path": "licenses/804b59b25f2c31bd278f9202a19ae49a3945aa2664387e2d0a128c7cacc61ec3.txt",
+          "sha256": "804b59b25f2c31bd278f9202a19ae49a3945aa2664387e2d0a128c7cacc61ec3"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "uncalled-for",
+      "version": "0.4.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/uncalled-for/0.4.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/uncalled-for/0.4.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "uncalled_for-0.4.0.dist-info/licenses/LICENSE",
+          "path": "licenses/62e55653f6573b42bf936146f3158a7b9446c55db802124a4ef42629fa97bb29.txt",
+          "sha256": "62e55653f6573b42bf936146f3158a7b9446c55db802124a4ef42629fa97bb29"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "uvicorn",
+      "version": "0.54.0",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/uvicorn/0.54.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/uvicorn/0.54.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "uvicorn-0.54.0.dist-info/licenses/LICENSE.md",
+          "path": "licenses/efe1acf3e62fb99c288b0ec73e5a773b7268ef4320fe757ea994214e4b63c371.txt",
+          "sha256": "efe1acf3e62fb99c288b0ec73e5a773b7268ef4320fe757ea994214e4b63c371"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "watchfiles",
+      "version": "1.3.0",
+      "license": "MIT",
+      "url": "https://pypi.org/project/watchfiles/1.3.0/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/watchfiles/1.3.0/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "watchfiles-1.3.0.dist-info/licenses/LICENSE",
+          "path": "licenses/4fd78355b67ce2677ede9fb6f63a250f377bb7e22088136a5f4699adb4bc069f.txt",
+          "sha256": "4fd78355b67ce2677ede9fb6f63a250f377bb7e22088136a5f4699adb4bc069f"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Python",
+      "name": "websockets",
+      "version": "17.2",
+      "license": "BSD-3-Clause",
+      "url": "https://pypi.org/project/websockets/17.2/",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "PyPI exact-version metadata and distribution license files",
+        "url": "https://pypi.org/pypi/websockets/17.2/json"
+      },
+      "licenseFiles": [
+        {
+          "source": "websockets-17.2.dist-info/licenses/LICENSE",
+          "path": "licenses/3d6a0c050d8bec52fabad502e45fb25bd02bcadbd70dea34d447b6a0ff4e6da8.txt",
+          "sha256": "3d6a0c050d8bec52fabad502e45fb25bd02bcadbd70dea34d447b6a0ff4e6da8"
+        }
+      ]
+    }
+  ]
+}

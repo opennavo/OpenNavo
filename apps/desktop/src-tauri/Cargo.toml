@@ -1,0 +1,77 @@
+[package]
+name = "opennavo-desktop"
+version = "0.0.0"
+description = "OpenNavo macOS desktop app"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
+[lib]
+# main.rs only calls the library's run(); tests and binding exports also use the library.
+name = "opennavo_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon", "protocol-asset", "macos-private-api"] }
+tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"] }
+tauri-plugin-deep-link = "2.6"
+tauri-plugin-updater = "2.13"
+tauri-plugin-notification = "2.5"
+tauri-plugin-autostart = "2.7"
+tauri-plugin-positioner = { version = "2.4", features = ["tray-icon"] }
+tauri-plugin-window-state = "2.5"
+tauri-plugin-store = "2.5"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
+tauri-plugin-clipboard-manager = "2.4"
+tauri-plugin-process = "2.4"
+tauri-plugin-log = "2.10"
+tauri-plugin-os = "2.4"
+# IPC type exports (06 §5): pin versions because release candidates have incompatible changes.
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta-typescript = "=0.0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+log = "0.4"
+portable-pty = "0.9"
+regex = "1"
+tokio = { version = "1", features = ["full"] }
+nix = { version = "0.31", features = ["signal", "process"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+sha2 = "0.10"
+sha1 = "0.10"
+flate2 = "1"
+plist = "1.10"
+icns = "0.5"
+image = { version = "0.25", default-features = false, features = ["png", "tiff"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSImage", "NSBitmapImageRep"] }
+objc2-foundation = "0.3"
+# Reuse the notification plugin's locked native dependency; declare it directly only to handle clicks.
+mac-notification-sys = "=0.6.15"
+
+[dev-dependencies]
+tempfile = "3"
+tauri = { version = "2.12", features = ["test"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+# Build-time dylibs must load through macOS dyld; stripping breaks Rust 1.96 LINKEDIT alignment. They are not bundled in the app.
+[profile.release.build-override]
+strip = false

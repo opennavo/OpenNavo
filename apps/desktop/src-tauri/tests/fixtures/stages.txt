@@ -1,0 +1,7 @@
+==> Fetching downloads for: ffmpeg@6
+==> Pouring ffmpeg@6--6.1.3_3.arm64_tahoe.bottle.tar.gz
+==> Uninstalling Cask cleanmymac-zh
+==> Purging files for version 4.15.9 of Cask cleanmymac-zh
+Removing: /usr/local/Cellar/gnutls/3.6.5... (1,195 files, 8.9MB)
+==> Caveats
+Emacs Lisp files have been installed to:

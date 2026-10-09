@@ -1,0 +1,3 @@
+==> Installing Cask inkscape
+==> Moving App 'Inkscape.app' to '/Applications/Inkscape.app'.
+==> Linking Binary 'inkscape' to '/usr/local/bin/inkscape'.

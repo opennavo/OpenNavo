@@ -1,0 +1,87 @@
+{
+  "name": "@elegant-router/vue",
+  "version": "0.3.8",
+  "description": "A Vue3 Router plugin to create router elegantly",
+  "author": {
+    "name": "Soybean",
+    "email": "soybeanjs@outlook.com",
+    "url": "https://github.com/soybeanjs"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/soybeanjs/elegant-router",
+  "repository": {
+    "url": "https://github.com/soybeanjs/elegant-router.git"
+  },
+  "bugs": {
+    "url": "https://github.com/soybeanjs/elegant-router/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.mjs",
+      "require": "./dist/vite.cjs"
+    },
+    "./webpack": {
+      "types": "./dist/webpack.d.ts",
+      "import": "./dist/webpack.mjs",
+      "require": "./dist/webpack.cjs"
+    },
+    "./rollup": {
+      "types": "./dist/rollup.d.ts",
+      "import": "./dist/rollup.mjs",
+      "require": "./dist/rollup.cjs"
+    },
+    "./esbuild": {
+      "types": "./dist/esbuild.d.ts",
+      "import": "./dist/esbuild.mjs",
+      "require": "./dist/esbuild.cjs"
+    },
+    "./*": "./*"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*",
+        "./*"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "consola": "3.2.3",
+    "kolorist": "1.8.0",
+    "magic-string": "0.30.11",
+    "magicast": "0.3.4",
+    "prettier": "3.3.3",
+    "recast": "0.23.9",
+    "unplugin": "1.12.0",
+    "@elegant-router/core": "0.3.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.0.0",
+    "rollup": "4.19.1",
+    "typescript": "5.5.4",
+    "unbuild": "2.0.0",
+    "vite": "5.3.5",
+    "vue-router": "4.4.1"
+  },
+  "scripts": {
+    "build": "pnpm typecheck && pnpm unbuild",
+    "stub": "unbuild --stub",
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  }
+}

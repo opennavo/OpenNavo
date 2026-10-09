@@ -1,0 +1,105 @@
+{
+  "token": "steam",
+  "full_token": "steam",
+  "old_tokens": [],
+  "tap": "homebrew/cask",
+  "name": [
+    "Steam"
+  ],
+  "desc": "Video game digital distribution service",
+  "homepage": "https://store.steampowered.com/about/",
+  "url": "https://cdn.cloudflare.steamstatic.com/client/installer/steam.dmg",
+  "url_specs": {},
+  "version": "6.0",
+  "autobump": false,
+  "no_autobump_message": "extract_plist",
+  "skip_livecheck": false,
+  "installed": null,
+  "installed_time": null,
+  "bundle_version": null,
+  "bundle_short_version": null,
+  "pinned": false,
+  "pinned_version": null,
+  "outdated": false,
+  "sha256": "no_check",
+  "artifacts": [
+    {
+      "uninstall": [
+        {
+          "launchctl": [
+            "com.valvesoftware.steam.ipctool",
+            "com.valvesoftware.steamclean"
+          ],
+          "quit": [
+            "com.valvesoftware.steam",
+            "com.valvesoftware.steam.helper",
+            "com.valvesoftware.steam.helper.EH"
+          ],
+          "delete": "~/Library/Application Support/Steam/Steam.AppBundle"
+        }
+      ]
+    },
+    {
+      "app": [
+        "Steam.app"
+      ],
+      "target": "/Applications/Steam.app"
+    },
+    {
+      "zap": [
+        {
+          "trash": [
+            "~/Library/Application Support/Steam",
+            "~/Library/LaunchAgents/com.valvesoftware.steamclean.plist",
+            "~/Library/Preferences/com.valvesoftware.steam.helper.plist",
+            "~/Library/Saved Application State/com.valvesoftware.steam.savedState"
+          ]
+        }
+      ]
+    }
+  ],
+  "caveats": null,
+  "caveats_rosetta": true,
+  "depends_on": {
+    "macos": {}
+  },
+  "conflicts_with": null,
+  "container": null,
+  "rename": [],
+  "auto_updates": true,
+  "deprecated": false,
+  "deprecation_date": null,
+  "deprecation_reason": null,
+  "deprecation_replacement_formula": null,
+  "deprecation_replacement_cask": null,
+  "deprecate_args": null,
+  "disabled": false,
+  "disable_date": null,
+  "disable_reason": null,
+  "disable_replacement_formula": null,
+  "disable_replacement_cask": null,
+  "disable_args": null,
+  "tap_git_head": "0d5785eb5d44ec29a051e3ac6a0da6f733347009",
+  "languages": [],
+  "ruby_source_path": "Casks/s/steam.rb",
+  "ruby_source_checksum": {
+    "sha256": "3c45a6982fcb74083585a5456788bfda180d1f1cf50baacef71ae7ac6e1c7126"
+  },
+  "variations": {},
+  "supported_platforms": [
+    "golden_gate",
+    "arm64_golden_gate",
+    "tahoe",
+    "arm64_tahoe",
+    "sequoia",
+    "arm64_sequoia",
+    "sonoma",
+    "arm64_sonoma",
+    "ventura",
+    "arm64_ventura",
+    "monterey",
+    "arm64_monterey",
+    "big_sur",
+    "arm64_big_sur"
+  ]
+}

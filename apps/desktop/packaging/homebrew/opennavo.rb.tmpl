@@ -1,0 +1,34 @@
+# Project tap opennavo/homebrew-tap cask (06 §15), rendered by release-desktop.yml through scripts/render-cask.mjs.
+# Double-brace placeholders: version, sha256 (Universal DMG), downloadUrl (GitHub DMG), manifestUrl (published stable manifest), homepage.
+# Remove these comments when rendering; publish only the cask body.
+cask "opennavo" do
+  version "{{version}}"
+  sha256 "{{sha256}}"
+
+  url "{{downloadUrl}}"
+  name "OpenNavo"
+  desc "Graphical app store for Homebrew packages"
+  homepage "{{homepage}}"
+
+  livecheck do
+    url "{{manifestUrl}}"
+    strategy :json do |json|
+      json["version"]
+    end
+  end
+
+  auto_updates true
+  depends_on macos: ">= :ventura"
+
+  app "OpenNavo.app"
+
+  zap trash: [
+    "~/Library/Application Support/com.opennavo.desktop",
+    "~/Library/Caches/com.opennavo.desktop",
+    "~/Library/HTTPStorages/com.opennavo.desktop",
+    "~/Library/Logs/com.opennavo.desktop",
+    "~/Library/Preferences/com.opennavo.desktop.plist",
+    "~/Library/Saved Application State/com.opennavo.desktop.savedState",
+    "~/Library/WebKit/com.opennavo.desktop",
+  ]
+end

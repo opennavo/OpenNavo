@@ -1,0 +1,44 @@
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS minio-build
+ARG TARGETOS
+ARG TARGETARCH
+ENV GOOS=${TARGETOS} GOARCH=${TARGETARCH}
+WORKDIR /upstream
+# The upstream is archived. These locked dependency fixes do NOT fix advisories
+# in MinIO itself; see docs/security/DEPENDENCY_SECURITY.md. Local development only.
+RUN --mount=type=cache,target=/go/pkg/mod go mod download github.com/minio/minio@RELEASE.2025-10-15T17-29-55Z && \
+    cp -R /go/pkg/mod/github.com/minio/minio@v0.0.0-20251015172955-9e49d5e7a648/. . && chmod -R u+w .
+COPY upstream/minio/go.mod upstream/minio/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod mkdir -p /data /source && \
+    CGO_ENABLED=0 go build -mod=readonly -trimpath -o /out/minio . && \
+    cp -R . /source/minio && \
+    cp /usr/local/go/LICENSE /source/GO-LICENSE && \
+    go list -m -f '{{.Path}} {{.Dir}}' all | while read -r module directory; do \
+      if [ -n "$directory" ]; then \
+        mkdir -p "/source/licenses/$module"; \
+        find "$directory" -maxdepth 1 -type f \( -iname '*license*' -o -iname '*notice*' -o -iname '*copying*' \) -exec cp '{}' "/source/licenses/$module/" \;; \
+      fi; \
+    done
+
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS helpers
+ARG TARGETOS
+ARG TARGETARCH
+ENV GOOS=${TARGETOS} GOARCH=${TARGETARCH}
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/probe ./cmd/probe && \
+    CGO_ENABLED=0 go build -trimpath -o /out/storage-init ./cmd/storage-init
+
+FROM gcr.io/distroless/static-debian12:nonroot AS minio
+COPY --from=minio-build /out/minio /minio
+COPY --from=minio-build /source/ /usr/share/doc/minio/
+COPY --chown=65532:65532 --from=minio-build /data /data
+COPY --from=helpers /out/probe /probe
+EXPOSE 9000 9001
+ENTRYPOINT ["/minio"]
+CMD ["server", "/data", "--console-address", ":9001"]
+
+FROM gcr.io/distroless/static-debian12:nonroot AS storage-init
+COPY --from=helpers /out/storage-init /storage-init
+ENTRYPOINT ["/storage-init"]

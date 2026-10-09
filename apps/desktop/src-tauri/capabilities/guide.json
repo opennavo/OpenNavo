@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "guide",
+  "description": "Permission overlay (06 §12.7): locale and permission events only, without settings or task access",
+  "windows": ["permission-guide"],
+  "permissions": ["native-guide", "core:event:default"]
+}

@@ -1,0 +1,11 @@
+==> Fetching downloads for: sourcegit
+✔︎ Cask sourcegit (2026.21)
+==> Upgrading sourcegit
+  2026.17 -> 2026.21
+==> Backing up App 'SourceGit.app' to '/opt/homebrew/Caskroom/sourcegit/2026.17/SourceGit.app'
+==> Removing App '/Applications/SourceGit.app'
+==> Unlinking Binary '/opt/homebrew/bin/sourcegit'
+==> Moving App 'SourceGit.app' to '/Applications/SourceGit.app'
+==> Linking Binary 'SourceGit' to '/opt/homebrew/bin/sourcegit'
+==> Purging files for version 2026.17 of Cask sourcegit
+sourcegit was successfully upgraded!

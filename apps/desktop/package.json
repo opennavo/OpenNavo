@@ -1,0 +1,47 @@
+{
+  "name": "@opennavo/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenNavo macOS desktop app (Tauri 2 + Vue 3)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 1420 --strictPort",
+    "dev:web": "vite --mode web --port 1420 --strictPort",
+    "build": "vue-tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "gen": "cd src-tauri && cargo test --lib export_bindings -- --exact --quiet",
+    "gen:mock": "node scripts/mock-fixtures.mjs",
+    "lint": "node ../../tooling/scripts/lint-frontend.mjs --eslint",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "catalog:",
+    "@opennavo/api": "workspace:*",
+    "@opennavo/shared": "workspace:*",
+    "@opennavo/tokens": "workspace:*",
+    "@opennavo/ui": "workspace:*",
+    "@tauri-apps/api": "catalog:",
+    "@tauri-apps/plugin-dialog": "catalog:",
+    "@tauri-apps/plugin-opener": "catalog:",
+    "@tauri-apps/plugin-process": "catalog:",
+    "@tauri-apps/plugin-updater": "catalog:",
+    "@unocss/reset": "catalog:",
+    "pinia": "catalog:",
+    "vue": "catalog:",
+    "vue-i18n": "catalog:",
+    "vue-router": "catalog:"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/test-utils": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "unocss": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue-tsc": "catalog:"
+  }
+}

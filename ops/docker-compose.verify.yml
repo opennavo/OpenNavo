@@ -1,0 +1,19 @@
+# Add only verification-specific MinIO; web images and static admin files use real production builds.
+services:
+  web:
+    # Browsers resolve this reserved domain to loopback; Nuxt image rendering accesses the same MinIO through the host gateway.
+    extra_hosts: ['cdn.opennavo.localhost:host-gateway']
+  minio:
+    image: opennavo-minio:dev
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    ports: ['127.0.0.1:29000:9000']
+    volumes: [verification-minio:/data]
+    healthcheck:
+      test: ['CMD', '/probe']
+      interval: 2s
+      timeout: 3s
+      retries: 60
+volumes:
+  verification-minio:

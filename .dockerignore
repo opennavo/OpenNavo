@@ -1,0 +1,25 @@
+# Root build context for web images and deployment verification fixtures. Exclude dependencies, artifacts, and secrets, not source directories.
+.git
+**/node_modules
+**/dist
+# Token outputs are committed source required for builds.
+!packages/tokens/dist
+**/.output
+**/.nuxt
+**/.nitro
+**/coverage
+**/playwright-report
+**/test-results
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+apps/server/bin
+apps/server/tmp
+**/*.log
+**/.DS_Store
+# Secrets: exclude all .env files from image contexts except examples and admin mode files.
+**/.env
+**/.env.*
+!**/.env.example
+!apps/admin/.env
+!apps/admin/.env.prod
+!apps/admin/.env.test

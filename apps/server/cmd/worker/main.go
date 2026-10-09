@@ -1,0 +1,134 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+	_ "time/tzdata"
+
+	"github.com/hibiken/asynq"
+
+	"encoding/json"
+	"errors"
+
+	pipeline "github.com/opennavo/opennavo/server/internal/changelog"
+	"github.com/opennavo/opennavo/server/internal/config"
+	"github.com/opennavo/opennavo/server/internal/domain"
+	"github.com/opennavo/opennavo/server/internal/homebrew"
+	"github.com/opennavo/opennavo/server/internal/jobs"
+	"github.com/opennavo/opennavo/server/internal/llm/control"
+	llmopenai "github.com/opennavo/opennavo/server/internal/llm/openai"
+	"github.com/opennavo/opennavo/server/internal/observability"
+	"github.com/opennavo/opennavo/server/internal/service/assets"
+	"github.com/opennavo/opennavo/server/internal/service/catalog"
+	"github.com/opennavo/opennavo/server/internal/service/changelog"
+	"github.com/opennavo/opennavo/server/internal/service/contenttranslate"
+	"github.com/opennavo/opennavo/server/internal/service/maintenance"
+	"github.com/opennavo/opennavo/server/internal/service/snapshot"
+	"github.com/opennavo/opennavo/server/internal/storage"
+	"github.com/opennavo/opennavo/server/internal/store"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx)
+	stop()
+	if err != nil {
+		slog.Error("worker failed", "error", err)
+		os.Exit(1)
+	}
+}
+func run(ctx context.Context) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	logger := observability.NewLogger(os.Stdout, cfg.LogLevel)
+	slog.SetDefault(logger)
+	st, err := store.Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	location, err := time.LoadLocation(cfg.TZSchedule)
+	if err != nil {
+		return err
+	}
+	queue := &jobs.Enqueuer{Client: asynq.NewClientFromRedisClient(st.Redis), Redis: st.Redis}
+	service := &catalog.Service{Store: st, Source: homebrew.NewClient(cfg.HomebrewAPIBase, cfg.FetchUserAgent), Queue: queue}
+	analytics := &catalog.AnalyticsService{Store: st, Source: homebrew.NewClient(cfg.HomebrewAPIBase, cfg.FetchUserAgent), Queue: queue, Location: location}
+	handlers := jobs.Handlers{"catalog:sync": func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return service.Run(ctx) }}
+	handlers["analytics:sync"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return analytics.Run(ctx) }
+	gateway := llmopenai.New(cfg)
+	language := &control.Client{Content: gateway, Store: st, Redis: st.Redis, Config: cfg, TranslationConfig: st.TranslationConfig}
+	if err := language.ConfigureQueue(ctx); err != nil {
+		return err
+	}
+	contentTranslation := &contenttranslate.Service{Store: st, LLM: language, Model: cfg.LLMModelTranslate}
+	handlers["translate:content"] = func(ctx context.Context, p jobs.Payload) (map[string]any, error) {
+		if p.Content == nil {
+			return nil, errors.New("missing content reference")
+		}
+		if p.Origin != nil {
+			ctx = domain.WithOperation(ctx, p.Origin)
+		}
+		return contentTranslation.Run(ctx, *p.Content, p.SourceHash)
+	}
+	objects, err := storage.New(cfg)
+	if err != nil {
+		return err
+	}
+	sizeService := &assets.SizeService{Store: st, Fetcher: assets.NewHEADFetcher(cfg.FetchUserAgent)}
+	handlers["assets:download-size"] = func(ctx context.Context, p jobs.Payload) (map[string]any, error) {
+		return sizeService.Run(ctx, p.PackageID)
+	}
+	cleanup := &maintenance.Service{Store: st, Objects: maintenance.S3Objects{Client: objects}}
+	handlers["cleanup"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return cleanup.Run(ctx) }
+	snapshots := &snapshot.Service{Store: st, Objects: assets.S3Objects{Client: objects}}
+	handlers["snapshot:build"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return snapshots.Build(ctx) }
+	releaseService := &changelog.Service{Store: st, Resolver: pipeline.NewResolver(cfg.FetchUserAgent), Fetcher: pipeline.NewFetcher(cfg.FetchUserAgent), Queue: queue}
+	releaseService.Resolver.ObserveQuota = st.ObserveGitHubQuota
+	releaseService.Fetcher.HTTP.ObserveQuota = st.ObserveGitHubQuota
+	releaseService.Fetcher.HTTP.TokenProvider = func(ctx context.Context) (string, error) {
+		return st.GitHubToken(ctx, cfg)
+	}
+	handlers["changelog:resolve"] = func(ctx context.Context, p jobs.Payload) (map[string]any, error) {
+		return releaseService.Resolve(ctx, p.PackageID)
+	}
+	handlers["changelog:fetch"] = func(ctx context.Context, p jobs.Payload) (map[string]any, error) {
+		return releaseService.Fetch(ctx, p.SourceID)
+	}
+	handlers["changelog:schedule"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return releaseService.Schedule(ctx) }
+	// Independent delivery polling keeps the 30-second source-save debounce independent of catalog sync intervals.
+	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
+	defer cancelDispatch()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-dispatchCtx.Done():
+				return
+			case <-ticker.C:
+				_, err := st.DispatchOutbox(dispatchCtx, func(ctx context.Context, kind string, raw json.RawMessage) error {
+					payload, meta, err := jobs.DecodeOutbox(raw)
+					if err != nil {
+						return err
+					}
+					_, err = queue.Enqueue(ctx, kind, payload, meta)
+					return jobs.OutboxDeliveryError(kind, err)
+				})
+				if err != nil && dispatchCtx.Err() == nil {
+					logger.Error("outbox delivery failed")
+				}
+			}
+		}
+	}()
+	defer func() { cancelDispatch(); <-done }()
+	return jobs.Run(ctx, st.Redis, st, jobs.WithLLMLimit(handlers, cfg.LLMConcurrency), location, logger)
+}

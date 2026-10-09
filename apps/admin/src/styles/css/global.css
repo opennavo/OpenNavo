@@ -1,0 +1,31 @@
+@import './reset.css';
+@import './nprogress.css';
+@import './transition.css';
+
+html,
+body,
+#app {
+  height: 100%;
+  text-autospace: normal;
+}
+
+html {
+  overflow-x: hidden;
+  color: rgb(var(--base-text-color));
+}
+
+/* Fonts match tokens (08 §4.1): Inter Variable and system Chinese fonts.
+   NaiveUI injects body { font-family: v-sans … } at runtime; override it with higher specificity here. */
+html,
+html body {
+  font-family: var(--on-font-family-sans);
+  font-feature-settings: var(--on-font-feature-settings);
+  font-optical-sizing: var(--on-font-optical-sizing);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Default dark theme avoids a white flash before theme variables load. */
+html.dark {
+  background-color: var(--on-surface-base);
+  color-scheme: dark;
+}

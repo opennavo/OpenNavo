@@ -1,0 +1,1374 @@
+{
+  "packages": [
+    {
+      "kind": "cask",
+      "token": "visual-studio-code",
+      "name": "Visual Studio Code",
+      "displayName": "VS Code 编辑器",
+      "summary": "代码编辑、调试与扩展开发",
+      "category": "developer-tools",
+      "version": "1.140.0",
+      "homepage": "https://code.visualstudio.com/",
+      "artifacts": {
+        "apps": [
+          "Visual Studio Code.app"
+        ],
+        "binaries": [
+          "code"
+        ],
+        "uninstallNotes": [
+          "Quit Visual Studio Code before uninstalling."
+        ]
+      },
+      "developer": "Microsoft",
+      "repoURL": "https://github.com/microsoft/vscode",
+      "license": "MIT",
+      "caveats": "E2E fixture: use the Command Palette to install the code command.",
+      "dependencies": {
+        "dependsOn": {
+          "macos": {
+            ">=": [
+              "13.0"
+            ]
+          },
+          "arch": [
+            "arm64",
+            "x86_64"
+          ],
+          "formula": [
+            "ripgrep"
+          ],
+          "cask": []
+        }
+      },
+      "conflictsWith": {
+        "casks": [
+          "visual-studio-code@insiders"
+        ],
+        "formulae": []
+      },
+      "aliases": [
+        "vscode",
+        "VS Code"
+      ]
+    },
+    {
+      "kind": "cask",
+      "token": "ghostty",
+      "name": "Ghostty",
+      "displayName": "Ghostty 终端",
+      "summary": "快速、原生的终端模拟器",
+      "category": "terminal",
+      "version": "1.3.0",
+      "homepage": "https://ghostty.org/",
+      "artifacts": {
+        "apps": [
+          "Ghostty.app"
+        ],
+        "binaries": []
+      },
+      "developer": "Ghostty contributors",
+      "repoURL": "https://github.com/ghostty-org/ghostty",
+      "license": "MIT"
+    },
+    {
+      "kind": "cask",
+      "token": "wechat",
+      "name": "WeChat",
+      "displayName": "微信",
+      "summary": "消息、通话与文件分享",
+      "category": "communication",
+      "version": "4.1.0",
+      "homepage": "https://mac.weixin.qq.com/",
+      "artifacts": {
+        "apps": [
+          "WeChat.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "iterm2",
+      "name": "iTerm2",
+      "displayName": "iTerm2 终端",
+      "summary": "分屏、搜索与自动化终端",
+      "category": "terminal",
+      "version": "3.6.0",
+      "homepage": "https://iterm2.com/",
+      "artifacts": {
+        "apps": [
+          "iTerm.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "google-chrome",
+      "name": "Google Chrome",
+      "displayName": "Chrome 浏览器",
+      "summary": "浏览网页并同步书签",
+      "category": "browsers",
+      "version": "141.0.7390.0",
+      "homepage": "https://www.google.com/chrome/",
+      "artifacts": {
+        "apps": [
+          "Google Chrome.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "firefox",
+      "name": "Firefox",
+      "displayName": "Firefox 浏览器",
+      "summary": "注重隐私的网页浏览器",
+      "category": "browsers",
+      "version": "143.0",
+      "homepage": "https://www.mozilla.org/firefox/",
+      "artifacts": {
+        "apps": [
+          "Firefox.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "raycast",
+      "name": "Raycast",
+      "displayName": "Raycast 启动器",
+      "summary": "快速启动、搜索与自动化",
+      "category": "productivity",
+      "version": "1.100.0",
+      "homepage": "https://www.raycast.com/",
+      "artifacts": {
+        "apps": [
+          "Raycast.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "rectangle",
+      "name": "Rectangle",
+      "displayName": "Rectangle 窗口管理",
+      "summary": "用快捷键排列桌面窗口",
+      "category": "utilities",
+      "version": "0.90",
+      "homepage": "https://rectangleapp.com/",
+      "artifacts": {
+        "apps": [
+          "Rectangle.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "iina",
+      "name": "IINA",
+      "displayName": "IINA 播放器",
+      "summary": "播放视频、音乐与流媒体",
+      "category": "media",
+      "version": "1.4.0",
+      "homepage": "https://iina.io/",
+      "artifacts": {
+        "apps": [
+          "IINA.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "obsidian",
+      "name": "Obsidian",
+      "displayName": "Obsidian 笔记",
+      "summary": "用双向链接组织本地笔记",
+      "category": "writing",
+      "version": "1.9.0",
+      "homepage": "https://obsidian.md/",
+      "artifacts": {
+        "apps": [
+          "Obsidian.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "notion",
+      "name": "Notion",
+      "displayName": "Notion 工作空间",
+      "summary": "协作笔记、文档与项目管理",
+      "category": "office",
+      "version": "4.20.0",
+      "homepage": "https://www.notion.so/",
+      "artifacts": {
+        "apps": [
+          "Notion.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "docker-desktop",
+      "name": "Docker Desktop",
+      "displayName": "Docker 容器桌面",
+      "summary": "管理本地容器与开发环境",
+      "category": "virtualization",
+      "version": "4.50.0",
+      "homepage": "https://www.docker.com/products/docker-desktop/",
+      "artifacts": {
+        "apps": [
+          "Docker.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "figma",
+      "name": "Figma",
+      "displayName": "Figma 设计工具",
+      "summary": "协作设计界面与交互原型",
+      "category": "design",
+      "version": "126.0.0",
+      "homepage": "https://www.figma.com/",
+      "artifacts": {
+        "apps": [
+          "Figma.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "slack",
+      "name": "Slack",
+      "displayName": "Slack 团队通讯",
+      "summary": "团队频道与工作消息协作",
+      "category": "communication",
+      "version": "4.45.0",
+      "homepage": "https://slack.com/",
+      "artifacts": {
+        "apps": [
+          "Slack.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "discord",
+      "name": "Discord",
+      "displayName": "Discord 社区聊天",
+      "summary": "语音、视频与社区交流",
+      "category": "communication",
+      "version": "0.0.360",
+      "homepage": "https://discord.com/",
+      "artifacts": {
+        "apps": [
+          "Discord.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "telegram",
+      "name": "Telegram",
+      "displayName": "Telegram 即时通讯",
+      "summary": "跨设备发送消息与文件",
+      "category": "communication",
+      "version": "6.3.0",
+      "homepage": "https://telegram.org/",
+      "artifacts": {
+        "apps": [
+          "Telegram.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "zoom",
+      "name": "Zoom",
+      "displayName": "Zoom 视频会议",
+      "summary": "线上会议与屏幕共享",
+      "category": "communication",
+      "version": "6.5.0",
+      "homepage": "https://zoom.us/",
+      "artifacts": {
+        "apps": [
+          "zoom.us.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "spotify",
+      "name": "Spotify",
+      "displayName": "Spotify 音乐",
+      "summary": "发现音乐、播客与播放列表",
+      "category": "media",
+      "version": "1.2.70",
+      "homepage": "https://www.spotify.com/",
+      "artifacts": {
+        "apps": [
+          "Spotify.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "vlc",
+      "name": "VLC",
+      "displayName": "VLC 媒体播放器",
+      "summary": "播放常见音视频格式",
+      "category": "media",
+      "version": "3.0.22",
+      "homepage": "https://www.videolan.org/vlc/",
+      "artifacts": {
+        "apps": [
+          "VLC.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "stats",
+      "name": "Stats",
+      "displayName": "Stats 系统监控",
+      "summary": "在菜单栏查看系统资源",
+      "category": "menu-bar",
+      "version": "2.12.0",
+      "homepage": "https://github.com/exelban/stats",
+      "artifacts": {
+        "apps": [
+          "Stats.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "alt-tab",
+      "name": "AltTab",
+      "displayName": "AltTab 窗口切换",
+      "summary": "用缩略图快速切换窗口",
+      "category": "utilities",
+      "version": "7.25.0",
+      "homepage": "https://alt-tab-macos.netlify.app/",
+      "artifacts": {
+        "apps": [
+          "AltTab.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "keka",
+      "name": "Keka",
+      "displayName": "Keka 压缩工具",
+      "summary": "压缩、加密与解压文件",
+      "category": "utilities",
+      "version": "1.5.0",
+      "homepage": "https://www.keka.io/",
+      "artifacts": {
+        "apps": [
+          "Keka.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "keepingyouawake",
+      "name": "KeepingYouAwake",
+      "displayName": "KeepingYouAwake 防休眠",
+      "summary": "在菜单栏控制电脑休眠",
+      "category": "menu-bar",
+      "version": "1.6.0",
+      "homepage": "https://keepingyouawake.app/",
+      "artifacts": {
+        "apps": [
+          "KeepingYouAwake.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "appcleaner",
+      "name": "AppCleaner",
+      "displayName": "AppCleaner 卸载助手",
+      "summary": "查找应用关联文件",
+      "category": "utilities",
+      "version": "3.7.0",
+      "homepage": "https://freemacsoft.net/appcleaner/",
+      "artifacts": {
+        "apps": [
+          "AppCleaner.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "bitwarden",
+      "name": "Bitwarden",
+      "displayName": "Bitwarden 密码管理",
+      "summary": "保存并同步密码与凭据",
+      "category": "security",
+      "version": "2026.9.0",
+      "homepage": "https://bitwarden.com/",
+      "artifacts": {
+        "apps": [
+          "Bitwarden.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "1password",
+      "name": "1Password",
+      "displayName": "1Password 密码管理",
+      "summary": "管理密码与安全共享",
+      "category": "security",
+      "version": "8.12.0",
+      "homepage": "https://1password.com/",
+      "artifacts": {
+        "apps": [
+          "1Password.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "tailscale",
+      "name": "Tailscale",
+      "displayName": "Tailscale 私有网络",
+      "summary": "连接设备与私有网络",
+      "category": "network",
+      "version": "1.90.0",
+      "homepage": "https://tailscale.com/",
+      "artifacts": {
+        "apps": [
+          "Tailscale.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "proxyman",
+      "name": "Proxyman",
+      "displayName": "Proxyman 网络调试",
+      "summary": "捕获与调试网络请求",
+      "category": "network",
+      "version": "5.25.0",
+      "homepage": "https://proxyman.io/",
+      "artifacts": {
+        "apps": [
+          "Proxyman.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "orbstack",
+      "name": "OrbStack",
+      "displayName": "OrbStack 虚拟化",
+      "summary": "轻量容器与虚拟机管理",
+      "category": "virtualization",
+      "version": "2.0.0",
+      "homepage": "https://orbstack.dev/",
+      "artifacts": {
+        "apps": [
+          "OrbStack.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "postman",
+      "name": "Postman",
+      "displayName": "Postman 接口调试",
+      "summary": "设计、调试与测试接口",
+      "category": "developer-tools",
+      "version": "11.65.0",
+      "homepage": "https://www.postman.com/",
+      "artifacts": {
+        "apps": [
+          "Postman.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "tableplus",
+      "name": "TablePlus",
+      "displayName": "TablePlus 数据库工具",
+      "summary": "连接与管理多种数据库",
+      "category": "databases",
+      "version": "6.8.0",
+      "homepage": "https://tableplus.com/",
+      "artifacts": {
+        "apps": [
+          "TablePlus.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "zed",
+      "name": "Zed",
+      "displayName": "Zed 代码编辑器",
+      "summary": "快速协作代码编辑",
+      "category": "developer-tools",
+      "version": "0.210.0",
+      "homepage": "https://zed.dev/",
+      "artifacts": {
+        "apps": [
+          "Zed.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "claude",
+      "name": "Claude",
+      "displayName": "Claude AI 助手",
+      "summary": "对话、写作与代码辅助",
+      "category": "ai",
+      "version": "1.0.0",
+      "homepage": "https://claude.ai/",
+      "artifacts": {
+        "apps": [
+          "Claude.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "calibre",
+      "name": "Calibre",
+      "displayName": "Calibre 电子书管理",
+      "summary": "整理、转换与阅读电子书",
+      "category": "education",
+      "version": "8.10.0",
+      "homepage": "https://calibre-ebook.com/",
+      "artifacts": {
+        "apps": [
+          "calibre.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "steam",
+      "name": "Steam",
+      "displayName": "Steam 游戏平台",
+      "summary": "管理游戏库与社区",
+      "category": "games",
+      "version": "1.0.0",
+      "homepage": "https://store.steampowered.com/",
+      "artifacts": {
+        "apps": [
+          "Steam.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "logi-options-plus",
+      "name": "Logi Options+",
+      "displayName": "罗技设备设置",
+      "summary": "配置鼠标与键盘快捷操作",
+      "category": "drivers",
+      "version": "1.95.0",
+      "homepage": "https://www.logitech.com/software/logi-options-plus.html",
+      "artifacts": {
+        "apps": [
+          "logioptionsplus.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "libreoffice",
+      "name": "LibreOffice",
+      "displayName": "LibreOffice 办公套件",
+      "summary": "编辑文档、表格与演示文稿",
+      "category": "office",
+      "version": "25.8.0",
+      "homepage": "https://www.libreoffice.org/",
+      "artifacts": {
+        "apps": [
+          "LibreOffice.app"
+        ],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "font-jetbrains-mono",
+      "name": "JetBrains Mono",
+      "displayName": "JetBrains Mono 字体",
+      "summary": "适合阅读代码的等宽字体",
+      "category": "fonts",
+      "version": "2.304",
+      "homepage": "https://www.jetbrains.com/lp/mono/",
+      "artifacts": {
+        "apps": [],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "font-fira-code",
+      "name": "Fira Code",
+      "displayName": "Fira Code 字体",
+      "summary": "带编程连字的等宽字体",
+      "category": "fonts",
+      "version": "6.2",
+      "homepage": "https://github.com/tonsky/FiraCode",
+      "artifacts": {
+        "apps": [],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "cask",
+      "token": "font-hack",
+      "name": "Hack",
+      "displayName": "Hack 等宽字体",
+      "summary": "清晰易读的编程字体",
+      "category": "fonts",
+      "version": "3.003",
+      "homepage": "https://sourcefoundry.org/hack/",
+      "artifacts": {
+        "apps": [],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "ripgrep",
+      "name": "ripgrep",
+      "displayName": "ripgrep 搜索",
+      "summary": "快速递归搜索文件内容",
+      "category": "developer-tools",
+      "version": "14.1.1",
+      "homepage": "https://github.com/BurntSushi/ripgrep",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "rg"
+        ]
+      },
+      "developer": "ripgrep contributors",
+      "repoURL": "https://github.com/BurntSushi/ripgrep",
+      "license": "MIT",
+      "dependencies": {
+        "runtime": [],
+        "build": [
+          "rust"
+        ],
+        "test": [],
+        "optional": [],
+        "recommended": [],
+        "usesFromMacos": []
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "node",
+      "name": "node",
+      "displayName": "Node.js 运行时",
+      "summary": "运行服务端 JavaScript 程序",
+      "category": "languages",
+      "version": "24.19.0",
+      "homepage": "https://nodejs.org/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "node"
+        ]
+      },
+      "developer": "Node.js contributors",
+      "repoURL": "https://github.com/nodejs/node",
+      "license": "MIT",
+      "dependencies": {
+        "runtime": [
+          "openssl@3",
+          "zlib"
+        ],
+        "build": [
+          "python@3.14"
+        ],
+        "test": [],
+        "optional": [],
+        "recommended": [],
+        "usesFromMacos": []
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "git",
+      "name": "git",
+      "displayName": "Git 版本控制",
+      "summary": "跟踪代码变更与协作开发",
+      "category": "developer-tools",
+      "version": "2.51.0",
+      "homepage": "https://git-scm.com/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "git"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "gh",
+      "name": "gh",
+      "displayName": "GitHub 命令行",
+      "summary": "管理仓库、议题与拉取请求",
+      "category": "developer-tools",
+      "version": "2.80.0",
+      "homepage": "https://cli.github.com/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "gh"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "fd",
+      "name": "fd",
+      "displayName": "fd 文件查找",
+      "summary": "快速查找文件与目录",
+      "category": "utilities",
+      "version": "10.3.0",
+      "homepage": "https://github.com/sharkdp/fd",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "fd"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "bat",
+      "name": "bat",
+      "displayName": "bat 文件阅读",
+      "summary": "带语法高亮的文件查看",
+      "category": "utilities",
+      "version": "0.25.0",
+      "homepage": "https://github.com/sharkdp/bat",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "bat"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "fzf",
+      "name": "fzf",
+      "displayName": "fzf 模糊查找",
+      "summary": "交互式模糊搜索工具",
+      "category": "terminal",
+      "version": "0.65.0",
+      "homepage": "https://github.com/junegunn/fzf",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "fzf"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "jq",
+      "name": "jq",
+      "displayName": "jq 数据处理",
+      "summary": "查询与转换 JSON 数据",
+      "category": "developer-tools",
+      "version": "1.8.1",
+      "homepage": "https://jqlang.org/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "jq"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "go",
+      "name": "go",
+      "displayName": "Go 编程语言",
+      "summary": "编译与运行 Go 程序",
+      "category": "languages",
+      "version": "1.27.1",
+      "homepage": "https://go.dev/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "go"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "python@3.14",
+      "name": "python@3.14",
+      "displayName": "Python 编程语言",
+      "summary": "运行脚本与科学计算程序",
+      "category": "languages",
+      "version": "3.14.0",
+      "homepage": "https://www.python.org/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "python3.14"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "rust",
+      "name": "rust",
+      "displayName": "Rust 编程语言",
+      "summary": "编译安全高效的系统程序",
+      "category": "languages",
+      "version": "1.96.0",
+      "homepage": "https://www.rust-lang.org/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "rustc"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "neovim",
+      "name": "neovim",
+      "displayName": "Neovim 文本编辑器",
+      "summary": "可扩展的终端文本编辑器",
+      "category": "developer-tools",
+      "version": "0.11.4",
+      "homepage": "https://neovim.io/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "nvim"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "tmux",
+      "name": "tmux",
+      "displayName": "tmux 终端复用",
+      "summary": "管理多个终端会话与窗口",
+      "category": "terminal",
+      "version": "3.5a",
+      "homepage": "https://github.com/tmux/tmux",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "tmux"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "wget",
+      "name": "wget",
+      "displayName": "wget 网络下载",
+      "summary": "通过命令行下载网络资源",
+      "category": "network",
+      "version": "1.25.0",
+      "homepage": "https://www.gnu.org/software/wget/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "wget"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "htop",
+      "name": "htop",
+      "displayName": "htop 进程监控",
+      "summary": "交互式查看系统进程",
+      "category": "utilities",
+      "version": "3.4.1",
+      "homepage": "https://htop.dev/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "htop"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "redis",
+      "name": "redis",
+      "displayName": "Redis 数据库",
+      "summary": "内存数据存储与缓存",
+      "category": "databases",
+      "version": "8.2.0",
+      "homepage": "https://redis.io/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "redis-cli"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "sqlite",
+      "name": "sqlite",
+      "displayName": "SQLite 数据库",
+      "summary": "轻量嵌入式关系数据库",
+      "category": "databases",
+      "version": "3.50.4",
+      "homepage": "https://www.sqlite.org/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "sqlite3"
+        ]
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "openssl@3",
+      "name": "openssl@3",
+      "displayName": "OpenSSL 加密库",
+      "summary": "提供加密与安全通信能力",
+      "category": "libraries",
+      "version": "3.6.0",
+      "homepage": "https://www.openssl.org/",
+      "artifacts": {
+        "apps": [],
+        "binaries": [
+          "openssl"
+        ]
+      },
+      "dependencies": {
+        "runtime": [
+          "zlib"
+        ],
+        "build": [],
+        "test": [],
+        "optional": [],
+        "recommended": [],
+        "usesFromMacos": []
+      },
+      "caveats": "E2E fixture: this library is keg-only."
+    },
+    {
+      "kind": "formula",
+      "token": "libpng",
+      "name": "libpng",
+      "displayName": "libpng 图像库",
+      "summary": "读取与写入 PNG 图像",
+      "category": "libraries",
+      "version": "1.6.50",
+      "homepage": "https://www.libpng.org/pub/png/libpng.html",
+      "artifacts": {
+        "apps": [],
+        "binaries": []
+      }
+    },
+    {
+      "kind": "formula",
+      "token": "zlib",
+      "name": "zlib",
+      "displayName": "zlib 压缩库",
+      "summary": "提供数据压缩与解压能力",
+      "category": "libraries",
+      "version": "1.3.1",
+      "homepage": "https://zlib.net/",
+      "artifacts": {
+        "apps": [],
+        "binaries": []
+      }
+    }
+  ],
+  "releases": [
+    {
+      "token": "visual-studio-code",
+      "version": "1.140.0",
+      "publishedAt": "2026-09-30T08:00:00Z",
+      "status": "manual",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.140.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.140.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "visual-studio-code",
+      "version": "1.139.0",
+      "publishedAt": "2026-09-23T08:00:00Z",
+      "status": "machine",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.139.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.139.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "visual-studio-code",
+      "version": "1.138.0",
+      "publishedAt": "2026-09-16T08:00:00Z",
+      "status": "manual",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.138.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.138.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "visual-studio-code",
+      "version": "1.137.0",
+      "publishedAt": "2026-09-09T08:00:00Z",
+      "status": "machine",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.137.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.137.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "visual-studio-code",
+      "version": "1.136.0",
+      "publishedAt": "2026-09-02T08:00:00Z",
+      "status": "manual",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.136.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.136.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "ghostty",
+      "version": "1.3.0",
+      "publishedAt": "2026-09-30T08:00:00Z",
+      "status": "manual",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.3.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.3.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "终端",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "渲染",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "ghostty",
+      "version": "1.2.3",
+      "publishedAt": "2026-09-23T08:00:00Z",
+      "status": "machine",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.2.3\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.2.3\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "终端",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "渲染",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "ghostty",
+      "version": "1.2.2",
+      "publishedAt": "2026-09-16T08:00:00Z",
+      "status": "manual",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.2.2\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.2.2\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "终端",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "渲染",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "visual-studio-code",
+      "version": "1.135.0",
+      "publishedAt": "2026-08-26T08:00:00Z",
+      "status": "machine",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.135.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.135.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "visual-studio-code",
+      "version": "1.134.0",
+      "publishedAt": "2026-08-19T08:00:00Z",
+      "status": "machine",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.134.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.134.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "visual-studio-code",
+      "version": "1.133.0",
+      "publishedAt": "2026-08-12T08:00:00Z",
+      "status": "machine",
+      "summary": "改善日常使用体验，修复稳定性问题。",
+      "bodyEN": "# 1.133.0\n\nImprove keyboard navigation and rendering performance. Fix session restoration issues.\n\nThis is deterministic OpenNavo E2E fixture content.",
+      "bodyZH": "# 1.133.0\n\n改善键盘导航与渲染性能，修复会话恢复问题。\n\n此内容是 OpenNavo 端到端测试固定样本。",
+      "sections": [
+        {
+          "area": "编辑器",
+          "items": [
+            "改善键盘导航体验。"
+          ]
+        },
+        {
+          "area": "调试",
+          "items": [
+            "修复会话恢复与显示问题。"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "rectangle",
+      "version": "0.90",
+      "source": "editorial",
+      "publishedAt": "2026-09-30T08:00:00Z",
+      "status": "manual",
+      "summary": "改善窗口布局与键盘操作。",
+      "bodyEN": "# 0.90\n\nImprove window layouts and keyboard navigation. This is editorial E2E fixture content.",
+      "bodyZH": "# 0.90\n\n改善窗口布局与键盘操作。这是人工编写的端到端测试样本。",
+      "sections": [
+        {
+          "area": "窗口",
+          "items": [
+            "改善窗口布局与键盘操作。"
+          ]
+        }
+      ]
+    }
+  ],
+  "collection": [
+    "visual-studio-code",
+    "ghostty",
+    "wechat",
+    "iterm2",
+    "google-chrome",
+    "raycast",
+    "rectangle",
+    "iina",
+    "obsidian",
+    "notion",
+    "keka",
+    "bitwarden",
+    "ripgrep",
+    "node",
+    "git"
+  ],
+  "synonyms": [
+    [
+      "vscode",
+      "visual studio code",
+      "vs code",
+      "visual-studio-code"
+    ],
+    [
+      "微信",
+      "wechat",
+      "weixin",
+      "wx"
+    ],
+    [
+      "rg",
+      "ripgrep"
+    ],
+    [
+      "nodejs",
+      "node",
+      "node.js"
+    ],
+    [
+      "终端",
+      "ghostty",
+      "iterm2"
+    ]
+  ],
+  "feedback": [
+    {
+      "type": "translation",
+      "token": "visual-studio-code",
+      "content": "端到端样本：希望调试分组的翻译更清楚。",
+      "platform": "web",
+      "status": "open"
+    },
+    {
+      "type": "install_failed",
+      "token": "ghostty",
+      "content": "端到端样本：安装时显示权限提示。",
+      "platform": "desktop",
+      "status": "in_progress"
+    },
+    {
+      "type": "wrong_info",
+      "token": "wechat",
+      "content": "端到端样本：中文简介已经核实。",
+      "platform": "web",
+      "status": "resolved"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "name": "@opennavo/tokens",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenNavo design tokens: CSS variables, UnoCSS preset, NaiveUI themes, and TS constants generated from tokens.json",
+  "type": "module",
+  "exports": {
+    ".": "./dist/tokens.ts",
+    "./tokens.css": "./dist/tokens.css",
+    "./uno-preset": "./dist/uno-preset.ts",
+    "./naive-theme": "./dist/naive-theme.ts",
+    "./contrast": "./src/contrast.ts",
+    "./tokens.json": "./tokens.json"
+  },
+  "scripts": {
+    "gen": "node scripts/generate.ts",
+    "lint": "node ../../tooling/scripts/lint-frontend.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "naive-ui": "catalog:",
+    "typescript": "catalog:",
+    "unocss": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "naive-ui": "catalog:",
+    "unocss": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "naive-ui": {
+      "optional": true
+    },
+    "unocss": {
+      "optional": true
+    }
+  }
+}

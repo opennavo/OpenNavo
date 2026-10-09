@@ -1,0 +1,60 @@
+import type { OnSidebarGroup, OnSidebarItem } from '@opennavo/ui';
+
+/**
+ * Web sidebar (05 §11.2): Browse matches desktop; desktop My items (Installed / Updates / History)
+ * become Collections / My list (Brewfile) on web. Shared by desktop-width sidebar and mobile menu.
+ */
+export function useSiteNav() {
+  const { t } = useI18n();
+  const route = useRoute();
+  const localePath = useLocalePath();
+  const brewfile = useBrewfileList();
+
+  // App lists/details/search belong under Discover, matching desktop detail navigation.
+  const section = computed(() => {
+    const path = route.path;
+    const under = (target: string) => {
+      const href = localePath(target);
+      return path === href || path.startsWith(`${href}/`);
+    };
+    for (const key of ['categories', 'rankings', 'collections', 'brewfile', 'about', 'feedback'] as const)
+      if (under(`/${key}`)) return key;
+    return under('/download') ? 'download' : 'discover';
+  });
+
+  const item = (key: string, path: string, icon: string, extra: Partial<OnSidebarItem> = {}): OnSidebarItem => ({
+    key,
+    label: t(`nav.${key}`),
+    icon,
+    href: localePath(path),
+    active: section.value === key,
+    ...extra
+  });
+
+  const groups = computed<OnSidebarGroup[]>(() => [
+    {
+      key: 'browse',
+      label: t('nav.browse'),
+      items: [
+        item('discover', '/discover', 'lucide:compass'),
+        item('categories', '/categories', 'lucide:layout-grid'),
+        item('rankings', '/rankings', 'lucide:chart-no-axes-column')
+      ]
+    },
+    {
+      key: 'lists',
+      label: t('nav.lists'),
+      items: [
+        item('collections', '/collections', 'lucide:library'),
+        item('brewfile', '/brewfile', 'lucide:file-text', { count: brewfile.count.value || undefined })
+      ]
+    }
+  ]);
+
+  const footer = computed<OnSidebarItem[]>(() => [
+    item('about', '/about', 'lucide:info'),
+    item('feedback', '/feedback', 'lucide:message-circle')
+  ]);
+
+  return { groups, footer };
+}

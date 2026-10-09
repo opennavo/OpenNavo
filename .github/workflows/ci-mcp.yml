@@ -1,0 +1,48 @@
+name: MCP CI
+on:
+  push:
+    branches: [main]
+    paths: &mcp-paths
+      - 'apps/mcp/**'
+      - 'apps/server/api/admin.openapi.yaml'
+      - 'apps/server/internal/http/admin/agent.go'
+      - 'apps/server/internal/http/admin/hermes_test.go'
+      - 'packages/shared/src/locales.json'
+      - 'tooling/scripts/tasks/server.mjs'
+      - '.github/workflows/ci-mcp.yml'
+      - '.github/workflows/release-mcp.yml'
+  pull_request:
+    paths: *mcp-paths
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/mcp
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.12.9'
+          enable-cache: true
+          cache-dependency-glob: apps/mcp/uv.lock
+      - run: uv python install 3.13
+      - run: uv lock --check
+      - run: uv sync --locked
+      - run: uv run --locked ruff check .
+      - run: uv run --locked ruff format --check .
+      - run: uv run --locked pyright
+      - run: uv run --locked python scripts/generate.py --check
+      - run: uv run --locked pytest
+      - run: uv build
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: apps/mcp
+          push: false
+          tags: opennavo-mcp:ci

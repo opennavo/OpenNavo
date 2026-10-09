@@ -1,0 +1,38 @@
+version: '2'
+run:
+  timeout: 5m
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - gosec
+    - revive
+    - gocritic
+    - bodyclose
+    - sqlclosecheck
+    - contextcheck
+    - errorlint
+    - misspell
+    - unparam
+  settings:
+    revive:
+      rules:
+        - name: var-naming
+          arguments:
+            - []
+            - []
+            - - skipPackageNameChecks: true
+  exclusions:
+    generated: strict
+    paths:
+      - gen
+      - ^tmp/
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - ^tmp/

@@ -1,0 +1,21 @@
+{
+  "1001": "Parámetros de solicitud no válidos",
+  "1002": "Recurso no encontrado",
+  "1003": "El recurso ya existe",
+  "1004": "No tienes permiso para realizar esta acción",
+  "1005": "Demasiadas solicitudes. Inténtalo de nuevo más tarde",
+  "1006": "Esta operación no está permitida en el estado actual",
+  "1007": "El archivo es demasiado grande o su formato no es compatible",
+  "1101": "Nombre de usuario o contraseña incorrectos",
+  "1102": "La cuenta está bloqueada. Inténtalo de nuevo en 15 minutos",
+  "1201": "El catálogo se ha actualizado. Vuelve a descargar la instantánea",
+  "1301": "El servicio ascendente no está disponible temporalmente",
+  "1302": "El servicio de idiomas no está disponible temporalmente",
+  "5000": "El servicio no está disponible temporalmente",
+  "7777": "La sesión ha caducado. Inicia sesión de nuevo",
+  "7778": "La contraseña ha cambiado. Inicia sesión de nuevo",
+  "8888": "Inicia sesión primero",
+  "8889": "La cuenta está desactivada",
+  "9999": "El token de acceso ha caducado",
+  "0000": "Aceptar"
+}

@@ -1,0 +1,109 @@
+rule_files: [rules.yml]
+evaluation_interval: 1m
+tests:
+  - name: all five alerts fire
+    interval: 1m
+    input_series:
+      - series: catalog_last_success_timestamp_seconds
+        values: '0+0x90'
+      - series: asynq_queue_size{queue="llm"}
+        values: '10001+0x90'
+      - series: llm_month_tokens
+        values: '81+0x90'
+      - series: llm_month_token_budget
+        values: '100+0x90'
+      - series: http_requests_total{status="500",route="/api/v1/home",method="GET"}
+        values: '0+2x90'
+      - series: http_requests_total{status="200",route="/api/v1/home",method="GET"}
+        values: '0+98x90'
+      - series: github_ratelimit_remaining
+        values: '499+0x90'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: CatalogSyncStale
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: 'Catalog synchronization has not succeeded for over an hour'}
+      - eval_time: 70m
+        alertname: QueueBacklog
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: 'Task queue backlog exceeds ten thousand'}
+      - eval_time: 70m
+        alertname: LLMTokenBudget
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: 'Monthly LLM tokens exceed 80 percent of budget'}
+      - eval_time: 70m
+        alertname: APIErrorRate
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: 'API server error rate exceeds one percent'}
+      - eval_time: 70m
+        alertname: GitHubQuotaLow
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: 'GitHub remaining quota is below five hundred'}
+  - name: thresholds and unknown quota do not fire
+    interval: 1m
+    input_series:
+      - series: catalog_last_success_timestamp_seconds
+        values: '0+60x90'
+      - series: asynq_queue_size{queue="llm"}
+        values: '10000+0x90'
+      - series: llm_month_tokens
+        values: '80+0x90'
+      - series: llm_month_token_budget
+        values: '100+0x90'
+      - series: http_requests_total{status="500"}
+        values: '0+1x90'
+      - series: http_requests_total{status="200"}
+        values: '0+99x90'
+      - series: github_ratelimit_remaining
+        values: '-1+0x90'
+    alert_rule_test:
+      - {eval_time: 70m, alertname: CatalogSyncStale, exp_alerts: []}
+      - {eval_time: 70m, alertname: QueueBacklog, exp_alerts: []}
+      - {eval_time: 70m, alertname: LLMTokenBudget, exp_alerts: []}
+      - {eval_time: 70m, alertname: APIErrorRate, exp_alerts: []}
+      - {eval_time: 70m, alertname: GitHubQuotaLow, exp_alerts: []}
+  - name: business Redis pressure and OOM are actionable; cache eviction is not an outage
+    interval: 1m
+    input_series:
+      - series: opennavo_redis_used_memory_bytes{role="business"}
+        values: '90+0x20'
+      - series: opennavo_redis_maxmemory_bytes{role="business"}
+        values: '100+0x20'
+      - series: opennavo_redis_oom_errors_total{role="business"}
+        values: '0+1x20'
+      - series: opennavo_redis_up{role="business"}
+        values: '1+0x20'
+      - series: opennavo_redis_used_memory_bytes{role="cache"}
+        values: '99+0x20'
+      - series: opennavo_redis_maxmemory_bytes{role="cache"}
+        values: '100+0x20'
+      - series: opennavo_redis_evicted_keys_total{role="cache"}
+        values: '0+100x20'
+      - series: opennavo_redis_up{role="cache"}
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: BusinessRedisMemoryHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, role: business}
+            exp_annotations: {summary: 'Business Redis memory exceeds 70 percent of its limit'}
+      - eval_time: 10m
+        alertname: BusinessRedisMemoryCritical
+        exp_alerts:
+          - exp_labels: {severity: critical, role: business}
+            exp_annotations: {summary: 'Business Redis memory exceeds 85 percent of its limit'}
+      - eval_time: 10m
+        alertname: RedisOOM
+        exp_alerts:
+          - exp_labels: {severity: critical, role: business}
+            exp_annotations: {summary: 'Redis is rejecting writes because its memory limit was reached'}
+      - eval_time: 10m
+        alertname: RedisUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical, role: cache}
+            exp_annotations: {summary: 'Redis metrics probes cannot reach the instance'}

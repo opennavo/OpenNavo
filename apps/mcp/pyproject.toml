@@ -1,0 +1,50 @@
+[project]
+name = "opennavo-mcp"
+version = "0.1.0"
+description = "OpenNavo Agent API adapter"
+license = "Apache-2.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "fastmcp>=4.0.11,<4.1",
+  "httpx2>=2.13,<2.14",
+  "pydantic>=2.12,<3",
+  "pydantic-settings>=2,<3",
+  "jsonschema>=4.26,<5",
+]
+
+[project.scripts]
+opennavo-mcp = "opennavo_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "ruff", "pyright", "datamodel-code-generator", "pyyaml", "types-pyyaml", "types-jsonschema"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+exclude = ["src/opennavo_mcp/gen/admin_models.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+include = ["src", "tests", "scripts"]
+exclude = ["src/opennavo_mcp/gen/admin_models.py"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"third-party" = "opennavo_mcp/third_party"
+
+[tool.hatch.build.targets.sdist.force-include]
+"third-party" = "third-party"

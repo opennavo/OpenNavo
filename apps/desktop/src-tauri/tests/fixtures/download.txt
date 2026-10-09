@@ -1,0 +1,2 @@
+==> Downloading https://desktop.docker.com/mac/stable/amd64/67351/Docker.dmg
+######################################################################## 100.0%

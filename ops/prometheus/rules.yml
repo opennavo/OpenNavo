@@ -1,0 +1,47 @@
+groups:
+  - name: opennavo
+    rules:
+      - alert: CatalogSyncStale
+        expr: time() - max(catalog_last_success_timestamp_seconds) > 3600
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: 'Catalog synchronization has not succeeded for over an hour'}
+      - alert: QueueBacklog
+        expr: sum(asynq_queue_size) > 10000
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Task queue backlog exceeds ten thousand'}
+      - alert: LLMTokenBudget
+        expr: max(llm_month_tokens) / max(llm_month_token_budget) > 0.8
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Monthly LLM tokens exceed 80 percent of budget'}
+      - alert: APIErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.01
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: 'API server error rate exceeds one percent'}
+      - alert: GitHubQuotaLow
+        expr: max(github_ratelimit_remaining) >= 0 and max(github_ratelimit_remaining) < 500
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'GitHub remaining quota is below five hundred'}
+      - alert: BusinessRedisMemoryHigh
+        expr: max by (role) (opennavo_redis_used_memory_bytes{role="business"} / opennavo_redis_maxmemory_bytes{role="business"}) > 0.7 and max by (role) (opennavo_redis_maxmemory_bytes{role="business"}) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Business Redis memory exceeds 70 percent of its limit'}
+      - alert: BusinessRedisMemoryCritical
+        expr: max by (role) (opennavo_redis_used_memory_bytes{role="business"} / opennavo_redis_maxmemory_bytes{role="business"}) > 0.85 and max by (role) (opennavo_redis_maxmemory_bytes{role="business"}) > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'Business Redis memory exceeds 85 percent of its limit'}
+      - alert: RedisOOM
+        expr: max by (role) (increase(opennavo_redis_oom_errors_total[5m])) > 0
+        labels: {severity: critical}
+        annotations: {summary: 'Redis is rejecting writes because its memory limit was reached'}
+      - alert: RedisUnavailable
+        expr: max by (role) (opennavo_redis_up) == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'Redis metrics probes cannot reach the instance'}

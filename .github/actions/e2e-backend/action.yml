@@ -1,0 +1,14 @@
+name: OpenNavo E2E backend
+description: Start isolated PostgreSQL, Redis, MinIO and seeded API for frontend tests
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: apps/server/go.mod
+        cache-dependency-path: apps/server/go.sum
+    - name: Start seeded backend
+      shell: bash
+      run: python3 ops/e2e.py up --ci
+      env:
+        RUNNER_TRACKING_ID: ''

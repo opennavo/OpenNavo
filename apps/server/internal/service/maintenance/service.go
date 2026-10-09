@@ -1,0 +1,73 @@
+package maintenance
+
+import (
+	"context"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/minio/minio-go/v7"
+	"github.com/opennavo/opennavo/server/internal/storage"
+	"github.com/opennavo/opennavo/server/internal/store"
+)
+
+type Objects interface {
+	Delete(context.Context, string) error
+}
+type S3Objects struct{ Client *storage.Client }
+
+func (s S3Objects) Delete(ctx context.Context, key string) error {
+	return s.Client.S3.RemoveObject(ctx, s.Client.Bucket, key, minio.RemoveObjectOptions{})
+}
+
+type Service struct {
+	Store   *store.Store
+	Objects Objects
+	Now     func() time.Time
+}
+
+func VariantKeys(a store.Asset) []string {
+	out := []string{a.StorageKey}
+	if a.MIME != "image/png" {
+		return out
+	}
+	suffix := "-" + strconv.Itoa(a.Width) + ".png"
+	if !strings.HasSuffix(path.Base(a.StorageKey), suffix) {
+		return out
+	}
+	base := strings.TrimSuffix(a.StorageKey, suffix)
+	widths := []int{1280, 640}
+	if a.Kind == "icon" {
+		widths = []int{256, 512}
+	}
+	for _, width := range widths {
+		if width != a.Width {
+			out = append(out, base+"-"+strconv.Itoa(width)+".png")
+		}
+	}
+	return out
+}
+func (s *Service) Run(ctx context.Context) (map[string]any, error) {
+	now := time.Now().UTC()
+	if s.Now != nil {
+		now = s.Now().UTC()
+	}
+	changes, err := s.Store.PruneCatalogChanges(ctx, now.AddDate(0, 0, -14))
+	if err != nil {
+		return nil, err
+	}
+	logs, err := s.Store.PruneLogs(ctx, now.AddDate(0, 0, -90))
+	if err != nil {
+		return nil, err
+	}
+	assets, err := s.Store.PruneAssets(ctx, now.AddDate(0, 0, -30), func(ctx context.Context, a store.Asset) error {
+		for _, key := range VariantKeys(a) {
+			if err := s.Objects.Delete(ctx, key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return map[string]any{"catalogChanges": changes, "searchQueries": logs["search_queries"], "syncRuns": logs["sync_runs"], "assets": assets}, err
+}

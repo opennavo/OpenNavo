@@ -1,0 +1,48 @@
+{
+  "name": "@opennavo/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenNavo shared web and desktop presentation components, without requests, IPC, or route access",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./markdown": "./src/markdown.ts",
+    "./base.css": "./src/styles/base.css",
+    "./system-fonts.css": "./src/styles/system-fonts.css"
+  },
+  "scripts": {
+    "gen": "node scripts/icons.ts",
+    "dev": "vite playground --port 6006 --strictPort",
+    "build": "vite build playground",
+    "lint": "node ../../tooling/scripts/lint-frontend.mjs --eslint",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@opennavo/api": "workspace:*",
+    "@opennavo/shared": "workspace:*",
+    "@opennavo/tokens": "workspace:*",
+    "isomorphic-dompurify": "catalog:",
+    "markdown-it": "catalog:"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "catalog:",
+    "@iconify-json/lucide": "catalog:",
+    "@iconify/types": "catalog:",
+    "@iconify/utils": "catalog:",
+    "@types/node": "catalog:",
+    "@unocss/reset": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/test-utils": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "unocss": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue": "catalog:",
+    "vue-tsc": "catalog:"
+  },
+  "peerDependencies": {
+    "vue": "catalog:"
+  }
+}

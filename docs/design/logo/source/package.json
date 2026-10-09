@@ -1,0 +1,11 @@
+{
+  "name": "opennavo-logo-build",
+  "private": true,
+  "description": "OpenNavo logo asset generator: node build.js",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

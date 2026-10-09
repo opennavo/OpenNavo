@@ -1,0 +1,60 @@
+name: Update desktop tap
+
+# Run manually after publishing stable in admin; create a PR only, never merge automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version already published in admin
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: desktop-tap
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'opennavo/homebrew-tap' }}
+      API_BASE: ${{ vars.DESKTOP_API_BASE || 'https://api.opennavo.com/api/v1' }}
+      MANIFEST_URL: ${{ vars.DESKTOP_STABLE_MANIFEST_URL || 'https://cdn.opennavo.com/desktop/stable/latest.json' }}
+      WEB_HOMEPAGE: ${{ vars.WEB_BASE_URL || 'https://opennavo.com/' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Validate the stable release and generate cask
+        run: |
+          test -n "$GH_TOKEN"
+          node apps/desktop/scripts/published-cask.mjs --version "$VERSION" --repository "$GITHUB_REPOSITORY" --api-base "$API_BASE" --manifest-url "$MANIFEST_URL" --homepage "$WEB_HOMEPAGE"
+      - name: Create tap PR
+        run: |
+          gh auth setup-git
+          gh repo clone "$TAP_REPO" tap-repo -- --depth 1
+          branch="opennavo-$VERSION"
+          cd tap-repo
+          git config user.name opennavo-release
+          git config user.email release@users.noreply.github.com
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            git fetch origin "$branch"
+            git checkout -b "$branch" FETCH_HEAD
+            cmp Casks/opennavo.rb ../tap/Casks/opennavo.rb
+          else
+            git checkout -b "$branch"
+            mkdir -p Casks
+            cp ../tap/Casks/opennavo.rb Casks/opennavo.rb
+            git add Casks/opennavo.rb
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -m "opennavo $VERSION"
+            git push origin "$branch"
+          fi
+          existing="$(gh pr list --repo "$TAP_REPO" --head "$branch" --state all --json number --jq length)"
+          if [ "$existing" = 0 ]; then
+            printf 'OpenNavo %s is published in the stable channel. Download from GitHub Releases.\n' "$VERSION" > "$RUNNER_TEMP/tap-pr.md"
+            gh pr create --repo "$TAP_REPO" --head "$branch" --title "opennavo $VERSION" --body-file "$RUNNER_TEMP/tap-pr.md"
+          fi

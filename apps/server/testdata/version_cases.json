@@ -1,0 +1,432 @@
+[
+  {
+    "left": "1.2",
+    "right": "1.10",
+    "expected": -1
+  },
+  {
+    "left": "1.0",
+    "right": "1",
+    "expected": 0
+  },
+  {
+    "left": "1",
+    "right": "1.0.0",
+    "expected": 0
+  },
+  {
+    "left": "1.0.1",
+    "right": "1",
+    "expected": 1
+  },
+  {
+    "left": "0",
+    "right": "0.0",
+    "expected": 0
+  },
+  {
+    "left": "v1.2",
+    "right": "1.2",
+    "expected": 0
+  },
+  {
+    "left": "1.0-alpha",
+    "right": "1.0-beta",
+    "expected": -1
+  },
+  {
+    "left": "1.0-beta",
+    "right": "1.0-pre",
+    "expected": -1
+  },
+  {
+    "left": "1.0-pre",
+    "right": "1.0-rc",
+    "expected": -1
+  },
+  {
+    "left": "1.0-rc",
+    "right": "1.0",
+    "expected": -1
+  },
+  {
+    "left": "1.0-preview",
+    "right": "1.0",
+    "expected": -1
+  },
+  {
+    "left": "1.0",
+    "right": "1.0-post1",
+    "expected": -1
+  },
+  {
+    "left": "1.0",
+    "right": "1.0p1",
+    "expected": -1
+  },
+  {
+    "left": "1.0p2",
+    "right": "1.0p10",
+    "expected": -1
+  },
+  {
+    "left": "1.0alpha",
+    "right": "1.0alpha0",
+    "expected": 0
+  },
+  {
+    "left": "1.0a1",
+    "right": "1.0alpha1",
+    "expected": 0
+  },
+  {
+    "left": "1.0b2",
+    "right": "1.0beta2",
+    "expected": 0
+  },
+  {
+    "left": "1.0beta10",
+    "right": "1.0beta2",
+    "expected": 1
+  },
+  {
+    "left": "1.0-alpha.1",
+    "right": "1.0-alpha.2",
+    "expected": -1
+  },
+  {
+    "left": "1.0.0rc1",
+    "right": "1.0rc2",
+    "expected": -1
+  },
+  {
+    "left": "1.0z",
+    "right": "1.0",
+    "expected": 1
+  },
+  {
+    "left": "1.0x",
+    "right": "1.0y",
+    "expected": -1
+  },
+  {
+    "left": "HEAD",
+    "right": "9.9",
+    "expected": 1
+  },
+  {
+    "left": "HEAD-abc",
+    "right": "HEAD-def",
+    "expected": 0
+  },
+  {
+    "left": "9",
+    "right": "HEAD-abc",
+    "expected": -1
+  },
+  {
+    "left": "latest",
+    "right": "1",
+    "expected": null
+  },
+  {
+    "left": "1",
+    "right": "latest",
+    "expected": null
+  },
+  {
+    "left": "latest",
+    "right": "latest",
+    "expected": null
+  },
+  {
+    "left": "",
+    "right": "1",
+    "expected": null
+  },
+  {
+    "left": "1",
+    "right": "",
+    "expected": null
+  },
+  {
+    "left": "",
+    "right": "",
+    "expected": null
+  },
+  {
+    "left": "1.2,300",
+    "right": "1.2,400",
+    "expected": -1
+  },
+  {
+    "left": "01.002",
+    "right": "1.2",
+    "expected": 0
+  },
+  {
+    "left": "1_2_3",
+    "right": "1.2.3",
+    "expected": 0
+  },
+  {
+    "left": "1-2-3",
+    "right": "1.2.3",
+    "expected": 0
+  },
+  {
+    "left": "9999999999999999999999",
+    "right": "9999999999999999999998",
+    "expected": 1
+  },
+  {
+    "left": "2026.09.30",
+    "right": "2026.10.04",
+    "expected": -1
+  },
+  {
+    "left": "2.0",
+    "right": "1.9999",
+    "expected": 1
+  },
+  {
+    "left": " 1.0 ",
+    "right": "1.0",
+    "expected": 0
+  },
+  {
+    "left": "1.0.RC1",
+    "right": "1.0.rc1",
+    "expected": 0
+  },
+  {
+    "left": "0.alpha1",
+    "right": "alpha1",
+    "expected": 0
+  },
+  {
+    "left": "alpha1",
+    "right": "0.alpha1",
+    "expected": 0
+  },
+  {
+    "left": "alpha1",
+    "right": "1",
+    "expected": -1
+  },
+  {
+    "left": "1",
+    "right": "alpha1",
+    "expected": 1
+  },
+  {
+    "left": "1.0post1",
+    "right": "1.0post2",
+    "expected": -1
+  },
+  {
+    "left": "1.0pre",
+    "right": "1.0preview",
+    "expected": 0
+  },
+  {
+    "left": "1.0-alpha",
+    "right": "1.0-z",
+    "expected": -1
+  },
+  {
+    "left": "1.0-z",
+    "right": "1.0-alpha",
+    "expected": 1
+  },
+  {
+    "left": "1.10",
+    "right": "1.2",
+    "expected": 1
+  },
+  {
+    "left": "1",
+    "right": "1.0",
+    "expected": 0
+  },
+  {
+    "left": "1.0.0",
+    "right": "1",
+    "expected": 0
+  },
+  {
+    "left": "1",
+    "right": "1.0.1",
+    "expected": -1
+  },
+  {
+    "left": "0.0",
+    "right": "0",
+    "expected": 0
+  },
+  {
+    "left": "1.2",
+    "right": "v1.2",
+    "expected": 0
+  },
+  {
+    "left": "1.0-beta",
+    "right": "1.0-alpha",
+    "expected": 1
+  },
+  {
+    "left": "1.0-pre",
+    "right": "1.0-beta",
+    "expected": 1
+  },
+  {
+    "left": "1.0-rc",
+    "right": "1.0-pre",
+    "expected": 1
+  },
+  {
+    "left": "1.0",
+    "right": "1.0-rc",
+    "expected": 1
+  },
+  {
+    "left": "1.0",
+    "right": "1.0-preview",
+    "expected": 1
+  },
+  {
+    "left": "1.0-post1",
+    "right": "1.0",
+    "expected": 1
+  },
+  {
+    "left": "1.0p1",
+    "right": "1.0",
+    "expected": 1
+  },
+  {
+    "left": "1.0p10",
+    "right": "1.0p2",
+    "expected": 1
+  },
+  {
+    "left": "1.0alpha0",
+    "right": "1.0alpha",
+    "expected": 0
+  },
+  {
+    "left": "1.0alpha1",
+    "right": "1.0a1",
+    "expected": 0
+  },
+  {
+    "left": "1.0beta2",
+    "right": "1.0b2",
+    "expected": 0
+  },
+  {
+    "left": "1.0beta2",
+    "right": "1.0beta10",
+    "expected": -1
+  },
+  {
+    "left": "1.0-alpha.2",
+    "right": "1.0-alpha.1",
+    "expected": 1
+  },
+  {
+    "left": "1.0rc2",
+    "right": "1.0.0rc1",
+    "expected": 1
+  },
+  {
+    "left": "1.0",
+    "right": "1.0z",
+    "expected": -1
+  },
+  {
+    "left": "1.0y",
+    "right": "1.0x",
+    "expected": 1
+  },
+  {
+    "left": "9.9",
+    "right": "HEAD",
+    "expected": -1
+  },
+  {
+    "left": "HEAD-def",
+    "right": "HEAD-abc",
+    "expected": 0
+  },
+  {
+    "left": "HEAD-abc",
+    "right": "9",
+    "expected": 1
+  },
+  {
+    "left": "1.2,400",
+    "right": "1.2,300",
+    "expected": 1
+  },
+  {
+    "left": "1.2",
+    "right": "01.002",
+    "expected": 0
+  },
+  {
+    "left": "1.2.3",
+    "right": "1_2_3",
+    "expected": 0
+  },
+  {
+    "left": "1.2.3",
+    "right": "1-2-3",
+    "expected": 0
+  },
+  {
+    "left": "9999999999999999999998",
+    "right": "9999999999999999999999",
+    "expected": -1
+  },
+  {
+    "left": "2026.10.04",
+    "right": "2026.09.30",
+    "expected": 1
+  },
+  {
+    "left": "1.9999",
+    "right": "2.0",
+    "expected": -1
+  },
+  {
+    "left": "1.0",
+    "right": " 1.0 ",
+    "expected": 0
+  },
+  {
+    "left": "1.0.rc1",
+    "right": "1.0.RC1",
+    "expected": 0
+  },
+  {
+    "left": "alpha1",
+    "right": "0.alpha1",
+    "expected": 0
+  },
+  {
+    "left": "0.alpha1",
+    "right": "alpha1",
+    "expected": 0
+  },
+  {
+    "left": "1",
+    "right": "alpha1",
+    "expected": 1
+  },
+  {
+    "left": "alpha1",
+    "right": "1",
+    "expected": -1
+  }
+]

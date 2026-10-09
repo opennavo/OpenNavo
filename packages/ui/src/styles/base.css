@@ -1,0 +1,30 @@
+/* Global @opennavo/ui base styles; import after @opennavo/tokens/tokens.css in web/desktop entries. */
+:root {
+  color-scheme: dark;
+}
+
+html {
+  font-family: var(--on-font-family-sans);
+  font-feature-settings: var(--on-font-feature-settings);
+  font-optical-sizing: var(--on-font-optical-sizing);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--on-text-primary);
+  text-autospace: normal;
+}
+
+body {
+  margin: 0;
+}
+
+/* Reduced motion (08 §5): disable animation/translation transitions, retaining only very brief changes. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

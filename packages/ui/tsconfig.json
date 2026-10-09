@@ -1,0 +1,7 @@
+{
+  "extends": "../../tooling/config/tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src", "tests", "playground", "scripts", "vitest.config.ts"]
+}

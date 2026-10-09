@@ -1,0 +1,212 @@
+{
+  "token": "artisan",
+  "full_token": "artisan",
+  "old_tokens": [],
+  "tap": "homebrew/cask",
+  "name": [
+    "Artisan"
+  ],
+  "desc": "Visual scope for coffee roasters",
+  "homepage": "https://artisan-scope.org/",
+  "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-arm-4.2.0.dmg",
+  "url_specs": {},
+  "version": "4.2.0",
+  "autobump": true,
+  "no_autobump_message": null,
+  "skip_livecheck": false,
+  "installed": null,
+  "installed_time": null,
+  "bundle_version": null,
+  "bundle_short_version": null,
+  "pinned": false,
+  "pinned_version": null,
+  "outdated": false,
+  "sha256": "ef4abc2a8db4efee94d89703d150b033555f3c19164ba34665ba39854e1492a2",
+  "artifacts": [
+    {
+      "app": [
+        "Artisan.app"
+      ],
+      "target": "/Applications/Artisan.app"
+    },
+    {
+      "zap": [
+        {
+          "trash": [
+            "~/Library/Application Support/artisan-scope",
+            "~/Library/Preferences/org.artisan-scope.Artisan.plist",
+            "~/Library/Saved Application State/org.artisan-scope.artisan.savedState"
+          ]
+        }
+      ]
+    }
+  ],
+  "caveats": null,
+  "caveats_rosetta": null,
+  "depends_on": {
+    "macos": {
+      ">=": [
+        "14"
+      ]
+    }
+  },
+  "conflicts_with": null,
+  "container": null,
+  "rename": [],
+  "auto_updates": null,
+  "deprecated": false,
+  "deprecation_date": null,
+  "deprecation_reason": null,
+  "deprecation_replacement_formula": null,
+  "deprecation_replacement_cask": null,
+  "deprecate_args": null,
+  "disabled": false,
+  "disable_date": null,
+  "disable_reason": null,
+  "disable_replacement_formula": null,
+  "disable_replacement_cask": null,
+  "disable_args": null,
+  "tap_git_head": "0d5785eb5d44ec29a051e3ac6a0da6f733347009",
+  "languages": [],
+  "ruby_source_path": "Casks/a/artisan.rb",
+  "ruby_source_checksum": {
+    "sha256": "90f4cea2ad382a24e538c8ee6d8f18602cc72dab371231e677cbdfe18de6b036"
+  },
+  "variations": {
+    "golden_gate": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-intel-4.2.0.dmg",
+      "sha256": "d152a64f41145807af248336971378be974c67db4b51194acc5606a15e4d68c6",
+      "depends_on": {
+        "macos": {
+          ">=": [
+            "13"
+          ]
+        }
+      }
+    },
+    "tahoe": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-intel-4.2.0.dmg",
+      "sha256": "d152a64f41145807af248336971378be974c67db4b51194acc5606a15e4d68c6",
+      "depends_on": {
+        "macos": {
+          ">=": [
+            "13"
+          ]
+        }
+      }
+    },
+    "sequoia": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-intel-4.2.0.dmg",
+      "sha256": "d152a64f41145807af248336971378be974c67db4b51194acc5606a15e4d68c6",
+      "depends_on": {
+        "macos": {
+          ">=": [
+            "13"
+          ]
+        }
+      }
+    },
+    "sonoma": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-intel-4.2.0.dmg",
+      "sha256": "d152a64f41145807af248336971378be974c67db4b51194acc5606a15e4d68c6",
+      "depends_on": {
+        "macos": {
+          ">=": [
+            "13"
+          ]
+        }
+      }
+    },
+    "ventura": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-intel-4.2.0.dmg",
+      "sha256": "d152a64f41145807af248336971378be974c67db4b51194acc5606a15e4d68c6",
+      "depends_on": {
+        "macos": {
+          ">=": [
+            "13"
+          ]
+        }
+      }
+    },
+    "monterey": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-intel-4.2.0.dmg",
+      "sha256": "d152a64f41145807af248336971378be974c67db4b51194acc5606a15e4d68c6",
+      "depends_on": {
+        "macos": {
+          ">=": [
+            "13"
+          ]
+        }
+      }
+    },
+    "big_sur": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-mac-intel-4.2.0.dmg",
+      "sha256": "d152a64f41145807af248336971378be974c67db4b51194acc5606a15e4d68c6",
+      "depends_on": {
+        "macos": {
+          ">=": [
+            "13"
+          ]
+        }
+      }
+    },
+    "x86_64_linux": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-linux-4.2.0.AppImage",
+      "sha256": "e2f85dc7ded8f27b63e075364ffa47abf6608a8798d328bec9d55c0c5ac746b4",
+      "artifacts": [
+        {
+          "app_image": [
+            "artisan-linux-4.2.0.AppImage",
+            {
+              "target": "Artisan.AppImage"
+            }
+          ],
+          "target": "/$HOME/Applications/Artisan.AppImage"
+        }
+      ],
+      "depends_on": {
+        "arch": [
+          {
+            "type": "intel",
+            "bits": 64
+          }
+        ]
+      }
+    },
+    "arm64_linux": {
+      "url": "https://github.com/artisan-roaster-scope/artisan/releases/download/v4.2.0/artisan-linux-4.2.0.AppImage",
+      "sha256": null,
+      "artifacts": [
+        {
+          "app_image": [
+            "artisan-linux-4.2.0.AppImage",
+            {
+              "target": "Artisan.AppImage"
+            }
+          ],
+          "target": "/$HOME/Applications/Artisan.AppImage"
+        }
+      ],
+      "depends_on": {
+        "arch": [
+          {
+            "type": "intel",
+            "bits": 64
+          }
+        ]
+      }
+    }
+  },
+  "supported_platforms": [
+    "golden_gate",
+    "arm64_golden_gate",
+    "tahoe",
+    "arm64_tahoe",
+    "sequoia",
+    "arm64_sequoia",
+    "sonoma",
+    "arm64_sonoma",
+    "ventura",
+    "x86_64_linux"
+  ]
+}
