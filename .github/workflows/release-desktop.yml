@@ -86,7 +86,7 @@ jobs:
             bundles: app
           - artifact: dmg-universal
             target: universal-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
     runs-on: macos-15
     timeout-minutes: 75
     env:
@@ -182,7 +182,7 @@ jobs:
           bundle="apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
           codesign --verify --deep --strict "$bundle/macos/OpenNavo.app"
           xcrun stapler validate "$bundle/macos/OpenNavo.app"
-          if [ "${{ matrix.bundles }}" = dmg ]; then
+          if [ "${{ matrix.artifact }}" = dmg-universal ]; then
             for dmg in "$bundle"/dmg/*.dmg; do
               xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
               xcrun stapler staple "$dmg"
