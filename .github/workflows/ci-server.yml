@@ -3,7 +3,8 @@ name: Backend CI
 on:
   push:
     branches: [main]
-    paths: &backend-paths
+  pull_request:
+    paths:
       - '.github/**'
       - 'apps/server/**'
       - 'apps/mcp/**'
@@ -20,8 +21,6 @@ on:
       - '.github/workflows/ci-mcp.yml'
       - '.github/workflows/release-mcp.yml'
       - '.github/workflows/release-server.yml'
-  pull_request:
-    paths: *backend-paths
   workflow_dispatch:
 
 permissions:

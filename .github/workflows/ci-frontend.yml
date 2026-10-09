@@ -4,7 +4,8 @@ name: Frontend CI
 on:
   push:
     branches: [main]
-    paths: &frontend-paths
+  pull_request:
+    paths:
       - '.github/**'
       - 'apps/**'
       - 'packages/**'
@@ -26,8 +27,6 @@ on:
       - 'tooling/scripts/lint-frontend.mjs'
       - 'tooling/scripts/format-frontend.mjs'
       - '.github/workflows/ci-frontend.yml'
-  pull_request:
-    paths: *frontend-paths
   workflow_dispatch:
 
 permissions:
