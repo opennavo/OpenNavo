@@ -1,5 +1,7 @@
 # Desktop release notes
 
+GitHub Release titles and bodies must be English only. The publishing script uses only the version's `en-US.md` for the GitHub body, including on retries. Chinese text in English notes fails validation before building or making remote changes. Do not concatenate localized notes into GitHub Releases.
+
 Before pushing a `desktop-vX.Y.Z` tag, add two UTF-8 Markdown files for that exact version:
 
 - `apps/desktop/release-notes/X.Y.Z/zh-CN.md`

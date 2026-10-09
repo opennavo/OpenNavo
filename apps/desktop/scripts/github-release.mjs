@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { TARGETS, channelOf, describeFile, githubArtifactUrl, githubBase, isReleaseVersion } from './release-lib.mjs';
+import { loadReleaseNotes, validateNotes } from './release-notes.mjs';
 
 export function prepareAssets(dir, repository, version) {
   githubBase(repository);
@@ -114,11 +115,13 @@ export function githubClient(repository, token, fetcher = fetch) {
         }
       ),
     publish: id => request(`${api}/releases/${id}`, json('PATCH', { draft: false, make_latest: 'false' })),
+    updateNotes: (id, body) => request(`${api}/releases/${id}`, json('PATCH', { body })),
     verify: (url, asset) => verifyDownload(url, asset, fetcher)
   };
 }
 
-export async function publishRelease({ repository, version, assets, client }) {
+export async function publishRelease({ repository, version, assets, client, notesEn }) {
+  const body = `# OpenNavo ${version}\n\n${validateNotes(notesEn, version, 'en-US')}\n`;
   const tag = `desktop-v${version}`;
   const prerelease = channelOf(version) === 'beta';
   if ((await client.repository()).private) throw new Error('release repository must be public');
@@ -143,6 +146,7 @@ export async function publishRelease({ repository, version, assets, client }) {
       throw new Error(`remote asset mismatch: ${asset.name}`);
     }
   }
+  await client.updateNotes(release.id, body);
   if (release.draft) await client.publish(release.id);
   for (const asset of assets) await client.verify(githubArtifactUrl(repository, version, asset.name), asset);
 }
@@ -151,12 +155,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const { values } = parseArgs({
     options: {
       dir: { type: 'string', default: 'release-artifacts' },
+      'notes-dir': { type: 'string', default: 'apps/desktop/release-notes' },
       version: { type: 'string' },
       repository: { type: 'string', default: process.env.GITHUB_REPOSITORY }
     }
   });
   const repository = values.repository ?? '';
   const version = values.version ?? '';
+  const notes = loadReleaseNotes(values['notes-dir'], version);
   // Fail before any remote writes if registration credentials are missing.
   if (!process.env.ADMIN_API_BASE || !process.env.CI_RELEASE_TOKEN)
     throw new Error('registration configuration is required');
@@ -164,6 +170,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   await publishRelease({
     repository,
     version,
+    notesEn: notes['en-US'],
     assets,
     client: githubClient(repository, process.env.GH_TOKEN)
   });

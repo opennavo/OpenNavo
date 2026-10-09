@@ -9,6 +9,9 @@ export function validateNotes(notes, version, locale) {
   if (!text || plain === `OpenNavo ${version}` || plain === version || /^(TODO|TBD|待补充|待填写)$/i.test(plain)) {
     throw new Error(`Missing real release notes for ${locale}; provide a Markdown file with user-facing changes`);
   }
+  if (locale === 'en-US' && /\p{Script=Han}/u.test(text)) {
+    throw new Error('English release notes must not contain Chinese text');
+  }
   return text;
 }
 

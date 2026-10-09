@@ -10,6 +10,7 @@ import { TARGETS, githubArtifactUrl, describeFile } from '../scripts/release-lib
 
 const repository = 'acme/opennavo';
 const version = '0.3.0';
+const notesEn = '## Improvements\n\n- Improved collection navigation.';
 const sha256 = createHash('sha256').update('content').digest('hex');
 const assets = [{ name: 'app.tar.gz', bytes: 7, sha256, path: '/unused' }];
 function fixture({ draft = true, remote = [], prerelease = false, exists = true } = {}) {
@@ -21,19 +22,31 @@ function fixture({ draft = true, remote = [], prerelease = false, exists = true 
     create: vi.fn(async () => release),
     assets: vi.fn(async () => remote),
     upload: vi.fn(async (_, a) => ({ name: a.name, size: a.bytes, digest: `sha256:${a.sha256}`, state: 'uploaded' })),
+    updateNotes: vi.fn(async () => ({})),
     publish: vi.fn(async () => ({})),
     verify: vi.fn(async () => {})
   };
   return client;
 }
 const good = { name: 'app.tar.gz', size: 7, digest: `sha256:${sha256}`, state: 'uploaded' };
-const run = client => publishRelease({ repository, version, assets, client });
+const run = client => publishRelease({ repository, version, assets, client, notesEn });
 
 describe('GitHub releases and failure recovery', () => {
+  it.each([undefined, '', '## Improvements\n\n- 改进导航。'])(
+    'rejects missing or Chinese notes before remote changes',
+    async notesEn => {
+      const client = fixture();
+      await expect(publishRelease({ repository, version, assets, client, notesEn })).rejects.toThrow();
+      expect(client.repository).not.toHaveBeenCalled();
+      expect(client.updateNotes).not.toHaveBeenCalled();
+    }
+  );
   it('Uploads the complete draft before publishing, then verifies anonymous downloads', async () => {
     const client = fixture({ exists: false });
     await run(client);
     expect(client.create).toHaveBeenCalledWith('desktop-v0.3.0', false);
+    expect(client.updateNotes).toHaveBeenCalledWith(1, `# OpenNavo ${version}\n\n${notesEn}\n`);
+    expect(client.publish.mock.invocationCallOrder[0]).toBeGreaterThan(client.updateNotes.mock.invocationCallOrder[0]);
     expect(client.publish.mock.invocationCallOrder[0]).toBeGreaterThan(client.upload.mock.invocationCallOrder[0]);
     expect(client.verify.mock.invocationCallOrder[0]).toBeGreaterThan(client.publish.mock.invocationCallOrder[0]);
     expect(client.verify).toHaveBeenCalledWith(githubArtifactUrl(repository, version, 'app.tar.gz'), assets[0]);
@@ -44,6 +57,7 @@ describe('GitHub releases and failure recovery', () => {
     expect(client.upload).not.toHaveBeenCalled();
     expect(client.publish).not.toHaveBeenCalled();
     expect(client.verify).toHaveBeenCalledOnce();
+    expect(client.updateNotes).toHaveBeenCalledWith(1, `# OpenNavo ${version}\n\n${notesEn}\n`);
   });
   it.each([
     { draft: false, remote: [] },
@@ -69,7 +83,7 @@ describe('GitHub releases and failure recovery', () => {
   });
   it('Creates beta prereleases without replacing latest', async () => {
     const client = fixture({ exists: false });
-    await publishRelease({ repository, version: '0.3.0-beta.1', assets, client });
+    await publishRelease({ repository, version: '0.3.0-beta.1', assets, client, notesEn });
     expect(client.create).toHaveBeenCalledWith('desktop-v0.3.0-beta.1', true);
   });
   it('Verifies downloads without tokens and rejects size or hash mismatches', async () => {
