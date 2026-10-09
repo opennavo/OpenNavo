@@ -51,7 +51,16 @@ def extract_admin(data, destination):
             path = PurePosixPath(member.name)
             if path.is_absolute() or '..' in path.parts or not (member.isfile() or member.isdir()):
                 raise ValueError('unsafe admin archive member')
-        archive.extractall(destination, members=members, filter='data')
+        # Extract only validated regular files/directories; supports older host Python
+        # without applying archive ownership, modes, symlinks or device metadata.
+        for member in members:
+            target = destination.joinpath(*PurePosixPath(member.name).parts)
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.extractfile(member) as source, target.open('wb') as output:
+                    shutil.copyfileobj(source, output)
     if not (destination / 'index.html').is_file():
         raise ValueError('admin index is missing')
 
