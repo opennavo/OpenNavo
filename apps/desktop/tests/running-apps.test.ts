@@ -8,16 +8,16 @@ import { isDeferredUpdate, useRunningAppsStore } from '@/stores/runningApps';
 import { setup } from './helpers';
 
 const target = (token: string) => ({ kind: 'cask' as const, token });
-let context: Awaited<ReturnType<typeof setup>> | undefined;
+let activeContext: Awaited<ReturnType<typeof setup>> | undefined;
 async function init(flags = 'running-apps') {
   window.history.replaceState({}, '', `/?mock=${flags}`);
-  context = await setup('/updates', { tickMs: 1 });
-  return context;
+  activeContext = await setup('/updates', { tickMs: 1 });
+  return activeContext;
 }
 afterEach(async () => {
   // Finish queued mock work while its IPC mocks and jsdom window are still installed.
-  if (context) await vi.waitFor(() => expect(context?.state.active).toHaveLength(0), { timeout: 5000 });
-  context = undefined;
+  if (activeContext) await vi.waitFor(() => expect(activeContext?.state.active).toHaveLength(0), { timeout: 5000 });
+  activeContext = undefined;
   window.history.replaceState({}, '', '/');
   vi.restoreAllMocks();
 });
