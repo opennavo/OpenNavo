@@ -122,7 +122,7 @@ const secondaryFeatures = computed<OnDiscoverFeature[]>(() =>
       title: item.title,
       subtitle: item.subtitle,
       description: item.body,
-      icons: item.package ? [toIcon(item.package)] : [],
+      icons: item.package ? [toIcon(item.package)] : collectionIconsForFeature(item),
       glowColor: item.glowColor,
       href: featureLink(item) ?? undefined,
       external: item.target.type === 'url',
@@ -138,10 +138,18 @@ const heroView = computed<OnDiscoverHero | null>(() =>
         subtitle: hero.value.subtitle,
         description: hero.value.body,
         icons: heroIcons.value,
-        glowColor: hero.value.glowColor
+        glowColor: hero.value.glowColor,
+        href: featureLink(hero.value) ?? undefined
       }
     : null
 );
+
+function collectionIconsForFeature(feature: Feature) {
+  if (feature.target.type !== 'collection') return [];
+  const slug = feature.target.slug;
+  const collection = home.value?.collections.find(item => item.slug === slug);
+  return collection ? collectionIcons(collection) : [];
+}
 
 const collections = computed<OnDiscoverCollection[]>(() =>
   (home.value?.collections ?? []).map(collection => ({

@@ -45,28 +45,38 @@ const messages = useUiMessages();
 const locale = useUiLocale();
 const text = computed(() => messages.value.version);
 
+function validDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.getUTCFullYear() > 1 ? value : null;
+}
+
+const publishedAt = computed(() => validDate(props.entry.publishedAt));
+const brewCommittedAt = computed(() => validDate(props.entry.brewCommittedAt));
 const date = computed(() => {
-  const at = props.entry.publishedAt ?? props.entry.brewCommittedAt;
+  const at = publishedAt.value ?? brewCommittedAt.value;
   return at ? formatDate(at, { locale: locale.value, weekday: !props.collapsed }) : '';
 });
 
 // Source row: upstream body source chart.series1, Homebrew adoption time chart.series2.
 const sources = computed(() => {
   const items: { key: string; tone: 'upstream' | 'homebrew'; label: string; href: string | null }[] = [];
-  const { source, sourceUrl, brewCommittedAt, publishedAt } = props.entry;
+  const { source, sourceUrl } = props.entry;
+  const published = publishedAt.value;
+  const brewed = brewCommittedAt.value;
   if (source !== 'homebrew') {
     const label = text.value.sources[source];
     const at =
-      source === 'github_release' && publishedAt
-        ? ` ${formatDate(publishedAt, { locale: locale.value })} ${formatTime(publishedAt)}`
+      source === 'github_release' && published
+        ? ` ${formatDate(published, { locale: locale.value })} ${formatTime(published)}`
         : '';
     items.push({ key: 'upstream', tone: 'upstream', label: `${label}${at}`, href: sourceUrl ?? null });
   }
-  if (brewCommittedAt) {
+  if (brewed) {
     items.push({
       key: 'homebrew',
       tone: 'homebrew',
-      label: `${text.value.sources.homebrew} ${formatDate(brewCommittedAt, { locale: locale.value })} ${formatTime(brewCommittedAt)}`,
+      label: `${text.value.sources.homebrew} ${formatDate(brewed, { locale: locale.value })} ${formatTime(brewed)}`,
       href: null
     });
   }

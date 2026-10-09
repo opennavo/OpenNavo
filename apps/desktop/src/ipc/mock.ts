@@ -48,6 +48,7 @@ function defaultSettings(): AppSettings {
     keepInMenuBarOnClose: true,
     trayShowCount: true,
     autoCheck: true,
+    autoCheckAppUpdates: true,
     checkTime: '09:00',
     runBrewUpdateOnCheck: true,
     includeGreedy: true,
@@ -340,6 +341,7 @@ export function installMockIpc(
   const handlers: Record<string, (args: Args) => unknown> = {
     app_info: () => appInfo,
     locale_get: () => settings.locale,
+    system_locale_get: () => systemLocale,
     env_detect: () => env,
     catalog_status: () => catalogStatus,
     catalog_sync: () => {

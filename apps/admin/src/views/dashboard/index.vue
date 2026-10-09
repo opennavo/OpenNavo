@@ -36,7 +36,7 @@ const stats = computed(() => {
   const packages = overview.value?.packages;
   if (!packages) return [];
   return [
-    // Cask-only catalog (ADR-018): count apps only.
+    // App and font counts are disjoint and exclude disabled or removed packages.
     { key: 'total', label: $t('page.dashboard.total'), value: packages.casks },
     { key: 'fonts', label: $t('page.dashboard.fonts'), value: packages.fonts },
     {

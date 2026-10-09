@@ -60,7 +60,7 @@ function toInput(option: MirrorOption): MirrorInput {
  * Download sources (first-launch-onboarding §3.3): enabled backend mirrors in backend order, always including the official source.
  * Load, probe, find the fastest source, and suggest alternatives when the official source is slow; pages decide when to save (Welcome button or Settings selection).
  */
-export function useMirrorOptions() {
+export function useMirrorOptions(includeMirrors: () => boolean = () => true) {
   const { t } = useI18n();
   const { appLocale } = useAppLocale();
   const { data: config, loading, error, reload: load } = useLoader(fetchClientConfig, [appLocale]);
@@ -70,7 +70,7 @@ export function useMirrorOptions() {
 
   // Use backend official-source metadata when configured (name, description, probe URL); otherwise prepend a built-in entry.
   const options = computed<MirrorOption[]>(() => {
-    const mirrors = config.value?.mirrors ?? [];
+    const mirrors = (config.value?.mirrors ?? []).filter(mirror => includeMirrors() || mirror.key === 'official');
     if (mirrors.some(mirror => mirror.key === 'official')) return mirrors;
     const official: MirrorOption = {
       key: 'official',
@@ -141,5 +141,17 @@ export function useMirrorOptions() {
   /** Sources whose probes completed unsuccessfully; exclude pending or untested sources. */
   const unreachable = (key: string) => probes.value[key]?.ok === false;
 
-  return { options, loading, failed, probes, probing, fastest, suggestion, find, load, probe, unreachable };
+  return {
+    options,
+    loading,
+    failed,
+    probes,
+    probing,
+    fastest,
+    suggestion,
+    find,
+    load,
+    probe,
+    unreachable
+  };
 }

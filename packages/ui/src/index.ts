@@ -160,3 +160,5 @@ export type { InlineSegment } from './utils/version';
 export type { PaginationItem } from './utils/pagination';
 
 export { default as OnAboutContent } from './components/OnAboutContent.vue';
+export { default as OnDialogShell } from './components/OnDialogShell.vue';
+export type { OnDialogShellProps } from './components/OnDialogShell.vue';

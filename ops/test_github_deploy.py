@@ -33,6 +33,52 @@ def payload():
 
 
 class DeployTests(unittest.TestCase):
+    def test_cleanup_stops_previous_release_and_removes_only_older_app_containers(self):
+        obj = object.__new__(deploy.Deployment)
+        obj.config = {'project': 'example-prod'}
+        obj.services = {kind: kind + '_new' for kind in ['api', 'web', 'mcp', 'admin']}
+        previous = {'services': {kind: kind + '_previous' for kind in obj.services}}
+        def container(service, running=True, project='example-prod'):
+            return {'Id': service, 'State': {'Running': running}, 'Config': {'Labels': {
+                'com.docker.compose.project': project, 'com.docker.compose.service': service}}}
+        containers = [container(s) for s in obj.services.values()]
+        containers += [container(s) for s in previous['services'].values()]
+        containers += [container('api_older'), container('web_ancient', False), container('api')]
+        containers += [container(s) for s in ['worker', 'postgres', 'redis', 'web-cache', 'minio', 'caddy', 'prometheus']]
+        containers += [container('api_foreign', project='other-project')]
+        def cmd(args):
+            if args[1] == 'ps': return '\n'.join(c['Id'] for c in containers)
+            if args[1] == 'inspect': return json.dumps(containers)
+            return ''
+        with patch.object(deploy, 'command', side_effect=cmd) as run:
+            obj.cleanup(previous)
+        mutations = [call.args[0] for call in run.call_args_list if call.args[0][1] in ['stop', 'rm']]
+        self.assertEqual(mutations, [
+            ['docker', 'stop', '--timeout', '30', *previous['services'].values(), 'api_older', 'api'],
+            ['docker', 'rm', 'api_older', 'web_ancient', 'api']])
+
+    def test_cleanup_does_not_remove_containers_if_stop_fails(self):
+        obj = object.__new__(deploy.Deployment)
+        obj.config = {'project': 'example-prod'}
+        obj.services = {'api': 'api_new'}
+        containers = [{'Id': 'old', 'State': {'Running': True}, 'Config': {'Labels': {
+            'com.docker.compose.project': 'example-prod', 'com.docker.compose.service': 'api_old'}}}]
+        with patch.object(deploy, 'command', side_effect=['old', json.dumps(containers), RuntimeError('stop failed')]) as run:
+            with self.assertRaises(RuntimeError): obj.cleanup({})
+        self.assertFalse(any(call.args[0][1] == 'rm' for call in run.call_args_list))
+
+    def test_retry_verifies_existing_release_before_resuming_cleanup(self):
+        obj = object.__new__(deploy.Deployment)
+        obj.payload = payload()
+        previous = {'services': {'api': 'api_previous'}}
+        obj.state = {'sha': obj.payload['sha'], 'services': {'api': 'api_live'}, 'previous': previous}
+        events = []
+        obj.verify = lambda: events.append('verify')
+        obj.cleanup = lambda state: events.append(('cleanup', state))
+        obj.apply(archive())
+        self.assertEqual(obj.services, obj.state['services'])
+        self.assertEqual(events, ['verify', ('cleanup', previous)])
+
     def test_accepts_only_complete_digest_pinned_release(self):
         body = payload()
         self.assertEqual(deploy.validate(body, 'ghcr.io/example'), archive())
@@ -90,6 +136,7 @@ class DeployTests(unittest.TestCase):
             obj.backup = lambda: events.append('backup')
             obj.compose = lambda *args, **kwargs: events.append(args)
             obj.reload = lambda: events.append('reload')
+            obj.cleanup = lambda _: events.append('cleanup')
             def fail(): raise RuntimeError('route check failed')
             obj.verify = fail
             def cmd(args, output=None):
@@ -105,6 +152,26 @@ class DeployTests(unittest.TestCase):
             self.assertIn(('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180', 'worker'), events)
             self.assertFalse(obj.state_path.exists())
             self.assertNotIn('down', str(events))
+            self.assertNotIn('cleanup', events)
+
+            # A successful retry must persist the verified release before cleanup.
+            obj.state['previous'] = {'sha': 'd' * 40}
+            (directory / 'release.env').write_text('new-env')
+            (directory / 'rolling.compose.json').write_text('{}')
+            events.clear()
+            obj.verify = lambda: events.append('verify')
+            def cleanup(previous):
+                state = json.loads(obj.state_path.read_text())
+                self.assertEqual(state['sha'], obj.payload['sha'])
+                self.assertEqual(state['previous'], {'sha': 'c' * 40})
+                self.assertEqual(previous, state['previous'])
+                events.append('cleanup')
+            obj.cleanup = cleanup
+            with patch.object(deploy, 'command', side_effect=cmd):
+                obj.apply(archive())
+            self.assertEqual(events.count('verify'), 2)
+            self.assertEqual(events[-1], 'cleanup')
+            self.assertLess(events.index(('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180', 'worker')), len(events) - 1)
 
 
 if __name__ == '__main__': unittest.main()

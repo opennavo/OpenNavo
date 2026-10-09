@@ -226,9 +226,9 @@ class Ratio(BaseModel):
 
 
 class Packages(BaseModel):
-    casks: Annotated[int, Field(examples=[40])]
+    casks: Annotated[int, Field(description='Non-font Cask apps, excluding disabled and removed packages.', examples=[40])]
     formulae: Annotated[int, Field(examples=[20])]
-    fonts: Annotated[int, Field(examples=[3])]
+    fonts: Annotated[int, Field(description='Font Casks, excluding disabled and removed packages.', examples=[3])]
     libraries: Annotated[int, Field(examples=[3])]
     hidden: Annotated[int, Field(examples=[1])]
     deprecated: Annotated[int, Field(examples=[1])]
@@ -236,11 +236,10 @@ class Packages(BaseModel):
 
 
 class Coverage(BaseModel):
-    zhSummary: Ratio
     primaryCategory: Ratio
     icon: Ratio
-    latestVersionNotes: Annotated[Ratio, Field(description='Valid apps whose current versionBase has non-hidden editorial release notes; excludes historical versions and old upstream notes.')]
-    sixLocaleContent: Annotated[Ratio, Field(description='Valid apps with actual nonempty summaries and introductions in all six languages, status source/machine/manual, and source language/hash matching current source text. Excludes fallback, queued, failed and stale content.')]
+    latestVersionNotes: Annotated[Ratio, Field(description='Valid apps and fonts whose current versionBase has non-hidden editorial release notes; excludes historical versions and old upstream notes.')]
+    sixLocaleContent: Annotated[Ratio, Field(description='Valid apps and fonts with actual nonempty summaries and introductions in all six languages, status source/machine/manual, and source language/hash matching current source text. Excludes fallback, queued, failed and stale content.')]
 
 
 class Llm(BaseModel):
@@ -1199,7 +1198,7 @@ class EditorialNotesClear(BaseModel):
 
 
 class EditorialNotesUpdate(RootModel[EditorialNotesWrite | EditorialNotesClear]):
-    root: Annotated[EditorialNotesWrite | EditorialNotesClear, Field(description='Only recorded Cask versions are allowed; version is the recorded versionBase. One editorial per package/version. Missing release date uses first ingestion time. clear=true deletes every editorial language, checks deletion allowance and saves restorable revisions; no editorial returns 1002. Historical notes remain available as fallback after clearing.', examples=[{'sourceLocale': 'zh-CN', 'summary': '改善窗口管理体验', 'sections': [{'area': '改进', 'items': ['改善窗口管理体验。']}], 'bodyMarkdown': '## 改进\n\n改善窗口管理体验。'}])]
+    root: Annotated[EditorialNotesWrite | EditorialNotesClear, Field(description='Only recorded Cask versions are allowed; version is the recorded versionBase. One editorial per package/version. Omitting publishedAt preserves the existing release date; new notes have no release date unless supplied. Explicit null clears the date. Year 0001 and invalid dates are rejected; ingestion time is never used as a release date. clear=true deletes every editorial language, checks deletion allowance and saves restorable revisions; no editorial returns 1002. Historical notes remain available as fallback after clearing.', examples=[{'sourceLocale': 'zh-CN', 'summary': '改善窗口管理体验', 'sections': [{'area': '改进', 'items': ['改善窗口管理体验。']}], 'bodyMarkdown': '## 改进\n\n改善窗口管理体验。'}])]
 
 
 class ContentLocaleState(BaseModel):
@@ -2836,7 +2835,7 @@ class UserInfoResponseResult(RootModel[UserInfoResponse | BusinessErrorResponse]
 
 class DashboardOverview(BaseModel):
     packages: Packages
-    coverage: Annotated[Coverage, Field(description='All five coverage metrics use all valid Cask apps as denominator, excluding fonts, disabled, hidden and removed packages.')]
+    coverage: Annotated[Coverage, Field(description='All four coverage metrics use all valid Cask apps, including fonts, as denominator, excluding disabled, hidden and removed packages.')]
     llm: Llm
     feedbackOpen: Annotated[int, Field(examples=[1])]
     jobs: Jobs
@@ -3369,7 +3368,7 @@ class CategoryTreeResponseResult(RootModel[CategoryTreeResponse | BusinessErrorR
 
 
 class DashboardOverviewResponseResult(RootModel[DashboardOverviewResponse | BusinessErrorResponse]):
-    root: Annotated[DashboardOverviewResponse | BusinessErrorResponse, Field(examples=[{'code': '0000', 'msg': 'ok', 'data': {'packages': {'casks': 40, 'formulae': 0, 'fonts': 3, 'libraries': 0, 'hidden': 1, 'deprecated': 1, 'disabled': 1}, 'coverage': {'zhSummary': {'done': 1, 'total': 1}, 'primaryCategory': {'done': 1, 'total': 1}, 'icon': {'done': 1, 'total': 1}, 'latestVersionNotes': {'done': 1, 'total': 1}, 'sixLocaleContent': {'done': 1, 'total': 1}}, 'llm': {'model': 'gpt-6-luna', 'monthTokens': 1, 'monthTokenBudget': 30000000, 'monthSpendUsd': None, 'monthBudgetUsd': None, 'pendingPackages': 1, 'pendingReleases': 1, 'needsReview': 1}, 'feedbackOpen': 1, 'jobs': {'failed24h': 1, 'lastCatalogSyncAt': None, 'lastAnalyticsSyncAt': None, 'lastSnapshotAt': None}, 'snapshot': {'cursor': 1, 'itemCount': 60, 'url': None}, 'hermes': {'date': '2026-10-07', 'timeZone': 'UTC', 'writes': 300, 'translations': 180, 'failures': 2}}}])]
+    root: Annotated[DashboardOverviewResponse | BusinessErrorResponse, Field(examples=[{'code': '0000', 'msg': 'ok', 'data': {'packages': {'casks': 40, 'formulae': 0, 'fonts': 3, 'libraries': 0, 'hidden': 1, 'deprecated': 1, 'disabled': 1}, 'coverage': {'primaryCategory': {'done': 1, 'total': 1}, 'icon': {'done': 1, 'total': 1}, 'latestVersionNotes': {'done': 1, 'total': 1}, 'sixLocaleContent': {'done': 1, 'total': 1}}, 'llm': {'model': 'gpt-6-luna', 'monthTokens': 1, 'monthTokenBudget': 30000000, 'monthSpendUsd': None, 'monthBudgetUsd': None, 'pendingPackages': 1, 'pendingReleases': 1, 'needsReview': 1}, 'feedbackOpen': 1, 'jobs': {'failed24h': 1, 'lastCatalogSyncAt': None, 'lastAnalyticsSyncAt': None, 'lastSnapshotAt': None}, 'snapshot': {'cursor': 1, 'itemCount': 60, 'url': None}, 'hermes': {'date': '2026-10-07', 'timeZone': 'UTC', 'writes': 300, 'translations': 180, 'failures': 2}}}])]
 
 
 class DesktopReleasePageResponseResult(RootModel[DesktopReleasePageResponse | BusinessErrorResponse]):

@@ -114,6 +114,12 @@ const checks = computed(() => {
   return [
     { key: 'autoCheck' as const, label: t('settings.general.autoCheck'), value: value.autoCheck },
     {
+      key: 'autoCheckAppUpdates' as const,
+      label: t('updater.autoCheck'),
+      hint: t('updater.autoCheckHint'),
+      value: value.autoCheckAppUpdates
+    },
+    {
       key: 'runBrewUpdateOnCheck' as const,
       label: t('settings.general.runBrewUpdate'),
       hint: t('settings.general.runBrewUpdateHint'),

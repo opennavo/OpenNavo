@@ -11,7 +11,9 @@ pnpm --filter @opennavo/desktop gen
 
 ## Local self-update verification
 
-`tauri.conf.json` configures the update public key and stable manifest URL. `tauri.beta.conf.json` overrides only the beta manifest URL, merged through Tauri CLI `--config`. Updater access is limited to the main window, without automatic network checks. Settings → About (`src/components/settings/AppUpdater.vue`) uses the matching `@tauri-apps/plugin-updater` version for manual checking, downloading, installation, and restart.
+`tauri.conf.json` configures the update public key and stable manifest URL. `tauri.beta.conf.json` overrides only the beta manifest URL, merged through Tauri CLI `--config`. Updater access is limited to the main window. OpenNavo self-update checks are enabled by default, independently of Homebrew update settings; existing settings migrate to enabled. The main app shell checks after a 30-second startup delay, then hourly and when returning online or to the foreground. Successful checks run once per local calendar day; failed requests retry no sooner than one hour. Check history persists in webview local storage per installed version. Network failures remain silent during automatic checks.
+
+The global update dialog and Settings → About share `src/stores/appUpdater.ts`. Available versions prompt at most once per day, wait for other dialogs to close, and require an explicit download/install action. Installation never triggers an automatic restart. Set `VITE_OPENNAVO_UPDATE_PREVIEW=1` when starting Vite to show a development-only sample dialog; downloads and installation are disabled in this preview, and production builds ignore the flag.
 
 The pinned Tauri version cannot prevent `request_restart` with `prevent_exit`. Rust preserves the process plugin's commands and permissions, adding queue checks to its existing restart entry point. Running/queued tasks reject restart with `active_tasks`; an idle restart atomically blocks new tasks, cleans notifications, then restarts. Exit still requires quit confirmation. The frontend disables restart while tasks are active and handles rejection; no additional IPC was introduced.
 

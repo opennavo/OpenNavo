@@ -3443,10 +3443,6 @@ export interface components {
          *           "disabled": 1
          *         },
          *         "coverage": {
-         *           "zhSummary": {
-         *             "done": 1,
-         *             "total": 1
-         *           },
          *           "primaryCategory": {
          *             "done": 1,
          *             "total": 1
@@ -4772,10 +4768,6 @@ export interface components {
          *         "disabled": 1
          *       },
          *       "coverage": {
-         *         "zhSummary": {
-         *           "done": 1,
-         *           "total": 1
-         *         },
          *         "primaryCategory": {
          *           "done": 1,
          *           "total": 1
@@ -4826,11 +4818,17 @@ export interface components {
          */
         DashboardOverview: {
             packages: {
-                /** @example 40 */
+                /**
+                 * @description Non-font Cask apps, excluding disabled and removed packages.
+                 * @example 40
+                 */
                 casks: number;
                 /** @example 20 */
                 formulae: number;
-                /** @example 3 */
+                /**
+                 * @description Font Casks, excluding disabled and removed packages.
+                 * @example 3
+                 */
                 fonts: number;
                 /** @example 3 */
                 libraries: number;
@@ -4841,14 +4839,13 @@ export interface components {
                 /** @example 1 */
                 disabled: number;
             };
-            /** @description All five coverage metrics use all valid Cask apps as denominator, excluding fonts, disabled, hidden and removed packages. */
+            /** @description All four coverage metrics use all valid Cask apps, including fonts, as denominator, excluding disabled, hidden and removed packages. */
             coverage: {
-                zhSummary: components["schemas"]["Ratio"];
                 primaryCategory: components["schemas"]["Ratio"];
                 icon: components["schemas"]["Ratio"];
-                /** @description Valid apps whose current versionBase has non-hidden editorial release notes; excludes historical versions and old upstream notes. */
+                /** @description Valid apps and fonts whose current versionBase has non-hidden editorial release notes; excludes historical versions and old upstream notes. */
                 latestVersionNotes: components["schemas"]["Ratio"];
-                /** @description Valid apps with actual nonempty summaries and introductions in all six languages, status source/machine/manual, and source language/hash matching current source text. Excludes fallback, queued, failed and stale content. */
+                /** @description Valid apps and fonts with actual nonempty summaries and introductions in all six languages, status source/machine/manual, and source language/hash matching current source text. Excludes fallback, queued, failed and stale content. */
                 sixLocaleContent: components["schemas"]["Ratio"];
             };
             llm: {
@@ -7937,10 +7934,6 @@ export interface components {
          *           "disabled": 1
          *         },
          *         "coverage": {
-         *           "zhSummary": {
-         *             "done": 1,
-         *             "total": 1
-         *           },
          *           "primaryCategory": {
          *             "done": 1,
          *             "total": 1
@@ -11469,7 +11462,7 @@ export interface components {
             clear: true;
         };
         /**
-         * @description Only recorded Cask versions are allowed; version is the recorded versionBase. One editorial per package/version. Missing release date uses first ingestion time. clear=true deletes every editorial language, checks deletion allowance and saves restorable revisions; no editorial returns 1002. Historical notes remain available as fallback after clearing.
+         * @description Only recorded Cask versions are allowed; version is the recorded versionBase. One editorial per package/version. Omitting publishedAt preserves the existing release date; new notes have no release date unless supplied. Explicit null clears the date. Year 0001 and invalid dates are rejected; ingestion time is never used as a release date. clear=true deletes every editorial language, checks deletion allowance and saves restorable revisions; no editorial returns 1002. Historical notes remain available as fallback after clearing.
          * @example {
          *       "sourceLocale": "zh-CN",
          *       "summary": "改善窗口管理体验",

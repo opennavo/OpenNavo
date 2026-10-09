@@ -13,6 +13,8 @@ const props = defineProps<{
   official: MirrorOption;
   /** Fastest available mirror; first backend-ordered mirror before probes finish. */
   mirror?: MirrorOption;
+  /** Hide the mirror card for computers whose system language is not Chinese. */
+  showMirror: boolean;
   probes: Readonly<Record<string, MirrorProbe>>;
   probing: boolean;
   selected?: string;
@@ -49,24 +51,36 @@ function latency(option: MirrorOption | undefined): Latency {
 
 const cards = computed(() =>
   [
-    { key: 'official', title: t('welcome.source.official'), option: props.official, detail: host(props.official) },
+    {
+      key: 'official',
+      title: t('welcome.source.official'),
+      option: props.official,
+      detail: host(props.official)
+    },
     {
       key: 'mirror',
       title: t('welcome.source.mirror'),
       option: props.mirror,
       detail: props.mirror?.name ?? (props.configFailed ? t('welcome.source.mirrorMissing') : '')
     }
-  ].map(card => ({
-    ...card,
-    latency: latency(card.option),
-    checked: Boolean(card.option) && props.selected === card.option?.key,
-    recommended: Boolean(card.option) && props.recommended === card.option?.key
-  }))
+  ]
+    .filter(card => props.showMirror || card.key === 'official')
+    .map(card => ({
+      ...card,
+      latency: latency(card.option),
+      checked: Boolean(card.option) && props.selected === card.option?.key,
+      recommended: Boolean(card.option) && props.recommended === card.option?.key
+    }))
 );
 </script>
 
 <template>
-  <div class="grid grid-cols-2 gap-10px" role="radiogroup" :aria-label="t('welcome.source.title')">
+  <div
+    class="grid gap-10px"
+    :class="showMirror ? 'grid-cols-2' : 'grid-cols-1'"
+    role="radiogroup"
+    :aria-label="t('welcome.source.title')"
+  >
     <button
       v-for="card in cards"
       :key="card.key"

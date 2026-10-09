@@ -8831,9 +8831,6 @@ components:
             deprecated: 1
             disabled: 1
           coverage:
-            zhSummary:
-              done: 1
-              total: 1
             primaryCategory:
               done: 1
               total: 1
@@ -10125,12 +10122,14 @@ components:
           properties:
             casks:
               type: integer
+              description: "Non-font Cask apps, excluding disabled and removed packages."
               example: 40
             formulae:
               type: integer
               example: 20
             fonts:
               type: integer
+              description: "Font Casks, excluding disabled and removed packages."
               example: 3
             libraries:
               type: integer
@@ -10146,26 +10145,23 @@ components:
               example: 1
         coverage:
           type: object
-          description: "All five coverage metrics use all valid Cask apps as denominator, excluding fonts, disabled, hidden and removed packages."
+          description: "All four coverage metrics use all valid Cask apps, including fonts, as denominator, excluding disabled, hidden and removed packages."
           required:
-            - zhSummary
             - primaryCategory
             - icon
             - latestVersionNotes
             - sixLocaleContent
           properties:
-            zhSummary:
-              $ref: "#/components/schemas/Ratio"
             primaryCategory:
               $ref: "#/components/schemas/Ratio"
             icon:
               $ref: "#/components/schemas/Ratio"
             latestVersionNotes:
-              description: "Valid apps whose current versionBase has non-hidden editorial release notes; excludes historical versions and old upstream notes."
+              description: "Valid apps and fonts whose current versionBase has non-hidden editorial release notes; excludes historical versions and old upstream notes."
               allOf:
                 - $ref: "#/components/schemas/Ratio"
             sixLocaleContent:
-              description: "Valid apps with actual nonempty summaries and introductions in all six languages, status source/machine/manual, and source language/hash matching current source text. Excludes fallback, queued, failed and stale content."
+              description: "Valid apps and fonts with actual nonempty summaries and introductions in all six languages, status source/machine/manual, and source language/hash matching current source text. Excludes fallback, queued, failed and stale content."
               allOf:
                 - $ref: "#/components/schemas/Ratio"
         llm:
@@ -10264,9 +10260,6 @@ components:
           deprecated: 1
           disabled: 1
         coverage:
-          zhSummary:
-            done: 1
-            total: 1
           primaryCategory:
             done: 1
             total: 1
@@ -13916,9 +13909,6 @@ components:
             deprecated: 1
             disabled: 1
           coverage:
-            zhSummary:
-              done: 1
-              total: 1
             primaryCategory:
               done: 1
               total: 1
@@ -17772,7 +17762,7 @@ components:
           ## 改进
 
           改善窗口管理体验。
-      description: "Only recorded Cask versions are allowed; version is the recorded versionBase. One editorial per package/version. Missing release date uses first ingestion time. clear=true deletes every editorial language, checks deletion allowance and saves restorable revisions; no editorial returns 1002. Historical notes remain available as fallback after clearing."
+      description: "Only recorded Cask versions are allowed; version is the recorded versionBase. One editorial per package/version. Omitting publishedAt preserves the existing release date; new notes have no release date unless supplied. Explicit null clears the date. Year 0001 and invalid dates are rejected; ingestion time is never used as a release date. clear=true deletes every editorial language, checks deletion allowance and saves restorable revisions; no editorial returns 1002. Historical notes remain available as fallback after clearing."
     ContentLocaleState:
       example: {"status":"manual","stale":false,"sourceHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","updatedAt":"2026-10-07T08:00:00Z","translatedAt":null,"machineTranslated":false,"model":null,"failReason":null,"fields":{"displayName":"示例应用","summary":"帮助管理日常工作的应用","description":"## 功能\n\n帮助整理日常工作。"}}
       type: object
@@ -23195,9 +23185,6 @@ components:
             deprecated: 1
             disabled: 1
           coverage:
-            zhSummary:
-              done: 1
-              total: 1
             primaryCategory:
               done: 1
               total: 1

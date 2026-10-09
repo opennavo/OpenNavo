@@ -316,10 +316,9 @@
       "disabled": "Desativados",
       "disabledHint": "{deprecated} obsoletos · {hidden} ocultos",
       "coverage": "Cobertura",
-      "coverageHint": "Todos os apps elegíveis; exclui fontes e apps desativados, ocultos ou removidos",
+      "coverageHint": "Todos os apps elegíveis, incluindo fontes; exclui itens desativados, ocultos ou removidos",
       "sixLocaleContentHint": "Os resumos e as descrições devem estar completos e atualizados nos seis idiomas. Fallbacks de idioma não contam.",
       "coverageItems": {
-        "zhSummary": "Resumo em chinês",
         "primaryCategory": "Categoria principal",
         "icon": "Ícone",
         "latestVersionNotes": "Notas da versão mais recente",

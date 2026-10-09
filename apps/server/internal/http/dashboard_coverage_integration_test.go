@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDashboardCoverageAllEligibleAppsAndFreshSixLocaleContent(t *testing.T) {
+func TestDashboardCoverageAllEligibleAppsAndFontsAndFreshSixLocaleContent(t *testing.T) {
 	ctx := context.Background()
 	st := testutil.NewStore(t)
 	password, err := seed.HashPassword("dashboard-test-password")
@@ -35,7 +35,7 @@ func TestDashboardCoverageAllEligibleAppsAndFreshSixLocaleContent(t *testing.T) 
 	seedData, err := seeds.Load()
 	require.NoError(t, err)
 	require.NoError(t, st.Seed(ctx, seedData, "dashboard-tester", password))
-	// Keep 1,001 valid apps so apps outside the popularity ranking enter both numerator and denominator.
+	// Keep 1,001 valid apps and one font so both enter coverage, even outside the popularity ranking.
 	require.NoError(t, st.DB.Exec(`INSERT INTO packages(kind,token,full_token,tap,name,version,version_base,popularity,raw,raw_hash)
  SELECT CASE WHEN n=1006 THEN 'formula' ELSE 'cask' END,'coverage-'||n,'coverage-'||n,
  CASE WHEN n=1006 THEN 'homebrew/core' ELSE 'homebrew/cask' END,'Coverage '||n,'1','1',1007-n,'{}',repeat('a',64)
@@ -79,6 +79,14 @@ func TestDashboardCoverageAllEligibleAppsAndFreshSixLocaleContent(t *testing.T) 
 	require.NoError(t, st.DB.Exec("INSERT INTO package_meta(package_id,hidden) VALUES(?,true)", ids["coverage-1004"]).Error)
 	require.NoError(t, st.DB.Exec("UPDATE packages SET removed_at=now() WHERE token='coverage-1005'").Error)
 	require.NoError(t, st.DB.Exec("UPDATE packages SET deprecated=true WHERE token='coverage-1000'").Error)
+	// A fully populated font contributes to every metric, just like an app.
+	fontID := ids["coverage-1002"]
+	require.NoError(t, st.DB.Exec(`INSERT INTO package_categories(package_id,category_id,is_primary,source)
+ VALUES(?,(SELECT id FROM categories ORDER BY id LIMIT 1),true,'human')`, fontID).Error)
+	var iconID int64
+	require.NoError(t, st.DB.Raw(`INSERT INTO assets(kind,storage_key,url,mime,bytes,sha256)
+ VALUES('icon','coverage-font-icon','https://example.com/font.png','image/png',1,repeat('b',64)) RETURNING id`).Scan(&iconID).Error)
+	require.NoError(t, st.DB.Exec("INSERT INTO package_meta(package_id,icon_asset_id) VALUES(?,?)", fontID, iconID).Error)
 	for _, token := range []string{"coverage-1", "coverage-1001", "coverage-1002", "coverage-1003", "coverage-1004", "coverage-1005", "coverage-1006"} {
 		require.NoError(t, st.DB.Exec("INSERT INTO releases(package_id,source,source_key,version,title) VALUES(?,'editorial',?,'1','Latest notes')", ids[token], token).Error)
 	}
@@ -93,7 +101,11 @@ func TestDashboardCoverageAllEligibleAppsAndFreshSixLocaleContent(t *testing.T) 
 	require.NoError(t, err)
 	spec, err := adminapi.GetSpec()
 	require.NoError(t, err)
-	coverage := func() map[string]adminapi.Ratio {
+	type dashboardSnapshot struct {
+		Packages struct{ Casks, Fonts, Disabled int }
+		Coverage map[string]adminapi.Ratio
+	}
+	overview := func() dashboardSnapshot {
 		t.Helper()
 		req := httptest.NewRequest("GET", "/admin-api/dashboard/overview", nil)
 		req.Header.Set("Authorization", "Bearer "+pair.Token)
@@ -102,20 +114,58 @@ func TestDashboardCoverageAllEligibleAppsAndFreshSixLocaleContent(t *testing.T) 
 		testutil.ValidateResponse(t, spec, "/admin-api", req, rec)
 		var response struct {
 			Code string
-			Data struct{ Coverage map[string]adminapi.Ratio }
+			Data dashboardSnapshot
 		}
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 		require.Equal(t, "0000", response.Code)
-		require.Len(t, response.Data.Coverage, 5)
-		return response.Data.Coverage
+		require.Len(t, response.Data.Coverage, 4)
+		require.NotContains(t, response.Data.Coverage, "zhSummary")
+		return response.Data
 	}
+	coverage := func() map[string]adminapi.Ratio { return overview().Coverage }
+	counts := overview().Packages
+	// Counts include hidden and deprecated apps, but never fonts, disabled apps or removed apps.
+	require.Equal(t, 1002, counts.Casks)
+	require.Equal(t, 1, counts.Fonts)
+	require.Equal(t, 1, counts.Disabled)
+	t.Run("disabled app leaves app count", func(t *testing.T) {
+		require.NoError(t, st.DB.Exec("UPDATE packages SET disabled=true WHERE id=?", tailID).Error)
+		got := overview().Packages
+		require.Equal(t, counts.Casks-1, got.Casks)
+		require.Equal(t, counts.Fonts, got.Fonts)
+		require.Equal(t, counts.Disabled+1, got.Disabled)
+		require.NoError(t, st.DB.Exec("UPDATE packages SET disabled=false WHERE id=?", tailID).Error)
+	})
 	got := coverage()
-	for _, key := range []string{"zhSummary", "primaryCategory", "icon", "latestVersionNotes", "sixLocaleContent"} {
+	for _, key := range []string{"primaryCategory", "icon", "latestVersionNotes", "sixLocaleContent"} {
 		require.Contains(t, got, key)
-		require.Equal(t, 1001, got[key].Total, key)
+		require.Equal(t, 1002, got[key].Total, key)
 	}
-	require.Equal(t, 2, got["latestVersionNotes"].Done)
-	require.Equal(t, 2, got["sixLocaleContent"].Done)
+	require.Equal(t, 3, got["latestVersionNotes"].Done)
+	require.Equal(t, 3, got["sixLocaleContent"].Done)
+	require.Equal(t, 1, got["primaryCategory"].Done)
+	require.Equal(t, 1, got["icon"].Done)
+	for _, tc := range []struct{ name, exclude, restore string }{
+		{"disabled font", "UPDATE packages SET disabled=true WHERE id=?", "UPDATE packages SET disabled=false WHERE id=?"},
+		{"hidden font", "UPDATE package_meta SET hidden=true WHERE package_id=?", "UPDATE package_meta SET hidden=false WHERE package_id=?"},
+		{"removed font", "UPDATE packages SET removed_at=now() WHERE id=?", "UPDATE packages SET removed_at=NULL WHERE id=?"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, st.DB.Exec(tc.exclude, fontID).Error)
+			packages := overview().Packages
+			require.Equal(t, counts.Casks, packages.Casks)
+			if tc.name == "hidden font" {
+				require.Equal(t, 1, packages.Fonts)
+			} else {
+				require.Zero(t, packages.Fonts)
+			}
+			for key, ratio := range coverage() {
+				require.Equal(t, got[key].Total-1, ratio.Total, key)
+				require.Equal(t, got[key].Done-1, ratio.Done, key)
+			}
+			require.NoError(t, st.DB.Exec(tc.restore, fontID).Error)
+		})
+	}
 	for _, tc := range []struct{ name, query string }{
 		{"missing language with display fallback", "DELETE FROM package_i18n WHERE package_id=? AND locale='ja-JP'"},
 		{"missing summary", "UPDATE package_i18n SET summary=NULL WHERE package_id=? AND locale='ja-JP'"},
@@ -132,17 +182,20 @@ func TestDashboardCoverageAllEligibleAppsAndFreshSixLocaleContent(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, st.DB.Exec(tc.query, tailID).Error)
-			require.Equal(t, 1, coverage()["sixLocaleContent"].Done)
-			complete(tailID, "zh-CN")
 			require.Equal(t, 2, coverage()["sixLocaleContent"].Done)
+			complete(tailID, "zh-CN")
+			require.Equal(t, 3, coverage()["sixLocaleContent"].Done)
 		})
 	}
 	t.Run("current version changes", func(t *testing.T) {
 		require.NoError(t, st.DB.Exec("UPDATE packages SET version='2',version_base='2' WHERE id=?", tailID).Error)
-		require.Equal(t, 1, coverage()["latestVersionNotes"].Done)
+		require.Equal(t, 2, coverage()["latestVersionNotes"].Done)
 	})
 	t.Run("empty eligible catalog", func(t *testing.T) {
 		require.NoError(t, st.DB.Exec("UPDATE packages SET disabled=true WHERE kind='cask'").Error)
+		packages := overview().Packages
+		require.Zero(t, packages.Casks)
+		require.Zero(t, packages.Fonts)
 		for key, ratio := range coverage() {
 			require.Zero(t, ratio.Done, key)
 			require.Zero(t, ratio.Total, key)

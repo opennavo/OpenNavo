@@ -14,6 +14,7 @@ import QuitConfirm from '@/components/shell/QuitConfirm.vue';
 import InstallConfirm from '@/components/shell/InstallConfirm.vue';
 import RunningAppsConfirm from '@/components/shell/RunningAppsConfirm.vue';
 import RestorePrompt from '@/components/shell/RestorePrompt.vue';
+import AppUpdateDialog from '@/components/shell/AppUpdateDialog.vue';
 import { useMediaQuery } from '@/composables/useMediaQuery';
 import { usePageRefresh, usePageRecovery } from '@/composables/usePageRefresh';
 import { useToasts } from '@/composables/useToasts';
@@ -101,6 +102,7 @@ watch(
       <RestorePrompt />
       <RunningAppsConfirm />
       <InstallConfirm />
+      <AppUpdateDialog />
       <OnToastRegion :items="toasts.items.value" @dismiss="toasts.dismiss" />
     </template>
   </OnAppShell>

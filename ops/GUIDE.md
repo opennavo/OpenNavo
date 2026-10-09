@@ -191,10 +191,42 @@ backup, applies migrations and grants, starts healthy candidates, and switches
 Caddy routes. It then updates the worker and verifies routes again. A failed
 switch restores old routes and the worker; it never runs down migrations.
 Schema changes must remain compatible with the previous application during the
-rollout. Old application containers and private release snapshots remain for
-operator-controlled rollback. First inspect a failed run on the server; logs
+rollout. After both route checks and the worker update succeed, the receiver stops
+all retired application containers, retains at most one stopped previous release
+for operator-controlled rollback, and removes older application containers. It
+also bounds the rolling Compose overlay and state history to the current and
+immediately previous releases. Infrastructure containers, data volumes, images,
+and private release snapshots are not removed. Start the previous application
+services and verify their health before restoring their routes during a manual
+rollback. Cleanup failures do not roll back a verified release; retrying the same
+revision verifies the live routes and resumes cleanup. First inspect a failed run on the server; logs
 intentionally omit expanded Docker/Compose errors that could reveal secrets.
 The registry token is job-scoped and stored only in a temporary Docker config.
+
+### Production image and build-cache cleanup
+
+Keep all images referenced by existing containers, including stopped containers,
+and the exact image digests or local tags needed by the immediately previous
+release. Include its API, web, MCP, admin, and worker image requirements. Resolve
+references to image IDs before selecting deletions: multiple tags can refer to
+the same image, and a local hotfix may differ from the release's source revision.
+The current release's `before-rolling.json` and `before-release.env` snapshots
+record the previous deployment's image references. Keep its static assets,
+configuration snapshots, and database backup available separately.
+
+Remove only older, unreferenced OpenNavo application images with
+`docker image rm <explicit-tag-or-digest>`, without force. Preserve infrastructure
+images. Do not use broad `docker image prune -a` when rollback images have no
+retained containers: it can remove those images too. Container cleanup in the
+deployment receiver does not automatically perform image cleanup.
+
+Unused build cache can be reclaimed with `docker builder prune -af` when no build
+is in progress. This may make future builds slower, but does not remove runtime
+data volumes. Never add `--volumes` or run volume pruning as part of image cleanup.
+Compare `docker system df` before and after, verify retained rollback images with
+`docker image inspect`, check current container health, and verify the public
+website and admin routes after cleanup. Image sizes share layers, so summing
+individual image sizes does not measure reclaimed disk space.
 
 For desktop builds, configure the Apple certificate/P12 password/signing identity,
 App Store Connect issuer/key ID/P8, and matching Tauri updater private key as

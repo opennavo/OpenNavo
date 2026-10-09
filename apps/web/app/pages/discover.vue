@@ -63,7 +63,8 @@ const heroView = computed<OnDiscoverHero | null>(() =>
         subtitle: hero.value.subtitle,
         description: hero.value.body,
         icons: heroIcons.value,
-        glowColor: hero.value.glowColor
+        glowColor: hero.value.glowColor,
+        href: featureHref(hero.value)?.href
       }
     : null
 );
@@ -91,7 +92,7 @@ const secondaryFeatures = computed<OnDiscoverFeature[]>(() =>
         title: item.title,
         subtitle: item.subtitle,
         description: item.body,
-        icons: item.package ? [toIcon(item.package)] : [],
+        icons: item.package ? [toIcon(item.package)] : collectionIconsForFeature(item),
         glowColor: item.glowColor,
         href: link?.href,
         external: link?.external,
@@ -99,6 +100,13 @@ const secondaryFeatures = computed<OnDiscoverFeature[]>(() =>
       };
     })
 );
+
+function collectionIconsForFeature(feature: Feature) {
+  if (feature.target.type !== 'collection') return [];
+  const slug = feature.target.slug;
+  const collection = home.value?.collections.find(item => item.slug === slug);
+  return collection ? collectionIcons(collection) : [];
+}
 
 const chips = computed(() => [
   { value: 'all', label: t('home.allCategories'), href: localePath('/discover') },

@@ -316,10 +316,9 @@
       "disabled": "無効",
       "disabledHint": "廃止 {deprecated} 件 · 非表示 {hidden} 件",
       "coverage": "カバー率",
-      "coverageHint": "対象となるすべての App。フォントと、無効・非表示・削除済みの App は除きます",
+      "coverageHint": "フォントを含むすべての有効な App。無効・非表示・削除済みの項目は除きます",
       "sixLocaleContentHint": "6言語すべてで概要と説明が揃い、最新である必要があります。言語フォールバックは含まれません。",
       "coverageItems": {
-        "zhSummary": "中国語の概要",
         "primaryCategory": "主カテゴリ",
         "icon": "アイコン",
         "latestVersionNotes": "最新バージョンの更新内容",

@@ -13,7 +13,7 @@ defineOptions({ name: 'CoverageCard' });
 
 const props = defineProps<{ coverage: DataOf<'getDashboardOverview'>['coverage'] }>();
 
-const keys = ['zhSummary', 'primaryCategory', 'icon', 'latestVersionNotes', 'sixLocaleContent'] as const;
+const keys = ['primaryCategory', 'icon', 'latestVersionNotes', 'sixLocaleContent'] as const;
 
 const rows = computed(() =>
   keys.map(key => {
@@ -37,7 +37,9 @@ const rows = computed(() =>
         <span class="text-13px">{{ row.label }}</span>
         <NProgress type="line" :percentage="row.percent" :show-indicator="false" :height="8" />
         <NText depth="2" class="text-right text-12px tabular-nums">
-          {{ formatCount(row.done, { locale: formattingLocale }) }} / {{ formatCount(row.total, { locale: formattingLocale }) }} · {{ formatPercent(row.percent / 100, { locale: formattingLocale, digits: 1 }) }}
+          {{ formatCount(row.done, { locale: formattingLocale }) }} /
+          {{ formatCount(row.total, { locale: formattingLocale }) }} ·
+          {{ formatPercent(row.percent / 100, { locale: formattingLocale, digits: 1 }) }}
         </NText>
       </li>
     </ul>

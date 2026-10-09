@@ -18,6 +18,58 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestEditorialNotesPublicationDates(t *testing.T) {
+	ctx := context.Background()
+	st := testutil.NewStore(t)
+	svc := &Service{Store: st}
+	pkg, err := homebrew.Normalize("cask", json.RawMessage(`{"token":"notes-dates","version":"2.0","name":["Notes Dates"]}`))
+	require.NoError(t, err)
+	require.NoError(t, st.ApplyCatalogBatch(ctx, []store.CatalogMutation{{Package: pkg}}))
+	var pid int64
+	require.NoError(t, st.DB.Raw("SELECT id FROM packages WHERE token='notes-dates'").Scan(&pid).Error)
+	// Historical backfills have a Homebrew commit date but no local observation date.
+	require.NoError(t, st.DB.Exec(`INSERT INTO package_versions(package_id,version,version_base,brew_committed_at) VALUES(?,'1.0','1.0','2026-09-23T08:07:03Z')`, pid).Error)
+	for _, version := range []string{"1.0", "2.0"} {
+		t.Run(version, func(t *testing.T) {
+			write := func(extra map[string]any) error {
+				t.Helper()
+				body := map[string]any{"sourceLocale": "en-US", "summary": "Release notes", "sections": []any{}}
+				for key, value := range extra {
+					body[key] = value
+				}
+				_, err := svc.Execute(ctx, "UpsertReleaseNotes", Input{ID: pid, Version: version, Body: body})
+				return err
+			}
+			readDate := func() *time.Time {
+				t.Helper()
+				var row struct{ PublishedAt *time.Time }
+				require.NoError(t, st.DB.Raw("SELECT published_at FROM releases WHERE package_id=? AND version=? AND source='editorial'", pid, version).Scan(&row).Error)
+				return row.PublishedAt
+			}
+			require.NoError(t, write(nil))
+			require.Nil(t, readDate(), "neither first observation nor Homebrew adoption is a publication date")
+			stamp := "2026-09-22T10:15:00+08:00"
+			expected, err := time.Parse(time.RFC3339, stamp)
+			require.NoError(t, err)
+			require.NoError(t, write(map[string]any{"publishedAt": stamp}))
+			require.WithinDuration(t, expected, *readDate(), 0)
+			require.NoError(t, write(map[string]any{"summary": "Edited notes"}))
+			require.WithinDuration(t, expected, *readDate(), 0, "omission preserves the date")
+			for _, invalid := range []any{"0001-01-01T00:00:00Z", "0001-01-01T08:00:00+08:00", "invalid", "", 42} {
+				err := write(map[string]any{"publishedAt": invalid})
+				var appErr *domain.AppError
+				require.ErrorAs(t, err, &appErr)
+				require.Equal(t, domain.CodeValidation, appErr.Code)
+				require.WithinDuration(t, expected, *readDate(), 0, "invalid writes leave the date intact")
+			}
+			require.NoError(t, write(map[string]any{"publishedAt": nil}))
+			require.Nil(t, readDate(), "explicit null clears the date")
+			require.NoError(t, write(nil))
+			require.Nil(t, readDate(), "an unknown date stays unknown")
+		})
+	}
+}
+
 func TestHermesContentHistoryTransactions(t *testing.T) {
 	ctx := context.Background()
 	st := testutil.NewStore(t)

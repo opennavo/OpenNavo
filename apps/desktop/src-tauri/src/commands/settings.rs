@@ -42,6 +42,11 @@ fn set_autostart(app: &tauri::AppHandle, enabled: bool) -> Result<(), AppError> 
 pub fn locale_get(state: State<'_, Arc<DesktopCore>>) -> Result<Locale, AppError> {
     Ok(state.current_settings()?.locale)
 }
+#[tauri::command]
+#[specta::specta]
+pub fn system_locale_get() -> Result<Locale, AppError> {
+    Ok(crate::settings::system_locale())
+}
 pub fn refresh_system(app: &tauri::AppHandle) {
     use tauri::Manager;
     let Some(core) = app.try_state::<Arc<DesktopCore>>() else {

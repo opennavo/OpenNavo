@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { Component } from 'vue';
 import type { PackageSummary } from '@opennavo/api';
 import OnCategoryChips from './OnCategoryChips.vue';
@@ -11,11 +12,10 @@ import OnSectionHeader from './OnSectionHeader.vue';
 import OnSkeleton from './OnSkeleton.vue';
 import type { OnAppCardStat } from './OnAppCard.vue';
 import OnAppIcon from './OnAppIcon.vue';
-import OnButton from './OnButton.vue';
 import OnHighlightText from './OnHighlightText.vue';
 import OnIcon from './OnIcon.vue';
 
-// Shared Discover presentation (mockup 02, ADR-017): hero, secondary feature, category chips, popular apps, recent updates, collections.
+// Shared Discover presentation (ADR-017): compact primary/secondary picks, categories, apps, and collections.
 // Host supplies data and card slots, with local-state desktop Get buttons or web open/copy/download menus.
 export interface OnDiscoverHero {
   badge: string;
@@ -24,6 +24,8 @@ export interface OnDiscoverHero {
   description?: string | null;
   icons: readonly OnFeatureHeroIcon[];
   glowColor?: string | null;
+  /** Primary destination, used to avoid repeating the same collection among secondary picks. */
+  href?: string;
 }
 
 export interface OnDiscoverCollection {
@@ -35,8 +37,9 @@ export interface OnDiscoverCollection {
   href: string;
 }
 
-export interface OnDiscoverFeature extends OnDiscoverHero {
-  key: number;
+export interface OnDiscoverFeature extends Omit<OnDiscoverHero, 'icons'> {
+  key: number | string;
+  icons: readonly OnCollectionIcon[];
   href?: string;
   external?: boolean;
   detailLabel: string;
@@ -64,15 +67,12 @@ export interface OnDiscoverViewProps {
   labels: OnDiscoverLabels;
   rankingsHref: string;
   collectionsHref: string;
-  /** Web: taller hero at widths ≥1024. */
-  responsive?: boolean;
   linkAs?: string | Component;
 }
 
-withDefaults(defineProps<OnDiscoverViewProps>(), {
+const props = withDefaults(defineProps<OnDiscoverViewProps>(), {
   features: () => [],
   collections: () => [],
-  responsive: false,
   linkAs: 'a'
 });
 
@@ -84,64 +84,130 @@ defineSlots<{
 }>();
 
 const RECENT_STATS: readonly OnAppCardStat[] = ['version', 'installs30d'];
+
+// Retain editorial order and fill vacant slots with real collections, without repeating destinations.
+const secondaryPicks = computed<OnDiscoverFeature[]>(() => {
+  const picks: OnDiscoverFeature[] = [];
+  const destinations = new Set(props.hero?.href ? [props.hero.href] : []);
+  for (const feature of props.features) {
+    if (feature.href && destinations.has(feature.href)) continue;
+    picks.push(feature);
+    if (feature.href) destinations.add(feature.href);
+    if (picks.length === 3) return picks;
+  }
+  if (!props.hero && !picks.length) return picks;
+  for (const collection of props.collections) {
+    if (destinations.has(collection.href)) continue;
+    picks.push({
+      key: `collection:${collection.key}`,
+      badge: '',
+      title: collection.title,
+      subtitle: collection.subtitle,
+      icons: collection.icons,
+      href: collection.href,
+      detailLabel: props.labels.viewAll
+    });
+    destinations.add(collection.href);
+    if (picks.length === 3) break;
+  }
+  return picks;
+});
+
+function featureLinkAttrs(feature: OnDiscoverFeature) {
+  if (!feature.href) return {};
+  return {
+    ...(feature.external || props.linkAs === 'a' ? { href: feature.href } : { to: feature.href }),
+    target: feature.external ? '_blank' : undefined,
+    rel: feature.external ? 'noopener noreferrer' : undefined
+  };
+}
 </script>
 
 <template>
-  <div class="flex flex-col gap-32px pt-8px">
+  <div class="on-discover-view flex flex-col gap-24px pt-8px">
     <slot name="notice" />
 
-    <OnFeatureHero
-      v-if="hero"
-      :badge="hero.badge"
-      :title="hero.title"
-      :subtitle="hero.subtitle ?? undefined"
-      :description="hero.description ?? undefined"
-      :icons="hero.icons"
-      :glow-color="hero.glowColor"
-      :responsive="responsive"
-    >
-      <template #actions>
-        <slot name="heroActions" />
-      </template>
-    </OnFeatureHero>
-
-    <div v-if="features.length" class="grid grid-cols-1 gap-12px md:grid-cols-2">
-      <article
-        v-for="feature in features"
-        :key="feature.key"
-        class="on-discover-feature flex min-w-0 flex-col rounded-big border border-solid border-line-subtle bg-surface-card p-24px"
+    <section v-if="hero || secondaryPicks.length">
+      <OnSectionHeader
+        :title="hero?.badge || secondaryPicks[0]?.badge || labels.collections"
+        :more-label="labels.viewAll"
+        :more-href="collectionsHref"
+        :link-as="linkAs"
+      />
+      <div
+        class="on-discover-picks grid min-w-0 gap-10px"
+        :class="{ 'on-discover-picks-split': hero && secondaryPicks.length }"
       >
-        <div class="flex items-start justify-between gap-16px">
-          <div class="min-w-0">
-            <span v-if="feature.badge" class="text-12px font-500 text-brand-salmon">{{ feature.badge }}</span>
-            <h3 class="m-0 mt-8px text-22px font-600 text-ink-primary">{{ feature.title }}</h3>
-            <p v-if="feature.subtitle" class="m-0 mt-6px text-16px font-500 text-brand-salmon">
-              {{ feature.subtitle }}
-            </p>
-          </div>
-          <OnAppIcon v-if="feature.icons[0]" v-bind="feature.icons[0]" :size="54" class="shrink-0" />
-        </div>
-        <OnHighlightText
-          v-if="feature.description"
-          as="p"
-          :text="feature.description"
-          class="m-0 mt-12px text-14px leading-[1.65] text-ink-secondary"
-        />
-        <div v-if="feature.href" class="mt-auto pt-20px">
-          <OnButton
-            variant="secondary"
-            shape="round"
-            :href="feature.href"
-            :link-as="feature.external ? 'a' : linkAs"
-            :target="feature.external ? '_blank' : undefined"
-            :rel="feature.external ? 'noopener noreferrer' : undefined"
+        <OnFeatureHero
+          v-if="hero"
+          compact
+          :title="hero.title"
+          :subtitle="hero.subtitle ?? undefined"
+          :description="hero.description ?? undefined"
+          :icons="hero.icons"
+          :glow-color="hero.glowColor"
+          :heading-level="3"
+        >
+          <template #actions>
+            <slot name="heroActions" />
+          </template>
+        </OnFeatureHero>
+
+        <div v-if="secondaryPicks.length" class="grid min-w-0 content-start gap-10px">
+          <component
+            :is="feature.href ? (feature.external ? 'a' : linkAs) : 'article'"
+            v-for="feature in secondaryPicks"
+            :key="feature.key"
+            v-bind="featureLinkAttrs(feature)"
+            class="on-discover-feature box-border flex min-w-0 items-center gap-12px rounded-big border border-solid border-line-subtle bg-surface-card p-14px text-ink-primary no-underline outline-none"
+            :class="{
+              'on-discover-feature-link hover:bg-surface-raised focus-visible:shadow-focus-ring': feature.href
+            }"
           >
-            {{ feature.detailLabel }}
-            <OnIcon name="arrow-up-right" :size="15" />
-          </OnButton>
+            <OnAppIcon
+              v-if="feature.icons[0]?.kind && feature.icons[0]?.token && feature.icons[0]?.name"
+              :kind="feature.icons[0].kind"
+              :token="feature.icons[0].token"
+              :name="feature.icons[0].name"
+              :src="feature.icons[0].src"
+              :accent="feature.icons[0].accent"
+              :size="40"
+            />
+            <img
+              v-else-if="feature.icons[0]?.src"
+              :src="feature.icons[0].src"
+              alt=""
+              width="40"
+              height="40"
+              loading="lazy"
+              class="h-40px w-40px shrink-0 rounded-app-icon object-cover"
+            />
+            <span
+              v-else
+              class="grid h-40px w-40px shrink-0 place-items-center rounded-app-icon bg-surface-raised text-ink-secondary"
+              aria-hidden="true"
+            >
+              <OnIcon name="library" :size="22" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <h3 class="m-0 truncate text-15px font-600" :title="feature.title">{{ feature.title }}</h3>
+              <OnHighlightText
+                v-if="feature.subtitle || feature.description"
+                as="p"
+                :text="feature.subtitle || feature.description || ''"
+                class="m-0 mt-4px truncate text-12px leading-[1.5] text-ink-secondary"
+              />
+            </div>
+            <OnIcon
+              v-if="feature.href"
+              :name="feature.external ? 'arrow-up-right' : 'chevron-right'"
+              :size="16"
+              class="shrink-0 text-ink-secondary"
+            />
+          </component>
         </div>
-      </article>
-    </div>
+      </div>
+    </section>
 
     <OnCategoryChips
       v-if="chips.length > 1"
@@ -202,3 +268,24 @@ const RECENT_STATS: readonly OnAppCardStat[] = ['version', 'installs30d'];
     </section>
   </div>
 </template>
+
+<style scoped>
+.on-discover-view {
+  container-type: inline-size;
+}
+
+.on-discover-feature {
+  min-height: 74px;
+}
+
+.on-discover-feature-link {
+  transition: background-color var(--on-motion-duration-fast) var(--on-motion-easing-standard);
+}
+
+/* Use the available content width: desktop sidebars can leave little room even in a wide window. */
+@container (min-width: 640px) {
+  .on-discover-picks-split {
+    grid-template-columns: minmax(0, 1.65fr) minmax(240px, 1fr);
+  }
+}
+</style>

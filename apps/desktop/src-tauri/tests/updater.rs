@@ -1,6 +1,23 @@
 #![cfg(target_os = "macos")]
 #[path = "support/updater.rs"]
 mod support;
+
+#[test]
+fn self_update_checks_default_to_enabled_and_preserve_explicit_opt_out() {
+    use opennavo_desktop_lib::model::Settings;
+    assert!(Settings::default().auto_check_app_updates);
+    let legacy: Settings = serde_json::from_str(r#"{"autoCheck":false}"#).unwrap();
+    assert!(!legacy.auto_check);
+    assert!(legacy.auto_check_app_updates);
+    let opted_out: Settings = serde_json::from_str(r#"{"autoCheckAppUpdates":false}"#).unwrap();
+    assert!(!opted_out.auto_check_app_updates);
+    let persisted = serde_json::to_string(&opted_out).unwrap();
+    assert!(
+        !serde_json::from_str::<Settings>(&persisted)
+            .unwrap()
+            .auto_check_app_updates
+    );
+}
 use std::path::Path;
 use support::*;
 

@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import { h } from 'vue';
 import type { ReleaseEntry } from '@opennavo/api';
+import { formatDate } from '@opennavo/shared';
 import OnVersionEntry from '../src/components/OnVersionEntry.vue';
 import OnVersionTimeline from '../src/components/OnVersionTimeline.vue';
 import { isMachineTranslated, isPatchVersion, parseInline } from '../src/utils/version';
@@ -55,6 +56,32 @@ describe('Release highlights and version numbers', () => {
 });
 
 describe('OnVersionEntry', () => {
+  it.each([false, true])('Falls back from missing or invalid release dates (collapsed=%s)', async collapsed => {
+    const brewCommittedAt = '2026-09-23T08:07:03Z';
+    const wrapper = mount(OnVersionEntry, {
+      props: { entry: entry('5.6.2', { source: 'github_release', brewCommittedAt }), collapsed },
+      global: withLocale('zh-CN')
+    });
+    const dateText = () => wrapper.find('span.text-12\\.5px').text();
+    // Valid publication dates still take precedence over the adoption date.
+    expect(dateText()).toBe(formatDate('2026-09-30T08:00:00Z', { locale: 'zh-CN', weekday: !collapsed }));
+    for (const publishedAt of [null, '', '0001-01-01T00:00:00Z', 'invalid-date']) {
+      await wrapper.setProps({
+        entry: entry('5.6.2', { source: 'github_release', publishedAt, brewCommittedAt })
+      });
+      expect(dateText()).toBe(formatDate(brewCommittedAt, { locale: 'zh-CN', weekday: !collapsed }));
+      expect(wrapper.text()).not.toContain('1年1月1日');
+      expect(wrapper.text()).not.toContain('NaN');
+    }
+    for (const invalid of [null, '0001-01-01T00:00:00Z', 'invalid-date']) {
+      await wrapper.setProps({
+        entry: entry('5.6.2', { publishedAt: invalid, brewCommittedAt: invalid })
+      });
+      expect(dateText()).toBe('');
+      expect(wrapper.text()).not.toContain('Homebrew 收录');
+    }
+  });
+
   it('Displays summaries and grouped highlights together and shows descriptions for summary-only releases', async () => {
     const summary = '保留远程执行环境。\n\n适用于跨平台 MCP 启动场景。';
     const wrapper = mount(OnVersionEntry, {

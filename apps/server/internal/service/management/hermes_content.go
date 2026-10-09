@@ -112,11 +112,8 @@ func (s *Service) upsertNotes(ctx context.Context, in Input) (any, error) {
 		return nil, domain.Validation()
 	}
 	return s.write(ctx, in, "UpsertReleaseNotes", "release", func(st *store.Store) (any, error) {
-		var version struct {
-			ID   int64
-			Date time.Time
-		}
-		if err := st.DB.WithContext(ctx).Raw(`SELECT v.id,v.first_seen_at date FROM package_versions v JOIN packages p ON p.id=v.package_id WHERE v.package_id=? AND v.version_base=? AND p.kind='cask' ORDER BY v.id DESC LIMIT 1`, in.ID, in.Version).Scan(&version).Error; err != nil {
+		var version struct{ ID int64 }
+		if err := st.DB.WithContext(ctx).Raw(`SELECT v.id FROM package_versions v JOIN packages p ON p.id=v.package_id WHERE v.package_id=? AND v.version_base=? AND p.kind='cask' ORDER BY v.id DESC LIMIT 1`, in.ID, in.Version).Scan(&version).Error; err != nil {
 			return nil, err
 		}
 		if version.ID == 0 {
@@ -145,13 +142,19 @@ func (s *Service) upsertNotes(ctx context.Context, in Input) (any, error) {
 			}
 			return mutationResult(ctx, st, ref)
 		}
-		date := version.Date
-		if value := text(in.Body, "publishedAt"); value != "" {
-			var err error
-			date, err = time.Parse(time.RFC3339, value)
-			if err != nil {
+		// Ingestion time is not a release date. Preserve unknown dates as SQL NULL.
+		var date *time.Time
+		value, dateProvided := in.Body["publishedAt"]
+		if dateProvided && value != nil {
+			stamp, ok := value.(string)
+			if !ok {
 				return nil, domain.Validation()
 			}
+			parsed, err := time.Parse(time.RFC3339, stamp)
+			if err != nil || parsed.UTC().Year() <= 1 {
+				return nil, domain.Validation()
+			}
+			date = &parsed
 		}
 		if id == 0 {
 			if err := st.DB.WithContext(ctx).Raw(`INSERT INTO releases(package_id,source,source_key,version,published_at,source_locale) VALUES(?,'editorial',?,?,?,?) RETURNING id`, in.ID, "editorial:"+in.Version, in.Version, date, text(in.Body, "sourceLocale")).Scan(&id).Error; err != nil {
@@ -161,7 +164,10 @@ func (s *Service) upsertNotes(ctx context.Context, in Input) (any, error) {
 		if err := st.DB.WithContext(ctx).Exec("UPDATE releases SET hidden=true,updated_at=now() WHERE package_id=? AND version=? AND source='editorial' AND id<>? AND NOT hidden", in.ID, in.Version, id).Error; err != nil {
 			return nil, err
 		}
-		fields := map[string]any{"hidden": false, "published_at": date, "updated_at": s.now()}
+		fields := map[string]any{"hidden": false, "updated_at": s.now()}
+		if dateProvided {
+			fields["published_at"] = date
+		}
 		for _, key := range []string{"title", "bodyMarkdown"} {
 			if v, present := in.Body[key]; present {
 				col := key

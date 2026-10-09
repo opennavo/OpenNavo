@@ -9,7 +9,7 @@ import QuitConfirm from '@/components/shell/QuitConfirm.vue';
 import RunningTask from '@/components/updates/RunningTask.vue';
 import SourceCards from '@/components/welcome/SourceCards.vue';
 import PermissionChecklist from '@/components/permissions/PermissionChecklist.vue';
-import type { Task } from '@/ipc/bindings';
+import type { Locale, Task } from '@/ipc/bindings';
 import { IpcError, commands, unwrap } from '@/ipc/client';
 import { sameMirrorChoice, toMirrorChoice, useMirrorOptions } from '@/composables/useMirrorOptions';
 import type { MirrorOption } from '@/composables/useMirrorOptions';
@@ -32,10 +32,23 @@ const permissions = usePermissionsStore();
 const toasts = useToasts();
 const inBrowser = !isTauri();
 const { errorText } = usePackageState();
-const { options, failed: configFailed, probes, probing, find, load, probe, unreachable } = useMirrorOptions();
+// Use the computer's language independently of the user's manual UI language choice.
+const systemLocale = ref<Locale>();
+const showMirrors = computed(() => systemLocale.value === 'zh-CN');
+const {
+  options,
+  failed: configFailed,
+  probes,
+  probing,
+  find,
+  load,
+  probe,
+  unreachable
+} = useMirrorOptions(() => showMirrors.value);
 
 onMounted(async () => {
   void permissions.refresh().catch(() => undefined);
+  systemLocale.value = await unwrap(commands.systemLocaleGet()).catch(() => 'en-US' as const);
   await load();
   await probe();
 });
@@ -92,7 +105,10 @@ const checks = computed(() => {
     {
       key: 'macos',
       state: 'ok' as CheckState,
-      label: t('welcome.macos', { version: info.macosVersion, arch: t(`welcome.arch.${arch.value}`) }),
+      label: t('welcome.macos', {
+        version: info.macosVersion,
+        arch: t(`welcome.arch.${arch.value}`)
+      }),
       status: t('welcome.macosOk')
     },
     {
@@ -144,6 +160,8 @@ const recommended = computed(() => {
 // Track the user's selected card; without a selection, choose the lowest latency after probing, or official if all fail.
 const pickedCard = ref<'official' | 'mirror'>();
 const selectedKey = computed(() => {
+  if (!systemLocale.value) return undefined;
+  if (!showMirrors.value) return 'official';
   if (pickedCard.value === 'official') return 'official';
   if (pickedCard.value === 'mirror' && mirror.value) return mirror.value.key;
   if (recommended.value) return recommended.value;
@@ -282,7 +300,9 @@ async function viewLog(task: Task) {
 
         <section class="mt-24px flex flex-col gap-10px" aria-labelledby="welcome-source">
           <div class="flex items-center justify-between gap-12px">
-            <h2 id="welcome-source" class="m-0 text-14px font-600 text-ink-primary">{{ t('welcome.source.title') }}</h2>
+            <h2 id="welcome-source" class="m-0 text-14px font-600 text-ink-primary">
+              {{ t('welcome.source.title') }}
+            </h2>
             <OnButton
               variant="ghost"
               size="xs"
@@ -296,11 +316,12 @@ async function viewLog(task: Task) {
           <SourceCards
             :official="official"
             :mirror="mirror"
+            :show-mirror="showMirrors"
             :probes="probes"
             :probing="probing"
             :selected="selectedKey"
             :recommended="recommended"
-            :config-failed="configFailed"
+            :config-failed="showMirrors && configFailed"
             :disabled="locked"
             @select="select"
             @retry="reloadMirrors"
@@ -357,7 +378,9 @@ async function viewLog(task: Task) {
           <RunningTask v-if="installTask?.state === 'running'" :task="installTask" />
           <template v-else>
             <div v-if="failure" class="rounded-default bg-status-danger-subtle px-14px py-12px" role="alert">
-              <p class="m-0 text-14px font-600 text-status-danger">{{ t('welcome.failed.title') }}</p>
+              <p class="m-0 text-14px font-600 text-status-danger">
+                {{ t('welcome.failed.title') }}
+              </p>
               <p class="m-0 mt-4px text-13px text-ink-secondary">{{ failureText }}</p>
               <div class="mt-10px flex flex-wrap gap-8px">
                 <OnButton variant="ghost" size="sm" icon="file-text" @click="viewLog(failure)">{{
@@ -371,7 +394,9 @@ async function viewLog(task: Task) {
             <OnButton variant="accent" size="lg" block :loading="locked" :disabled="!selectedKey" @click="install">{{
               t('welcome.install')
             }}</OnButton>
-            <p class="m-0 text-center text-12.5px leading-[1.55] text-ink-tertiary">{{ t('welcome.passwordHint') }}</p>
+            <p class="m-0 text-center text-12.5px leading-[1.55] text-ink-tertiary">
+              {{ t('welcome.passwordHint') }}
+            </p>
           </template>
         </footer>
       </div>

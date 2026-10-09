@@ -4,6 +4,7 @@ import { formatMilliseconds } from '@opennavo/shared';
 import WelcomePage from '@/pages/WelcomePage.vue';
 import { i18n } from '@/i18n';
 import { commands, unwrap } from '@/ipc/client';
+import type { Locale } from '@/ipc/bindings';
 import { startLocalState, usePermissionsStore, useSettingsStore } from '@/stores';
 import { setup } from './helpers';
 
@@ -52,11 +53,17 @@ const MIRRORS = [
   }
 ];
 
-async function open(options: { brew?: boolean; flags?: string } = {}) {
+async function open(options: { brew?: boolean; flags?: string; systemLocale?: Locale; locale?: Locale } = {}) {
   // Simulation switches come from the URL and must be set before installing simulated IPC.
-  window.history.replaceState(null, '', options.flags ? `/?mock=${options.flags}` : '/');
+  const params = new URLSearchParams({ 'mock-system-locale': options.systemLocale ?? 'zh-CN' });
+  if (options.flags) params.set('mock', options.flags);
+  window.history.replaceState(null, '', `/?${params}`);
   const context = await setup('/welcome', { brew: options.brew ?? false, tickMs: 5 });
   await startLocalState();
+  if (options.locale) {
+    await useSettingsStore().setLanguage(options.locale);
+    i18n.global.locale.value = options.locale;
+  }
   const wrapper = mount(WelcomePage, {
     global: { plugins: [context.pinia, context.router, i18n] },
     attachTo: document.body
@@ -77,7 +84,9 @@ const start = () => button('开始使用');
 /** Click Enable App Management and wait for it to be enabled in simulated System Settings. */
 async function grantAppManagement() {
   button('开启 App 管理')?.click();
-  await vi.waitFor(() => expect(usePermissionsStore().appManagement).toBe('granted'), { timeout: 3000 });
+  await vi.waitFor(() => expect(usePermissionsStore().appManagement).toBe('granted'), {
+    timeout: 3000
+  });
   await flushPromises();
 }
 const text = () => document.body.textContent ?? '';
@@ -103,6 +112,46 @@ afterEach(async () => {
 });
 
 describe('Welcome without Homebrew', () => {
+  it.each(['en-US', 'ja-JP', 'es-ES', 'pt-BR', 'ru-RU'] as const)(
+    '%s computers only show, probe and install from official, even with Chinese UI',
+    async systemLocale => {
+      const probe = vi.spyOn(commands, 'mirrorProbe');
+      await open({ systemLocale });
+      expect(radios()).toHaveLength(1);
+      expect(checked()).toContain('官方源安装');
+      expect(probe).toHaveBeenCalled();
+      expect(probe.mock.calls.every(([inputs]) => inputs.length === 1 && inputs[0]?.key === 'official')).toBe(true);
+      const enqueue = vi.spyOn(commands, 'taskEnqueue');
+      button('安装 Homebrew')?.click();
+      await flushPromises();
+      expect(enqueue).toHaveBeenCalledWith('install_homebrew', null, {}, 'manual');
+      expect(useSettingsStore().value?.mirror.key).toBe('official');
+    }
+  );
+
+  it('Chinese computers retain mirrors after switching the UI to English', async () => {
+    await open({ systemLocale: 'zh-CN', locale: 'en-US' });
+    expect(radios()).toHaveLength(2);
+    expect(checked()).toContain('Other Mirror');
+  });
+
+  it('Non-Chinese computers do not show mirror-list failures', async () => {
+    remote.config = null;
+    await open({ systemLocale: 'en-US' });
+    expect(radios()).toHaveLength(1);
+    expect(checked()).toContain('官方源安装');
+    expect(text()).not.toContain('暂时拿不到镜像列表');
+  });
+
+  it('Non-Chinese computers do not offer mirrors after official downloads fail', async () => {
+    await open({ systemLocale: 'en-US', flags: 'brew-install-fail-download' });
+    button('安装 Homebrew')?.click();
+    await vi.waitFor(() => expect(text()).toContain('安装脚本下载失败'), { timeout: 3000 });
+    expect(button('改用清华 TUNA')).toBeUndefined();
+    expect(radios()).toHaveLength(1);
+    expect(useSettingsStore().value?.mirror.key).toBe('official');
+  });
+
   it('Official left, fastest mirror right; select/recommend only lowest latency', async () => {
     await open();
     expect(radios().map(item => item.textContent)).toEqual([
@@ -192,7 +241,9 @@ describe('Welcome without Homebrew', () => {
   it('Failures show reason/logs; reinstall clears the failure panel', async () => {
     await open({ flags: 'brew-install-fail-sudo' });
     button('安装 Homebrew')?.click();
-    await vi.waitFor(() => expect(text()).toContain('没有输入管理员密码，安装已取消。'), { timeout: 3000 });
+    await vi.waitFor(() => expect(text()).toContain('没有输入管理员密码，安装已取消。'), {
+      timeout: 3000
+    });
     expect(text()).toContain('Homebrew 没有装好');
 
     button('查看日志')?.click();
@@ -254,7 +305,10 @@ describe('Welcome with Homebrew', () => {
     start()?.click();
     await flushPromises();
     const settings = useSettingsStore().value;
-    expect(settings?.mirror).toMatchObject({ key: 'tuna', brewGitRemote: `${TUNA}/git/homebrew/brew.git` });
+    expect(settings?.mirror).toMatchObject({
+      key: 'tuna',
+      brewGitRemote: `${TUNA}/git/homebrew/brew.git`
+    });
     expect(settings?.onboardingCompleted).toBe(true);
     expect(router.currentRoute.value.path).toBe('/discover');
     expect(replace).toHaveBeenCalledWith('/discover');
@@ -267,7 +321,9 @@ describe('Welcome with Homebrew', () => {
     expect(start()?.disabled).toBe(false);
     const guide = vi.spyOn(commands, 'permissionGuideOpen');
     button('开启完全磁盘访问权限')?.click();
-    await vi.waitFor(() => expect(usePermissionsStore().fullDiskAccess).toBe('granted'), { timeout: 3000 });
+    await vi.waitFor(() => expect(usePermissionsStore().fullDiskAccess).toBe('granted'), {
+      timeout: 3000
+    });
     await flushPromises();
     expect(guide).toHaveBeenCalledWith('full_disk_access');
     expect(button('开启完全磁盘访问权限')).toBeUndefined();

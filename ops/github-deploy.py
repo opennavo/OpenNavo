@@ -117,6 +117,10 @@ class Deployment:
         for source, name in [(self.live_caddy, 'before-caddy'), (self.rolling, 'before-rolling.json'), (self.env, 'before-release.env'), (self.state_path, 'before-state.json')]:
             shutil.copyfile(source, self.directory / name)
         overlay = json.loads(self.rolling.read_text())
+        # Keep only the live release as the rollback candidate in the next overlay.
+        live_services = set(self.state['services'].values())
+        overlay['services'] = {name: service for name, service in overlay['services'].items()
+                               if not re.match(r'^(api|web|mcp|admin)(?:_|$)', name) or name in live_services}
         routes = self.live_caddy.read_text()
         for kind, new in self.services.items():
             old = self.state['services'][kind]
@@ -220,8 +224,38 @@ class Deployment:
         self.compose('stop', *self.services.values())
         print('Previous routes and worker restored; database was not rolled back.', flush=True)
 
+    def cleanup(self, previous):
+        """Stop retired application containers and retain only one rollback release."""
+        current = set(self.services.values())
+        retained = set(previous.get('services', {}).values())
+        ids = command(['docker', 'ps', '-aq', '--filter',
+                       'label=com.docker.compose.project=' + self.config['project']]).splitlines()
+        if not ids:
+            return
+        containers = json.loads(command(['docker', 'inspect', *ids]))
+        retired = []
+        for container in containers:
+            labels = container['Config'].get('Labels') or {}
+            service = labels.get('com.docker.compose.service', '')
+            if (labels.get('com.docker.compose.project') != self.config['project']
+                    or not re.fullmatch(r'(api|web|mcp|admin)(?:_[A-Za-z0-9_]+)?', service)
+                    or service in current):
+                continue
+            retired.append((container, service))
+        running = [container['Id'] for container, _ in retired if container['State']['Running']]
+        if running:
+            command(['docker', 'stop', '--timeout', '30', *running])
+        obsolete = [container['Id'] for container, service in retired if service not in retained]
+        if obsolete:
+            # Never remove volumes, images, or release files during container cleanup.
+            command(['docker', 'rm', *obsolete])
+        print('Retired containers stopped; at most one previous release retained.', flush=True)
+
     def apply(self, archive):
         if self.state.get('sha') == self.payload['sha']:
+            self.services = self.state['services']
+            self.verify()
+            self.cleanup(self.state.get('previous', {}))
             print('This source revision is already deployed.'); return
         with tempfile.TemporaryDirectory() as auth:
             token = self.payload.get('registry_token', '')
@@ -253,10 +287,12 @@ class Deployment:
         except Exception:
             self.rollback()
             raise
-        write_private(self.state_path, {'sha': self.payload['sha'], 'release': self.release, 'services': self.services, 'previous': self.state})
+        previous = {key: value for key, value in self.state.items() if key != 'previous'}
+        write_private(self.state_path, {'sha': self.payload['sha'], 'release': self.release, 'services': self.services, 'previous': previous})
         write_private(self.directory / 'manifest.json', {key: value for key, value in self.payload.items() if key not in ['admin_archive', 'registry_token']})
         print('Production deployed and verified: ' + self.payload['sha'], flush=True)
-        # Old web/API containers stay available for a subsequent operator-controlled rollback.
+        # Cleanup failure must not roll back a verified release; a retry resumes cleanup.
+        self.cleanup(previous)
 
 
 def main():

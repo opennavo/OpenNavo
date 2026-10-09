@@ -59,6 +59,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::updates::updates_unignore,
             commands::settings::settings_get,
             commands::settings::locale_get,
+            commands::settings::system_locale_get,
             commands::settings::settings_set,
             commands::mirror::mirror_probe,
             commands::tasks::apps_running,

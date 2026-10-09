@@ -47,11 +47,10 @@ const pages: PageMessages = {
     disabled: 'Disabled',
     disabledHint: '{deprecated} deprecated · {hidden} hidden',
     coverage: 'Coverage',
-    coverageHint: 'All eligible apps; excludes fonts and disabled, hidden or removed apps',
+    coverageHint: 'All eligible apps, including fonts; excludes disabled, hidden or removed items',
     sixLocaleContentHint:
       'Summaries and descriptions must be complete and current in all six languages. Language fallbacks do not count.',
     coverageItems: {
-      zhSummary: 'Chinese summary',
       primaryCategory: 'Primary category',
       icon: 'Icon',
       latestVersionNotes: 'Latest version notes',

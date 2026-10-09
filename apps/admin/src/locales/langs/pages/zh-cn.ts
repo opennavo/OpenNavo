@@ -37,10 +37,9 @@ const pages = {
     disabled: '停用',
     disabledHint: '弃用 {deprecated} · 隐藏 {hidden}',
     coverage: '覆盖率',
-    coverageHint: '全部有效 App，不含字体、停用、隐藏和已移除项',
+    coverageHint: '全部有效 App（含字体），不含停用、隐藏和已移除项',
     sixLocaleContentHint: '六种语言的简介与介绍均齐全且未过期；语言回退不计入。',
     coverageItems: {
-      zhSummary: '中文简介',
       primaryCategory: '主分类',
       icon: '图标',
       latestVersionNotes: '最新版本更新说明',

@@ -734,6 +734,23 @@ const messages: MessageSchema = {
     discard: 'Discard'
   },
   updater: {
+    autoCheck: 'Automatically check for OpenNavo updates',
+    autoCheckHint: 'Check after launch, with one successful check per day.',
+    foundTitle: 'New update available',
+    foundDescription: 'OpenNavo {version} is ready to download',
+    versionChange: 'Current version {current} → New version {next}',
+    notesTitle: 'What’s new',
+    noNotes: 'No release notes were provided.',
+    fullNotes: 'View full release notes',
+    later: 'Later',
+    restartHint: 'Restart after installation. You can finish your current tasks first.',
+    readyTitle: 'Update ready',
+    downloadingUnknown: 'Downloading update…',
+    installFailed: 'Download or installation failed. Please retry.',
+    viewUpdate: 'View update',
+    previewHint:
+      'Development preview: simulated download and installation; no real update. Restart only closes the preview; you can view it again.',
+    previewFailure: 'Simulate download failure',
     title: 'App updates',
     current: 'Current version {version}',
     check: 'Check for updates',

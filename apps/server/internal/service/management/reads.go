@@ -121,12 +121,12 @@ func (s *Service) llmUsage(ctx context.Context, in Input) (any, error) {
 	return s.Store.JSONRows(ctx, `SELECT jsonb_build_object('month',to_char(date_trunc('month',created_at),'YYYY-MM'),'task',task,'promptTokens',sum(prompt_tokens),'completionTokens',sum(completion_tokens),'reasoningTokens',sum(reasoning_tokens),'cachedTokens',sum(cached_tokens),'requests',count(*),'costUsd',sum(cost_usd)) AS data FROM llm_usage WHERE created_at>=date_trunc('month',?::timestamptz)-(?-1)*interval '1 month' GROUP BY date_trunc('month',created_at),task ORDER BY date_trunc('month',created_at) DESC,task`, s.now(), months)
 }
 func (s *Service) dashboard(ctx context.Context) (any, error) {
-	// All five metrics share the valid-app set; six-language coverage counts actual current-source content, never display fallback.
+	// All four metrics share the valid-app-and-font set; six-language coverage counts actual current-source content, never display fallback.
 	raw, err := s.Store.JSONRow(ctx, `
 WITH eligible AS (
  SELECT p.id,p.source_locale FROM packages p
  LEFT JOIN package_meta m ON m.package_id=p.id
- WHERE p.kind='cask' AND p.removed_at IS NULL AND NOT p.is_font
+ WHERE p.kind='cask' AND p.removed_at IS NULL
  AND NOT p.disabled AND NOT COALESCE(m.hidden,false)
 ), complete_content AS (
  SELECT e.id FROM eligible e
@@ -143,17 +143,13 @@ WITH eligible AS (
 )
 SELECT jsonb_build_object(
  'packages',(SELECT jsonb_build_object(
-  'casks',count(*) FILTER(WHERE p.kind='cask'),'formulae',count(*) FILTER(WHERE p.kind='formula'),
-  'fonts',count(*) FILTER(WHERE p.is_font),'libraries',count(*) FILTER(WHERE p.is_library),
+  'casks',count(*) FILTER(WHERE NOT p.is_font AND NOT p.disabled),'formulae',count(*) FILTER(WHERE p.kind='formula'),
+  'fonts',count(*) FILTER(WHERE p.is_font AND NOT p.disabled),'libraries',count(*) FILTER(WHERE p.is_library),
   'hidden',count(*) FILTER(WHERE m.hidden),'deprecated',count(*) FILTER(WHERE p.deprecated),
   'disabled',count(*) FILTER(WHERE p.disabled))
   FROM packages p LEFT JOIN package_meta m ON m.package_id=p.id
   WHERE p.kind='cask' AND p.removed_at IS NULL),
  'coverage',jsonb_build_object(
-  'zhSummary',jsonb_build_object(
-   'done',(SELECT count(*) FROM eligible e JOIN package_i18n i ON i.package_id=e.id
-    WHERE i.locale='zh-CN' AND COALESCE(i.summary,'')<>''),
-   'total',(SELECT count(*) FROM eligible)),
   'primaryCategory',jsonb_build_object(
    'done',(SELECT count(DISTINCT e.id) FROM eligible e JOIN package_categories c ON c.package_id=e.id AND c.is_primary),
    'total',(SELECT count(*) FROM eligible)),

@@ -40,6 +40,8 @@ export interface OnFeatureHeroProps {
   linkAs?: string | Component;
   /** Web at ≥1024 width: increase height to 360. */
   responsive?: boolean;
+  /** Compact discovery pick; preserves the full-size hero for other surfaces. */
+  compact?: boolean;
   headingLevel?: 2 | 3;
 }
 
@@ -75,7 +77,7 @@ const floats = computed<FloatIcon[]>(() =>
     const slot = SLOTS[index] as (typeof SLOTS)[number];
     return {
       icon,
-      size: slot.size,
+      size: props.compact ? ([64, 40, 32] as const)[index]! : slot.size,
       style: {
         left: `${slot.left}px`,
         top: `${slot.top}px`,
@@ -98,8 +100,12 @@ const heading = computed(() => `h${props.headingLevel}`);
 
 <template>
   <section
-    class="relative box-border min-h-276px overflow-hidden rounded-huge border border-solid border-line-subtle bg-component-hero-bg font-sans md:h-276px"
-    :class="responsive ? 'on-hero-responsive lg:h-360px' : ''"
+    class="relative box-border overflow-hidden border border-solid border-line-subtle bg-component-hero-bg font-sans"
+    :class="
+      compact
+        ? 'on-hero-compact rounded-big'
+        : ['min-h-276px rounded-huge md:h-276px', responsive ? 'on-hero-responsive lg:h-360px' : '']
+    "
   >
     <div class="on-hero-stage pointer-events-none absolute h-520px w-520px" aria-hidden="true">
       <div class="on-hero-glow absolute inset-0 rounded-full" :style="glowStyle"></div>
@@ -130,7 +136,10 @@ const heading = computed(() => `h${props.headingLevel}`);
     </div>
 
     <!-- Mockup text has no right padding and body width 398; add padding on narrow screens to avoid touching edges. -->
-    <div class="relative box-border max-w-430px pb-28px pl-32px pr-24px pt-20px sm:pr-0 md:pb-0">
+    <div
+      class="on-hero-copy relative box-border"
+      :class="compact ? 'p-24px' : 'max-w-430px pb-28px pl-32px pr-24px pt-20px sm:pr-0 md:pb-0'"
+    >
       <span
         v-if="badge"
         class="inline-flex h-26px items-center gap-6px rounded-small bg-accent-salmon-subtle px-10px text-12.5px font-500 text-brand-salmon"
@@ -138,11 +147,18 @@ const heading = computed(() => `h${props.headingLevel}`);
         {{ badge }}
         <span class="inline-flex" aria-hidden="true"><OnLogo star :size="13" /></span>
       </span>
-      <component :is="heading" class="m-0 mt-16px text-display text-ink-primary max-md:text-36px">
+      <component
+        :is="heading"
+        class="m-0 text-ink-primary"
+        :class="
+          compact ? 'text-26px font-600 leading-[1.2] tracking-[-0.02em]' : 'mt-16px text-display max-md:text-36px'
+        "
+      >
         {{ title }}
         <span
           v-if="subtitle"
-          class="mt-4px block text-32px leading-[1.08] tracking-[-0.02em] text-brand-salmon max-md:text-26px"
+          class="mt-4px block tracking-[-0.02em] text-brand-salmon"
+          :class="compact ? 'text-20px leading-[1.3]' : 'text-32px leading-[1.08] max-md:text-26px'"
           >{{ subtitle }}</span
         >
       </component>
@@ -151,6 +167,7 @@ const heading = computed(() => `h${props.headingLevel}`);
         as="p"
         :text="description"
         class="m-0 mt-14px text-14px leading-[1.65] text-ink-secondary"
+        :class="{ 'on-hero-description-compact': compact }"
       />
       <div class="mt-20px flex flex-wrap gap-10px">
         <slot name="actions">
@@ -186,6 +203,44 @@ const heading = computed(() => `h${props.headingLevel}`);
 
 .on-hero-float {
   filter: drop-shadow(var(--on-shadow-float-icon));
+}
+
+.on-hero-compact {
+  container: discover-hero / inline-size;
+  min-width: 0;
+  min-height: 242px;
+}
+
+.on-hero-compact .on-hero-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 242px;
+  overflow-wrap: anywhere;
+}
+
+.on-hero-description-compact {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.on-hero-compact .on-hero-stage {
+  display: none;
+  right: -326px;
+  bottom: -358px;
+}
+
+/* Decoration only appears when it can sit beside the copy without reducing readability. */
+@container discover-hero (min-width: 460px) {
+  .on-hero-compact .on-hero-stage {
+    display: block;
+  }
+
+  .on-hero-compact .on-hero-copy {
+    padding-right: 152px;
+  }
 }
 
 /* Wide web card (≥1024, 1192×360): scale stage around center by 1.3 to preserve desktop-like glow/icon proportions. */

@@ -118,7 +118,7 @@ describe('OnSidebar and OnToolbar', () => {
 });
 
 describe('OnDiscoverView', () => {
-  it('Displays the hero and all secondary features in order with separate app, collection, and external links', () => {
+  it('Displays a primary pick and clickable secondary tiles with app, collection, and external destinations', () => {
     const wrapper = mount(OnDiscoverView, {
       props: {
         hero: { badge: '精选', title: 'Visual Studio Code', icons: [] },
@@ -154,23 +154,59 @@ describe('OnDiscoverView', () => {
       slots: { heroActions: '<a href="/apps/visual-studio-code">查看详情</a>' },
       global: withLocale('zh-CN')
     });
-    expect(wrapper.findAll('h2').map(node => node.text())).toEqual(['Visual Studio Code']);
+    expect(wrapper.findAll('h2').map(node => node.text())).toEqual(['精选']);
+    expect(wrapper.findComponent({ name: 'OnFeatureHero' }).get('h3').text()).toBe('Visual Studio Code');
     expect(wrapper.findAll('.on-discover-feature h3').map(node => node.text())).toEqual([
       'Ghostty',
       '新 Mac',
       '官方网站'
     ]);
-    const links = wrapper.findAll('.on-discover-feature a');
+    const links = wrapper.findAll('a.on-discover-feature');
     expect(links.map(link => link.attributes('href'))).toEqual([
       '#/apps/ghostty',
       '#/collections/new-mac',
       'https://example.com'
     ]);
-    expect(links[1]?.text()).toContain('查看合集');
+    expect(links[1]?.text()).toContain('新 Mac');
+    expect(wrapper.findAll('.on-discover-feature button')).toHaveLength(0);
     expect(links[0]?.attributes('target')).toBeUndefined();
     expect(links[2]?.attributes('target')).toBe('_blank');
     expect(links[2]?.attributes('rel')).toBe('noopener noreferrer');
     expect(wrapper.find('.on-discover-feature p span').text()).toBe('Ghostty');
+  });
+
+  it('Fills up to three secondary slots from collections without repeating the primary or editorial destinations', () => {
+    const collection = (key: string) => ({ key, title: key, count: 2, icons: [], href: `/collections/${key}` });
+    const wrapper = mount(OnDiscoverView, {
+      props: {
+        hero: { badge: '精选合集', title: 'Main', icons: [], href: '/collections/main' },
+        features: [
+          { key: 1, badge: '', title: 'Duplicate main', icons: [], href: '/collections/main', detailLabel: 'View' },
+          { key: 2, badge: '', title: 'Editorial', icons: [], href: '/collections/editorial', detailLabel: 'View' },
+          {
+            key: 3,
+            badge: '',
+            title: 'Duplicate editorial',
+            icons: [],
+            href: '/collections/editorial',
+            detailLabel: 'View'
+          }
+        ],
+        collections: ['main', 'editorial', 'third', 'fourth', 'overflow'].map(collection),
+        chips: [],
+        popular: [],
+        recent: [],
+        labels,
+        rankingsHref: '/rankings',
+        collectionsHref: '/collections'
+      }
+    });
+    expect(wrapper.findAll('a.on-discover-feature').map(node => node.attributes('href'))).toEqual([
+      '/collections/editorial',
+      '/collections/third',
+      '/collections/fourth'
+    ]);
+    expect(wrapper.find('a[href="/collections"]').text()).toContain('查看全部');
   });
 
   it('Shows loading skeletons, renders loaded sections through host card slots, and includes recent-update statistics', () => {

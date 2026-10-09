@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, useAttrs } from 'vue';
 import { Icon } from '@iconify/vue';
+import { interfaceIcons } from './interface-icons';
 import { localIcons } from './local-icons';
 
 defineOptions({ name: 'SvgIcon', inheritAttrs: false });
@@ -34,11 +35,17 @@ const localComponent = computed(() => {
 
 /** If localIcon is passed, render localIcon first */
 const renderLocalIcon = computed(() => props.localIcon || !props.icon);
+const interfaceComponent = computed(() =>
+  props.icon && Object.hasOwn(interfaceIcons, props.icon) ? interfaceIcons[props.icon] : undefined
+);
 </script>
 
 <template>
   <template v-if="renderLocalIcon">
     <component :is="localComponent" aria-hidden="true" width="1em" height="1em" v-bind="bindAttrs" />
+  </template>
+  <template v-else-if="interfaceComponent">
+    <component :is="interfaceComponent" aria-hidden="true" width="1em" height="1em" v-bind="bindAttrs" />
   </template>
   <template v-else>
     <Icon v-if="icon" :icon="icon" v-bind="bindAttrs" />
