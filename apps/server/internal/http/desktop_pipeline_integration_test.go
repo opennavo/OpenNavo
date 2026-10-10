@@ -199,7 +199,7 @@ func TestNativeDesktopReleasePipelineWithRealStorage(t *testing.T) {
 			report.Artifacts = append(report.Artifacts, artifact)
 		}
 		runDesktopReleaseCLI(t, ctx, root, cliEnv, "register-release.mjs", "--dir", out, "--version", release.version, "--channel", "stable",
-			"--notes-zh", "本地发布演练 "+release.version+"：浏览、搜索和更新。", "--notes-en", "Local release drill "+release.version+": browse, search and updates.")
+			"--notes-en", "Local release drill "+release.version+": browse, search and updates.")
 		var id int64
 		require.NoError(t, st.DB.WithContext(ctx).Table("desktop_releases").Where("version = ? AND channel = ? AND status = ?", release.version, "stable", "draft").Select("id").Scan(&id).Error)
 		require.Positive(t, id)

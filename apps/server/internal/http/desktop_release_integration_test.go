@@ -163,7 +163,7 @@ func TestDesktopReleaseContractsCIManifestRollbackAndCompensation(t *testing.T) 
 	root, rootErr := filepath.Abs("../../../..")
 	require.NoError(t, rootErr)
 	for range 2 {
-		command := exec.CommandContext(ctx, "node", filepath.Join(root, "apps/desktop/scripts/register-release.mjs"), "--dir", dir, "--version", "0.0.3", "--notes-zh", "脚本原文", "--notes-en", "Script notes") //nolint:gosec // Fixed controlled script and temporary test directory; no user input.
+		command := exec.CommandContext(ctx, "node", filepath.Join(root, "apps/desktop/scripts/register-release.mjs"), "--dir", dir, "--version", "0.0.3", "--notes-en", "Script notes") //nolint:gosec // Fixed controlled script and temporary test directory; no user input.
 		command.Dir = root
 		command.Env = []string{"PATH=" + os.Getenv("PATH"), "ADMIN_API_BASE=" + apiServer.URL + "/admin-api", "CI_RELEASE_TOKEN=local-ci-only"}
 		output, runErr := command.CombinedOutput()
@@ -173,7 +173,10 @@ func TestDesktopReleaseContractsCIManifestRollbackAndCompensation(t *testing.T) 
 	require.NoError(t, st.DB.Table("desktop_releases").Where("version=? AND channel=?", "0.0.3", "stable").Count(&count).Error)
 	require.EqualValues(t, 1, count)
 	var text string
-	require.NoError(t, st.DB.Raw("SELECT notes FROM desktop_release_i18n WHERE desktop_release_id=(SELECT id FROM desktop_releases WHERE version='0.0.3' AND channel='stable') AND locale='zh-CN'").Scan(&text).Error)
-	require.Equal(t, "脚本原文", text)
+	require.NoError(t, st.DB.Raw("SELECT notes FROM desktop_release_i18n WHERE desktop_release_id=(SELECT id FROM desktop_releases WHERE version='0.0.3' AND channel='stable') AND locale='en-US'").Scan(&text).Error)
+	require.Equal(t, "Script notes", text)
+	var registered store.DesktopRelease
+	require.NoError(t, st.DB.Where("version=? AND channel=?", "0.0.3", "stable").First(&registered).Error)
+	require.Equal(t, "en-US", registered.SourceLocale)
 	call("GET", "/system/audit-logs?entityType=desktop_release", "", "0000", pair.Token)
 }
