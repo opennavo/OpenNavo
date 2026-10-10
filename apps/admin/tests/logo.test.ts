@@ -30,12 +30,13 @@ it.each([16, 32, 40])('selects geometry for a %i px admin logo', size => {
   expect(svg.attributes('style')).toContain(logoInlineShift(geometry.nCenterOffset));
 });
 
-it('uses SMALL geometry, tight viewBox and font-adjusted centering in the 32px OG footer', () => {
-  const svg = mount(OgFrame, { props: { footer: 'OpenNavo' } }).get('svg');
-  expect(svg.attributes('viewBox')).toBe(LOGO.small.markViewBox);
-  expect(svg.attributes('width')).toBe(String(Math.round(32 * LOGO.small.markAspect)));
-  expect(svg.attributes('height')).toBe('32');
-  expect(svg.findAll('path').map(path => path.attributes('d'))).toEqual([LOGO.small.outerPath, LOGO.small.innerPath]);
-  const shift = 32 * LOGO.small.nCenterOffset - ((1160 - 288 - 733) / 2000) * 24;
-  expect(svg.attributes('style')).toContain(`translateY(-${shift.toFixed(2)}px)`);
+it('uses full brand geometry and gradients in the 64px OG header', () => {
+  const frame = mount(OgFrame, { props: { tagline: 'The Homebrew App Store' } });
+  const svg = frame.get('svg');
+  expect(svg.attributes('viewBox')).toBe(LOGO.markViewBox);
+  expect(svg.attributes('width')).toBe(String(Math.round(64 * LOGO.markAspect)));
+  expect(svg.attributes('height')).toBe('64');
+  expect(svg.findAll('path').map(path => path.attributes('d'))).toEqual([LOGO.outerPath, LOGO.innerPath]);
+  expect(svg.findAll('linearGradient')).toHaveLength(2);
+  expect(frame.text()).toContain('The Homebrew App Store');
 });
