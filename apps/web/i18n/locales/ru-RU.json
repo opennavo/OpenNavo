@@ -425,7 +425,11 @@
     "draft": "На проверке"
   },
   "og": {
-    "footer": "OpenNavo · Магазин приложений Homebrew"
+    "tagline": "Магазин приложений Homebrew",
+    "homeTitle": "Магазин\nHomebrew\nдля Mac.",
+    "homeDescription": "Устанавливайте приложения.\nОбновляйте Mac и читайте об изменениях.",
+    "discoverTitle": "Откройте\nприложения Mac.",
+    "discoverDescription": "Изучайте приложения и обновления.\nНайдите новое приложение для Mac."
   },
   "languageSuggestion": {
     "message": "Хотите просматривать сайт на языке «{language}»?",

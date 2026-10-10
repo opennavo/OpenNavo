@@ -151,13 +151,16 @@ useSeoMeta({
 
 defineOgImage('OgDefault', {
   locale: formattingLocale.value,
-  title: t('home.metaTitle'),
-  description: t(
-    'site.description',
-    { count: formatCount(total.value, { locale: formattingLocale.value }) },
-    { plural: total.value }
-  ),
-  footer: t('og.footer')
+  variant: 'discover',
+  title: t('og.discoverTitle'),
+  description: t('og.discoverDescription'),
+  tagline: t('og.tagline'),
+  icons: pickShowcaseApps([home.value?.popularApps, home.value?.recentlyUpdated], 4).map(pkg => ({
+    name: pkg.displayName,
+    token: pkg.token,
+    src: pkg.iconUrl,
+    accent: pkg.accentColor
+  }))
 });
 </script>
 

@@ -425,7 +425,11 @@
     "draft": "待审"
   },
   "og": {
-    "footer": "OpenNavo · Homebrew 应用商店"
+    "tagline": "Homebrew 应用商店",
+    "homeTitle": "Mac 上的\nHomebrew\n应用商店",
+    "homeDescription": "安装应用，查看更新日志。\n让你的 Mac 保持最新。",
+    "discoverTitle": "发现好用的\nMac 应用",
+    "discoverDescription": "浏览应用，查看更新日志。\n找到下一款想安装的应用。"
   },
   "languageSuggestion": {
     "message": "是否使用{language}浏览？",

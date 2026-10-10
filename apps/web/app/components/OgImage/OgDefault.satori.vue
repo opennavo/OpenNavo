@@ -1,30 +1,84 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { color } from '@opennavo/tokens';
+import OgAppIcon from '../og/OgAppIcon.vue';
 import OgFrame from '../og/OgFrame.vue';
 
-// Default share image: title/description; wrap by words and balance two lines to avoid splitting App Store.
-defineProps<{ title: string; description?: string; locale?: string; footer: string }>();
+const props = defineProps<{
+  title: string;
+  description?: string;
+  locale?: string;
+  tagline: string;
+  variant: 'home' | 'discover';
+  icons?: { name: string; token: string; src?: string | null; accent?: string | null }[];
+}>();
+const titleLines = computed(() => props.title.split('\n'));
+// Missing discovery data falls back to the real brand asset, never invented app icons.
+const iconRows = computed(() => {
+  const icons = props.icons?.slice(0, 4) ?? [];
+  return [icons.slice(0, 2), icons.slice(2, 4)].filter(row => row.length);
+});
 </script>
 
 <template>
-  <OgFrame :footer="footer" :locale="locale">
-    <div :style="{ display: 'flex', flexDirection: 'column', flex: 1, gap: '22px' }">
+  <OgFrame :tagline="tagline" :locale="locale">
+    <div
+      :style="{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '724px',
+        flexShrink: 0,
+        gap: '20px'
+      }"
+    >
       <div
+        class="font-semibold"
         :style="{
-          fontSize: '56px',
+          display: 'flex',
+          flexDirection: 'column',
+          fontSize: variant === 'home' ? '68px' : '80px',
           fontWeight: 600,
-          lineHeight: 1.15,
-          color: color.text.primary,
-          letterSpacing: '-0.02em',
-          wordBreak: 'keep-all',
-          textWrap: 'balance'
+          lineHeight: 1.08,
+          letterSpacing: '-0.03em'
         }"
       >
-        {{ title }}
+        <div v-for="line in titleLines" :key="line" :style="{ lineClamp: 1 }">{{ line }}</div>
       </div>
-      <div v-if="description" :style="{ fontSize: '28px', lineHeight: 1.5, color: color.text.secondary, lineClamp: 3 }">
+      <div
+        v-if="description"
+        :style="{
+          fontSize: '30px',
+          lineHeight: 1.4,
+          color: color.text.secondary,
+          whiteSpace: 'pre-wrap',
+          lineClamp: 2
+        }"
+      >
         {{ description }}
       </div>
     </div>
+    <div
+      v-if="variant === 'discover' && iconRows.length"
+      :style="{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '20px',
+        width: '300px',
+        flexShrink: 0
+      }"
+    >
+      <div v-for="(row, index) in iconRows" :key="index" :style="{ display: 'flex', gap: '20px' }">
+        <OgAppIcon
+          v-for="icon in row"
+          :key="icon.token"
+          :name="icon.name"
+          :token="icon.token"
+          :src="icon.src"
+          :accent="icon.accent"
+          :size="140"
+        />
+      </div>
+    </div>
+    <OgAppIcon v-else name="OpenNavo" token="opennavo" src="/icon-512.png" :size="300" />
   </OgFrame>
 </template>

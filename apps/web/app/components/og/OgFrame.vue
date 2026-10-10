@@ -1,24 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { LOGO } from '@opennavo/shared';
-import { color, effect } from '@opennavo/tokens';
+import { color } from '@opennavo/tokens';
 
-// Share-image frame (08 §14): 1200×630, surface.page background, lower-right glow, OpenNavo/Homebrew app-store footer.
-// Satori lacks CSS variables/class themes; use @opennavo/tokens constants directly and public/fonts Chinese subsets.
-// Keep outside components/OgImage, where every file becomes a template and cannot resolve neighboring templates.
-const props = defineProps<{ footer: string; locale?: string }>();
-
+// All 1200×630 cards keep the bottom 126 px empty for X's title overlay.
+// Satori needs inline styles, numeric SVG dimensions and static font families.
+const props = defineProps<{ tagline: string; locale?: string }>();
 defineSlots<{ default?: () => unknown }>();
-
-const font = computed(() => (props.locale?.startsWith('ja') ? 'OG Noto Sans JP' : 'OG Noto Sans SC'));
-// Footer logo uses tight bounds for accurate text spacing; Satori needs numeric dimensions.
-const LOGO_HEIGHT = 32;
-const geometry = LOGO.small;
-const LOGO_WIDTH = Math.round(LOGO_HEIGHT * geometry.markAspect);
-const FOOTER_SIZE = 24;
-// Raise footer logo to align N/text (08 §2). Satori builds line boxes from font ascender/descender (1160/-288, cap height 733, per 1000 em).
-// Cap center is (1160 - 288 - 733) / 2 / 1000 em below line center; subtract that from the logo shift.
-const LOGO_SHIFT = LOGO_HEIGHT * geometry.nCenterOffset - ((1160 - 288 - 733) / 2000) * FOOTER_SIZE;
+const font = computed(() => (props.locale?.startsWith('ja') ? 'Inter, OG Noto Sans JP' : 'Inter, OG Noto Sans SC'));
+const logoHeight = 64;
 </script>
 
 <template>
@@ -30,6 +20,7 @@ const LOGO_SHIFT = LOGO_HEIGHT * geometry.nCenterOffset - ((1160 - 288 - 733) / 
       position: 'relative',
       overflow: 'hidden',
       backgroundColor: color.surface.page,
+      color: color.text.primary,
       fontFamily: font,
       fontWeight: 400
     }"
@@ -37,46 +28,72 @@ const LOGO_SHIFT = LOGO_HEIGHT * geometry.nCenterOffset - ((1160 - 288 - 733) / 
     <div
       :style="{
         position: 'absolute',
-        right: '-260px',
-        bottom: '-360px',
-        width: '900px',
-        height: '900px',
-        backgroundImage: effect.heroGlow,
-        opacity: 0.75
-      }"
-    ></div>
-    <div
-      :style="{
+        top: '36px',
+        left: '64px',
+        right: '64px',
+        height: '76px',
         display: 'flex',
-        flexDirection: 'column',
         justifyContent: 'space-between',
-        width: '100%',
-        padding: '72px 80px'
+        alignItems: 'flex-start'
       }"
     >
-      <div :style="{ display: 'flex', alignItems: 'center', gap: '40px' }">
-        <slot />
-      </div>
-      <div
-        :style="{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '14px',
-          fontSize: `${FOOTER_SIZE}px`,
-          color: color.text.tertiary
-        }"
-      >
-        <svg
-          :viewBox="geometry.markViewBox"
-          :width="LOGO_WIDTH"
-          :height="LOGO_HEIGHT"
-          :style="{ transform: `translateY(-${LOGO_SHIFT.toFixed(2)}px)` }"
-        >
-          <path :fill="color.brand.coral" :d="geometry.outerPath" />
-          <path :fill="color.brand.logoCoreGradient[1]" :d="geometry.innerPath" />
+      <div :style="{ display: 'flex', alignItems: 'center', gap: '20px' }">
+        <svg :viewBox="LOGO.markViewBox" :width="Math.round(logoHeight * LOGO.markAspect)" :height="logoHeight">
+          <defs>
+            <linearGradient id="og-brand-n" x1="0" y1="0" x2="1" y2="1">
+              <stop
+                v-for="stop in LOGO.outerGradient"
+                :key="stop.offset"
+                :offset="stop.offset"
+                :stop-color="stop.color"
+              />
+            </linearGradient>
+            <linearGradient id="og-brand-star" x1="0" y1="0" x2="1" y2="1">
+              <stop
+                v-for="stop in LOGO.innerGradient"
+                :key="stop.offset"
+                :offset="stop.offset"
+                :stop-color="stop.color"
+              />
+            </linearGradient>
+          </defs>
+          <path fill="url(#og-brand-n)" :d="LOGO.outerPath" />
+          <path fill="url(#og-brand-star)" :d="LOGO.innerPath" />
         </svg>
-        <span>{{ footer }}</span>
+        <div :style="{ display: 'flex', flexDirection: 'column', gap: '2px' }">
+          <div :style="{ display: 'flex', alignItems: 'baseline', gap: '12px' }">
+            <span
+              :style="{
+                fontSize: '38px',
+                fontWeight: 600,
+                lineHeight: 1.2,
+                letterSpacing: '-0.02em'
+              }"
+              >OpenNavo</span
+            >
+            <span :style="{ fontSize: '24px', color: color.text.secondary }">- macOS app</span>
+          </div>
+          <div :style="{ fontSize: '20px', lineHeight: 1.35, color: color.text.secondary }">
+            {{ tagline }}
+          </div>
+        </div>
       </div>
+      <span :style="{ fontSize: '24px', color: color.text.secondary, marginTop: '8px' }">opennavo.com</span>
+    </div>
+    <div
+      :style="{
+        position: 'absolute',
+        top: '156px',
+        left: '64px',
+        right: '64px',
+        height: '332px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '48px',
+        overflow: 'hidden'
+      }"
+    >
+      <slot />
     </div>
   </div>
 </template>

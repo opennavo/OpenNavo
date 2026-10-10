@@ -425,7 +425,11 @@
     "draft": "Pendiente de revisión"
   },
   "og": {
-    "footer": "OpenNavo · Tienda de aplicaciones Homebrew"
+    "tagline": "La tienda de apps de Homebrew",
+    "homeTitle": "La tienda de apps\nde Homebrew\npara Mac.",
+    "homeDescription": "Instala apps. Lee las novedades.\nMantén tu Mac al día.",
+    "discoverTitle": "Descubre apps\npara Mac.",
+    "discoverDescription": "Explora apps. Lee las novedades.\nEncuentra tu próxima app."
   },
   "languageSuggestion": {
     "message": "¿Quieres navegar en {language}?",

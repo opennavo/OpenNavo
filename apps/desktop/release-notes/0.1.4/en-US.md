@@ -6,5 +6,6 @@
 
 ## Improvements
 
+- Added custom Homebrew mirrors with configurable endpoints and connection checks in Settings.
 - Refined the Discover layout and collection artwork for easier browsing.
 - Homebrew setup now uses the official source on computers whose system language is not Chinese; Chinese-language systems retain mirror selection.

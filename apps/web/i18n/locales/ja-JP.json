@@ -425,7 +425,11 @@
     "draft": "審査待ち"
   },
   "og": {
-    "footer": "OpenNavo · Homebrewアプリストア"
+    "tagline": "Homebrew アプリストア",
+    "homeTitle": "Mac のための\nHomebrew\nアプリストア",
+    "homeDescription": "アプリのインストールと更新履歴。\nMac をいつも最新の状態に。",
+    "discoverTitle": "Mac アプリを\n見つけよう",
+    "discoverDescription": "アプリと更新履歴をチェック。\n次に使いたいアプリを見つけよう。"
   },
   "languageSuggestion": {
     "message": "{language}で閲覧しますか？",

@@ -70,9 +70,10 @@ useSeoMeta({ title: () => t('site.title'), description: () => description.value 
 
 defineOgImage('OgDefault', {
   locale: formattingLocale.value,
-  title: t('site.title'),
-  description: description.value,
-  footer: t('og.footer')
+  variant: 'home',
+  title: t('og.homeTitle'),
+  description: t('og.homeDescription'),
+  tagline: t('og.tagline')
 });
 
 // Site and site search, with search terms in q.

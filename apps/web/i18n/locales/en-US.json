@@ -425,7 +425,11 @@
     "draft": "Draft"
   },
   "og": {
-    "footer": "OpenNavo · The Homebrew App Store"
+    "tagline": "The Homebrew App Store",
+    "homeTitle": "The Homebrew\nApp Store\nfor Mac.",
+    "homeDescription": "Install apps. Read release notes.\nKeep your Mac up to date.",
+    "discoverTitle": "Discover\nMac apps.",
+    "discoverDescription": "Browse apps. Read release notes.\nFind your next install."
   },
   "languageSuggestion": {
     "message": "Would you like to browse in {language}?",

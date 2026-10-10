@@ -141,7 +141,7 @@ if (pkg.value)
     token: pkg.value.token,
     iconUrl: pkg.value.iconUrl,
     accent: pkg.value.accentColor,
-    footer: t('og.footer')
+    tagline: t('og.tagline')
   });
 
 // 05 §6.2: SoftwareApplication and breadcrumbs; URL matches absolute canonical.
