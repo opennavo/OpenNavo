@@ -565,7 +565,7 @@
       "officialFallback": "公式ソースを使用",
       "name": "名前",
       "apiDomain": "API URL",
-      "bottleDomain": "Bottle URL",
+      "bottleDomain": "ボトル配信先 URL",
       "brewGitRemote": "brew Git リポジトリ URL",
       "coreGitRemote": "core Git リポジトリ URL",
       "advanced": "詳細設定 · Git リポジトリ",

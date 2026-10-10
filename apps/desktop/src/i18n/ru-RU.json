@@ -565,7 +565,7 @@
       "officialFallback": "Официальный источник",
       "name": "Название",
       "apiDomain": "URL API",
-      "bottleDomain": "URL Bottle",
+      "bottleDomain": "URL готовых пакетов",
       "brewGitRemote": "URL Git-репозитория brew",
       "coreGitRemote": "URL Git-репозитория core",
       "advanced": "Дополнительно · Git-репозитории",
