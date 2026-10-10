@@ -23,6 +23,21 @@ type Objects interface {
 	Put(context.Context, string, []byte, string) error
 	URL(string) string
 }
+
+// Decoding admits images up to 32 megapixels (about 128 MB as NRGBA). Bound concurrent
+// decodes so upload bursts cannot exhaust API memory; callers wait rather than fail.
+var imageSlots = make(chan struct{}, 2)
+
+func processImage(ctx context.Context, data []byte, kind string) ([]images.Variant, *string, error) {
+	select {
+	case imageSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	}
+	defer func() { <-imageSlots }()
+	return images.Process(data, kind)
+}
+
 type S3Objects struct{ Client *storage.Client }
 
 func (s S3Objects) Put(ctx context.Context, key string, data []byte, mime string) error {
@@ -63,7 +78,10 @@ func (s *Service) Upload(ctx context.Context, kind string, data []byte, sourceUR
 	if kind != "icon" && kind != "screenshot" && kind != "cover" && kind != "og" {
 		return adminapi.Asset{}, domain.Validation()
 	}
-	variants, _, err := images.Process(data, kind)
+	variants, _, err := processImage(ctx, data, kind)
+	if ctx.Err() != nil {
+		return adminapi.Asset{}, ctx.Err()
+	}
 	if err != nil {
 		return adminapi.Asset{}, &domain.AppError{Code: domain.CodeInvalidUpload, HTTPStatus: 400}
 	}
@@ -85,7 +103,7 @@ func (s *Service) Preview(kind string, data []byte) (map[string]any, error) {
 	if kind != "icon" && kind != "screenshot" && kind != "cover" && kind != "og" {
 		return nil, domain.Validation()
 	}
-	variants, _, err := images.Process(data, kind)
+	variants, _, err := processImage(context.Background(), data, kind)
 	if err != nil {
 		return nil, &domain.AppError{Code: domain.CodeInvalidUpload, HTTPStatus: 400}
 	}
@@ -118,6 +136,6 @@ func (s *Service) IconAccent(ctx context.Context, id int64) (*string, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, accent, err := images.Process(data, "icon")
+	_, accent, err := processImage(ctx, data, "icon")
 	return accent, err
 }
