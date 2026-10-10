@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/opennavo/opennavo/server/internal/cache"
 	"github.com/opennavo/opennavo/server/internal/changelog"
 	"gorm.io/gorm"
 )
@@ -74,8 +76,11 @@ func (s *Store) ChangelogDue(ctx context.Context, now time.Time) ([]int64, error
 	err := s.DB.WithContext(ctx).Raw("SELECT s.id FROM changelog_sources s JOIN packages p ON p.id=s.package_id LEFT JOIN package_meta m ON m.package_id=p.id WHERE NOT COALESCE(m.changelog_excluded,false) AND s.enabled AND s.type='homebrew_commits' AND p.kind='cask' AND s.next_fetch_at<=? AND p.removed_at IS NULL AND NOT p.disabled ORDER BY p.popularity DESC,s.id LIMIT 1000", now).Scan(&ids).Error
 	return ids, err
 }
-func (s *Store) SaveFetchedChangelog(ctx context.Context, source ChangelogState, result changelog.FetchResult, next, timeFetched time.Time) error {
-	return s.WithTx(ctx, func(tx *gorm.DB) error {
+
+// SaveFetchedChangelog reports whether the fetch added or completed any version.
+func (s *Store) SaveFetchedChangelog(ctx context.Context, source ChangelogState, result changelog.FetchResult, next, timeFetched time.Time) (bool, error) {
+	changed := false
+	err := s.WithTx(ctx, func(tx *gorm.DB) error {
 		if err := LockCatalogWrites(ctx, tx); err != nil {
 			return err
 		}
@@ -86,7 +91,7 @@ func (s *Store) SaveFetchedChangelog(ctx context.Context, source ChangelogState,
 		if settings.Excluded {
 			return nil
 		}
-		changed := false
+		changed = false
 		for _, version := range result.Versions {
 			base := strings.SplitN(version.Version, ",", 2)[0]
 			r := tx.Exec(`INSERT INTO package_versions(package_id,version,version_base,brew_committed_at,brew_commit_sha) VALUES(?,?,?,?,?) ON CONFLICT(package_id,version) DO UPDATE SET brew_committed_at=EXCLUDED.brew_committed_at,brew_commit_sha=EXCLUDED.brew_commit_sha WHERE package_versions.brew_committed_at IS NULL`, source.PackageID, version.Version, base, version.CommittedAt, version.SHA)
@@ -115,8 +120,20 @@ func (s *Store) SaveFetchedChangelog(ctx context.Context, source ChangelogState,
 		if result.LastModified != "" {
 			fields["last_modified"] = result.LastModified
 		}
-		return tx.WithContext(ctx).Table("changelog_sources").Where("id=?", source.ID).Updates(fields).Error
+		if err := tx.WithContext(ctx).Table("changelog_sources").Where("id=?", source.ID).Updates(fields).Error; err != nil {
+			return err
+		}
+		if changed {
+			p, err := (&Store{DB: tx}).ChangelogCandidate(ctx, source.PackageID)
+			if err != nil {
+				return err
+			}
+			identity := cache.PatternLiteral(p.Kind) + ":" + cache.PatternLiteral(p.Token) + ":*"
+			return addCacheInvalidation(ctx, tx, fmt.Sprintf("changelog:%d", source.PackageID), "c:rel:*:"+identity, "c:pkg:c3:"+identity)
+		}
+		return nil
 	})
+	return changed && err == nil, err
 }
 func (s *Store) ChangelogFailure(ctx context.Context, id int64, status, message string, next time.Time) error {
 	return s.DB.WithContext(ctx).Exec("UPDATE changelog_sources SET last_status=?,last_error=?,fail_count=fail_count+1,next_fetch_at=?,last_fetched_at=now(),updated_at=now() WHERE id=?", status, message, next, id).Error

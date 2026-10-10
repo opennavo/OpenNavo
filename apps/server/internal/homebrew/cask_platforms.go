@@ -113,8 +113,10 @@ func caskPlatforms(cask Cask, raw json.RawMessage) (CaskPlatformMetadata, error)
 		return out, nil
 	}
 	var base map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &base); err != nil {
-		return out, fmt.Errorf("decode cask platform base: %w", err)
+	if len(cask.Variations) > 0 {
+		if err := json.Unmarshal(raw, &base); err != nil {
+			return out, fmt.Errorf("decode cask platform base: %w", err)
+		}
 	}
 	for _, tag := range unique(cask.SupportedPlatforms) {
 		if tag == "linux" || strings.HasSuffix(tag, "_linux") {
@@ -129,17 +131,21 @@ func caskPlatforms(cask Cask, raw json.RawMessage) (CaskPlatformMetadata, error)
 			out.SupportStatus = "unknown"
 			continue
 		}
-		effective := make(map[string]json.RawMessage, len(base))
-		for key, value := range base {
-			effective[key] = value
-		}
-		// Homebrew API.merge_variations uses shallow overrides; empty objects, empty arrays and null must clear base fields.
-		for key, value := range cask.Variations[tag] {
-			effective[key] = value
-		}
-		var variant Cask
-		if err := json.Unmarshal(marshal(effective), &variant); err != nil {
-			return out, fmt.Errorf("decode cask variation %s: %w", tag, err)
+		// Most tags carry no overrides; their variant is the base cask, so skip re-encoding the whole document.
+		variant := cask
+		if len(cask.Variations[tag]) > 0 {
+			effective := make(map[string]json.RawMessage, len(base))
+			for key, value := range base {
+				effective[key] = value
+			}
+			// Homebrew API.merge_variations uses shallow overrides; empty objects, empty arrays and null must clear base fields.
+			for key, value := range cask.Variations[tag] {
+				effective[key] = value
+			}
+			variant = Cask{}
+			if err := json.Unmarshal(marshal(effective), &variant); err != nil {
+				return out, fmt.Errorf("decode cask variation %s: %w", tag, err)
+			}
 		}
 		var checksum *string
 		if checksumPattern.MatchString(variant.SHA256) {

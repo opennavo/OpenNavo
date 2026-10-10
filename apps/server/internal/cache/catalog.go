@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,6 +62,18 @@ func invalidationChannel(client *redis.Client) string {
 func validPattern(pattern string) bool {
 	return strings.HasPrefix(pattern, "c:") && len(pattern) > 2 && len(pattern) <= 256 && !strings.ContainsAny(pattern, "\r\n")
 }
+
+// PatternLiteral escapes Redis glob metacharacters so a key segment matches only itself.
+func PatternLiteral(value string) string {
+	var out strings.Builder
+	for _, r := range value {
+		if strings.ContainsRune(`*?[]\`, r) {
+			out.WriteByte('\\')
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
 func Invalidate(ctx context.Context, client *redis.Client, patterns []string) error {
 	for _, pattern := range patterns {
 		if !validPattern(pattern) {
@@ -67,7 +81,8 @@ func Invalidate(ctx context.Context, client *redis.Client, patterns []string) er
 		}
 		var cursor uint64
 		for {
-			keys, next, err := client.Scan(ctx, cursor, pattern, 100).Result()
+			// Large batches keep a full pass over a busy keyspace to a few round trips.
+			keys, next, err := client.Scan(ctx, cursor, pattern, 1000).Result()
 			if err != nil {
 				return err
 			}
@@ -84,6 +99,56 @@ func Invalidate(ctx context.Context, client *redis.Client, patterns []string) er
 	}
 	return nil
 }
+
+// invalidationInterval bounds how often invalidation bursts rescan Redis: bulk writes
+// otherwise publish several times per second and keep every cache permanently cold.
+var invalidationInterval = 10 * time.Second
+
+// coalescer merges invalidation bursts. The first batch after a quiet interval runs at
+// once; later ones wait until the interval since the previous pass has elapsed.
+type coalescer struct {
+	interval time.Duration
+	last     time.Time
+	pending  map[string]struct{}
+}
+
+// add records valid patterns and reports when the pending batch is due.
+func (c *coalescer) add(now time.Time, patterns []string) (time.Time, bool) {
+	for _, pattern := range patterns {
+		if !validPattern(pattern) {
+			continue
+		}
+		if c.pending == nil {
+			c.pending = map[string]struct{}{}
+		}
+		c.pending[pattern] = struct{}{}
+	}
+	if len(c.pending) == 0 {
+		return time.Time{}, false
+	}
+	return later(now, c.last.Add(c.interval)), true
+}
+
+// take returns the pending batch; c:* supersedes every narrower pattern.
+func (c *coalescer) take(now time.Time) []string {
+	if len(c.pending) == 0 {
+		return nil
+	}
+	patterns := []string{"c:*"}
+	if _, all := c.pending["c:*"]; !all {
+		patterns = slices.Sorted(maps.Keys(c.pending))
+	}
+	c.pending, c.last = nil, now
+	return patterns
+}
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+
 func Subscribe(ctx context.Context, client *redis.Client, logger *slog.Logger, targets ...*redis.Client) (func(), error) {
 	child, cancel := context.WithCancel(ctx)
 	sub := client.Subscribe(child, invalidationChannel(client))
@@ -92,10 +157,24 @@ func Subscribe(ctx context.Context, client *redis.Client, logger *slog.Logger, t
 		_ = sub.Close()
 		return nil, err
 	}
-	done := make(chan struct{})
+	// Keep business-local authorization caches invalidated too. Publishers
+	// stay on the business connection; disposable cache storage may differ.
+	clients := []*redis.Client{}
+	for _, target := range append([]*redis.Client{client}, targets...) {
+		if target != nil && !slices.Contains(clients, target) {
+			clients = append(clients, target)
+		}
+	}
+	apply := func(ctx context.Context, patterns []string) {
+		for _, target := range clients {
+			if err := Invalidate(ctx, target, patterns); err != nil && ctx.Err() == nil {
+				logger.WarnContext(ctx, "cache invalidation failed")
+			}
+		}
+	}
+	received := make(chan []string, 64)
 	go func() {
-		defer close(done)
-		defer func() { _ = sub.Close() }()
+		defer close(received)
 		for {
 			message, err := sub.ReceiveMessage(child)
 			if err != nil {
@@ -111,17 +190,36 @@ func Subscribe(ctx context.Context, client *redis.Client, logger *slog.Logger, t
 			if json.Unmarshal([]byte(message.Payload), &payload) != nil {
 				continue
 			}
-			// Keep business-local authorization caches invalidated too. Publishers
-			// stay on the business connection; disposable cache storage may differ.
-			seen := map[*redis.Client]bool{}
-			for _, target := range append([]*redis.Client{client}, targets...) {
-				if target == nil || seen[target] {
-					continue
+			select {
+			case received <- payload.Patterns:
+			case <-child.Done():
+				return
+			}
+		}
+	}()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		batch := coalescer{interval: invalidationInterval}
+		timer := time.NewTimer(time.Hour)
+		timer.Stop()
+		for {
+			select {
+			case patterns, open := <-received:
+				if !open {
+					// Apply a pending burst on shutdown so a restart cannot strand stale entries.
+					if pending := batch.take(time.Now()); len(pending) > 0 {
+						flush, stop := context.WithTimeout(context.WithoutCancel(child), 3*time.Second)
+						apply(flush, pending)
+						stop()
+					}
+					return
 				}
-				seen[target] = true
-				if err := Invalidate(child, target, payload.Patterns); err != nil && child.Err() == nil {
-					logger.WarnContext(child, "cache invalidation failed")
+				if due, ok := batch.add(time.Now(), patterns); ok {
+					timer.Reset(time.Until(due))
 				}
+			case <-timer.C:
+				apply(child, batch.take(time.Now()))
 			}
 		}
 	}()

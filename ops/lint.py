@@ -21,7 +21,7 @@ assert services['api']['environment']['CACHE_REDIS_URL'] == 'redis://web-cache:6
 assert services['web']['depends_on']['web-cache']['condition'] == 'service_healthy'
 cache_command = services['web-cache']['command']
 assert cache_command[cache_command.index('--maxmemory-policy') + 1] == 'allkeys-lru'
-assert cache_command[cache_command.index('--maxmemory') + 1] == '256mb'
+assert cache_command[cache_command.index('--maxmemory') + 1] == '768mb'
 assert not services['web-cache'].get('ports')
 business_command = services['redis']['command']
 assert business_command[business_command.index('--maxmemory-policy') + 1] == 'noeviction'

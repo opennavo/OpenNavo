@@ -7,7 +7,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/opennavo/opennavo/server/internal/cache"
 	pipeline "github.com/opennavo/opennavo/server/internal/changelog"
 	"github.com/opennavo/opennavo/server/internal/domain"
 	"github.com/opennavo/opennavo/server/internal/jobs"
@@ -33,6 +32,9 @@ func (s *Service) now() time.Time {
 	return time.Now().UTC()
 }
 func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
+	if err := s.Store.DispatchCacheInvalidations(ctx); err != nil {
+		return nil, err
+	}
 	state, err := s.Store.ChangelogState(ctx, id)
 	if err != nil {
 		return nil, err
@@ -78,7 +80,11 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 		category, httpStatus := pipeline.Failure(err)
 		return map[string]any{"status": status, "source": state.Type, "errorCategory": category, "httpStatus": httpStatus}, err
 	}
-	if err := s.Store.SaveFetchedChangelog(ctx, state, result, s.now().Add(interval(state.Rank30d)), s.now()); err != nil {
+	changed, err := s.Store.SaveFetchedChangelog(ctx, state, result, s.now().Add(interval(state.Rank30d)), s.now())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Store.DispatchCacheInvalidations(ctx); err != nil {
 		return nil, err
 	}
 	if s.Queue != nil {
@@ -93,12 +99,7 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 			return nil, err
 		}
 	}
-	if s.Store.Redis != nil {
-		if err := cache.PublishInvalidation(ctx, s.Store.Redis, "c:*"); err != nil {
-			return nil, err
-		}
-	}
-	return map[string]any{"versions": len(result.Versions), "notModified": result.NotModified, "source": state.Type}, nil
+	return map[string]any{"versions": len(result.Versions), "notModified": result.NotModified, "source": state.Type, "changed": changed}, nil
 }
 func (s *Service) Schedule(ctx context.Context) (map[string]any, error) {
 	candidates, err := s.Store.UnresolvedHomebrewSources(ctx)

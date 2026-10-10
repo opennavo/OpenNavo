@@ -376,12 +376,15 @@ func platformData(p store.PublicPackage) (homebrew.CaskPlatformMetadata, []publi
 	return metadata, platforms, nil
 }
 func (s *PublicService) Related(ctx context.Context, kind, token, locale string, limit int) ([]publicapi.PackageSummary, error) {
-	p, err := s.Store.PublicPackage(ctx, kind, token, locale)
-	if err != nil {
-		return nil, notFound(err)
-	}
-	rows, err := s.Store.PublicRelated(ctx, p, locale, limit)
-	return Summaries(rows), err
+	key := fmt.Sprintf("c:related:c1:%s:%s:%s:%d", kind, token, locale, limit)
+	return cache.ReadThrough(ctx, s.Cache, key, 10*time.Minute, func(ctx context.Context) ([]publicapi.PackageSummary, error) {
+		p, err := s.Store.PublicPackage(ctx, kind, token, locale)
+		if err != nil {
+			return nil, notFound(err)
+		}
+		rows, err := s.Store.PublicRelated(ctx, p, locale, limit)
+		return Summaries(rows), err
+	})
 }
 func packageForPlatform(p store.PublicPackage, tag string) (store.PublicPackage, bool, error) {
 	var metadata homebrew.CaskPlatformMetadata
@@ -415,6 +418,12 @@ func packageForPlatform(p store.PublicPackage, tag string) (store.PublicPackage,
 }
 
 func (s *PublicService) Dependencies(ctx context.Context, kind, token, locale string, depth int, platformTag string) (publicapi.Dependencies, error) {
+	key := fmt.Sprintf("c:dep:c1:%s:%s:%s:%d:%s", kind, token, locale, depth, platformTag)
+	return cache.ReadThrough(ctx, s.Cache, key, 10*time.Minute, func(ctx context.Context) (publicapi.Dependencies, error) {
+		return s.dependencies(ctx, kind, token, locale, depth, platformTag)
+	})
+}
+func (s *PublicService) dependencies(ctx context.Context, kind, token, locale string, depth int, platformTag string) (publicapi.Dependencies, error) {
 	p, err := s.Store.PublicPackage(ctx, kind, token, locale)
 	if err != nil {
 		return publicapi.Dependencies{}, notFound(err)

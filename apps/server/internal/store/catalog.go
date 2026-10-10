@@ -228,7 +228,7 @@ func (s *Store) ApplyCatalogBatch(ctx context.Context, mutations []CatalogMutati
 		if err := UpdateSearchIndex(ctx, tx, searchIDs); err != nil {
 			return err
 		}
-		return nil
+		return addCatalogInvalidation(ctx, tx)
 	})
 }
 
@@ -254,11 +254,14 @@ func (s *Store) RemoveCatalogRows(ctx context.Context, rows []*CatalogRow) error
 		if err := tx.WithContext(ctx).Exec("INSERT INTO catalog_changes (package_id,kind,token,op,reason,event_type,version) VALUES "+strings.Join(groups, ","), arguments...).Error; err != nil {
 			return fmt.Errorf("record removed packages: %w", err)
 		}
-		return nil
+		return addCatalogInvalidation(ctx, tx)
 	})
 }
 
 func (s *Store) DispatchOutbox(ctx context.Context, deliver func(context.Context, string, json.RawMessage) error) (int, error) {
+	if err := s.DispatchCacheInvalidations(ctx); err != nil {
+		return 0, err
+	}
 	delivered := 0
 	dueBefore := time.Now().UTC()
 	for {

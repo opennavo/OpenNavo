@@ -67,9 +67,11 @@ services:
         limits: {memory: 512M}
     healthcheck:
       test: ['CMD', '/probe', 'api']
-      interval: 5s
+      interval: 30s
       timeout: 3s
-      retries: 30
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
   mcp:
     image: ${MCP_IMAGE:?Build or pull MCP_IMAGE}
     restart: unless-stopped
@@ -96,20 +98,25 @@ services:
       api: {condition: service_healthy}
     healthcheck:
       test: ['CMD', 'python', '-I', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/healthz', timeout=2).close()"]
-      interval: 5s
+      interval: 30s
       timeout: 3s
-      retries: 30
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
   worker:
     <<: *server
     entrypoint: ['/worker']
     deploy:
       resources:
-        limits: {memory: 1G}
+        # One core at most: periodic catalog syncs must not starve the API and database.
+        limits: {memory: 1G, cpus: '1.0'}
     healthcheck:
       test: ['CMD', '/probe', 'worker']
-      interval: 10s
+      interval: 30s
       timeout: 4s
-      retries: 12
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
   web:
     networks:
       default:
@@ -140,15 +147,17 @@ services:
     # Disposable page cache must not share memory with sessions, rate limits, or Asynq queues.
     image: ${REDIS_IMAGE:-opennavo-redis:local}
     restart: unless-stopped
-    command: ['redis-server', '--save', '', '--appendonly', 'no', '--maxmemory', '256mb', '--maxmemory-policy', 'allkeys-lru']
+    command: ['redis-server', '--save', '', '--appendonly', 'no', '--maxmemory', '768mb', '--maxmemory-policy', 'allkeys-lru']
     deploy:
       resources:
-        limits: {memory: 384M}
+        limits: {memory: 1G}
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
-      interval: 2s
+      interval: 30s
       timeout: 3s
-      retries: 30
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
   caddy:
     image: ${CADDY_IMAGE:-opennavo-caddy:local}
     restart: unless-stopped
@@ -184,9 +193,11 @@ services:
         limits: {memory: 1536M}
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
-      interval: 2s
+      interval: 30s
       timeout: 3s
-      retries: 30
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
   postgres:
     image: ${POSTGRES_IMAGE:-opennavo-postgres:local}
     profiles: [local-db]
@@ -198,9 +209,11 @@ services:
     volumes: [postgres-data:/var/lib/postgresql]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U opennavo_migrate -d opennavo']
-      interval: 2s
+      interval: 30s
       timeout: 3s
-      retries: 30
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
   migrate:
     <<: *server
     profiles: [ops]

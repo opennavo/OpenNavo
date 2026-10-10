@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/opennavo/opennavo/server/internal/homebrew"
+	"github.com/opennavo/opennavo/server/internal/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -144,4 +146,25 @@ func TestCatalogSpoolCapturedCatalog(t *testing.T) {
 	require.Positive(t, count)
 	require.Less(t, info.Size(), int64(64<<20))
 	t.Logf("items=%d spoolBytes=%d", count, info.Size())
+}
+
+func TestUnchangedEntryMatchesTheFullComparison(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("../../../testdata/homebrew", "steam.json")) // #nosec G304 -- Fixed fixture path.
+	require.NoError(t, err)
+	item, err := homebrew.Normalize("cask", raw)
+	require.NoError(t, err)
+	stored := func(mutate func(*store.CatalogRow)) map[string]*store.CatalogRow {
+		row := &store.CatalogRow{ID: 1, Kind: "cask", Token: item.Token, RawHash: item.RawHash, NormalizationVersion: fmt.Sprint(homebrew.CaskNormalizationVersion)}
+		if mutate != nil {
+			mutate(row)
+		}
+		return map[string]*store.CatalogRow{item.Token: row}
+	}
+	require.True(t, unchangedEntry(stored(nil), raw))
+	require.False(t, unchangedEntry(map[string]*store.CatalogRow{}, raw), "new token")
+	require.False(t, unchangedEntry(stored(func(row *store.CatalogRow) { row.RawHash = "changed" }), raw), "changed definition")
+	removed := time.Now()
+	require.False(t, unchangedEntry(stored(func(row *store.CatalogRow) { row.RemovedAt = &removed }), raw), "restored package")
+	require.False(t, unchangedEntry(stored(func(row *store.CatalogRow) { row.NormalizationVersion = "1" }), raw), "outdated normalization")
+	require.False(t, unchangedEntry(stored(nil), json.RawMessage(`{"token":`)), "invalid definition")
 }

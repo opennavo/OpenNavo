@@ -8,7 +8,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/opennavo/opennavo/server/internal/cache"
 	"github.com/opennavo/opennavo/server/internal/homebrew"
 	"github.com/opennavo/opennavo/server/internal/jobs"
 	"github.com/opennavo/opennavo/server/internal/store"
@@ -70,10 +69,11 @@ func (s *Service) Run(ctx context.Context) (map[string]any, error) {
 		}
 		return err
 	})
-	// Committed catalog batches must invalidate browse caches even if a later batch fails.
+	// Flush committed batches even after a partial sync, including notifications
+	// left by an earlier failed publication. Unchanged catalogs add no new rows.
 	invalidateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if cacheErr := cache.PublishInvalidation(invalidateCtx, s.Store.Redis, "c:pkg:*", "c:home:*", "c:rank:*", "c:cat:*", "c:sug:*"); cacheErr != nil {
+	if cacheErr := s.Store.DispatchCacheInvalidations(invalidateCtx); cacheErr != nil {
 		err = errors.Join(err, fmt.Errorf("invalidate catalog cache: %w", cacheErr))
 	}
 	return stats, err
@@ -165,11 +165,20 @@ func (s *Service) syncKind(ctx context.Context, kind string) (stats Stats, resul
 	}
 	renamed := map[int64]bool{}
 	for {
-		item, err := spool.next()
+		raw, err := spool.nextRaw()
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			return stats, fmt.Errorf("read catalog spool: %w", err)
+		}
+		// The stream already validated every entry; nearly all are unchanged, so skip normalizing those twice.
+		if unchangedEntry(rows, raw) {
+			stats.Unchanged++
+			continue
+		}
+		item, err := homebrew.Normalize("cask", raw)
+		if err != nil {
+			return stats, fmt.Errorf("read catalog spool: normalize catalog spool: %w", err)
 		}
 		old := rows[item.Token]
 		oldToken := ""
@@ -223,6 +232,22 @@ func (s *Service) syncKind(ctx context.Context, kind string) (stats Stats, resul
 		return stats, fmt.Errorf("save catalog validator: %w", err)
 	}
 	return stats, nil
+}
+
+// unchangedEntry applies the unchanged-row test below using only the token and raw hash.
+func unchangedEntry(rows map[string]*store.CatalogRow, raw json.RawMessage) bool {
+	var identity struct {
+		Token string `json:"token"`
+	}
+	if json.Unmarshal(raw, &identity) != nil {
+		return false
+	}
+	old := rows[identity.Token]
+	if old == nil || old.RemovedAt != nil || old.NormalizationVersion != fmt.Sprint(homebrew.CaskNormalizationVersion) {
+		return false
+	}
+	hash, err := homebrew.RawHash(raw)
+	return err == nil && hash == old.RawHash
 }
 
 func (s *Service) renormalize(ctx context.Context, rows map[string]*store.CatalogRow, stats *Stats) error {

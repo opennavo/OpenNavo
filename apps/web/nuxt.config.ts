@@ -114,7 +114,20 @@ export default defineNuxtConfig({
   },
   // Exclude search results and Brewfile lists from indexing (05 §6.4).
   // List actual manifest paths explicitly rather than assuming a particular language prefix.
-  robots: { disallow: privatePagePaths },
+  // Search engines and AI search/user agents keep the default group. SEO-tool crawlers bring no
+  // visitors; the ClaudeBot training crawler is slowed (Crawl-delay is added by
+  // server/plugins/robots-crawl-delay.ts) and kept off payloads and dependency tabs.
+  robots: {
+    disallow: privatePagePaths,
+    groups: [
+      { userAgent: ['MJ12bot', 'SerpstatBot'], disallow: ['/'], _skipI18n: true },
+      {
+        userAgent: ['ClaudeBot'],
+        disallow: [...privatePagePaths, '/*_payload.json', '/*/dependencies'],
+        _skipI18n: true
+      }
+    ]
+  },
   // Generate the About page canonical URL at runtime too, so a generic image cannot embed the build host URL in HTML.
   routeRules: localizedRules({
     '/search': { cache: false, headers: { 'cache-control': 'no-store' } },

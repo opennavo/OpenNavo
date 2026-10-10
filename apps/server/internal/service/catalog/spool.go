@@ -53,10 +53,19 @@ func (s *catalogSpool) rewind() error {
 	return nil
 }
 
-func (s *catalogSpool) next() (homebrew.Package, error) {
+// nextRaw returns the next spooled definition without normalizing it.
+func (s *catalogSpool) nextRaw() (json.RawMessage, error) {
 	var raw json.RawMessage
 	if err := s.decoder.Decode(&raw); err != nil {
-		return homebrew.Package{}, fmt.Errorf("read catalog spool: %w", err)
+		return nil, fmt.Errorf("read catalog spool: %w", err)
+	}
+	return raw, nil
+}
+
+func (s *catalogSpool) next() (homebrew.Package, error) {
+	raw, err := s.nextRaw()
+	if err != nil {
+		return homebrew.Package{}, err
 	}
 	item, err := homebrew.Normalize("cask", raw)
 	if err != nil {

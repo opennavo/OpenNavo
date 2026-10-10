@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -161,6 +162,16 @@ func (s *Store) publicRows(ctx context.Context, locale, condition, order string,
 	}
 	return out, nil
 }
+
+// publicPage selects the ordered page of IDs before building the JSON view: packageView
+// references the whole row, which would otherwise de-TOAST every candidate row.
+func (s *Store) publicPage(ctx context.Context, locale, condition, order string, args ...any) ([]PublicPackage, error) {
+	var ids []int64
+	if err := s.DB.WithContext(ctx).Raw("SELECT p.id"+publicJoins+" WHERE p.kind='cask' AND "+condition+" "+order, args...).Scan(&ids).Error; err != nil {
+		return nil, fmt.Errorf("query public package page: %w", err)
+	}
+	return s.PublicPackagesByID(ctx, ids, locale)
+}
 func publicCondition(f PublicFilter) (string, []any) {
 	condition := publicVisible
 	args := []any{}
@@ -208,7 +219,7 @@ func (s *Store) PublicPackages(ctx context.Context, f PublicFilter) ([]PublicPac
 		return []PublicPackage{}, total, nil
 	}
 	args = append(args, f.Size, offset)
-	rows, err := s.publicRows(ctx, f.Locale, condition, "ORDER BY "+order+" LIMIT ? OFFSET ?", args...)
+	rows, err := s.publicPage(ctx, f.Locale, condition, "ORDER BY "+order+" LIMIT ? OFFSET ?", args...)
 	return rows, total, err
 }
 func (s *Store) PublicPackage(ctx context.Context, kind, token, locale string) (PublicPackage, error) {
@@ -225,7 +236,19 @@ func (s *Store) PublicPackagesByID(ctx context.Context, ids []int64, locale stri
 	if len(ids) == 0 {
 		return []PublicPackage{}, nil
 	}
-	return s.publicRows(ctx, locale, "p.id IN ?", "", ids)
+	rows, err := s.publicRows(ctx, locale, "p.id IN ?", "", ids)
+	if err != nil {
+		return nil, err
+	}
+	// IN returns rows in arbitrary order; keep the caller's order.
+	position := make(map[int64]int, len(ids))
+	for index, id := range ids {
+		if _, seen := position[id]; !seen {
+			position[id] = index
+		}
+	}
+	sort.SliceStable(rows, func(a, b int) bool { return position[rows[a].ID] < position[rows[b].ID] })
+	return rows, nil
 }
 func (s *Store) PublicCategories(ctx context.Context, locale string) ([]PublicCategory, error) {
 	var rows []PublicCategory
@@ -242,28 +265,39 @@ func (s *Store) PublicStats(ctx context.Context) (map[string]int, error) {
 	return map[string]int{"casks": v.Casks, "formulae": v.Formulae, "updatedLast24h": v.Updated}, err
 }
 func (s *Store) PublicRelated(ctx context.Context, p PublicPackage, locale string, limit int) ([]PublicPackage, error) {
-	return s.publicRows(ctx, locale, publicVisible+` AND NOT p.disabled AND NOT p.is_font AND NOT p.is_library AND p.kind=? AND p.id<>? AND EXISTS(SELECT 1 FROM package_categories pc JOIN package_categories target ON target.category_id=pc.category_id WHERE pc.package_id=p.id AND target.package_id=? AND target.is_primary)`, "ORDER BY abs(p.popularity-?),p.popularity DESC,p.id LIMIT ?", p.Kind, p.ID, p.ID, p.Popularity, limit)
+	return s.publicPage(ctx, locale, publicVisible+` AND NOT p.disabled AND NOT p.is_font AND NOT p.is_library AND p.kind=? AND p.id<>? AND EXISTS(SELECT 1 FROM package_categories pc JOIN package_categories target ON target.category_id=pc.category_id WHERE pc.package_id=p.id AND target.package_id=? AND target.is_primary)`, "ORDER BY abs(p.popularity-?),p.popularity DESC,p.id LIMIT ?", p.Kind, p.ID, p.ID, p.Popularity, limit)
 }
 func (s *Store) PublicDependents(ctx context.Context, p PublicPackage, locale string) ([]PublicPackage, int, error) {
-	condition := publicVisible + ` AND (p.dependencies->'runtime' @> ?::jsonb OR p.dependencies->'dependsOn'->'formula' @> ?::jsonb OR p.dependencies->'dependsOn'->'cask' @> ?::jsonb)`
-	tokens, _ := json.Marshal([]string{p.Token})
-	formula, cask := string(tokens), `[]`
-	if p.Kind == "cask" {
-		formula, cask = `[]`, string(tokens)
-	}
-	// An empty array is a subset of every array; use a nonexistent safe token to represent the other kind.
-	if p.Kind == "cask" {
-		formula = `["__no_formula__"]`
-	} else {
-		cask = `["__no_cask__"]`
-	}
-	args := []any{formula, formula, cask}
-	var total int
-	if err := s.DB.WithContext(ctx).Raw("SELECT count(*)"+publicJoins+" WHERE "+condition, args...).Scan(&total).Error; err != nil {
+	tokens, err := json.Marshal([]string{p.Token})
+	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.publicRows(ctx, locale, condition, "ORDER BY p.popularity DESC,p.id LIMIT 6", args...)
-	return rows, total, err
+	// Casks are required only through dependsOn.cask; formulae through runtime or dependsOn.formula.
+	// Each path has an expression index (migration 00015).
+	condition := `p.dependencies->'dependsOn'->'cask' @> ?::jsonb`
+	args := []any{string(tokens)}
+	if p.Kind != "cask" {
+		condition = `(p.dependencies->'runtime' @> ?::jsonb OR p.dependencies->'dependsOn'->'formula' @> ?::jsonb)`
+		args = append(args, string(tokens))
+	}
+	var rows []struct {
+		ID    int64
+		Total int
+	}
+	// MATERIALIZED keeps the planner on the indexed filter; with ORDER BY ... LIMIT it would
+	// otherwise walk the popularity index and test every package.
+	if err := s.DB.WithContext(ctx).Raw("WITH d AS MATERIALIZED (SELECT p.id,p.popularity"+publicJoins+" WHERE "+publicVisible+" AND "+condition+") SELECT id,(SELECT count(*) FROM d) AS total FROM d ORDER BY popularity DESC,id LIMIT 6", args...).Scan(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("query package dependents: %w", err)
+	}
+	if len(rows) == 0 {
+		return []PublicPackage{}, 0, nil
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	out, err := s.PublicPackagesByID(ctx, ids, locale)
+	return out, rows[0].Total, err
 }
 func (s *Store) PublicSitemap(ctx context.Context, current, size int) ([]PublicPackage, int, error) {
 	var total int

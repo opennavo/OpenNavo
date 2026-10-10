@@ -17,6 +17,30 @@ const ttls: Record<string, number> = {
   '/download': 600
 };
 
+describe('robots.txt crawler groups', () => {
+  const robots = config.robots as {
+    disallow: string[];
+    groups: { userAgent: string[]; disallow: string[] }[];
+  };
+  const group = (agent: string) => robots.groups.find(entry => entry.userAgent.includes(agent));
+
+  it('blocks SEO-tool crawlers entirely', () => {
+    for (const agent of ['MJ12bot', 'SerpstatBot']) expect(group(agent)?.disallow).toEqual(['/']);
+  });
+
+  it('keeps ClaudeBot off private pages, payloads and dependency tabs', () => {
+    const claude = group('ClaudeBot');
+    for (const path of robots.disallow) expect(claude?.disallow).toContain(path);
+    expect(claude?.disallow).toEqual(expect.arrayContaining(['/*_payload.json', '/*/dependencies']));
+  });
+
+  it('leaves search engines and AI search agents on the default rules', () => {
+    for (const agent of ['Googlebot', 'Bingbot', 'Claude-SearchBot', 'Claude-User', 'OAI-SearchBot', 'ChatGPT-User'])
+      expect(group(agent), agent).toBeUndefined();
+    expect(robots.disallow).not.toContain('/*_payload.json');
+  });
+});
+
 describe('localized route policies', () => {
   it.each(prefixes)('preserves production cache TTLs at the actual %s locale paths', prefix => {
     for (const [path, swr] of Object.entries(ttls)) {

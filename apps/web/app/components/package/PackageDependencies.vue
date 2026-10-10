@@ -102,6 +102,19 @@ const empty = computed(
     !data.value.dependents.count
 );
 
+// Without dependency relations this tab only repeats the overview's platform requirements;
+// keep it out of search indexes while its links stay followable.
+if (
+  data.value &&
+  !groups.value.runtime.length &&
+  !groups.value.build.length &&
+  !groups.value.other.length &&
+  !conflicts.value.length &&
+  !data.value.dependents.count
+) {
+  useRobotsRule('noindex, follow');
+}
+
 usePageSeo({
   title: () => t('package.deps.metaTitle', { name: pkg.value?.displayName ?? token.value }),
   description: () => pkg.value?.summary ?? undefined

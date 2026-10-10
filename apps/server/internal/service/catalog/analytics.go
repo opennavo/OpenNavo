@@ -101,7 +101,7 @@ func (s *AnalyticsService) Run(ctx context.Context) (map[string]any, error) {
 			return err
 		}
 		stats["packages"], stats["libraries"], stats["snapshotDate"] = len(rows), 0, date
-		if err := cache.PublishInvalidation(ctx, s.Store.Redis, "c:pkg:*", "c:home:*", "c:rank:*", "c:sug:*"); err != nil {
+		if err := cache.PublishInvalidation(ctx, s.Store.Redis, "c:pkg:*", "c:home:*", "c:rank:*", "c:sug:*", "c:dep:*", "c:related:*"); err != nil {
 			return fmt.Errorf("invalidate analytics cache: %w", err)
 		}
 		queued, err := catalogService.dispatch(ctx)
