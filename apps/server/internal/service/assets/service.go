@@ -99,11 +99,14 @@ func (s *Service) Upload(ctx context.Context, kind string, data []byte, sourceUR
 }
 
 // Preview validates and computes image metadata without accessing object storage or the database.
-func (s *Service) Preview(kind string, data []byte) (map[string]any, error) {
+func (s *Service) Preview(ctx context.Context, kind string, data []byte) (map[string]any, error) {
 	if kind != "icon" && kind != "screenshot" && kind != "cover" && kind != "og" {
 		return nil, domain.Validation()
 	}
-	variants, _, err := processImage(context.Background(), data, kind)
+	variants, _, err := processImage(ctx, data, kind)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, &domain.AppError{Code: domain.CodeInvalidUpload, HTTPStatus: 400}
 	}

@@ -86,7 +86,7 @@ func TestAssetURLUploadAndPreview(t *testing.T) {
 	})}}
 	data, err := service.DownloadURL(ctx, source)
 	require.NoError(t, err)
-	preview, err := service.Preview("icon", data)
+	preview, err := service.Preview(ctx, "icon", data)
 	require.NoError(t, err)
 	require.Equal(t, "icon", preview["kind"])
 	var count int64

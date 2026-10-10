@@ -110,7 +110,7 @@ func (h *Handler) UploadAsset(ctx context.Context, request adminapi.UploadAssetR
 		}
 	}
 	if op := domain.CurrentOperation(requestContext(ctx)); op != nil && op.DryRun {
-		after, err := h.Assets.Preview(kind, data)
+		after, err := h.Assets.Preview(requestContext(ctx), kind, data)
 		if err != nil {
 			return nil, err
 		}
