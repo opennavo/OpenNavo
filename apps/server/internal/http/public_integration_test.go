@@ -45,6 +45,7 @@ func TestPublicAPIContractsWithPostgreSQLRedisCacheAndLimits(t *testing.T) {
 		{"cask", `{"token":"wechat","name":["WeChat","微信"],"version":"1"}`},
 		{"cask", `{"token":"hidden","version":"1"}`},
 		{"cask", `{"token":"disabled","version":"1","disabled":true,"disable_date":"2026-01-01"}`},
+		{"cask", `{"token":"stale","version":"1"}`},
 		{"cask", `{"token":"font-sample","version":"1"}`},
 		{"formula", `{"name":"ripgrep","versions":{"stable":"1"},"executables":["rg"],"dependencies":["lib-sample"]}`},
 		{"formula", `{"name":"lib-sample","versions":{"stable":"1"},"dependencies":["ripgrep"],"uses_from_macos":[{"zlib":"build"}]}`},
@@ -58,6 +59,7 @@ func TestPublicAPIContractsWithPostgreSQLRedisCacheAndLimits(t *testing.T) {
 		`INSERT INTO package_meta(package_id,hidden) SELECT id,true FROM packages WHERE token='hidden'`,
 		`INSERT INTO package_categories(package_id,category_id,is_primary,source) SELECT p.id,c.id,true,'human' FROM packages p CROSS JOIN categories c WHERE p.token='ripgrep' AND c.slug='education'`,
 		`UPDATE packages SET is_library=true WHERE token='lib-sample'`,
+		`UPDATE packages SET stale_disabled=true WHERE token='stale'`,
 		`UPDATE packages SET installs_30d=100,installs_90d=300,installs_365d=1000,popularity=10 WHERE token='visual-studio-code'`,
 		`INSERT INTO package_categories(package_id,category_id,is_primary,source) SELECT p.id,c.id,true,'human' FROM packages p CROSS JOIN categories c WHERE p.token IN ('visual-studio-code','wechat') AND c.slug='developer-tools'`,
 	} {
@@ -89,7 +91,7 @@ func TestPublicAPIContractsWithPostgreSQLRedisCacheAndLimits(t *testing.T) {
 		testutil.ValidateResponse(t, spec, "/api/v1", request, reply)
 		return reply
 	}
-	for _, path := range []string{"/home", "/categories", "/packages", "/packages?sort=name&includeFonts=true&includeLibraries=true&includeDisabled=true", "/packages?category=developer-tools", "/packages/cask/visual-studio-code", "/packages/cask/disabled", "/packages/formula/ripgrep", "/packages/cask/visual-studio-code/dependencies?depth=3", "/packages/formula/ripgrep/dependencies?depth=3", "/packages/cask/visual-studio-code/related", "/rankings?kind=cask", "/rankings?kind=formula&period=90d&size=1&current=2", "/search?q=vscode", "/search?q=rg&kind=formula", "/packages?kind=formula", "/search/suggest?q=weix", "/sitemap/packages", "/config/client?platform=web", "/config/client?platform=desktop&version=0.0.1&locale=en-US"} {
+	for _, path := range []string{"/home", "/categories", "/packages", "/packages?sort=name&includeFonts=true&includeLibraries=true&includeDisabled=true", "/packages?category=developer-tools", "/packages/cask/visual-studio-code", "/packages/cask/disabled", "/packages/cask/stale", "/packages/formula/ripgrep", "/packages/cask/visual-studio-code/dependencies?depth=3", "/packages/formula/ripgrep/dependencies?depth=3", "/packages/cask/visual-studio-code/related", "/rankings?kind=cask", "/rankings?kind=formula&period=90d&size=1&current=2", "/search?q=vscode", "/search?q=rg&kind=formula", "/packages?kind=formula", "/search/suggest?q=weix", "/sitemap/packages", "/config/client?platform=web", "/config/client?platform=desktop&version=0.0.1&locale=en-US"} {
 		t.Run(path, func(t *testing.T) {
 			reply := call("GET", path, "")
 			if strings.Contains(path, "formula") {
@@ -141,6 +143,12 @@ func TestPublicAPIContractsWithPostgreSQLRedisCacheAndLimits(t *testing.T) {
 		require.NotEqual(t, "hidden", p.Token)
 	}
 	require.Contains(t, reply.Body.String(), `"token":"font-sample"`)
+	require.NotContains(t, reply.Body.String(), `"token":"stale"`)
+	require.Contains(t, call("GET", "/packages?includeDisabled=true", "").Body.String(), `"token":"stale"`)
+	var staleDetail publicapi.PackageDetailResponse
+	require.NoError(t, json.Unmarshal(call("GET", "/packages/cask/stale", "").Body.Bytes(), &staleDetail))
+	require.NotNil(t, staleDetail.Data.Disable)
+	require.Contains(t, *staleDetail.Data.Disable.Reason, "90")
 	for _, path := range []string{"/packages", "/rankings?kind=cask"} {
 		separator := "?"
 		if strings.Contains(path, "?") {

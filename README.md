@@ -118,6 +118,8 @@ opennavo/
 
 The backend syncs the catalog and installation counts from Homebrew's public APIs, reads Homebrew commits to find when each version was added, probes download sizes, and generates offline catalog snapshots for the app. APIs follow a contract-first workflow: update `apps/server/api/*.openapi.yaml`, then run `make gen` to generate Go and TypeScript code.
 
+Non-font Casks are automatically marked disabled when the Homebrew commit for their current full version is more than 90 days old. A version change clears this local status until its commit date is checked. Apps with unknown commit dates remain active under this policy, and explicit history-fetch exclusions are respected. Homebrew's own disabled status and manually hidden apps stay independent. The policy runs during catalog sync, including unchanged responses, and disabled entries remain available through **Show disabled** and installed-app records.
+
 | Part | Technology |
 |---|---|
 | Web | Nuxt 4 · Vue 3 · UnoCSS (SSR) |

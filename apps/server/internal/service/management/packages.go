@@ -45,7 +45,7 @@ func (s *Service) packages(ctx context.Context, in Input) (any, error) {
 		where = append(where, "COALESCE(i.status,'none')=?")
 		args = append(args, status)
 	}
-	for key, col := range map[string]string{"hasicon": "m.icon_asset_id IS NOT NULL", "hidden": "COALESCE(m.hidden,false)", "editorchoice": "COALESCE(m.editor_choice,false)", "deprecated": "p.deprecated", "disabled": "p.disabled", "isfont": "p.is_font", "islibrary": "p.is_library"} {
+	for key, col := range map[string]string{"hasicon": "m.icon_asset_id IS NOT NULL", "hidden": "COALESCE(m.hidden,false)", "editorchoice": "COALESCE(m.editor_choice,false)", "deprecated": "p.deprecated", "disabled": store.PackageDisabledSQL, "isfont": "p.is_font", "islibrary": "p.is_library"} {
 		if v, ok := in.Params[key].(bool); ok {
 			where = append(where, "("+col+")=?")
 			args = append(args, v)

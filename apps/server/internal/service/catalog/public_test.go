@@ -38,6 +38,30 @@ func TestPackageCompatibilityAndLifecycleMapping(t *testing.T) {
 	require.Len(t, cask.Arch, 1)
 }
 
+func TestStaleDisableNoticeAndUpstreamPrecedence(t *testing.T) {
+	p := store.PublicPackage{Disabled: true, StaleDisabled: true}
+	for locale, reason := range map[string]string{
+		"en-US": "No version update for more than 90 days",
+		"zh-CN": "超过 90 天没有版本更新",
+		"ja-JP": "90 日以上バージョン更新がありません",
+		"es-ES": "Sin actualizaciones de versión durante más de 90 días",
+		"pt-BR": "Sem atualização de versão há mais de 90 dias",
+		"ru-RU": "Версия не обновлялась более 90 дней",
+	} {
+		notice := packageDisable(p, locale)
+		require.NotNil(t, notice)
+		require.Equal(t, reason, *notice.Reason)
+		require.Nil(t, notice.Replacement)
+	}
+	date, reason, replacement := "2026-01-01", "unsafe", "cask:replacement"
+	p.UpstreamDisabled, p.DisableDate, p.DisableReason, p.DisableReplacement = true, &date, &reason, &replacement
+	notice := packageDisable(p, "zh-CN")
+	require.Equal(t, reason, *notice.Reason)
+	require.Equal(t, date, notice.Date.String())
+	require.Equal(t, "replacement", notice.Replacement.Token)
+	require.Nil(t, packageDisable(store.PublicPackage{}, "en-US"))
+}
+
 func TestCaskPlatformPublicMappingPreservesCompleteMetadata(t *testing.T) {
 	item, err := homebrew.Normalize("cask", json.RawMessage(`{"token":"mapping","version":"2","supported_platforms":["arm64_sonoma","sonoma"],"caveats_rosetta":true,"depends_on":{"formula":[{"openssl@3":">=3"}],"maximum_macos":{"<=":["15"]}},"artifacts":[{"uninstall":[{"pkgutil":"test.id"}]},{"zap":[{"trash":"~/.test"}]}],"variations":{"sonoma":{"version":"1","depends_on":{}}}}`))
 	require.NoError(t, err)

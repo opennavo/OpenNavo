@@ -127,7 +127,7 @@ WITH eligible AS (
  SELECT p.id,p.source_locale FROM packages p
  LEFT JOIN package_meta m ON m.package_id=p.id
  WHERE p.kind='cask' AND p.removed_at IS NULL
- AND NOT p.disabled AND NOT COALESCE(m.hidden,false)
+ AND NOT (p.disabled OR p.stale_disabled) AND NOT COALESCE(m.hidden,false)
 ), complete_content AS (
  SELECT e.id FROM eligible e
  JOIN content_translation_sources s ON s.entity='package' AND s.object_key=e.id::text
@@ -143,10 +143,10 @@ WITH eligible AS (
 )
 SELECT jsonb_build_object(
  'packages',(SELECT jsonb_build_object(
-  'casks',count(*) FILTER(WHERE NOT p.is_font AND NOT p.disabled),'formulae',count(*) FILTER(WHERE p.kind='formula'),
-  'fonts',count(*) FILTER(WHERE p.is_font AND NOT p.disabled),'libraries',count(*) FILTER(WHERE p.is_library),
+  'casks',count(*) FILTER(WHERE NOT p.is_font AND NOT (p.disabled OR p.stale_disabled)),'formulae',count(*) FILTER(WHERE p.kind='formula'),
+  'fonts',count(*) FILTER(WHERE p.is_font AND NOT (p.disabled OR p.stale_disabled)),'libraries',count(*) FILTER(WHERE p.is_library),
   'hidden',count(*) FILTER(WHERE m.hidden),'deprecated',count(*) FILTER(WHERE p.deprecated),
-  'disabled',count(*) FILTER(WHERE p.disabled))
+  'disabled',count(*) FILTER(WHERE p.disabled OR p.stale_disabled))
   FROM packages p LEFT JOIN package_meta m ON m.package_id=p.id
   WHERE p.kind='cask' AND p.removed_at IS NULL),
  'coverage',jsonb_build_object(

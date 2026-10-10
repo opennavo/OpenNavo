@@ -234,7 +234,7 @@ func (s *PublicService) Detail(ctx context.Context, kind, token, locale string) 
 		d.ConflictsWith = conflicts(p.ConflictsWith)
 		d.Dependencies, d.DependsOn = dependencyData(p)
 		d.Deprecation = lifecycle(p.Deprecated, p.DeprecationDate, p.DeprecationReason, p.DeprecationReplacement)
-		d.Disable = lifecycle(p.Disabled, p.DisableDate, p.DisableReason, p.DisableReplacement)
+		d.Disable = packageDisable(p, locale)
 		d.SummaryTranslation.Status = publicapi.TranslationInfoStatusNone
 		if p.I18n.Summary != nil && *p.I18n.Summary != "" {
 			d.SummaryTranslation.Status = publicapi.TranslationInfoStatus(p.I18n.Status)
@@ -274,6 +274,26 @@ func (s *PublicService) Detail(ctx context.Context, kind, token, locale string) 
 		return d, nil
 	})
 }
+func packageDisable(p store.PublicPackage, locale string) *publicapi.LifecycleNotice {
+	if p.StaleDisabled && !p.UpstreamDisabled {
+		reason := "No version update for more than 90 days"
+		switch locale {
+		case "zh-CN":
+			reason = "超过 90 天没有版本更新"
+		case "ja-JP":
+			reason = "90 日以上バージョン更新がありません"
+		case "es-ES":
+			reason = "Sin actualizaciones de versión durante más de 90 días"
+		case "pt-BR":
+			reason = "Sem atualização de versão há mais de 90 dias"
+		case "ru-RU":
+			reason = "Версия не обновлялась более 90 дней"
+		}
+		return &publicapi.LifecycleNotice{Reason: &reason}
+	}
+	return lifecycle(p.Disabled, p.DisableDate, p.DisableReason, p.DisableReplacement)
+}
+
 func lifecycle(active bool, date, reason, replacement *string) *publicapi.LifecycleNotice {
 	if !active {
 		return nil

@@ -108,10 +108,16 @@ func addOutbox(ctx context.Context, tx *gorm.DB, jobType string, ref string, id 
 }
 
 func (s *Store) ApplyCatalogBatch(ctx context.Context, mutations []CatalogMutation) error {
+	_, err := s.ApplyCatalogBatchWithLifecycle(ctx, mutations, time.Now().UTC())
+	return err
+}
+
+func (s *Store) ApplyCatalogBatchWithLifecycle(ctx context.Context, mutations []CatalogMutation, now time.Time) (StalePackageStats, error) {
+	var stats StalePackageStats
 	if len(mutations) == 0 {
-		return nil
+		return stats, nil
 	}
-	return s.WithTx(ctx, func(tx *gorm.DB) error {
+	err := s.WithTx(ctx, func(tx *gorm.DB) error {
 		if err := LockCatalogWrites(ctx, tx); err != nil {
 			return err
 		}
@@ -228,8 +234,17 @@ func (s *Store) ApplyCatalogBatch(ctx context.Context, mutations []CatalogMutati
 		if err := UpdateSearchIndex(ctx, tx, searchIDs); err != nil {
 			return err
 		}
+		var err error
+		stats, err = refreshStalePackages(ctx, tx, now, searchIDs)
+		if err != nil {
+			return err
+		}
 		return addCatalogInvalidation(ctx, tx)
 	})
+	if err != nil {
+		return StalePackageStats{}, err
+	}
+	return stats, nil
 }
 
 func (s *Store) RemoveCatalogRows(ctx context.Context, rows []*CatalogRow) error {

@@ -86,6 +86,8 @@ type PublicPackage struct {
 	SupportsArm64                          bool    `json:"supports_arm64"`
 	SupportsX8664                          bool    `json:"supports_x86_64"`
 	Deprecated, Disabled                   bool
+	UpstreamDisabled                       bool    `json:"upstream_disabled"`
+	StaleDisabled                          bool    `json:"stale_disabled"`
 	IsFont                                 bool    `json:"is_font"`
 	IsLibrary                              bool    `json:"is_library"`
 	DeprecationDate                        *string `json:"deprecation_date"`
@@ -139,7 +141,7 @@ const publicVisible = `p.kind='cask' AND p.removed_at IS NULL AND NOT COALESCE(m
 // Empty categories may be curated in advance; subtrees containing only Formula entries do not enter the catalog.
 const publicCategoryVisible = `c.visible AND (NOT EXISTS (WITH RECURSIVE subtree AS (SELECT c.id UNION ALL SELECT child.id FROM categories child JOIN subtree parent ON child.parent_id=parent.id) SELECT 1 FROM package_categories pc JOIN subtree ON subtree.id=pc.category_id) OR EXISTS (WITH RECURSIVE subtree AS (SELECT c.id UNION ALL SELECT child.id FROM categories child JOIN subtree parent ON child.parent_id=parent.id) SELECT 1 FROM package_categories pc JOIN subtree ON subtree.id=pc.category_id JOIN packages cp ON cp.id=pc.package_id WHERE cp.kind='cask')) AND c.applies_to<>'formula'`
 const packageView = `SELECT (to_jsonb(p)-ARRAY['raw','raw_hash','search_text','search_vector']) ||
- jsonb_build_object('meta',COALESCE(to_jsonb(m),'{}'::jsonb),'i18n',COALESCE(to_jsonb(i),jsonb_build_object('source_locale',p.source_locale,'locale',p.source_locale)),'icon_url',a.url,'source_path',COALESCE(p.raw->>'ruby_source_path',''),
+ jsonb_build_object('upstream_disabled',p.disabled,'disabled',` + PackageDisabledSQL + `,'meta',COALESCE(to_jsonb(m),'{}'::jsonb),'i18n',COALESCE(to_jsonb(i),jsonb_build_object('source_locale',p.source_locale,'locale',p.source_locale)),'icon_url',a.url,'source_path',COALESCE(p.raw->>'ruby_source_path',''),
  'download_sha256',CASE WHEN COALESCE(p.raw->>'sha256',p.raw#>>'{urls,stable,checksum}') ~ '^[a-fA-F0-9]{64}$' THEN lower(COALESCE(p.raw->>'sha256',p.raw#>>'{urls,stable,checksum}')) ELSE NULL END,
  'categories',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',c.id,'source_locale',c.source_locale,'machine_translated',COALESCE(ci.machine_translated,false),'slug',c.slug,'name',COALESCE(ci.name,c.slug),'icon',c.icon,'is_primary',pc.is_primary,'confidence',pc.confidence) ORDER BY pc.is_primary DESC,c.sort,c.id)
  FROM package_categories pc JOIN categories c ON c.id=pc.category_id LEFT JOIN LATERAL (SELECT t.* FROM category_i18n t CROSS JOIN (SELECT ?::text requested) lang WHERE NULLIF(t.name,'') IS NOT NULL AND t.category_id=c.id AND t.locale IN (lang.requested,c.source_locale,'en-US') ORDER BY ` + publicLocaleOrder + ` LIMIT 1) ci ON TRUE
@@ -176,7 +178,7 @@ func publicCondition(f PublicFilter) (string, []any) {
 	condition := publicVisible
 	args := []any{}
 	if !f.IncludeDisabled {
-		condition += " AND NOT p.disabled"
+		condition += " AND NOT (p.disabled OR p.stale_disabled)"
 	}
 	if !f.IncludeFonts {
 		condition += " AND NOT p.is_font"
@@ -254,18 +256,18 @@ func (s *Store) PublicCategories(ctx context.Context, locale string) ([]PublicCa
 	var rows []PublicCategory
 	// Aggregate by ancestor once, avoiding costly JIT compilation triggered by overestimated per-category correlated queries.
 	err := s.DB.WithContext(ctx).Raw(`WITH RECURSIVE descendants AS(SELECT id ancestor,id FROM categories UNION ALL SELECT d.ancestor,c.id FROM descendants d JOIN categories c ON c.parent_id=d.id),
-	 counts AS(SELECT d.ancestor,count(DISTINCT pc.package_id) package_count FROM descendants d JOIN package_categories pc ON pc.category_id=d.id JOIN packages p ON p.id=pc.package_id LEFT JOIN package_meta m ON m.package_id=p.id WHERE `+publicVisible+` AND NOT p.disabled GROUP BY d.ancestor)
+	 counts AS(SELECT d.ancestor,count(DISTINCT pc.package_id) package_count FROM descendants d JOIN package_categories pc ON pc.category_id=d.id JOIN packages p ON p.id=pc.package_id LEFT JOIN package_meta m ON m.package_id=p.id WHERE `+publicVisible+` AND NOT (p.disabled OR p.stale_disabled) GROUP BY d.ancestor)
 	 SELECT c.id,c.source_locale,COALESCE(i.machine_translated,false) machine_translated,c.parent_id,c.slug,c.icon,c.applies_to,c.hidden_by_default,COALESCE(i.name,c.slug) name,i.description,COALESCE(counts.package_count,0) package_count
 	 FROM categories c LEFT JOIN LATERAL (SELECT t.* FROM category_i18n t CROSS JOIN (SELECT ?::text requested) lang WHERE NULLIF(t.name,'') IS NOT NULL AND t.category_id=c.id AND t.locale IN (lang.requested,c.source_locale,'en-US') ORDER BY `+publicLocaleOrder+` LIMIT 1) i ON TRUE LEFT JOIN counts ON counts.ancestor=c.id WHERE `+publicCategoryVisible+` ORDER BY c.sort,c.id`, locale).Scan(&rows).Error
 	return rows, err
 }
 func (s *Store) PublicStats(ctx context.Context) (map[string]int, error) {
 	var v struct{ Casks, Formulae, Updated int }
-	err := s.DB.WithContext(ctx).Raw(`SELECT count(*) FILTER(WHERE p.kind='cask') casks,count(*) FILTER(WHERE p.kind='formula') formulae,count(*) FILTER(WHERE p.version_changed_at>now()-interval '24 hours') updated` + publicJoins + ` WHERE ` + publicVisible).Scan(&v).Error
+	err := s.DB.WithContext(ctx).Raw(`SELECT count(*) FILTER(WHERE p.kind='cask') casks,count(*) FILTER(WHERE p.kind='formula') formulae,count(*) FILTER(WHERE p.version_changed_at>now()-interval '24 hours') updated` + publicJoins + ` WHERE ` + publicVisible + ` AND NOT (p.disabled OR p.stale_disabled)`).Scan(&v).Error
 	return map[string]int{"casks": v.Casks, "formulae": v.Formulae, "updatedLast24h": v.Updated}, err
 }
 func (s *Store) PublicRelated(ctx context.Context, p PublicPackage, locale string, limit int) ([]PublicPackage, error) {
-	return s.publicPage(ctx, locale, publicVisible+` AND NOT p.disabled AND NOT p.is_font AND NOT p.is_library AND p.kind=? AND p.id<>? AND EXISTS(SELECT 1 FROM package_categories pc JOIN package_categories target ON target.category_id=pc.category_id WHERE pc.package_id=p.id AND target.package_id=? AND target.is_primary)`, "ORDER BY abs(p.popularity-?),p.popularity DESC,p.id LIMIT ?", p.Kind, p.ID, p.ID, p.Popularity, limit)
+	return s.publicPage(ctx, locale, publicVisible+` AND NOT (p.disabled OR p.stale_disabled) AND NOT p.is_font AND NOT p.is_library AND p.kind=? AND p.id<>? AND EXISTS(SELECT 1 FROM package_categories pc JOIN package_categories target ON target.category_id=pc.category_id WHERE pc.package_id=p.id AND target.package_id=? AND target.is_primary)`, "ORDER BY abs(p.popularity-?),p.popularity DESC,p.id LIMIT ?", p.Kind, p.ID, p.ID, p.Popularity, limit)
 }
 func (s *Store) PublicDependents(ctx context.Context, p PublicPackage, locale string) ([]PublicPackage, int, error) {
 	tokens, err := json.Marshal([]string{p.Token})
@@ -286,7 +288,7 @@ func (s *Store) PublicDependents(ctx context.Context, p PublicPackage, locale st
 	}
 	// MATERIALIZED keeps the planner on the indexed filter; with ORDER BY ... LIMIT it would
 	// otherwise walk the popularity index and test every package.
-	if err := s.DB.WithContext(ctx).Raw("WITH d AS MATERIALIZED (SELECT p.id,p.popularity"+publicJoins+" WHERE "+publicVisible+" AND "+condition+") SELECT id,(SELECT count(*) FROM d) AS total FROM d ORDER BY popularity DESC,id LIMIT 6", args...).Scan(&rows).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Raw("WITH d AS MATERIALIZED (SELECT p.id,p.popularity"+publicJoins+" WHERE "+publicVisible+" AND NOT (p.disabled OR p.stale_disabled) AND "+condition+") SELECT id,(SELECT count(*) FROM d) AS total FROM d ORDER BY popularity DESC,id LIMIT 6", args...).Scan(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("query package dependents: %w", err)
 	}
 	if len(rows) == 0 {
@@ -305,14 +307,14 @@ func (s *Store) PublicSitemap(ctx context.Context, current, size int) ([]PublicP
 		Kind, Token string
 		UpdatedAt   time.Time
 	}
-	if err := s.DB.WithContext(ctx).Raw("SELECT count(*)" + publicJoins + " WHERE " + publicVisible + " AND NOT p.disabled").Scan(&total).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Raw("SELECT count(*)" + publicJoins + " WHERE " + publicVisible + " AND NOT (p.disabled OR p.stale_disabled)").Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	offset, found := domain.PageOffset(current, size, int64(total))
 	if !found {
 		return []PublicPackage{}, total, nil
 	}
-	err := s.DB.WithContext(ctx).Raw("SELECT p.kind,p.token,p.updated_at"+publicJoins+" WHERE "+publicVisible+" AND NOT p.disabled ORDER BY p.id LIMIT ? OFFSET ?", size, offset).Scan(&rows).Error
+	err := s.DB.WithContext(ctx).Raw("SELECT p.kind,p.token,p.updated_at"+publicJoins+" WHERE "+publicVisible+" AND NOT (p.disabled OR p.stale_disabled) ORDER BY p.id LIMIT ? OFFSET ?", size, offset).Scan(&rows).Error
 	out := make([]PublicPackage, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, PublicPackage{Kind: r.Kind, Token: r.Token, UpdatedAt: r.UpdatedAt})

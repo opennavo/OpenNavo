@@ -24,19 +24,30 @@ type Service struct {
 	Store  *store.Store
 	Source Source
 	Queue  Queue
+	Now    func() time.Time
 }
 type Stats struct {
-	Kind           string `json:"kind"`
-	Fetched        int    `json:"fetched"`
-	Inserted       int    `json:"inserted"`
-	Updated        int    `json:"updated"`
-	VersionChanged int    `json:"versionChanged"`
-	Removed        int    `json:"removed"`
-	Renamed        int    `json:"renamed"`
-	Unchanged      int    `json:"unchanged"`
-	DurationMs     int64  `json:"durationMs"`
-	NotModified    bool   `json:"notModified"`
-	Renormalized   int    `json:"renormalized"`
+	Kind               string `json:"kind"`
+	Fetched            int    `json:"fetched"`
+	Inserted           int    `json:"inserted"`
+	Updated            int    `json:"updated"`
+	VersionChanged     int    `json:"versionChanged"`
+	Removed            int    `json:"removed"`
+	Renamed            int    `json:"renamed"`
+	Unchanged          int    `json:"unchanged"`
+	DurationMs         int64  `json:"durationMs"`
+	NotModified        bool   `json:"notModified"`
+	Renormalized       int    `json:"renormalized"`
+	AutoDisabled       int    `json:"autoDisabled"`
+	Reactivated        int    `json:"reactivated"`
+	MissingVersionDate int    `json:"missingVersionDate"`
+}
+
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (s *Service) Run(ctx context.Context) (map[string]any, error) {
@@ -53,7 +64,7 @@ func (s *Service) Run(ctx context.Context) (map[string]any, error) {
 			stats["kinds"] = kinds
 			if err != nil {
 				for _, kindStats := range kinds {
-					if kindStats.Inserted+kindStats.Updated+kindStats.Removed > 0 {
+					if kindStats.Inserted+kindStats.Updated+kindStats.Removed+kindStats.AutoDisabled+kindStats.Reactivated > 0 {
 						stats["partial"] = true
 						break
 					}
@@ -94,6 +105,15 @@ func (s *Service) syncKind(ctx context.Context, kind string) (stats Stats, resul
 	stats = Stats{Kind: kind}
 	started := time.Now()
 	defer func() { stats.DurationMs = time.Since(started).Milliseconds() }()
+	// Age-based transitions remain due even when Homebrew returns 304 or the
+	// download fails. Committed update dates are independent of fetch success.
+	defer func() {
+		lifecycle, err := s.Store.RefreshStalePackages(ctx, s.now())
+		stats.AutoDisabled += lifecycle.AutoDisabled
+		stats.Reactivated += lifecycle.Reactivated
+		stats.MissingVersionDate = lifecycle.MissingVersionDate
+		resultError = errors.Join(resultError, err)
+	}()
 	rows, err := s.Store.CatalogRows(ctx, kind)
 	if err != nil {
 		return stats, err
@@ -144,9 +164,12 @@ func (s *Service) syncKind(ctx context.Context, kind string) (stats Stats, resul
 	}
 	batch := make([]store.CatalogMutation, 0, 500)
 	flush := func() error {
-		if err := s.Store.ApplyCatalogBatch(ctx, batch); err != nil {
+		lifecycle, err := s.Store.ApplyCatalogBatchWithLifecycle(ctx, batch, s.now())
+		if err != nil {
 			return err
 		}
+		stats.AutoDisabled += lifecycle.AutoDisabled
+		stats.Reactivated += lifecycle.Reactivated
 		for _, mutation := range batch {
 			if mutation.Previous == nil {
 				stats.Inserted++
@@ -274,9 +297,12 @@ func (s *Service) renormalize(ctx context.Context, rows map[string]*store.Catalo
 	}
 	batch := make([]store.CatalogMutation, 0, 500)
 	flush := func() error {
-		if err := s.Store.ApplyCatalogBatch(ctx, batch); err != nil {
+		lifecycle, err := s.Store.ApplyCatalogBatchWithLifecycle(ctx, batch, s.now())
+		if err != nil {
 			return err
 		}
+		stats.AutoDisabled += lifecycle.AutoDisabled
+		stats.Reactivated += lifecycle.Reactivated
 		for _, mutation := range batch {
 			mutation.Previous.NormalizationVersion = fmt.Sprint(homebrew.CaskNormalizationVersion)
 			mutation.Previous.RawHash = mutation.Package.RawHash

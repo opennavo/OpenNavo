@@ -19,6 +19,9 @@ func (s *Store) AnalyticsPackages(ctx context.Context) ([]domain.AnalyticsPackag
 
 func (s *Store) ApplyAnalytics(ctx context.Context, rows []domain.AnalyticsRow, date string) error {
 	return s.WithTx(ctx, func(tx *gorm.DB) error {
+		if err := LockCatalogWrites(ctx, tx); err != nil {
+			return err
+		}
 		for start := 0; start < len(rows); start += 500 {
 			groups := []string{}
 			arguments := []any{}
@@ -31,12 +34,8 @@ func (s *Store) ApplyAnalytics(ctx context.Context, rows []domain.AnalyticsRow, 
 				return fmt.Errorf("update analytics batch: %w", err)
 			}
 		}
-		if err := tx.WithContext(ctx).Exec("UPDATE packages SET rank_30d=NULL WHERE kind='cask' AND (removed_at IS NOT NULL OR is_font OR disabled)").Error; err != nil {
-			return fmt.Errorf("reset excluded ranks: %w", err)
-		}
-		// kind/popularity and primary-key indexes support ranking reads; window ranks are calculated once during daily sync.
-		if err := tx.WithContext(ctx).Exec("WITH ranked AS (SELECT id,row_number() OVER (PARTITION BY kind ORDER BY installs_30d DESC,token) AS rank FROM packages WHERE kind='cask' AND removed_at IS NULL AND NOT is_font AND NOT disabled) UPDATE packages p SET rank_30d=ranked.rank FROM ranked WHERE p.id=ranked.id").Error; err != nil {
-			return fmt.Errorf("compute analytics ranks: %w", err)
+		if _, err := refreshPackageRanks(ctx, tx); err != nil {
+			return err
 		}
 		if err := tx.WithContext(ctx).Exec("INSERT INTO analytics_snapshots (package_id,snapshot_date,installs_30d,installs_90d,installs_365d,on_request_30d,rank_30d) SELECT id,?::date,installs_30d,installs_90d,installs_365d,on_request_30d,rank_30d FROM packages WHERE kind='cask' AND removed_at IS NULL ON CONFLICT (package_id,snapshot_date) DO UPDATE SET installs_30d=EXCLUDED.installs_30d,installs_90d=EXCLUDED.installs_90d,installs_365d=EXCLUDED.installs_365d,on_request_30d=EXCLUDED.on_request_30d,rank_30d=EXCLUDED.rank_30d", date).Error; err != nil {
 			return fmt.Errorf("save daily analytics snapshot: %w", err)

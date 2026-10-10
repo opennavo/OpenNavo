@@ -57,8 +57,13 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 	if state.LastModified != nil {
 		source.LastModified = *state.LastModified
 	}
-	if state.Type == "homebrew_commits" && state.LastFetchedAt != nil && (state.LastStatus == "ok" || state.LastStatus == "not_modified") {
-		since := state.LastFetchedAt.Add(-24 * time.Hour)
+	// An incremental window can miss a version published before first import.
+	// Until that exact version's date is known, fetch the bounded full history.
+	// The "latest" marker has no version commit date to backfill.
+	if state.CurrentVersion != "latest" && (state.CurrentVersionCommittedAt == nil || state.CurrentVersionCommittedAt.IsZero() || state.CurrentVersionCommittedAt.After(s.now())) {
+		source.ETag, source.LastModified = "", ""
+	} else if state.Type == "homebrew_commits" && state.LastFetchedAt != nil && (state.LastStatus == "ok" || state.LastStatus == "not_modified") {
+		since := state.LastFetchedAt.UTC().Add(-24 * time.Hour)
 		source.Since = &since
 	}
 	result, err := s.Fetcher.Fetch(ctx, p, source)
@@ -80,7 +85,7 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 		category, httpStatus := pipeline.Failure(err)
 		return map[string]any{"status": status, "source": state.Type, "errorCategory": category, "httpStatus": httpStatus}, err
 	}
-	changed, err := s.Store.SaveFetchedChangelog(ctx, state, result, s.now().Add(interval(state.Rank30d)), s.now())
+	changed, lifecycle, err := s.Store.SaveFetchedChangelogWithLifecycle(ctx, state, result, s.now().Add(interval(state.Rank30d)), s.now())
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +104,7 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 			return nil, err
 		}
 	}
-	return map[string]any{"versions": len(result.Versions), "notModified": result.NotModified, "source": state.Type, "changed": changed}, nil
+	return map[string]any{"versions": len(result.Versions), "notModified": result.NotModified, "source": state.Type, "changed": changed, "autoDisabled": lifecycle.AutoDisabled, "reactivated": lifecycle.Reactivated, "missingVersionDate": lifecycle.MissingVersionDate}, nil
 }
 func (s *Service) Schedule(ctx context.Context) (map[string]any, error) {
 	candidates, err := s.Store.UnresolvedHomebrewSources(ctx)
