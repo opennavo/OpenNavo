@@ -207,7 +207,10 @@ rollout. After both route checks and the worker update succeed, the receiver sto
 all retired application containers, retains at most one stopped previous release
 for operator-controlled rollback, and removes older application containers. It
 also bounds the rolling Compose overlay and state history to the current and
-immediately previous releases. Infrastructure containers, data volumes, images,
+immediately previous releases. Keep versioned application service names out of
+`depends_on` in the host's base Compose file: retired releases are pruned from
+the overlay, and the receiver's `compose config` check then aborts the deployment
+before the backup, migrations or route switch. Infrastructure containers, data volumes, images,
 and private release snapshots are not removed. Start the previous application
 services and verify their health before restoring their routes during a manual
 rollback. Cleanup failures do not roll back a verified release; retrying the same
