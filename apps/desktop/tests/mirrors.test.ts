@@ -2,12 +2,15 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import MirrorSettings from '@/components/settings/MirrorSettings.vue';
+import CustomMirrorForm from '@/components/settings/CustomMirrorForm.vue';
+import { customMirrorInput, customMirrorProbes, validateMirrorDraft } from '@/composables/customMirrors';
 import { useMirrorOptions } from '@/composables/useMirrorOptions';
 import { i18n } from '@/i18n';
 import type { MirrorProbe } from '@/ipc/bindings';
 import { commands } from '@/ipc/client';
 import { startLocalState, useSettingsStore } from '@/stores';
 import { setup } from './helpers';
+import customProbeContract from './fixtures/custom-mirror-probes.json';
 
 // Settings download sources and shared source list (first-launch-onboarding §3.3, D2).
 const remote = vi.hoisted(() => ({ config: null as unknown }));
@@ -43,8 +46,12 @@ afterEach(() => {
 async function mountSettings() {
   const context = await setup('/settings/mirrors');
   await startLocalState();
-  mount(MirrorSettings, { global: { plugins: [context.pinia, context.router, i18n] }, attachTo: document.body });
+  const wrapper = mount(MirrorSettings, {
+    global: { plugins: [context.pinia, context.router, i18n] },
+    attachTo: document.body
+  });
   await flushPromises();
+  return wrapper;
 }
 
 describe('Settings: download sources', () => {
@@ -178,5 +185,208 @@ describe('Slow official-source suggestions', () => {
     expect(await suggestionFor([result('official', 1500), result('tuna', 40)])).toBeUndefined();
     expect(await suggestionFor([result('official', 2400), result('tuna', null)])).toBeUndefined();
     expect(await suggestionFor([result('official', 1600), result('tuna', 1800)])).toBeUndefined();
+  });
+});
+
+describe('Local custom download mirrors', () => {
+  it('Matches the four-endpoint payload exercised by the native IPC command test', () => {
+    expect(customMirrorProbes(customProbeContract.source)).toEqual(customProbeContract.probes);
+  });
+
+  const draft = (apiDomain = 'https://local.example/api') => ({
+    name: 'My mirror',
+    apiDomain,
+    bottleDomain: '',
+    brewGitRemote: '',
+    coreGitRemote: ''
+  });
+
+  it('Saves canonical API bases and derives probes exactly as Homebrew concatenates endpoints', () => {
+    for (const example of customProbeContract.apiBases) {
+      const input = customMirrorInput(draft(example.input), 'custom-test');
+      expect(input.apiDomain).toBe(example.normalized);
+      expect(input.probeUrl).toBe(`${input.apiDomain}/cask.jws.json`);
+      expect(input.probeUrl).toBe(example.probeUrl);
+      expect(customMirrorProbes(input)[0]?.probeUrl).toBe(example.probeUrl);
+    }
+    for (const api of customProbeContract.invalidApiBases) {
+      expect(validateMirrorDraft(draft(api)).apiDomain).toBe('apiQueryInvalid');
+      expect(() => customMirrorInput(draft(api), 'custom-test')).toThrow();
+    }
+  });
+
+  it('Blocks checking and saving an API URL with a query before IPC', async () => {
+    await setup();
+    const probe = vi.spyOn(commands, 'mirrorProbe');
+    const wrapper = mount(CustomMirrorForm, { props: { saving: false }, global: { plugins: [i18n] } });
+    await wrapper.findAll('input')[0]!.setValue('Local');
+    await wrapper.findAll('input')[1]!.setValue('https://mirror.example/api?channel=stable');
+    await wrapper
+      .findAll('button')
+      .find(item => item.text() === '检查连接')!
+      .trigger('click');
+    await flushPromises();
+    expect(probe).not.toHaveBeenCalled();
+    expect(wrapper.find('[role="alert"]').text()).toContain('API 地址不能包含查询参数');
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(wrapper.emitted('save')).toBeUndefined();
+    await wrapper.findAll('input')[1]!.setValue('https://mirror.example/api///');
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(wrapper.emitted('save')?.[0]?.[0]).toMatchObject({
+      apiDomain: 'https://mirror.example/api',
+      probeUrl: 'https://mirror.example/api/cask.jws.json'
+    });
+    wrapper.unmount();
+  });
+
+  it('Validates addresses and checks all configured endpoints with stable API paths', () => {
+    for (const url of [
+      'file:///tmp/mirror',
+      'https://user:password@example.test',
+      'https://example.test/#fragment',
+      'https://example.test/\n'
+    ]) {
+      expect(validateMirrorDraft(draft(url)).apiDomain).toBe('urlInvalid');
+    }
+    expect(validateMirrorDraft({ ...draft(''), name: '' })).toEqual({
+      name: 'nameRequired',
+      addresses: 'addressRequired'
+    });
+    const input = customMirrorInput(
+      { ...draft('https://local.example/api///'), bottleDomain: 'https://local.example/bottles' },
+      'custom-test'
+    );
+    expect(customMirrorProbes(input).map(item => item.probeUrl)).toEqual([
+      'https://local.example/api/cask.jws.json',
+      'https://local.example/bottles'
+    ]);
+  });
+
+  it('Creates, selects, reloads and edits a custom mirror atomically; deletion returns to official', async () => {
+    const wrapper = await mountSettings();
+    await wrapper
+      .findAll('button')
+      .find(item => item.text() === '添加自定义源')!
+      .trigger('click');
+    const form = wrapper.findComponent(CustomMirrorForm);
+    await form.findAll('input')[0]!.setValue('My mirror');
+    await form.findAll('input')[1]!.setValue('https://local.example/api');
+    await form.find('form').trigger('submit');
+    await flushPromises();
+    const store = useSettingsStore();
+    const saved = store.value!.customMirrors[0]!;
+    expect(saved.name).toBe('My mirror');
+    expect(store.value!.mirror.key).toBe(saved.key);
+    expect(store.value!.mirror.bottleDomain).toBeNull();
+    expect(radios().find(item => item.textContent?.includes('My mirror'))?.textContent).toContain('仅本机');
+    await store.load();
+    expect(store.value!.customMirrors).toEqual([saved]);
+    await store.saveCustomMirror({ ...saved, name: 'Renamed', apiDomain: 'https://new.example/api' });
+    expect(store.value!.mirror.apiDomain).toBe('https://new.example/api');
+    await store.removeCustomMirror(saved.key);
+    expect(store.value!.customMirrors).toEqual([]);
+    expect(store.value!.mirror).toEqual({
+      key: 'official',
+      apiDomain: null,
+      bottleDomain: null,
+      brewGitRemote: null,
+      coreGitRemote: null
+    });
+    wrapper.unmount();
+  });
+
+  it('Failed local save preserves the existing source and custom list', async () => {
+    const wrapper = await mountSettings();
+    const store = useSettingsStore();
+    const previous = JSON.parse(JSON.stringify(store.value));
+    vi.spyOn(commands, 'settingsSet').mockResolvedValue({
+      status: 'error',
+      error: { code: 'E_UNKNOWN', message: 'disk_full', detail: null }
+    });
+    await expect(store.saveCustomMirror(customMirrorInput(draft(), 'custom-test'), true)).rejects.toBeDefined();
+    expect(store.value).toEqual(previous);
+    wrapper.unmount();
+  });
+
+  it('API success does not hide Bottle failure and editing invalidates old check results', async () => {
+    await setup();
+    const wrapper = mount(CustomMirrorForm, {
+      props: { saving: false },
+      global: { plugins: [i18n] },
+      attachTo: document.body
+    });
+    await wrapper.findAll('input')[0]!.setValue('My mirror');
+    await wrapper.findAll('input')[1]!.setValue('https://local.example/api');
+    await wrapper.findAll('input')[2]!.setValue('https://local.example/bottles');
+    vi.spyOn(commands, 'mirrorProbe').mockImplementation(async inputs => ({
+      status: 'ok',
+      data: inputs.map(input => ({
+        key: input.key,
+        ok: input.name === 'apiDomain',
+        latencyMs: 5,
+        status: input.name === 'apiDomain' ? 200 : 404,
+        error: null
+      }))
+    }));
+    await wrapper
+      .findAll('button')
+      .find(item => item.text() === '检查连接')!
+      .trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[role="status"]').text()).toContain('Bottle');
+    await wrapper.findAll('input')[2]!.setValue('https://different.example/bottles');
+    expect(wrapper.find('[role="status"]').text()).toBe('尚未检查');
+    wrapper.unmount();
+  });
+});
+
+describe('Custom sources with unavailable built-in configuration', () => {
+  it('Keeps a local source selectable when the remote mirror list cannot load', async () => {
+    remote.config = null;
+    const wrapper = await mountSettings();
+    const input = customMirrorInput(
+      {
+        name: 'Offline local',
+        apiDomain: '',
+        bottleDomain: 'https://local.example/bottles',
+        brewGitRemote: '',
+        coreGitRemote: ''
+      },
+      'custom-offline'
+    );
+    await useSettingsStore().saveCustomMirror(input);
+    await flushPromises();
+    expect(radios()).toHaveLength(2);
+    radios()
+      .find(item => item.textContent?.includes('Offline local'))!
+      .click();
+    await flushPromises();
+    expect(useSettingsStore().value?.mirror.key).toBe(input.key);
+    expect(wrapper.text()).toContain('仍可使用官方源和本机自定义源');
+    wrapper.unmount();
+  });
+
+  it('Discards a completed probe if its addresses changed during the request', async () => {
+    await setup();
+    const wrapper = mount(CustomMirrorForm, { props: { saving: false }, global: { plugins: [i18n] } });
+    await wrapper.findAll('input')[0]!.setValue('Local');
+    await wrapper.findAll('input')[1]!.setValue('https://local.example/api');
+    let finish!: (value: Awaited<ReturnType<typeof commands.mirrorProbe>>) => void;
+    const pending = new Promise<Awaited<ReturnType<typeof commands.mirrorProbe>>>(resolve => {
+      finish = resolve;
+    });
+    vi.spyOn(commands, 'mirrorProbe').mockReturnValue(pending);
+    await wrapper
+      .findAll('button')
+      .find(item => item.text() === '检查连接')!
+      .trigger('click');
+    await flushPromises();
+    await wrapper.findAll('input')[1]!.setValue('https://changed.example/api');
+    finish({ status: 'ok', data: [] });
+    await flushPromises();
+    expect(wrapper.find('[role="status"]').text()).toBe('尚未检查');
+    wrapper.unmount();
   });
 });

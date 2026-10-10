@@ -443,7 +443,8 @@ pub struct Settings {
     pub auto_upgrade_casks: bool,
     pub notify_updates: bool,
     pub mirror: MirrorChoice,
-    pub brew_path: Option<String>, // None means automatic discovery (§6.1).
+    pub custom_mirrors: Vec<MirrorInput>, // Local settings only; never sent to the public API.
+    pub brew_path: Option<String>,        // None means automatic discovery (§6.1).
     pub homebrew_analytics: Option<bool>, // None leaves analytics unchanged; Some(false) injects HOMEBREW_NO_ANALYTICS=1.
     pub crash_reports: bool,
     pub zap_by_default: bool,
@@ -467,6 +468,7 @@ struct SettingsInput {
     pub auto_upgrade_casks: bool,
     pub notify_updates: bool,
     pub mirror: MirrorChoice,
+    pub custom_mirrors: Vec<MirrorInput>,
     pub brew_path: Option<String>, // None means automatic discovery (§6.1).
     pub homebrew_analytics: Option<bool>, // None leaves analytics unchanged; Some(false) injects HOMEBREW_NO_ANALYTICS=1.
     pub crash_reports: bool,
@@ -492,6 +494,7 @@ impl Default for SettingsInput {
             auto_upgrade_casks: value.auto_upgrade_casks,
             notify_updates: value.notify_updates,
             mirror: value.mirror,
+            custom_mirrors: value.custom_mirrors,
             brew_path: value.brew_path,
             homebrew_analytics: value.homebrew_analytics,
             crash_reports: value.crash_reports,
@@ -521,6 +524,7 @@ impl From<SettingsInput> for Settings {
             auto_upgrade_casks: value.auto_upgrade_casks,
             notify_updates: value.notify_updates,
             mirror: value.mirror,
+            custom_mirrors: value.custom_mirrors,
             brew_path: value.brew_path,
             homebrew_analytics: value.homebrew_analytics,
             crash_reports: value.crash_reports,
@@ -716,6 +720,7 @@ impl Default for Settings {
             auto_upgrade_casks: false,
             notify_updates: true,
             mirror: MirrorChoice::default(),
+            custom_mirrors: Vec::new(),
             brew_path: None,
             homebrew_analytics: None,
             crash_reports: false,

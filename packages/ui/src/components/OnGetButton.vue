@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useUiMessages } from '../composables/locale';
+import OnIcon from './OnIcon.vue';
 
 export type GetState = 'get' | 'open' | 'installed' | 'update' | 'queued' | 'running' | 'unavailable';
 
@@ -10,9 +11,11 @@ export interface OnGetButtonProps {
   progress?: number;
   /** Override default copy, e.g. web Get or Update to 1.140.0. */
   label?: string;
+  /** Compact pill for lists, or a standard button alongside detail-header actions. */
+  appearance?: 'compact' | 'button';
 }
 
-const props = defineProps<OnGetButtonProps>();
+const props = withDefaults(defineProps<OnGetButtonProps>(), { appearance: 'compact' });
 
 const emit = defineEmits<{
   /** Click in get/open/update states. */
@@ -50,9 +53,14 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const dashOffset = computed(() => CIRCUMFERENCE * (1 - (percent.value ?? 25) / 100));
 
 const classes = computed(() => [
-  'm-0 box-border inline-flex h-26px min-w-56px select-none items-center justify-center whitespace-nowrap rounded-full border border-solid px-12px font-sans text-12px font-600 outline-none',
+  'm-0 box-border inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap border border-solid font-sans font-600 outline-none',
+  props.appearance === 'button'
+    ? 'h-34px min-w-76px gap-7px rounded-default px-16px text-13px'
+    : 'h-26px min-w-56px rounded-full px-12px text-12px',
   'transition-colors duration-fast ease-standard focus-visible:shadow-focus-ring',
-  STYLE[props.state]
+  props.appearance === 'button' && (props.state === 'get' || props.state === 'running')
+    ? 'group border-transparent bg-button-secondary-bg text-button-secondary-text hover:bg-button-secondary-hover active:bg-button-secondary-pressed'
+    : STYLE[props.state]
 ]);
 </script>
 
@@ -90,6 +98,7 @@ const classes = computed(() => [
     </span>
   </button>
   <button v-else-if="INTERACTIVE.has(state)" type="button" :class="classes" @click="emit('click', $event)">
+    <OnIcon v-if="appearance === 'button' && state === 'get'" name="download" :size="15" />
     {{ text }}
   </button>
   <span v-else :class="classes">{{ text }}</span>

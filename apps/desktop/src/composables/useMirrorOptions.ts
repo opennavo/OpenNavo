@@ -7,7 +7,7 @@ import { useAppLocale } from './useAppLocale';
 import { fetchClientConfig } from './useClientConfig';
 import type { ClientConfig } from './useClientConfig';
 
-export type MirrorOption = ClientConfig['mirrors'][number];
+export type MirrorOption = ClientConfig['mirrors'][number] & { local?: boolean };
 
 /** Suggest a faster available mirror when the official probe exceeds this threshold or fails (06 §11). */
 export const SLOW_OFFICIAL_MS = 1500;
@@ -60,7 +60,10 @@ function toInput(option: MirrorOption): MirrorInput {
  * Download sources (first-launch-onboarding §3.3): enabled backend mirrors in backend order, always including the official source.
  * Load, probe, find the fastest source, and suggest alternatives when the official source is slow; pages decide when to save (Welcome button or Settings selection).
  */
-export function useMirrorOptions(includeMirrors: () => boolean = () => true) {
+export function useMirrorOptions(
+  includeMirrors: () => boolean = () => true,
+  customMirrors: () => readonly MirrorInput[] = () => []
+) {
   const { t } = useI18n();
   const { appLocale } = useAppLocale();
   const { data: config, loading, error, reload: load } = useLoader(fetchClientConfig, [appLocale]);
@@ -70,7 +73,10 @@ export function useMirrorOptions(includeMirrors: () => boolean = () => true) {
 
   // Use backend official-source metadata when configured (name, description, probe URL); otherwise prepend a built-in entry.
   const options = computed<MirrorOption[]>(() => {
-    const mirrors = (config.value?.mirrors ?? []).filter(mirror => includeMirrors() || mirror.key === 'official');
+    const mirrors: MirrorOption[] = [
+      ...(config.value?.mirrors ?? []).filter(mirror => !mirror.key.startsWith('custom-')),
+      ...customMirrors().map(mirror => ({ ...mirror, local: true, recommended: false }))
+    ].filter(mirror => includeMirrors() || mirror.key === 'official');
     if (mirrors.some(mirror => mirror.key === 'official')) return mirrors;
     const official: MirrorOption = {
       key: 'official',
@@ -100,8 +106,16 @@ export function useMirrorOptions(includeMirrors: () => boolean = () => true) {
       do {
         again = false;
         probes.value = {};
-        const inputs = options.value.slice(0, PROBE_LIMIT).map(toInput);
-        const results = await unwrap(commands.mirrorProbe(inputs)).catch((): MirrorProbe[] => []);
+        const inputs = options.value.map(toInput);
+        const results: MirrorProbe[] = [];
+        for (let offset = 0; offset < inputs.length; offset += PROBE_LIMIT) {
+          results.push(
+            ...(await unwrap(commands.mirrorProbe(inputs.slice(offset, offset + PROBE_LIMIT))).catch(
+              (): MirrorProbe[] => []
+            ))
+          );
+          if (again) break;
+        }
         if (!again) probes.value = Object.fromEntries(results.map(result => [result.key, result]));
       } while (again);
     })().finally(() => {

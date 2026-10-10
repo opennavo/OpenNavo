@@ -334,3 +334,160 @@ fn six_language_settings_round_trip() {
         );
     }
 }
+
+fn custom() -> MirrorInput {
+    MirrorInput {
+        key: "custom-local".into(),
+        name: "Local mirror".into(),
+        probe_url: "https://ignored.example".into(),
+        api_domain: Some("https://mirror.example/api///".into()),
+        bottle_domain: None,
+        brew_git_remote: None,
+        core_git_remote: None,
+    }
+}
+
+#[test]
+fn custom_mirrors_are_local_persistent_and_active_addresses_follow_edits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("settings.json");
+    let local = custom();
+    let normalized = settings::validate(Settings {
+        custom_mirrors: vec![local.clone()],
+        mirror: mirror::choice(&local),
+        ..Settings::default()
+    })
+    .unwrap();
+    assert_eq!(
+        normalized.custom_mirrors[0].probe_url,
+        "https://mirror.example/api/cask.jws.json"
+    );
+    assert_eq!(
+        normalized.mirror.api_domain.as_deref(),
+        Some("https://mirror.example/api")
+    );
+    settings::save_file(&path, &normalized).unwrap();
+    let mut reloaded = settings::load(&path).unwrap();
+    assert_eq!(reloaded.custom_mirrors, normalized.custom_mirrors);
+    assert_eq!(reloaded.mirror, normalized.mirror);
+    reloaded.custom_mirrors[0].api_domain = Some("https://new.example/api".into());
+    reloaded = settings::validate(reloaded).unwrap();
+    assert_eq!(
+        reloaded.mirror.api_domain.as_deref(),
+        Some("https://new.example/api")
+    );
+    assert_eq!(mirror::variables(&reloaded.mirror).len(), 1);
+    let env = construct(&reloaded, "/tmp", Path::new("/tmp/askpass"));
+    assert!(!env.contains_key("HOMEBREW_BOTTLE_DOMAIN"));
+    reloaded.custom_mirrors.clear();
+    assert!(settings::validate(reloaded.clone()).is_err());
+    reloaded.mirror = Settings::default().mirror;
+    assert!(settings::validate(reloaded).is_ok());
+    let legacy: Settings = serde_json::from_str(r#"{"mirror":{"key":"official"}}"#).unwrap();
+    assert!(legacy.custom_mirrors.is_empty());
+}
+
+#[test]
+fn invalid_custom_mirrors_cannot_be_persisted() {
+    for address in [
+        "file:///tmp/mirror",
+        "https://user:password@example.test",
+        "https://example.test/#fragment",
+        "https://example.test/\n",
+        "",
+    ] {
+        let mut local = custom();
+        local.api_domain = Some(address.into());
+        assert!(mirror::normalize_custom(local).is_err(), "{address:?}");
+    }
+    for name in ["", "   ", "Mirror\n"] {
+        let mut local = custom();
+        local.name = name.into();
+        assert!(mirror::normalize_custom(local).is_err());
+    }
+    let mut local = custom();
+    local.key = "official".into();
+    assert!(mirror::normalize_custom(local).is_err());
+    for custom_mirrors in [
+        vec![custom(); 2],
+        (0..21)
+            .map(|n| MirrorInput {
+                key: format!("custom-{n}"),
+                ..custom()
+            })
+            .collect(),
+    ] {
+        assert!(
+            settings::validate(Settings {
+                custom_mirrors,
+                ..Settings::default()
+            })
+            .is_err()
+        );
+    }
+    let oversized = (0..20)
+        .map(|n| MirrorInput {
+            key: format!("custom-{n}"),
+            bottle_domain: Some(format!("https://example.test/{}", "x".repeat(3900))),
+            ..custom()
+        })
+        .collect();
+    assert!(
+        settings::validate(Settings {
+            custom_mirrors: oversized,
+            ..Settings::default()
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn custom_api_base_persistence_and_brew_environment_match_probe_requests() {
+    let contract: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/custom-mirror-probes.json"
+    ))
+    .unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("settings.json");
+    for example in contract["apiBases"].as_array().unwrap() {
+        let source = MirrorInput {
+            api_domain: Some(example["input"].as_str().unwrap().into()),
+            ..custom()
+        };
+        let normalized = settings::validate(Settings {
+            mirror: mirror::choice(&source),
+            custom_mirrors: vec![source],
+            ..Settings::default()
+        })
+        .unwrap();
+        settings::save_file(&path, &normalized).unwrap();
+        let reloaded = settings::load(&path).unwrap();
+        let env = construct(&reloaded, "/tmp", Path::new("/tmp/askpass"));
+        let base = &env["HOMEBREW_API_DOMAIN"];
+        assert_eq!(base, example["normalized"].as_str().unwrap());
+        assert_eq!(reloaded.custom_mirrors[0].api_domain.as_ref(), Some(base));
+        assert_eq!(
+            reloaded.custom_mirrors[0].probe_url,
+            example["probeUrl"].as_str().unwrap()
+        );
+        // Homebrew::API.fetch builds this same string in Library/Homebrew/api.rb.
+        assert_eq!(
+            format!("{base}/cask.jws.json"),
+            reloaded.custom_mirrors[0].probe_url
+        );
+    }
+    for api in contract["invalidApiBases"].as_array().unwrap() {
+        let source = MirrorInput {
+            api_domain: Some(api.as_str().unwrap().into()),
+            ..custom()
+        };
+        assert!(
+            settings::validate(Settings {
+                mirror: mirror::choice(&source),
+                custom_mirrors: vec![source],
+                ..Settings::default()
+            })
+            .is_err()
+        );
+    }
+}

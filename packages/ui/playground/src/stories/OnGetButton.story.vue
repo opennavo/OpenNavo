@@ -21,6 +21,12 @@ const progress = ref(62);
         <span class="text-caption text-ink-tertiary">{{ state }}</span>
       </div>
     </StoryRow>
+    <StoryRow label="Detail-header buttons">
+      <div v-for="state in states" :key="state" class="flex flex-col items-center gap-6px">
+        <OnGetButton appearance="button" :state="state" :progress="state === 'running' ? progress : undefined" />
+        <span class="text-caption text-ink-tertiary">{{ state }}</span>
+      </div>
+    </StoryRow>
     <StoryRow label="Progress">
       <OnGetButton state="running" :progress="0" />
       <OnGetButton state="running" :progress="25" />

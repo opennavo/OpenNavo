@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { OnGetButton } from '@opennavo/ui';
+import type { OnGetButtonProps } from '@opennavo/ui';
 import type { Kind } from '@/ipc/bindings';
 import { usePackageState } from '@/composables/usePackageState';
 import { useTasksStore } from '@/stores';
 
 // Get button (06 §13): derive from installed packages, updates, and queue; clicking while running can stop it.
-const props = defineProps<{ kind: Kind; token: string; disabled?: boolean; label?: string }>();
+const props = defineProps<{
+  kind: Kind;
+  token: string;
+  disabled?: boolean;
+  label?: string;
+  appearance?: OnGetButtonProps['appearance'];
+}>();
 
 const { stateOf, act } = usePackageState();
 const tasks = useTasksStore();
@@ -23,6 +30,7 @@ function cancel() {
     :state="current.state"
     :progress="current.progress"
     :label="label ?? current.label"
+    :appearance="appearance"
     @click="act(kind, token, current.state)"
     @cancel="cancel"
   />

@@ -55,6 +55,7 @@ function defaultSettings(): AppSettings {
     autoUpgradeFormulae: true,
     autoUpgradeCasks: false,
     notifyUpdates: true,
+    customMirrors: [],
     // Match Rust defaults: official source, four empty URLs (06 §11).
     mirror: {
       key: 'official',

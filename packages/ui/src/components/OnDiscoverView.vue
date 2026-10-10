@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { Component } from 'vue';
 import type { PackageSummary } from '@opennavo/api';
 import OnCategoryChips from './OnCategoryChips.vue';
@@ -62,6 +62,8 @@ export interface OnDiscoverViewProps {
   chips: readonly OnCategoryChip<string>[];
   /** null means loading; show skeletons. */
   popular: readonly PackageSummary[] | null;
+  /** Fit popular-app rows to the available width, with a partial final row; omitted keeps the six-app preview. */
+  popularRows?: number;
   recent: readonly PackageSummary[] | null;
   collections?: readonly OnDiscoverCollection[];
   labels: OnDiscoverLabels;
@@ -84,6 +86,38 @@ defineSlots<{
 }>();
 
 const RECENT_STATS: readonly OnAppCardStat[] = ['version', 'installs30d'];
+const appGrid = 'grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-12px';
+const root = ref<HTMLElement>();
+const contentWidth = ref(0);
+const popularLimit = computed(() => {
+  if (!props.popularRows) return 6;
+  const columns = Math.max(1, Math.floor((contentWidth.value + 12) / (220 + 12)));
+  const lastRow = columns === 1 ? 1 : Math.min(columns - 1, Math.ceil(columns * 0.6));
+  return columns * (props.popularRows - 1) + lastRow;
+});
+let observer: ResizeObserver | undefined;
+let resizeFrame = 0;
+
+onMounted(() => {
+  if (!props.popularRows || !root.value) return;
+  contentWidth.value = root.value.clientWidth;
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(([entry]) => {
+      if (!entry || entry.contentRect.width === contentWidth.value) return;
+      const width = entry.contentRect.width;
+      cancelAnimationFrame(resizeFrame);
+      // Changing the card count changes height; apply it after observer delivery to avoid resize loops.
+      resizeFrame = requestAnimationFrame(() => {
+        contentWidth.value = width;
+      });
+    });
+    observer.observe(root.value);
+  }
+});
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  cancelAnimationFrame(resizeFrame);
+});
 
 // Retain editorial order and fill vacant slots with real collections, without repeating destinations.
 const secondaryPicks = computed<OnDiscoverFeature[]>(() => {
@@ -124,7 +158,7 @@ function featureLinkAttrs(feature: OnDiscoverFeature) {
 </script>
 
 <template>
-  <div class="on-discover-view flex flex-col gap-24px pt-8px">
+  <div ref="root" class="on-discover-view flex flex-col gap-24px pt-8px">
     <slot name="notice" />
 
     <section v-if="hero || secondaryPicks.length">
@@ -226,24 +260,24 @@ function featureLinkAttrs(feature: OnDiscoverFeature) {
           :more-href="rankingsHref"
           :link-as="linkAs"
         />
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-12px">
-          <template v-for="pkg in popular.slice(0, 6)" :key="`${pkg.kind}/${pkg.token}`">
-            <slot name="card" :pkg="pkg" section="popular" />
+        <div :class="appGrid">
+          <template v-for="pkg in popular.slice(0, popularLimit)" :key="`${pkg.kind}/${pkg.token}`">
+            <slot name="card" :pkg="pkg" section="popular" :stats="RECENT_STATS" />
           </template>
         </div>
       </section>
 
       <section v-if="recent.length">
         <OnSectionHeader :title="labels.recentlyUpdated" :hint="labels.recentlyUpdatedHint" />
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-12px">
+        <div :class="appGrid">
           <template v-for="pkg in recent.slice(0, 8)" :key="`${pkg.kind}/${pkg.token}`">
             <slot name="card" :pkg="pkg" section="recent" :stats="RECENT_STATS" />
           </template>
         </div>
       </section>
     </template>
-    <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-12px" aria-hidden="true">
-      <OnSkeleton v-for="index in 6" :key="index" height="148px" radius="big" />
+    <div v-else :class="appGrid" aria-hidden="true">
+      <OnSkeleton v-for="index in popularLimit" :key="index" height="148px" radius="big" />
     </div>
 
     <section v-if="collections.length">

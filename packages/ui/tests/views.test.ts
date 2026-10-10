@@ -240,7 +240,7 @@ describe('OnDiscoverView', () => {
     const cards = wrapper.findAll('.card');
     expect(cards.map(card => card.text())).toEqual(['a', 'b', 'c']);
     expect(cards[2]?.attributes('data-stats')).toBe('version,installs30d');
-    expect(cards[0]?.attributes('data-stats')).toBe('');
+    expect(cards[0]?.attributes('data-stats')).toBe('version,installs30d');
     expect(wrapper.text()).toContain('新 Mac 必备');
     expect(wrapper.find('a[href="#/rankings"]').exists()).toBe(true);
   });

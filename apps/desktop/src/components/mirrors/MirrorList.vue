@@ -21,6 +21,8 @@ withDefaults(
   { selected: undefined, fastest: undefined, disabled: false }
 );
 
+defineSlots<{ actions?: (props: { option: MirrorOption }) => unknown }>();
+
 const emit = defineEmits<{ select: [option: MirrorOption] }>();
 
 const { t } = useI18n();
@@ -38,47 +40,54 @@ function host(option: MirrorOption): string {
 
 <template>
   <div role="radiogroup" :aria-label="label" :aria-disabled="disabled || undefined">
-    <button
+    <div
       v-for="option in options"
       :key="option.key"
-      type="button"
-      role="radio"
-      :aria-checked="selected === option.key"
-      :disabled="disabled"
-      :title="option.description ?? undefined"
-      class="m-0 flex w-full items-center gap-14px border-none border-t border-t-solid border-line-subtle bg-transparent px-18px py-12px text-left font-sans outline-none first:border-t-0 enabled:hover:bg-component-item-active focus-visible:shadow-focus-ring disabled:cursor-default"
-      @click="emit('select', option)"
+      class="flex items-center border-t border-t-solid border-line-subtle pr-18px first:border-t-0"
     >
-      <span
-        class="grid h-18px w-18px shrink-0 place-items-center rounded-full border-2 border-solid"
-        :class="selected === option.key ? 'border-brand-coral' : 'border-line-default'"
-        aria-hidden="true"
+      <button
+        type="button"
+        role="radio"
+        :aria-checked="selected === option.key"
+        :disabled="disabled"
+        :title="option.description ?? undefined"
+        class="m-0 flex min-w-0 flex-1 items-center gap-14px border-none bg-transparent px-18px py-12px text-left font-sans outline-none enabled:hover:bg-component-item-active focus-visible:shadow-focus-ring disabled:cursor-default"
+        @click="emit('select', option)"
       >
-        <span v-if="selected === option.key" class="h-8px w-8px rounded-full bg-brand-coral"></span>
-      </span>
-      <span class="min-w-0 flex-1">
-        <span class="block text-14px font-600 text-ink-primary">{{ option.name }}</span>
-        <span class="block truncate font-mono text-12px text-ink-tertiary">{{ host(option) }}</span>
-      </span>
-      <span class="flex shrink-0 items-center gap-6px text-12.5px">
-        <template v-if="probes[option.key]">
-          <span
-            v-if="probes[option.key]?.ok"
-            :class="fastest === option.key ? 'text-status-success' : 'text-ink-secondary'"
-          >
-            {{ formatMilliseconds(probes[option.key]?.latencyMs ?? 0, { locale: appLocale }) }}
-          </span>
-          <span v-else class="text-status-danger">{{ t('mirrors.unavailable') }}</span>
-        </template>
         <span
-          v-else-if="probing"
-          class="block h-12px w-12px animate-spin rounded-full border-2 border-solid border-line-default border-t-ink-secondary motion-reduce:animate-none"
-          role="img"
-          :aria-label="t('mirrors.probing')"
-        ></span>
-        <OnChip v-if="fastest === option.key" tone="success">{{ t('mirrors.fastest') }}</OnChip>
-        <OnChip v-if="option.recommended" tone="outline">{{ t('mirrors.recommended') }}</OnChip>
-      </span>
-    </button>
+          class="grid h-18px w-18px shrink-0 place-items-center rounded-full border-2 border-solid"
+          :class="selected === option.key ? 'border-brand-coral' : 'border-line-default'"
+          aria-hidden="true"
+        >
+          <span v-if="selected === option.key" class="h-8px w-8px rounded-full bg-brand-coral"></span>
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="flex flex-wrap items-center gap-6px text-14px font-600 text-ink-primary"
+            >{{ option.name }}<OnChip v-if="option.local">{{ t('settings.customMirrors.local') }}</OnChip></span
+          >
+          <span class="block truncate font-mono text-12px text-ink-tertiary">{{ host(option) }}</span>
+        </span>
+        <span class="flex shrink-0 items-center gap-6px text-12.5px">
+          <template v-if="probes[option.key]">
+            <span
+              v-if="probes[option.key]?.ok"
+              :class="fastest === option.key ? 'text-status-success' : 'text-ink-secondary'"
+            >
+              {{ formatMilliseconds(probes[option.key]?.latencyMs ?? 0, { locale: appLocale }) }}
+            </span>
+            <span v-else class="text-status-danger">{{ t('mirrors.unavailable') }}</span>
+          </template>
+          <span
+            v-else-if="probing"
+            class="block h-12px w-12px animate-spin rounded-full border-2 border-solid border-line-default border-t-ink-secondary motion-reduce:animate-none"
+            role="img"
+            :aria-label="t('mirrors.probing')"
+          ></span>
+          <OnChip v-if="fastest === option.key" tone="success">{{ t('mirrors.fastest') }}</OnChip>
+          <OnChip v-if="option.recommended" tone="outline">{{ t('mirrors.recommended') }}</OnChip>
+        </span>
+      </button>
+      <slot name="actions" :option="option" />
+    </div>
   </div>
 </template>

@@ -56,7 +56,8 @@ const barColor = computed(() => iconColor(props.token));
 
 <template>
   <span
-    class="relative box-border inline-grid shrink-0 place-items-center overflow-hidden rounded-app-icon shadow-app-icon"
+    class="relative box-border inline-grid shrink-0 place-items-center"
+    :class="{ 'overflow-hidden rounded-app-icon shadow-app-icon': !showImage }"
     :style="box"
     :role="label ? 'img' : undefined"
     :aria-label="label"
@@ -70,7 +71,7 @@ const barColor = computed(() => iconColor(props.token));
       :loading="priority ? 'eager' : 'lazy'"
       :fetchpriority="priority ? 'high' : undefined"
       decoding="async"
-      class="h-full w-full object-cover"
+      class="h-full w-full object-contain"
       @error="failed = true"
     />
     <span

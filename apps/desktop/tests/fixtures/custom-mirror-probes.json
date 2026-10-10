@@ -1,0 +1,76 @@
+{
+  "source": {
+    "key": "custom-01234567-89ab-4cde-8f01-23456789abcd",
+    "name": "Local mirror",
+    "probeUrl": "https://mirror.example/api/cask.jws.json",
+    "apiDomain": "https://mirror.example/api",
+    "bottleDomain": "https://mirror.example/bottles",
+    "brewGitRemote": "https://mirror.example/brew.git",
+    "coreGitRemote": "https://mirror.example/homebrew-core.git"
+  },
+  "probes": [
+    {
+      "key": "custom-01234567-89ab-4cde-8f01-23456789abcd-apidomain",
+      "name": "apiDomain",
+      "probeUrl": "https://mirror.example/api/cask.jws.json",
+      "apiDomain": "https://mirror.example/api",
+      "bottleDomain": "https://mirror.example/bottles",
+      "brewGitRemote": "https://mirror.example/brew.git",
+      "coreGitRemote": "https://mirror.example/homebrew-core.git"
+    },
+    {
+      "key": "custom-01234567-89ab-4cde-8f01-23456789abcd-bottledomain",
+      "name": "bottleDomain",
+      "probeUrl": "https://mirror.example/bottles",
+      "apiDomain": "https://mirror.example/api",
+      "bottleDomain": "https://mirror.example/bottles",
+      "brewGitRemote": "https://mirror.example/brew.git",
+      "coreGitRemote": "https://mirror.example/homebrew-core.git"
+    },
+    {
+      "key": "custom-01234567-89ab-4cde-8f01-23456789abcd-brewgitremote",
+      "name": "brewGitRemote",
+      "probeUrl": "https://mirror.example/brew.git",
+      "apiDomain": "https://mirror.example/api",
+      "bottleDomain": "https://mirror.example/bottles",
+      "brewGitRemote": "https://mirror.example/brew.git",
+      "coreGitRemote": "https://mirror.example/homebrew-core.git"
+    },
+    {
+      "key": "custom-01234567-89ab-4cde-8f01-23456789abcd-coregitremote",
+      "name": "coreGitRemote",
+      "probeUrl": "https://mirror.example/homebrew-core.git",
+      "apiDomain": "https://mirror.example/api",
+      "bottleDomain": "https://mirror.example/bottles",
+      "brewGitRemote": "https://mirror.example/brew.git",
+      "coreGitRemote": "https://mirror.example/homebrew-core.git"
+    }
+  ],
+  "apiBases": [
+    {
+      "input": "https://mirror.example/api///",
+      "normalized": "https://mirror.example/api",
+      "probeUrl": "https://mirror.example/api/cask.jws.json"
+    },
+    {
+      "input": "https://mirror.example///",
+      "normalized": "https://mirror.example",
+      "probeUrl": "https://mirror.example/cask.jws.json"
+    },
+    {
+      "input": "HTTPS://MIRROR.EXAMPLE:443/api/",
+      "normalized": "https://mirror.example/api",
+      "probeUrl": "https://mirror.example/api/cask.jws.json"
+    },
+    {
+      "input": "https://mirror.example/api%2F/",
+      "normalized": "https://mirror.example/api%2F",
+      "probeUrl": "https://mirror.example/api%2F/cask.jws.json"
+    }
+  ],
+  "invalidApiBases": [
+    "https://mirror.example/api?channel=stable",
+    "https://mirror.example/api///?channel=stable",
+    "https://mirror.example/api?"
+  ]
+}

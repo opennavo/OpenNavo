@@ -23,6 +23,28 @@ pub fn validate(mut settings: Settings) -> Result<Settings, AppError> {
         return Err(AppError::new("E_INVALID_ARG", "brew_path"));
     }
     settings.mirror = crate::mirror::normalize(settings.mirror)?;
+    if settings.custom_mirrors.len() > 20 {
+        return Err(AppError::new("E_INVALID_ARG", "custom_mirror_count"));
+    }
+    let mut keys = std::collections::HashSet::new();
+    for input in &mut settings.custom_mirrors {
+        *input = crate::mirror::normalize_custom(input.clone())?;
+        if !keys.insert(input.key.clone()) {
+            return Err(AppError::new("E_INVALID_ARG", "custom_mirror_duplicate"));
+        }
+    }
+    if settings.mirror.key.starts_with("custom-") {
+        let input = settings
+            .custom_mirrors
+            .iter()
+            .find(|input| input.key == settings.mirror.key)
+            .ok_or_else(|| AppError::new("E_INVALID_ARG", "custom_mirror_missing"))?;
+        settings.mirror = crate::mirror::choice(input);
+    }
+    // Match load's size limit so every saved configuration can be read on the next launch.
+    if serde_json::to_vec_pretty(&settings)?.len() > 64 * 1024 {
+        return Err(AppError::new("E_INVALID_ARG", "settings_size"));
+    }
     Ok(settings)
 }
 pub fn locale(system: Option<&str>) -> crate::model::Locale {

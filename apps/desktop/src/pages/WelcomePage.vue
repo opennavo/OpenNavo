@@ -44,7 +44,10 @@ const {
   load,
   probe,
   unreachable
-} = useMirrorOptions(() => showMirrors.value);
+} = useMirrorOptions(
+  () => showMirrors.value,
+  () => settings.value?.customMirrors ?? []
+);
 
 onMounted(async () => {
   void permissions.refresh().catch(() => undefined);

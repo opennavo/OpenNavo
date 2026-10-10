@@ -481,6 +481,7 @@ export type Settings = {
 	autoUpgradeCasks: boolean,
 	notifyUpdates: boolean,
 	mirror: MirrorChoice,
+	customMirrors: MirrorInput[],
 	brewPath: string | null,
 	homebrewAnalytics: boolean | null,
 	crashReports: boolean,

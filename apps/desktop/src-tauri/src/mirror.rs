@@ -60,6 +60,82 @@ pub fn variables(choice: &MirrorChoice) -> Vec<(&'static str, &str)> {
     .filter_map(|(key, value)| value.as_deref().map(|value| (*key, value)))
     .collect()
 }
+pub fn choice(input: &MirrorInput) -> MirrorChoice {
+    MirrorChoice {
+        key: input.key.clone(),
+        api_domain: input.api_domain.clone(),
+        bottle_domain: input.bottle_domain.clone(),
+        brew_git_remote: input.brew_git_remote.clone(),
+        core_git_remote: input.core_git_remote.clone(),
+    }
+}
+
+fn normalize_api_domain(value: &str) -> Result<String, AppError> {
+    validate_url(value)?;
+    let url = reqwest::Url::parse(value)
+        .map_err(|_| AppError::new("E_INVALID_ARG", "mirror_api_domain"))?;
+    if url.query().is_some() {
+        return Err(AppError::new("E_INVALID_ARG", "mirror_api_domain"));
+    }
+    Ok(url.as_str().trim_end_matches('/').to_owned())
+}
+
+pub fn normalize_custom(mut input: MirrorInput) -> Result<MirrorInput, AppError> {
+    crate::brew::args::validate_token(&input.key)?;
+    if !input.key.starts_with("custom-") {
+        return Err(AppError::new("E_INVALID_ARG", "custom_mirror_key"));
+    }
+    if input.name.chars().any(char::is_control) {
+        return Err(AppError::new("E_INVALID_ARG", "custom_mirror_name"));
+    }
+    input.name = input.name.trim().to_owned();
+    if input.name.is_empty()
+        || input.name.chars().count() > 120
+        || input.name.chars().any(char::is_control)
+    {
+        return Err(AppError::new("E_INVALID_ARG", "custom_mirror_name"));
+    }
+    for value in [
+        &mut input.api_domain,
+        &mut input.bottle_domain,
+        &mut input.brew_git_remote,
+        &mut input.core_git_remote,
+    ] {
+        if value
+            .as_ref()
+            .is_some_and(|url| url.chars().any(char::is_control))
+        {
+            return Err(AppError::new("E_INVALID_ARG", "mirror_url"));
+        }
+        *value = value
+            .as_ref()
+            .map(|url| url.trim().to_owned())
+            .filter(|url| !url.is_empty());
+        if let Some(url) = value {
+            validate_url(url)?;
+        }
+    }
+    if let Some(api) = &mut input.api_domain {
+        *api = normalize_api_domain(api)?;
+    }
+    input.probe_url = if let Some(api) = &input.api_domain {
+        // Homebrew builds API requests by concatenating "domain/endpoint".
+        format!("{api}/cask.jws.json")
+    } else {
+        [
+            &input.bottle_domain,
+            &input.brew_git_remote,
+            &input.core_git_remote,
+        ]
+        .into_iter()
+        .flatten()
+        .next()
+        .cloned()
+        .ok_or_else(|| AppError::new("E_INVALID_ARG", "custom_mirror_empty"))?
+    };
+    validate_url(&input.probe_url)?;
+    Ok(input)
+}
 /// Text for Settings to copy, never executed or written to shell configuration; URLs remain single-quoted strings.
 pub fn terminal_environment(choice: &MirrorChoice) -> Result<String, AppError> {
     let choice = normalize(choice.clone())?;

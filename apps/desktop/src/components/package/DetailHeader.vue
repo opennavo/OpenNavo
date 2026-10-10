@@ -110,6 +110,7 @@ const onSelect = (key: string) => menu.select(props.kind, props.token, name.valu
         >{{ t(brewfile.has(kind, token) ? 'brewfile.inList' : 'brewfile.add') }}</OnButton
       >
       <PackageGetButton
+        appearance="button"
         :kind="kind"
         :token="token"
         :disabled="Boolean(detail?.disable ?? local?.disabled)"
@@ -118,7 +119,6 @@ const onSelect = (key: string) => menu.select(props.kind, props.token, name.valu
       <OnButton
         v-if="state.state === 'update' && kind === 'cask'"
         variant="secondary"
-        shape="round"
         @click="act(kind, token, 'open')"
       >
         {{ t('package.open') }}

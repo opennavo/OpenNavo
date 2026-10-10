@@ -18,7 +18,7 @@ import type { ListQuery } from '@/ipc/bindings';
 import type { LocalItem } from '@/ipc/client';
 import { useAppLocale } from '@/composables/useAppLocale';
 import { refreshPage } from '@/composables/usePageRefresh';
-import { fetchHome, peekHome } from '@/composables/useHome';
+import { fetchHome, fetchPopularApps, peekHome, peekPopularApps } from '@/composables/useHome';
 import { useLoader } from '@/composables/useLoader';
 import { useCatalogLoader } from '@/composables/useCatalogLoader';
 import { usePackageSummary } from '@/composables/usePackageSummary';
@@ -42,6 +42,14 @@ const {
   () => peekHome(appLocale.value)
 );
 
+const { data: popularApps } = useLoader(
+  () => fetchPopularApps(appLocale.value),
+  [appLocale],
+  undefined,
+  [appLocale],
+  () => peekPopularApps(appLocale.value)
+);
+
 const base: Omit<ListQuery, 'sort' | 'limit'> = {
   kind: 'cask',
   category: null,
@@ -61,7 +69,7 @@ const { data: offline, error: offlineError } = useCatalogLoader(
   async () => {
     if (home.value) return null;
     const [apps, recent] = await Promise.all([
-      localList({ sort: 'installs30d', limit: 6 }),
+      localList({ sort: 'installs30d', limit: 30 }),
       localList({ sort: 'updated', limit: 8 })
     ]);
     return { apps, recent };
@@ -71,7 +79,7 @@ const { data: offline, error: offlineError } = useCatalogLoader(
 );
 
 const sections = computed(() => {
-  if (home.value) return { apps: home.value.popularApps, recent: home.value.recentlyUpdated };
+  if (home.value) return { apps: popularApps.value ?? home.value.popularApps, recent: home.value.recentlyUpdated };
   return offline.value
     ? { apps: offline.value.apps.map(toSummary), recent: offline.value.recent.map(toSummary) }
     : null;
@@ -187,6 +195,7 @@ const chips = computed(() => [
     :features="secondaryFeatures"
     :chips="chips"
     :popular="sections?.apps ?? (offlineError ? [] : null)"
+    :popular-rows="3"
     :recent="sections?.recent ?? (offlineError ? [] : null)"
     :collections="collections"
     :labels="labels"

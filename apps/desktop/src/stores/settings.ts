@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import { defineStore } from 'pinia';
 import { commands, unwrap } from '@/ipc/client';
 import type { AppSettings } from '@/ipc/client';
+import type { MirrorInput } from '@/ipc/bindings';
 
 /** Settings (06 §11): settings_set replaces the whole object and returns normalized values. */
 export const useSettingsStore = defineStore('settings', () => {
@@ -45,5 +46,40 @@ export const useSettingsStore = defineStore('settings', () => {
     });
   }
 
-  return { value, load, save, update, setLanguage };
+  async function saveCustomMirror(input: MirrorInput, activate = false) {
+    await serialize(async () => {
+      if (!value.value) throw new Error('Settings are not loaded');
+      const customMirrors = value.value.customMirrors.filter(item => item.key !== input.key);
+      const index = value.value.customMirrors.findIndex(item => item.key === input.key);
+      customMirrors.splice(index < 0 ? customMirrors.length : index, 0, input);
+      const choice = {
+        key: input.key,
+        apiDomain: input.apiDomain,
+        bottleDomain: input.bottleDomain,
+        brewGitRemote: input.brewGitRemote,
+        coreGitRemote: input.coreGitRemote
+      };
+      const mirror = activate || value.value.mirror.key === input.key ? choice : value.value.mirror;
+      value.value = (await unwrap(commands.settingsSet({ ...value.value, customMirrors, mirror }))) as AppSettings;
+    });
+  }
+
+  async function removeCustomMirror(key: string) {
+    await serialize(async () => {
+      if (!value.value) throw new Error('Settings are not loaded');
+      const mirror =
+        value.value.mirror.key === key
+          ? { key: 'official', apiDomain: null, bottleDomain: null, brewGitRemote: null, coreGitRemote: null }
+          : value.value.mirror;
+      value.value = (await unwrap(
+        commands.settingsSet({
+          ...value.value,
+          customMirrors: value.value.customMirrors.filter(item => item.key !== key),
+          mirror
+        })
+      )) as AppSettings;
+    });
+  }
+
+  return { value, load, save, update, setLanguage, saveCustomMirror, removeCustomMirror };
 });
