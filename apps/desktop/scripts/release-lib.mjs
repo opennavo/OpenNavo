@@ -68,7 +68,7 @@ export function describeFile(path) {
 }
 
 /** Draft registration payload (DesktopReleaseCreate contract); DMGs have no update signature. */
-export function releaseBody({ version, channel, artifacts, notesZh, notesEn, minMacos = '13.0' }) {
+export function releaseBody({ version, channel, artifacts, notesEn, minMacos = '13.0' }) {
   if (!isReleaseVersion(version)) throw new Error(`invalid version: ${version}`);
   const missing = Object.keys(TARGETS).filter(target => !artifacts.some(item => item.target === target));
   if (missing.length) throw new Error(`missing artifacts: ${missing.join(', ')}`);
@@ -78,9 +78,8 @@ export function releaseBody({ version, channel, artifacts, notesZh, notesEn, min
     version,
     channel,
     minMacos,
-    sourceLocale: 'zh-CN',
+    sourceLocale: 'en-US',
     i18n: {
-      'zh-CN': { notes: validateNotes(notesZh, version, 'zh-CN') },
       'en-US': { notes: validateNotes(notesEn, version, 'en-US') }
     },
     artifacts: artifacts.map(({ target, url, signature, bytes, sha256 }) => ({

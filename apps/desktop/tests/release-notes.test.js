@@ -10,7 +10,7 @@ describe('Versioned release notes', () => {
   it.each([undefined, '', ' \n ', 'OpenNavo 0.3.0', '# OpenNavo 0.3.0', '0.3.0', 'TODO', '待补充'])(
     'rejects absent or placeholder notes: %s',
     notes => {
-      expect(() => validateNotes(notes, '0.3.0', 'zh-CN')).toThrow('real release notes');
+      expect(() => validateNotes(notes, '0.3.0', 'en-US')).toThrow('real release notes');
     }
   );
   it('reads exact beta version files and preserves multiline Markdown as data', () => {
@@ -18,16 +18,13 @@ describe('Versioned release notes', () => {
     try {
       const version = '0.3.0-beta.1';
       mkdirSync(join(dir, version));
-      const zh = '## 修复\n\n- 修复启动问题。\n- 保留 `code` 和 $(literal)。';
       const en = '## Fixes\n\n- Fix startup.\n- Preserve "quotes".';
-      writeFileSync(join(dir, version, 'zh-CN.md'), zh + '\n');
       expect(() => loadReleaseNotes(dir, version)).toThrow();
       writeFileSync(join(dir, version, 'en-US.md'), en);
       const notes = loadReleaseNotes(dir, version);
       const body = releaseBody({
         version,
         channel: 'beta',
-        notesZh: notes['zh-CN'],
         notesEn: notes['en-US'],
         artifacts: Object.keys(TARGETS).map(target => ({
           target,
@@ -37,7 +34,6 @@ describe('Versioned release notes', () => {
         }))
       });
       expect(JSON.parse(JSON.stringify(body)).i18n).toEqual({
-        'zh-CN': { notes: zh },
         'en-US': { notes: en }
       });
       expect(() => loadReleaseNotes(dir, '0.3.0')).toThrow();
@@ -66,7 +62,7 @@ it('registers Markdown files through the CLI without executing their contents', 
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     mkdirSync(join(dir, '0.3.0'));
     const notes = '## Fixes\n\n- Preserve `code`, "$HOME" and $(literal).';
-    for (const locale of ['zh-CN', 'en-US']) writeFileSync(join(dir, '0.3.0', `${locale}.md`), notes);
+    writeFileSync(join(dir, '0.3.0', 'en-US.md'), notes);
     for (const target of Object.keys(TARGETS))
       writeFileSync(
         join(dir, `${target}.json`),
@@ -84,7 +80,8 @@ it('registers Markdown files through the CLI without executing their contents', 
         }
       }
     );
-    expect(received.i18n).toEqual({ 'zh-CN': { notes }, 'en-US': { notes } });
+    expect(received.sourceLocale).toBe('en-US');
+    expect(received.i18n).toEqual({ 'en-US': { notes } });
   } finally {
     await new Promise(resolve => server.close(resolve));
     rmSync(dir, { recursive: true, force: true });

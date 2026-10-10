@@ -12,13 +12,12 @@ const { values } = parseArgs({
     dir: { type: 'string', default: 'release-artifacts' },
     version: { type: 'string' },
     channel: { type: 'string', default: 'stable' },
-    'notes-zh': { type: 'string' },
     'notes-en': { type: 'string' },
     'notes-dir': { type: 'string' }
   }
 });
-if (values['notes-dir'] && (values['notes-zh'] !== undefined || values['notes-en'] !== undefined)) {
-  throw new Error('Use --notes-dir or inline --notes-zh/--notes-en, not both');
+if (values['notes-dir'] && values['notes-en'] !== undefined) {
+  throw new Error('Use --notes-dir or inline --notes-en, not both');
 }
 const notes = values['notes-dir'] ? loadReleaseNotes(values['notes-dir'], values.version ?? '') : {};
 const base = process.env.ADMIN_API_BASE;
@@ -33,7 +32,6 @@ const body = releaseBody({
   version: values.version ?? '',
   channel: values.channel,
   artifacts,
-  notesZh: notes['zh-CN'] ?? values['notes-zh'],
   notesEn: notes['en-US'] ?? values['notes-en']
 });
 

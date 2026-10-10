@@ -18,7 +18,7 @@ export function validateNotes(notes, version, locale) {
 export function loadReleaseNotes(dir, version) {
   if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(version)) throw new Error('Invalid release notes version');
   return Object.fromEntries(
-    ['zh-CN', 'en-US'].map(locale => [
+    ['en-US'].map(locale => [
       locale,
       validateNotes(readFileSync(resolve(dir, version, `${locale}.md`), 'utf8'), version, locale)
     ])
@@ -33,5 +33,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     }
   });
   loadReleaseNotes(values.dir, values.version ?? '');
-  console.log(`Release notes validated for ${values.version} (zh-CN, en-US)`);
+  console.log(`Release notes validated for ${values.version} (en-US)`);
 }

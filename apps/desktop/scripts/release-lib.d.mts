@@ -19,8 +19,8 @@ export interface ReleaseBody {
   version: string;
   channel: string;
   minMacos: string;
-  sourceLocale: 'zh-CN';
-  i18n: Record<'zh-CN' | 'en-US', { notes: string }>;
+  sourceLocale: 'en-US';
+  i18n: Record<'en-US', { notes: string }>;
   artifacts: ReleaseArtifact[];
 }
 
@@ -36,7 +36,6 @@ export function releaseBody(input: {
   version: string;
   channel: string;
   artifacts: ReleaseArtifact[];
-  notesZh?: string;
   notesEn?: string;
   minMacos?: string;
 }): ReleaseBody;
