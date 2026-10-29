@@ -326,9 +326,9 @@
       }
     },
     "related": "Apps semelhantes",
-    "relatedMore": "See more",
-    "verified": "Verified",
-    "verifiedDetails": "Verified download details",
+    "relatedMore": "Ver mais",
+    "verified": "Verificado",
+    "verifiedDetails": "Detalhes de download verificados",
     "screenshots": "Capturas de tela",
     "caveats": "Observações",
     "info": {
@@ -666,7 +666,7 @@
       "source": "O instalador é baixado de {source}."
     },
     "spec": {
-      "title": "Visão geral",
+      "title": "Em resumo",
       "price": "Preço",
       "system": "Sistema",
       "chip": "Chip",
@@ -676,7 +676,7 @@
       "githubRepository": "Repositório do GitHub",
       "developer": "Desenvolvedor",
       "homepage": "Site",
-      "token": "Token",
+      "token": "Identificador",
       "yes": "Sim",
       "no": "Não",
       "checked": "Verificado"

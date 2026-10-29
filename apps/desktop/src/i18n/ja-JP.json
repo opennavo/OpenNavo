@@ -440,7 +440,7 @@
       }
     },
     "related": "類似アプリ",
-    "relatedMore": "See more",
+    "relatedMore": "もっと見る",
     "screenshots": "スクリーンショット",
     "caveats": "注意事項",
     "info": {
@@ -464,9 +464,9 @@
       "githubRepository": "GitHub リポジトリ",
       "developer": "開発元",
       "homepage": "ホームページ",
-      "token": "Token",
-      "installedVersion": "Installed version",
-      "installLocation": "Install location",
+      "token": "パッケージ識別子",
+      "installedVersion": "インストール済みのバージョン",
+      "installLocation": "インストール先",
       "yes": "はい",
       "no": "いいえ",
       "checked": "確認日"
@@ -475,7 +475,8 @@
       "stars": "★",
       "updated": "{days} 日前に更新",
       "unmaintained": "メンテナンスが終了している可能性があります",
-      "archived": "アーカイブ済み"
+      "archived": "アーカイブ済み",
+      "checked": "リポジトリ情報の確認日：{date}。"
     },
     "deps": {
       "macos": "システム要件",

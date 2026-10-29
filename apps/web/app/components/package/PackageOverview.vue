@@ -7,7 +7,6 @@ import type { OnRelatedPackage } from '@opennavo/ui';
 import { capabilities } from '~/utils/packageFacts';
 import { packagePath } from '~/utils/packageView';
 import { appEntityId, softwareAppNode } from '~/utils/structuredData';
-import { trackEvent } from '~/utils/analytics';
 import {
   overrideDescription,
   overrideTitle,
@@ -33,7 +32,6 @@ const props = defineProps<{ kind: PackageKind }>();
 const { t, locale } = useI18n();
 const api = useApi();
 const localePath = useLocalePath();
-const toasts = useToasts();
 const NuxtLink = resolveComponent('NuxtLink');
 
 const { data: pkg, token } = await usePackage(props.kind);
@@ -86,12 +84,6 @@ const relatedItems = computed<OnRelatedPackage[]>(() =>
 );
 
 const spec = computed(() => packageSpec(pkg.value!, t, toAppLocale(locale.value)));
-
-function onCopied(command: string) {
-  toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
-  trackEvent('copy_install_command');
-}
-
 type SoftwareAppInput = NonNullable<Parameters<typeof defineSoftwareApp>[0]>;
 
 // WP10 SoftwareApplication (utils/structuredData): only what the page shows, offers only for
@@ -169,14 +161,13 @@ usePageSeo({
       :screenshots-label="t('package.screenshots')"
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
-      :command="can.homebrew ? pkg.installCommand : undefined"
+      related-in-main
       :info="[]"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
       :related-more-href="localePath('/apps')"
       :related-more-label="t('package.relatedMore')"
       :link-as="NuxtLink"
-      @copied="onCopied"
     >
       <template #about>
         <MarkdownContent class="package-overview-description" size="md" :heading-level="3" :source="description" />
@@ -188,11 +179,11 @@ usePageSeo({
           :total="pkg.releaseCount"
           :versions-href="localePath(packagePath(pkg.token, 'versions'))"
         />
-        <PackageSafety v-if="can.safety" :pkg="pkg" />
+        <PackageSafety v-if="can.safety && pkg.kind === 'link'" :pkg="pkg" :show-checked="false" />
         <PackageIssues :pkg="pkg" />
         <PackageIntegrations :pkg="pkg" />
         <PackageInstall v-if="can.homebrew" :pkg="pkg" />
-        <PackageUninstall v-if="can.uninstall" :pkg="pkg" :homebrew="can.homebrew" />
+        <PackageUninstall v-if="!can.homebrew && can.uninstall" :pkg="pkg" :homebrew="false" compact />
         <PackageFaq :pkg="pkg" />
         <PackageAlternatives :pkg="pkg" />
         <PackageArticles :pkg="pkg" />

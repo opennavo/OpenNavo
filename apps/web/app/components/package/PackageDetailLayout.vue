@@ -105,12 +105,13 @@ const allTabs = computed(() => [
     : [])
 ]);
 // Link apps have no Homebrew definition, so there are no dependencies or install details to show.
+const emptyDependencies = computed(() => pkg.value?.indexing?.pages?.dependencies?.reason === 'duplicate_of_overview');
 const tabs = computed(() =>
   isLink.value
     ? allTabs.value.filter(
         item => item.value === 'overview' || item.value === 'versions' || item.value === 'troubleshooting'
       )
-    : allTabs.value
+    : allTabs.value.filter(item => item.value !== 'dependencies' || !emptyDependencies.value)
 );
 
 // Breadcrumbs are always Discover › primary category › app (› tab on subpages), the same in SSR and on the

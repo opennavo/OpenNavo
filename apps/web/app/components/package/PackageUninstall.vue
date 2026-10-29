@@ -15,7 +15,16 @@ import { uninstallPageOpen } from '~/utils/uninstallPage';
 // items and receipts link to their background-items page (F1). Link apps never get a Homebrew command (T3);
 // they only show declarations if facts list any.
 // `guide`: link the standalone uninstall page (X2) when the server opens it; off on that page itself.
-const props = withDefaults(defineProps<{ pkg: PackagePage; homebrew: boolean; guide?: boolean }>(), { guide: true });
+const props = withDefaults(
+  defineProps<{
+    pkg: PackagePage;
+    homebrew: boolean;
+    guide?: boolean;
+    compact?: boolean;
+    showChecked?: boolean;
+  }>(),
+  { guide: true, compact: false, showChecked: true }
+);
 
 const { t, locale } = useI18n();
 const localePath = useLocalePath();
@@ -65,7 +74,11 @@ function onCopied(command: string) {
   <section
     v-if="visible"
     id="uninstall"
-    class="rounded-big border border-solid border-line-subtle bg-surface-card px-18px py-16px"
+    :class="
+      compact
+        ? 'mt-16px border-t border-t-solid border-line-subtle pt-14px'
+        : 'rounded-big border border-solid border-line-subtle bg-surface-card px-18px py-16px'
+    "
     aria-labelledby="uninstall-title"
     data-testid="package-uninstall"
   >
@@ -79,9 +92,11 @@ function onCopied(command: string) {
         :title="t('package.guide.uninstallTitle')"
         @copied="onCopied"
       />
-      <p class="m-0 text-12px leading-[1.6] text-ink-tertiary">{{ t('package.guide.uninstall') }}</p>
+      <p class="m-0 text-12px leading-[1.6] text-ink-tertiary">
+        {{ t('package.guide.uninstall') }}
+      </p>
     </div>
-    <div v-if="regular.length" class="mt-10px">
+    <div v-if="!compact && regular.length" class="mt-10px">
       <h3 class="m-0 text-12.5px font-600 text-ink-primary">{{ t('package.uninstall.also') }}</h3>
       <dl class="m-0 mt-6px flex flex-col gap-6px text-12.5px leading-[1.6]">
         <div v-for="group in regular" :key="group.kind">
@@ -118,7 +133,7 @@ function onCopied(command: string) {
           <template v-else>{{ part.text }}</template>
         </template>
       </p>
-      <details id="uninstall-files" class="text-12.5px leading-[1.6]">
+      <details v-if="!compact" id="uninstall-files" class="text-12.5px leading-[1.6]">
         <summary
           class="cursor-pointer text-ink-secondary outline-none hover:text-ink-primary focus-visible:shadow-focus-ring"
         >
@@ -137,7 +152,10 @@ function onCopied(command: string) {
         </dl>
       </details>
     </details>
-    <p v-if="checked && (regular.length || cleanup.length)" class="m-0 mt-10px text-11.5px text-ink-tertiary">
+    <p
+      v-if="!compact && showChecked && checked && (regular.length || cleanup.length)"
+      class="m-0 mt-10px text-11.5px text-ink-tertiary"
+    >
       {{ checked.before }}<time :datetime="checked.iso">{{ checked.date }}</time
       >{{ checked.after }}
     </p>

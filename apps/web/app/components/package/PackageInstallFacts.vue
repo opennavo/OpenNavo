@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { isThirdPartyTap } from '@opennavo/shared';
-import { displayUrl, OnCaskArtifacts } from '@opennavo/ui';
+import { displayUrl, OnCaskArtifacts, OnCodeText } from '@opennavo/ui';
 import type { PackagePage } from '~/utils/packageFacts';
 
 // Install details on the overview (T2, H9): what only the details tab used to show, now in full in the
@@ -71,6 +71,10 @@ const entries = computed(() => overview.value.artifacts.entries ?? []);
     data-testid="package-install-facts"
   >
     <h2 id="details-title" class="m-0 text-13.5px font-600 text-ink-primary">{{ t('package.tabs.details') }}</h2>
+    <pre
+      v-if="overview.caveats"
+      class="m-0 mt-8px whitespace-pre-wrap font-mono text-12px leading-[1.6] text-ink-secondary"
+    ><OnCodeText :text="overview.caveats" /></pre>
     <dl
       class="m-0 mt-8px grid grid-cols-1 gap-x-16px gap-y-2px text-12.5px leading-[1.6] sm:grid-cols-[max-content_minmax(0,1fr)] sm:gap-y-6px"
     >

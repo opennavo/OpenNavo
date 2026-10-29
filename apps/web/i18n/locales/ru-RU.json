@@ -326,9 +326,9 @@
       }
     },
     "related": "Похожие приложения",
-    "relatedMore": "See more",
-    "verified": "Verified",
-    "verifiedDetails": "Verified download details",
+    "relatedMore": "Показать ещё",
+    "verified": "Проверено",
+    "verifiedDetails": "Проверенные сведения о загрузке",
     "screenshots": "Снимки экрана",
     "caveats": "Примечания",
     "info": {
@@ -676,7 +676,7 @@
       "githubRepository": "Репозиторий GitHub",
       "developer": "Разработчик",
       "homepage": "Сайт",
-      "token": "Token",
+      "token": "Идентификатор",
       "yes": "Да",
       "no": "Нет",
       "checked": "Проверено"

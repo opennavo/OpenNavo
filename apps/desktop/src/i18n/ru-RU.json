@@ -440,7 +440,7 @@
       }
     },
     "related": "Похожие приложения",
-    "relatedMore": "See more",
+    "relatedMore": "Показать ещё",
     "screenshots": "Снимки экрана",
     "caveats": "Примечания",
     "info": {
@@ -464,9 +464,9 @@
       "githubRepository": "Репозиторий GitHub",
       "developer": "Разработчик",
       "homepage": "Сайт",
-      "token": "Token",
-      "installedVersion": "Installed version",
-      "installLocation": "Install location",
+      "token": "Идентификатор",
+      "installedVersion": "Установленная версия",
+      "installLocation": "Путь установки",
       "yes": "Да",
       "no": "Нет",
       "checked": "Проверено"
@@ -475,7 +475,8 @@
       "stars": "★",
       "updated": "Обновлено {days} дн. назад",
       "unmaintained": "Возможно, больше не поддерживается",
-      "archived": "В архиве"
+      "archived": "В архиве",
+      "checked": "Данные репозитория проверены {date}."
     },
     "deps": {
       "macos": "Системные требования",

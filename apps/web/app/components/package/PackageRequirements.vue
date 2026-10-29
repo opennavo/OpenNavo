@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { displayUrl, OnChip } from '@opennavo/ui';
+import { displayUrl, OnButton, OnChip } from '@opennavo/ui';
 import { shownRequirements, macosText } from '~/utils/packageFacts';
 import type { PackagePage, RequirementFact } from '~/utils/packageFacts';
 
@@ -10,6 +10,11 @@ import type { PackagePage, RequirementFact } from '~/utils/packageFacts';
 const props = defineProps<{ pkg: PackagePage }>();
 
 const { t } = useI18n();
+const toasts = useToasts();
+async function copyChecksum(value: string) {
+  await navigator.clipboard.writeText(value);
+  toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+}
 
 const archLabel = (arch: string) => (arch === 'arm64' || arch === 'x86_64' ? t(`package.arch.${arch}`) : arch);
 
@@ -87,9 +92,14 @@ const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? [
                 >
                 <span v-if="row.sha256" class="mt-2px block text-11px text-ink-tertiary"
                   >SHA-256
-                  <code class="font-mono text-component-mono-text [overflow-wrap:anywhere]">{{
-                    row.sha256
-                  }}</code></span
+                  <code class="font-mono text-component-mono-text [overflow-wrap:anywhere]">{{ row.sha256 }}</code>
+                  <OnButton
+                    size="xs"
+                    icon="copy"
+                    :aria-label="t('download.copySha')"
+                    @click="copyChecksum(row.sha256)"
+                    >{{ t('common.copy') }}</OnButton
+                  ></span
                 >
               </template>
               <template v-else>—</template>

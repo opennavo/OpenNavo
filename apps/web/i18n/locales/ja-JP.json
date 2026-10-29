@@ -326,9 +326,9 @@
       }
     },
     "related": "類似アプリ",
-    "relatedMore": "See more",
-    "verified": "Verified",
-    "verifiedDetails": "Verified download details",
+    "relatedMore": "もっと見る",
+    "verified": "確認済み",
+    "verifiedDetails": "確認済みのダウンロード情報",
     "screenshots": "スクリーンショット",
     "caveats": "注意事項",
     "info": {
@@ -676,7 +676,7 @@
       "githubRepository": "GitHub リポジトリ",
       "developer": "開発元",
       "homepage": "ホームページ",
-      "token": "Token",
+      "token": "パッケージ識別子",
       "yes": "はい",
       "no": "いいえ",
       "checked": "確認日"

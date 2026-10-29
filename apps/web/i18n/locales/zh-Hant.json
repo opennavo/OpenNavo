@@ -326,9 +326,9 @@
       }
     },
     "related": "相似應用",
-    "relatedMore": "See more",
-    "verified": "Verified",
-    "verifiedDetails": "Verified download details",
+    "relatedMore": "檢視更多",
+    "verified": "已核實",
+    "verifiedDetails": "已核實的下載詳情",
     "screenshots": "截圖",
     "caveats": "注意事項",
     "info": {
@@ -584,10 +584,10 @@
       "priceStoreNote": "Homebrew 安裝的是開發者網站提供的版本，價格和功能可能與 App Store 版不同。",
       "openSourceQ": "{name} 是開源軟體嗎？",
       "openSourceA": "{name} 的原始碼公開在 GitHub 上（{repo}），使用 {license} 許可證。",
-      "openSourceNoLicenseA": "{name} 有公開的 GitHub 儲存庫（{repo}），但 OpenNavo 尚未核實其 OSI 授權條款。",
+      "openSourceNoLicenseA": "{name} 有公開的 GitHub 倉庫（{repo}），但 OpenNavo 尚未核實其 OSI 許可證。",
       "openSourceArchived": "這個倉庫已經歸檔，不再更新。",
-      "openSourceStars": "儲存庫 Stars：{stars}。",
-      "openSourceChecked": "儲存庫資料核查於 {date}。",
+      "openSourceStars": "倉庫星標數：{stars}。",
+      "openSourceChecked": "倉庫資料核查於 {date}。",
       "uninstallQ": "怎樣在 Mac 上徹底解除安裝 {name}？",
       "uninstallRun": "執行 `brew uninstall --cask {token}`。",
       "uninstallDoes": "它會{actions}。",
@@ -668,15 +668,15 @@
     "spec": {
       "title": "基本資訊",
       "price": "價格",
-      "system": "系統需求",
+      "system": "系統要求",
       "chip": "晶片",
       "autoUpdates": "自動更新",
       "openSource": "開源",
-      "repository": "儲存庫",
-      "githubRepository": "GitHub 儲存庫",
+      "repository": "倉庫",
+      "githubRepository": "GitHub 倉庫",
       "developer": "開發者",
       "homepage": "主頁",
-      "token": "Token",
+      "token": "套件識別碼",
       "yes": "是",
       "no": "否",
       "checked": "核查日期"
@@ -685,7 +685,7 @@
       "stars": "★",
       "updated": "{days} 天前更新",
       "unmaintained": "可能已不再維護",
-      "archived": "已封存"
+      "archived": "已歸檔"
     },
     "quick": {
       "title": "基本資訊",

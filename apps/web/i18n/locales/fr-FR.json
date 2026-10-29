@@ -326,9 +326,9 @@
       }
     },
     "related": "Apps similaires",
-    "relatedMore": "See more",
-    "verified": "Verified",
-    "verifiedDetails": "Verified download details",
+    "relatedMore": "Voir plus",
+    "verified": "Vérifié",
+    "verifiedDetails": "Détails du téléchargement vérifiés",
     "screenshots": "Captures d’écran",
     "caveats": "Mises en garde",
     "info": {
@@ -676,7 +676,7 @@
       "githubRepository": "Dépôt GitHub",
       "developer": "Développeur",
       "homepage": "Site web",
-      "token": "Token",
+      "token": "Identifiant",
       "yes": "Oui",
       "no": "Non",
       "checked": "Vérifié le"

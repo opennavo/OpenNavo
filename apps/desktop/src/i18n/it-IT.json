@@ -440,7 +440,7 @@
       }
     },
     "related": "App simili",
-    "relatedMore": "See more",
+    "relatedMore": "Mostra altro",
     "screenshots": "Screenshot",
     "caveats": "Avvertenze",
     "info": {
@@ -464,9 +464,9 @@
       "githubRepository": "Repository GitHub",
       "developer": "Sviluppatore",
       "homepage": "Sito web",
-      "token": "Token",
-      "installedVersion": "Installed version",
-      "installLocation": "Install location",
+      "token": "Identificatore",
+      "installedVersion": "Versione installata",
+      "installLocation": "Percorso di installazione",
       "yes": "Sì",
       "no": "No",
       "checked": "Verificato"
@@ -475,7 +475,8 @@
       "stars": "★",
       "updated": "Aggiornato {days} giorni fa",
       "unmaintained": "La manutenzione potrebbe essere terminata",
-      "archived": "Archiviato"
+      "archived": "Archiviato",
+      "checked": "Dati del repository verificati il {date}."
     },
     "deps": {
       "macos": "Requisiti",

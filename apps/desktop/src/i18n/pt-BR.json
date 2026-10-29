@@ -440,7 +440,7 @@
       }
     },
     "related": "Apps semelhantes",
-    "relatedMore": "See more",
+    "relatedMore": "Ver mais",
     "screenshots": "Capturas de tela",
     "caveats": "Observações",
     "info": {
@@ -454,7 +454,7 @@
       "license": "Licença"
     },
     "spec": {
-      "title": "Visão geral",
+      "title": "Em resumo",
       "price": "Preço",
       "system": "Sistema",
       "chip": "Chip",
@@ -464,9 +464,9 @@
       "githubRepository": "Repositório do GitHub",
       "developer": "Desenvolvedor",
       "homepage": "Site",
-      "token": "Token",
-      "installedVersion": "Installed version",
-      "installLocation": "Install location",
+      "token": "Identificador",
+      "installedVersion": "Versão instalada",
+      "installLocation": "Local de instalação",
       "yes": "Sim",
       "no": "Não",
       "checked": "Verificado"
@@ -475,7 +475,8 @@
       "stars": "★",
       "updated": "Atualizado há {days} dias",
       "unmaintained": "Pode não receber mais manutenção",
-      "archived": "Arquivado"
+      "archived": "Arquivado",
+      "checked": "Dados do repositório verificados em {date}."
     },
     "deps": {
       "macos": "Requisitos do sistema",

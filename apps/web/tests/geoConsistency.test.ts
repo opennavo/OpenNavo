@@ -267,7 +267,8 @@ describe('G5 cross-export normalized facts', () => {
       case 'G5-28':
         expect(html.details).toContain(GEO_HASH);
         expect(md).toContain(GEO_HASH);
-        expect(plainHtml(html.install!)).toContain(page.facts.overview.caveats!);
+        expect(plainHtml(html.details!)).toContain(page.facts.overview.caveats!);
+        expect(plainHtml(html.install!)).not.toContain(page.facts.overview.caveats!);
         expect(md).toContain(mdText(page.facts.overview.caveats!));
         expect(md).toContain(t('package.guide.sha'));
         break;

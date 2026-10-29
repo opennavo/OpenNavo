@@ -20,6 +20,8 @@ const t = (key: string, named?: Record<string, unknown>) =>
   siteMessage('en-US', key, named as Record<string, string | number>);
 beforeEach(() => {
   vi.stubGlobal('computed', computed);
+  vi.stubGlobal('useToasts', () => ({ push: () => {} }));
+  vi.stubGlobal('useLocalePath', () => (path: string) => path);
   vi.stubGlobal('useI18n', () => ({ t, locale: ref('en') }));
   vi.stubGlobal('toAppLocale', () => 'en-US');
 });
@@ -236,7 +238,7 @@ describe('application SEO repair', () => {
     const html = await render(Timeline, { entries });
     expect(html.match(/class="on-version-entry /g)).toHaveLength(1);
   });
-  it('shows the direct download and only dated, recorded checksum evidence', async () => {
+  it('links verified evidence to Install details without repeating downloads or dates', async () => {
     const pkg = page();
     pkg.homebrewStatus = { state: 'active', reason: null, date: null };
     pkg.facts.requirements = [
@@ -253,11 +255,12 @@ describe('application SEO repair', () => {
       })
     ];
     const html = await render(Download, { pkg });
-    expect(html).toContain('href="https://vendor.example/app.dmg"');
+    expect(html).toContain(`href="/apps/${pkg.token}/details#sources"`);
+    expect(html).not.toContain('href="https://vendor.example/app.dmg"');
     expect(html).toContain('Official download · vendor.example');
     expect(html).toContain('SHA-256 recorded by Homebrew');
     expect(html).toContain('Not disabled by Homebrew');
-    expect(html).toContain('2026');
+    expect(html).not.toContain('<time');
     pkg.facts.requirements[0]!.sha256 = null;
     expect(await render(Download, { pkg })).not.toContain('SHA-256');
     pkg.homebrewStatus.state = 'disabled';

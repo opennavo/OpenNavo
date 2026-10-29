@@ -45,9 +45,19 @@ const items = computed<OnKeyValueItem[]>(() => {
   if (value.names.length > 1)
     list.push({ key: 'names', label: t('package.details.names'), value: value.names.join(' · ') });
   if (!artifacts.entries?.length && artifacts.apps.length)
-    list.push({ key: 'apps', label: messages.value.cask.source, value: artifacts.apps.join(' · '), mono: true });
+    list.push({
+      key: 'apps',
+      label: messages.value.cask.source,
+      value: artifacts.apps.join(' · '),
+      mono: true
+    });
   if (artifacts.pkgs.length)
-    list.push({ key: 'pkgs', label: t('package.details.pkgs'), value: artifacts.pkgs.join('  '), mono: true });
+    list.push({
+      key: 'pkgs',
+      label: t('package.details.pkgs'),
+      value: artifacts.pkgs.join('  '),
+      mono: true
+    });
   if (artifacts.binaries.length)
     list.push({
       key: 'binaries',
@@ -62,7 +72,11 @@ const items = computed<OnKeyValueItem[]>(() => {
       value: artifacts.uninstallNotes.join('；')
     });
   if (value.kegOnly)
-    list.push({ key: 'keg', label: t('package.details.kegOnly'), value: t('package.details.kegOnlyValue') });
+    list.push({
+      key: 'keg',
+      label: t('package.details.kegOnly'),
+      value: t('package.details.kegOnlyValue')
+    });
   list.push({
     key: 'source',
     label: t('package.details.source'),
@@ -78,7 +92,12 @@ const items = computed<OnKeyValueItem[]>(() => {
       href: value.formulaeUrl
     });
   if (value.repoUrl)
-    list.push({ key: 'repo', label: t('package.details.repo'), value: displayUrl(value.repoUrl), href: value.repoUrl });
+    list.push({
+      key: 'repo',
+      label: t('package.details.repo'),
+      value: displayUrl(value.repoUrl),
+      href: value.repoUrl
+    });
   return list;
 });
 
@@ -92,6 +111,11 @@ usePageSeo({
   <div v-if="pkg" class="grid grid-cols-1 gap-20px pt-4px lg:grid-cols-[minmax(0,1fr)_320px]">
     <div class="flex min-w-0 flex-col gap-16px">
       <PackageRequirements :pkg="pkg" />
+      <p v-if="overview?.sha256" class="m-0 text-12px leading-[1.6] text-ink-tertiary">
+        {{ t('package.guide.sha') }}
+      </p>
+      <PackagePrice :pkg="pkg" />
+      <PackageSafety v-if="!pkg.isFont" :pkg="pkg" :show-checked="false" />
       <section class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-4px">
         <OnKeyValueList :items="items" />
       </section>
@@ -114,7 +138,7 @@ usePageSeo({
               size="xs"
               icon="copy"
               class="shrink-0"
-              :aria-label="`${t('common.copy')} SHA-256`"
+              :aria-label="t('download.copySha')"
               @click="copyChecksum"
               >{{ t('common.copy') }}</OnButton
             >
@@ -122,7 +146,7 @@ usePageSeo({
         </template>
       </dl>
       <OnCaskArtifacts v-if="overview?.artifacts.entries?.length" :entries="overview.artifacts.entries" />
-      <PackageUninstall :pkg="pkg" :homebrew="true" :guide="false" />
+      <PackageUninstall :pkg="pkg" :homebrew="true" :guide="false" :show-checked="false" />
       <section
         v-if="overview?.caveats"
         class="rounded-big border border-solid border-status-warning bg-surface-card px-18px py-14px"

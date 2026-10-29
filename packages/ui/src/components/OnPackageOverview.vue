@@ -2,7 +2,7 @@
 import type { Component } from 'vue';
 import type { PackageKind } from '@opennavo/shared';
 import OnAboutSection from './OnAboutSection.vue';
-import OnAppIcon from './OnAppIcon.vue';
+import OnRelatedPackages from './OnRelatedPackages.vue';
 import type { OnImageVariant } from '../utils/image';
 import OnCodeText from './OnCodeText.vue';
 import OnInstallCommand from './OnInstallCommand.vue';
@@ -37,15 +37,17 @@ export interface OnPackageOverviewProps {
   caveatsTitle?: string;
   /** Install command; link apps have none and fill the `download` slot instead. */
   command?: string;
+  installNotice?: { text: string; disabled: boolean };
   info: readonly OnKeyValueItem[];
   related?: readonly OnRelatedPackage[];
   relatedTitle?: string;
+  relatedInMain?: boolean;
   relatedMoreHref?: string;
   relatedMoreLabel?: string;
   linkAs?: string | Component;
 }
 
-const props = withDefaults(defineProps<OnPackageOverviewProps>(), {
+withDefaults(defineProps<OnPackageOverviewProps>(), {
   screenshots: () => [],
   hasAbout: false,
   related: () => [],
@@ -53,8 +55,6 @@ const props = withDefaults(defineProps<OnPackageOverviewProps>(), {
 });
 
 const emit = defineEmits<{ copied: [command: string] }>();
-
-const linkAttrs = (href: string) => (props.linkAs === 'a' ? { href } : { to: href });
 
 defineSlots<{
   /** Top of the main column, before screenshots, e.g. the web's facts table. */
@@ -88,6 +88,14 @@ defineSlots<{
         <slot name="about" />
       </OnAboutSection>
       <slot name="main" />
+      <OnRelatedPackages
+        v-if="relatedInMain"
+        :related="related"
+        :related-title="relatedTitle"
+        :related-more-href="relatedMoreHref"
+        :related-more-label="relatedMoreLabel"
+        :link-as="linkAs"
+      />
       <section
         v-if="caveats"
         class="rounded-big border border-solid border-status-warning bg-surface-card px-18px py-14px"
@@ -101,10 +109,28 @@ defineSlots<{
     <aside class="flex min-w-0 flex-col gap-14px">
       <slot name="download" />
       <section
-        v-if="command"
-        class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px max-[640px]:hidden"
+        v-if="command || installNotice"
+        class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px"
+        data-testid="package-install-command"
       >
-        <OnInstallCommand :command="command" @copied="emit('copied', $event)" />
+        <p
+          v-if="installNotice"
+          role="note"
+          class="m-0 rounded-default border border-solid px-12px py-10px text-12.5px leading-[1.6]"
+          :class="[
+            installNotice.disabled
+              ? 'border-status-danger text-status-danger'
+              : 'border-status-warning text-status-warning',
+            command && !installNotice.disabled ? 'mb-12px' : ''
+          ]"
+        >
+          {{ installNotice.text }}
+        </p>
+        <OnInstallCommand
+          v-if="command && !installNotice?.disabled"
+          :command="command"
+          @copied="emit('copied', $event)"
+        />
       </section>
       <slot name="spec" />
       <section
@@ -114,45 +140,14 @@ defineSlots<{
         <OnKeyValueList :items="info" />
       </section>
       <slot name="aside" />
-      <!-- Similar apps (.sim): 32 icon, name, summary, row dividers; whole row clickable. -->
-      <section v-if="related.length" class="mt-4px">
-        <h2 class="m-0 text-headline text-ink-primary">{{ relatedTitle }}</h2>
-        <ul class="m-0 mt-8px list-none p-0">
-          <li
-            v-for="pkg in related"
-            :key="pkg.key"
-            class="relative flex items-center gap-10px border-t border-t-solid border-line-subtle py-8px first:border-t-0"
-          >
-            <OnAppIcon
-              :kind="pkg.kind"
-              :token="pkg.token"
-              :name="pkg.name"
-              :src="pkg.src"
-              :variants="pkg.variants"
-              :accent="pkg.accent"
-              :size="32"
-            />
-            <span class="min-w-0 flex-1">
-              <component
-                :is="linkAs"
-                v-bind="linkAttrs(pkg.href)"
-                class="on-stretched block truncate text-12.5px font-600 text-ink-primary no-underline outline-none focus-visible:underline"
-              >
-                {{ pkg.name }}
-              </component>
-              <span v-if="pkg.description" class="block truncate text-11px text-ink-tertiary">{{
-                pkg.description
-              }}</span>
-            </span>
-          </li>
-        </ul>
-        <a
-          v-if="relatedMoreHref"
-          :href="relatedMoreHref"
-          class="mt-8px inline-flex text-12.5px font-600 text-ink-secondary no-underline hover:text-ink-primary"
-          >{{ relatedMoreLabel }}</a
-        >
-      </section>
+      <OnRelatedPackages
+        v-if="!relatedInMain"
+        :related="related"
+        :related-title="relatedTitle"
+        :related-more-href="relatedMoreHref"
+        :related-more-label="relatedMoreLabel"
+        :link-as="linkAs"
+      />
       <slot name="asideEnd" />
     </aside>
   </div>
