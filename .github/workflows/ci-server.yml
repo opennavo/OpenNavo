@@ -62,7 +62,7 @@ jobs:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter opennavo --ignore-scripts
-      - run: pnpm exec redocly lint apps/server/api/public.openapi.yaml apps/server/api/admin.openapi.yaml --config apps/server/api/redocly.yaml
+      - run: pnpm exec redocly lint apps/server/api/public.openapi.yaml apps/server/api/public-external.openapi.yaml apps/server/api/admin.openapi.yaml --config apps/server/api/redocly.yaml
       - run: make gen-server
       - run: git diff --exit-code
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 ../../.github/workflows/*.yml

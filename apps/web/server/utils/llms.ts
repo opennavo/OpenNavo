@@ -2,9 +2,9 @@ import { BRAND_FACTS } from '../../shared/utils/brandFacts';
 import { siteMessage } from './siteCopy';
 
 /**
- * A short English orientation, sharing the site's identity and linking only stable public HTML. Laid out as
- * llmstxt.org describes: the name as H1, the one-sentence definition as the summary blockquote, a detail
- * line, then the pages under an H2.
+ * A short English orientation, sharing the site's identity and linking stable public pages and interfaces.
+ * Laid out as llmstxt.org describes: the name as H1, the one-sentence definition as the summary blockquote,
+ * a detail line, then the pages and developer interfaces under H2 headings.
  */
 export function renderLlms(siteUrl: string): string {
   const origin = new URL(siteUrl).origin;
@@ -26,6 +26,12 @@ export function renderLlms(siteUrl: string): string {
     '## Main pages',
     '',
     ...links.map(([label, path]) => `- [${label}](${origin}${path})`),
+    '',
+    '## Developer interfaces',
+    '',
+    `- MCP: <${origin}/mcp>`,
+    `- Public API: <https://api.opennavo.com/api/v1/openapi.yaml>`,
+    `- Developer documentation: <${origin}/developers>`,
     ''
   ].join('\n');
 }

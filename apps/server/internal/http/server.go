@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	publiccontract "github.com/opennavo/opennavo/server/api"
 	"github.com/opennavo/opennavo/server/gen/adminapi"
 	"github.com/opennavo/opennavo/server/gen/publicapi"
 	"github.com/opennavo/opennavo/server/internal/config"
@@ -73,6 +74,12 @@ func New(cfg config.Config, logger *slog.Logger, ready Readiness, deps ...Depend
 			return
 		}
 		respond.OK(c, gin.H{"status": "ready"})
+	})
+	// The externally documented contract is deliberately separate from the internal public API
+	// contract. Keep it on the /api path so the API host's existing Caddy allowlist serves it.
+	engine.GET("/api/v1/openapi.yaml", func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=3600")
+		c.Data(http.StatusOK, "application/yaml; charset=utf-8", publiccontract.PublicExternalOpenAPI)
 	})
 	engine.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/agent-api/") {

@@ -1,0 +1,3654 @@
+# Derived from apps/server/api/public.openapi.yaml; only stable anonymous read operations are published.
+---
+openapi: 3.0.3
+info:
+  title: OpenNavo Public Read API
+  version: 1.0.0
+  license:
+    name: Proprietary
+    url: https://opennavo.com/developers#terms
+  description: |-
+    Stable, anonymous, read-only catalog endpoints for OpenNavo.
+
+    Responses use the `{code, msg, data}` envelope and return `code = "0000"` on success. Fields use camelCase; timestamps use RFC 3339 (UTC). Localization prefers the `locale` query parameter, then `Accept-Language`, and defaults to `en-US`.
+
+    Rate limits are enforced per client IP by a Redis-backed GCRA limiter. Ordinary read endpoints allow 300 requests per 60 seconds; `/search` allows 60 requests per 60 seconds. Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. A rejected request returns HTTP 429 with `Retry-After` in seconds. Limits are shared across API instances and may change with fair-use policy.
+
+    The public surface contains catalog reads only; telemetry and write-oriented routes are outside this document.
+servers:
+- url: https://api.opennavo.com/api/v1
+- url: http://localhost:8080/api/v1
+security: []
+tags:
+- name: catalog
+  description: Public app catalog, categories and dependencies
+- name: search
+  description: Public app search
+- name: releases
+  description: Public release history
+- name: rankings
+  description: Public installation rankings
+- name: collections
+  description: Public app collections
+- name: articles
+  description: Published public articles
+paths:
+  "/categories":
+    get:
+      tags:
+      - catalog
+      operationId: listCategories
+      summary: Category tree with package counts
+      parameters:
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CategoryTreeResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/packages/{kind}/{token}":
+    get:
+      tags:
+      - catalog
+      operationId: getPackage
+      summary: Package details
+      parameters:
+      - "$ref": "#/components/parameters/KindPath"
+      - "$ref": "#/components/parameters/TokenPath"
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PackageDetailResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        '404':
+          "$ref": "#/components/responses/Error"
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/packages/{kind}/{token}/releases":
+    get:
+      tags:
+      - releases
+      operationId: listPackageReleases
+      summary: Release history timeline
+      description: Merge Homebrew versions and release notes, preferring editorial notes with historical notes as fallback (no new upstream fetching or summary generation), sorted by version descending.
+      parameters:
+      - "$ref": "#/components/parameters/KindPath"
+      - "$ref": "#/components/parameters/TokenPath"
+      - name: original
+        in: query
+        description: When true, prefer English release notes and fall back to the source language if English is missing; the UI still labels these as Original
+        schema:
+          type: boolean
+          default: false
+      - name: onlyWithNotes
+        in: query
+        description: Return only versions with release notes
+        schema:
+          type: boolean
+          default: false
+      - "$ref": "#/components/parameters/Current"
+      - "$ref": "#/components/parameters/Size"
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ReleasePageResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        '404':
+          "$ref": "#/components/responses/Error"
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/packages/{kind}/{token}/dependencies":
+    get:
+      tags:
+      - catalog
+      operationId: getPackageDependencies
+      summary: Dependencies and conflicts
+      parameters:
+      - "$ref": "#/components/parameters/KindPath"
+      - "$ref": "#/components/parameters/TokenPath"
+      - name: platform
+        in: query
+        description: macOS label from supported_platforms. When provided, resolve the dependency tree and conflicts for that platform; unsupported labels return 400.
+        schema:
+          type: string
+          maxLength: 80
+          pattern: "^(arm64_)?[a-z][a-z0-9_]*$"
+      - name: depth
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 3
+          default: 2
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/DependenciesResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        '404':
+          "$ref": "#/components/responses/Error"
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/packages/{kind}/{token}/related":
+    get:
+      tags:
+      - catalog
+      operationId: listRelatedPackages
+      summary: Similar packages with the same content type and primary category
+      parameters:
+      - "$ref": "#/components/parameters/KindPath"
+      - "$ref": "#/components/parameters/TokenPath"
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 12
+          default: 8
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PackageSummaryListResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/articles":
+    get:
+      tags:
+      - articles
+      operationId: listArticles
+      summary: Published articles
+      description: Newest first. Each card uses the requested language when its translation is ready and not held back, otherwise the source language (locale tells which). Withdrawn articles are never listed.
+      parameters:
+      - "$ref": "#/components/parameters/Locale"
+      - "$ref": "#/components/parameters/Current"
+      - name: size
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 12
+      - name: type
+        in: query
+        schema:
+          "$ref": "#/components/schemas/ArticleType"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArticlePageResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/articles/{slug}":
+    get:
+      tags:
+      - articles
+      operationId: getArticle
+      summary: One article
+      description: 'published: the published revision, in the requested language when its translation is ready and not held back (availableLocales lists those languages; others show the source text and should not be indexed). moved: a former slug, redirect permanently to slug. withdrawn: taken off the site, answer 410. Unknown slugs return 404. Drafts are never readable here.'
+      parameters:
+      - "$ref": "#/components/parameters/ArticleSlugPath"
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArticleLookupResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/search":
+    get:
+      tags:
+      - search
+      operationId: searchPackages
+      summary: Search
+      parameters:
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      - "$ref": "#/components/parameters/KindQuery"
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: includeDisabled
+        in: query
+        schema:
+          type: boolean
+          default: false
+      - name: platform
+        in: query
+        schema:
+          type: string
+          enum:
+          - web
+          - desktop
+          default: web
+      - "$ref": "#/components/parameters/Current"
+      - "$ref": "#/components/parameters/Size"
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SearchResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 60
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/rankings":
+    get:
+      tags:
+      - rankings
+      operationId: listRankings
+      summary: Installation rankings
+      parameters:
+      - name: kind
+        in: query
+        required: true
+        schema:
+          "$ref": "#/components/schemas/PackageKind"
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - 30d
+          - 90d
+          - 365d
+          default: 30d
+      - name: category
+        in: query
+        schema:
+          type: string
+      - name: includeFonts
+        in: query
+        schema:
+          type: boolean
+          default: true
+      - "$ref": "#/components/parameters/Current"
+      - "$ref": "#/components/parameters/Size"
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RankingPageResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/collections":
+    get:
+      tags:
+      - collections
+      operationId: listCollections
+      summary: Published collections
+      parameters:
+      - "$ref": "#/components/parameters/Current"
+      - "$ref": "#/components/parameters/Size"
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CollectionSummaryPageResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/collections/{slug}":
+    get:
+      tags:
+      - collections
+      operationId: getCollection
+      summary: Collection details
+      parameters:
+      - "$ref": "#/components/parameters/SlugPath"
+      - "$ref": "#/components/parameters/Locale"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CollectionDetailResponse"
+          headers:
+            Vary:
+              description: Includes at least Origin and Accept-Language; preserves existing Vary values.
+              schema:
+                type: string
+        '404':
+          "$ref": "#/components/responses/Error"
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+  "/collections/{slug}/brewfile":
+    get:
+      tags:
+      - collections
+      operationId: getCollectionBrewfile
+      summary: Export a collection as a plain-text Brewfile
+      parameters:
+      - "$ref": "#/components/parameters/SlugPath"
+      responses:
+        '200':
+          description: Brewfile text
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          "$ref": "#/components/responses/Error"
+        default:
+          "$ref": "#/components/responses/Error"
+        '429':
+          description: The per-IP rate limit was exceeded.
+          headers:
+            Retry-After:
+              description: Seconds until another request may be attempted.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: Configured requests allowed in the current 60-second window.
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Requests remaining before the limit is reached.
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      x-rate-limit:
+        algorithm: GCRA
+        scope: per-ip
+        requests: 300
+        window: 60s
+        headers:
+        - X-RateLimit-Limit
+        - X-RateLimit-Remaining
+        - Retry-After
+components:
+  parameters:
+    Locale:
+      name: locale
+      in: query
+      schema:
+        "$ref": "#/components/schemas/Locale"
+      description: locale > Accept-Language (six languages matched by q value) > en-US. Missing translations fall back to en-US, then the source language.
+    KindPath:
+      name: kind
+      in: path
+      required: true
+      schema:
+        "$ref": "#/components/schemas/PackageKind"
+    TokenPath:
+      name: token
+      in: path
+      required: true
+      description: Homebrew token; may contain `@`, for example `python@3.14`
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9@._+-]*$"
+        maxLength: 128
+    Current:
+      name: current
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Size:
+      name: size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 24
+    ArticleSlugPath:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+        maxLength: 100
+    KindQuery:
+      name: kind
+      in: query
+      schema:
+        "$ref": "#/components/schemas/PackageKind"
+    SlugPath:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]*$"
+        maxLength: 64
+  schemas:
+    CategoryTreeResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          type: array
+          items:
+            "$ref": "#/components/schemas/CategoryNode"
+    ErrorResponse:
+      type: object
+      required:
+      - code
+      - msg
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          type: object
+          nullable: true
+    PackageDetailResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          "$ref": "#/components/schemas/PackageDetail"
+    ReleasePageResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          "$ref": "#/components/schemas/ReleasePage"
+    DependenciesResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          "$ref": "#/components/schemas/Dependencies"
+    PackageSummaryListResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          type: array
+          items:
+            "$ref": "#/components/schemas/PackageSummary"
+    ArticleType:
+      type: string
+      enum:
+      - recommendation
+      - review
+      - tutorial
+      - roundup
+      - news
+    ArticlePageResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          "$ref": "#/components/schemas/ArticlePage"
+    ArticleLookupResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          "$ref": "#/components/schemas/ArticleLookup"
+    SearchResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          "$ref": "#/components/schemas/SearchResult"
+    PackageKind:
+      type: string
+      enum:
+      - cask
+      - formula
+      - link
+      description: Casks only. The formula enum remains for old-request compatibility; explicit requests return 404. Historical data is not deleted.
+    RankingPageResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          type: object
+          required:
+          - current
+          - size
+          - total
+          - records
+          properties:
+            current:
+              type: integer
+            size:
+              type: integer
+            total:
+              type: integer
+            records:
+              type: array
+              items:
+                "$ref": "#/components/schemas/RankingEntry"
+    CollectionSummaryPageResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          type: object
+          required:
+          - current
+          - size
+          - total
+          - records
+          properties:
+            current:
+              type: integer
+            size:
+              type: integer
+            total:
+              type: integer
+            records:
+              type: array
+              items:
+                "$ref": "#/components/schemas/CollectionSummary"
+    CollectionDetailResponse:
+      type: object
+      required:
+      - code
+      - msg
+      - data
+      properties:
+        code:
+          "$ref": "#/components/schemas/Code"
+        msg:
+          type: string
+        data:
+          "$ref": "#/components/schemas/CollectionDetail"
+    Locale:
+      type: string
+      enum:
+      - en-US
+      - zh-CN
+      - ja-JP
+      - es-ES
+      - pt-BR
+      - ru-RU
+      - de-DE
+      - fr-FR
+      - it-IT
+      - zh-Hant
+      description: Supported language; without locale, match Accept-Language by q value and ultimately default to en-US.
+    Code:
+      type: string
+      description: Business code; "0000" means success
+    CategoryNode:
+      type: object
+      required:
+      - slug
+      - name
+      - icon
+      - appliesTo
+      - hiddenByDefault
+      - packageCount
+      - children
+      properties:
+        seoTitle:
+          type: string
+          nullable: true
+          maxLength: 120
+          description: Localized search title; blank uses the default page title.
+        seoDescription:
+          type: string
+          nullable: true
+          maxLength: 300
+          description: Localized search description; blank uses the default page description.
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        icon:
+          type: string
+        appliesTo:
+          type: string
+          enum:
+          - cask
+          - formula
+          - both
+        hiddenByDefault:
+          type: boolean
+        packageCount:
+          type: integer
+        children:
+          type: array
+          items:
+            "$ref": "#/components/schemas/CategoryNode"
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    PackageDetail:
+      allOf:
+      - "$ref": "#/components/schemas/PackageSummary"
+      - type: object
+        required:
+        - names
+        - tap
+        - installCommand
+        - artifacts
+        - installs
+        - categories
+        - tags
+        - conflictsWith
+        - supports
+        - kegOnly
+        - screenshots
+        - releaseCount
+        - sourceUrl
+        - formulaeUrl
+        - summaryTranslation
+        properties:
+          seoOverride:
+            "$ref": "#/components/schemas/PackageSeoOverride"
+          collections:
+            type: array
+            items:
+              "$ref": "#/components/schemas/PackageCollectionRef"
+          names:
+            type: array
+            items:
+              type: string
+          descriptionEn:
+            type: string
+            nullable: true
+          description:
+            type: string
+            nullable: true
+            description: Localized introduction in Markdown, using the existing description field.
+          developer:
+            type: string
+            nullable: true
+          homepage:
+            type: string
+            nullable: true
+          license:
+            type: string
+            nullable: true
+          tap:
+            type: string
+          downloadUrl:
+            type: string
+            nullable: true
+          downloadSize:
+            type: integer
+            format: int64
+            nullable: true
+          installCommand:
+            type: string
+          artifacts:
+            "$ref": "#/components/schemas/Artifacts"
+          installs:
+            "$ref": "#/components/schemas/InstallStats"
+          onRequest:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/InstallStats"
+            nullable: true
+            description: 'Formula only: installations on request'
+          categories:
+            type: array
+            items:
+              "$ref": "#/components/schemas/CategoryRef"
+          tags:
+            type: array
+            items:
+              type: string
+          dependencies:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/FormulaDependencies"
+            nullable: true
+          dependsOn:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/CaskDependsOn"
+            nullable: true
+          conflictsWith:
+            "$ref": "#/components/schemas/ConflictsWith"
+          caveats:
+            type: string
+            nullable: true
+          supports:
+            type: object
+            required:
+            - arm64
+            - x86_64
+            properties:
+              status:
+                type: string
+                enum:
+                - known
+                - unknown
+                description: known indicates an official platform list or explicit architecture declaration; with unknown, boolean fields do not prove lack of support.
+              requiresRosetta:
+                type: boolean
+                description: Whether Homebrew declares a Rosetta requirement; this does not establish native ARM support.
+              arm64:
+                type: boolean
+              x86_64:
+                type: boolean
+          platforms:
+            type: array
+            description: Actual versions, downloads, dependencies and installation declarations per macOS/architecture. An empty array means no recognizable macOS platform; consult supports.status to determine whether support is unknown.
+            items:
+              "$ref": "#/components/schemas/CaskPlatform"
+          minMacos:
+            type: string
+            nullable: true
+          kegOnly:
+            type: boolean
+          deprecation:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/LifecycleNotice"
+            nullable: true
+          disable:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/LifecycleNotice"
+            nullable: true
+          screenshots:
+            type: array
+            items:
+              "$ref": "#/components/schemas/Screenshot"
+          latestRelease:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/ReleaseEntry"
+            nullable: true
+          releaseCount:
+            type: integer
+          repoUrl:
+            type: string
+            nullable: true
+          sourceUrl:
+            type: string
+            description: GitHub URL of this package's Homebrew definition
+          formulaeUrl:
+            type: string
+          summaryTranslation:
+            "$ref": "#/components/schemas/TranslationInfo"
+          downloadSha256:
+            type: string
+            nullable: true
+            description: SHA-256 of the downloadUrl file; null when absent upstream or no_check.
+            pattern: "^[a-fA-F0-9]{64}$"
+          indexing:
+            "$ref": "#/components/schemas/PackageIndexing"
+          versionCommittedAt:
+            type: string
+            format: date-time
+            nullable: true
+            description: When Homebrew committed the current version; versionChangedAt is when OpenNavo noticed it.
+          releaseStats:
+            "$ref": "#/components/schemas/ReleaseStats"
+          facts:
+            "$ref": "#/components/schemas/AppFacts"
+          price:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/AppPrice"
+            nullable: true
+            description: Apps only; null when the price is unknown or under review
+          macosSupplement:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/MacosSupplement"
+            nullable: true
+            description: Apps only; null without a verified supplement
+          alternatives:
+            type: array
+            description: 'Apps only: human-confirmed alternatives (0 to 8) that pages can show'
+            items:
+              "$ref": "#/components/schemas/PackageAlternative"
+          articles:
+            type: array
+            description: 'Apps only: up to three published articles that cover this app, newest first'
+            items:
+              "$ref": "#/components/schemas/ArticleCard"
+          homebrewStatus:
+            "$ref": "#/components/schemas/HomebrewStatus"
+          openSource:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/OpenSourceFact"
+            nullable: true
+            description: Apps only; null unless GitHub reports an OSI-approved license for a code repository the Homebrew definition points at
+          appStore:
+            type: object
+            allOf:
+            - "$ref": "#/components/schemas/AppStoreListing"
+            nullable: true
+            description: Apps only; null unless a Mac App Store listing shares a bundle identifier and a name with this app
+    ReleasePage:
+      type: object
+      required:
+      - current
+      - size
+      - total
+      - records
+      - stats
+      - indexing
+      properties:
+        current:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+        records:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ReleaseEntry"
+        stats:
+          "$ref": "#/components/schemas/ReleaseStats"
+        indexing:
+          "$ref": "#/components/schemas/PageDecision"
+    Dependencies:
+      type: object
+      required:
+      - dependencies
+      - dependents
+      - conflictsWith
+      properties:
+        platforms:
+          type: array
+          description: Platform-specific dependency and installation declarations for displaying conditional dependencies; do not merge all platforms into unconditional dependencies.
+          items:
+            "$ref": "#/components/schemas/CaskPlatform"
+        dependencies:
+          type: array
+          items:
+            "$ref": "#/components/schemas/DependencyNode"
+        dependents:
+          type: object
+          required:
+          - count
+          - top
+          properties:
+            count:
+              type: integer
+            top:
+              type: array
+              items:
+                "$ref": "#/components/schemas/PackageSummary"
+        dependsOn:
+          type: object
+          allOf:
+          - "$ref": "#/components/schemas/CaskDependsOn"
+          nullable: true
+        conflictsWith:
+          "$ref": "#/components/schemas/ConflictsWith"
+    PackageSummary:
+      type: object
+      required:
+      - kind
+      - token
+      - name
+      - displayName
+      - version
+      - installs30d
+      - autoUpdates
+      - deprecated
+      - disabled
+      - isFont
+      - isLibrary
+      - editorChoice
+      - versionChangedAt
+      properties:
+        recommendationPaused:
+          type: boolean
+          description: OpenNavo paused recommendations because upstream version data is stale; separate from Homebrew disabled status.
+        bundleIds:
+          type: array
+          items:
+            type: string
+        link:
+          type: object
+          nullable: true
+          allOf:
+          - "$ref": "#/components/schemas/LinkInfo"
+        kind:
+          "$ref": "#/components/schemas/PackageKind"
+        token:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+          description: Display name in the negotiated language; falls back to en-US, then the source language. Brand names may remain unchanged.
+        summary:
+          type: string
+          nullable: true
+          description: Localized one-sentence summary
+        iconUrl:
+          type: string
+          nullable: true
+        accentColor:
+          type: string
+          nullable: true
+          pattern: "^#[0-9A-Fa-f]{6}$"
+        version:
+          type: string
+        primaryCategory:
+          type: object
+          allOf:
+          - "$ref": "#/components/schemas/CategoryRef"
+          nullable: true
+        installs30d:
+          type: integer
+        rank30d:
+          type: integer
+          nullable: true
+        autoUpdates:
+          type: boolean
+        deprecated:
+          type: boolean
+        disabled:
+          type: boolean
+        isFont:
+          type: boolean
+        isLibrary:
+          type: boolean
+        editorChoice:
+          type: boolean
+        versionChangedAt:
+          type: string
+          format: date-time
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+        iconVariants:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ImageVariant"
+          description: Stored 64/128/256 pixel WebP icons. Empty or absent for legacy assets; fall back to iconUrl.
+    ArticlePage:
+      type: object
+      required:
+      - records
+      - current
+      - size
+      - total
+      properties:
+        records:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ArticleCard"
+        current:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+    ArticleLookup:
+      type: object
+      required:
+      - state
+      - slug
+      properties:
+        state:
+          type: string
+          enum:
+          - published
+          - moved
+          - withdrawn
+        slug:
+          type: string
+          description: Current slug; differs from the requested one when moved
+        article:
+          "$ref": "#/components/schemas/Article"
+    SearchResult:
+      type: object
+      required:
+      - current
+      - size
+      - total
+      - records
+      - queryId
+      properties:
+        current:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+        records:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SearchHit"
+        queryId:
+          type: string
+        expandedTerms:
+          type: array
+          description: Query terms expanded from synonyms
+          items:
+            type: string
+    RankingEntry:
+      type: object
+      required:
+      - rank
+      - installs
+      - package
+      properties:
+        rank:
+          type: integer
+        rankChange:
+          type: integer
+          nullable: true
+          description: Rank change relative to 7 days ago; positive means improvement
+        installs:
+          type: integer
+        package:
+          "$ref": "#/components/schemas/PackageSummary"
+    CollectionSummary:
+      type: object
+      required:
+      - slug
+      - title
+      - itemCount
+      - iconUrls
+      - updatedAt
+      properties:
+        seoTitle:
+          type: string
+          nullable: true
+          maxLength: 120
+          description: Localized search title; blank uses the default page title.
+        seoDescription:
+          type: string
+          nullable: true
+          maxLength: 300
+          description: Localized search description; blank uses the default page description.
+        slug:
+          type: string
+        title:
+          type: string
+        subtitle:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        itemCount:
+          type: integer
+        iconUrls:
+          type: array
+          description: Icons of the first 5 items; null for missing icons
+          items:
+            type: string
+            nullable: true
+        previewItems:
+          type: array
+          maxItems: 5
+          description: First 5 visible items in iconUrls order; names use the requested language with package-name fallback, for letter or command-line tiles when icons are missing.
+          items:
+            "$ref": "#/components/schemas/CollectionPreviewItem"
+        updatedAt:
+          type: string
+          format: date-time
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    CollectionDetail:
+      allOf:
+      - "$ref": "#/components/schemas/CollectionSummary"
+      - type: object
+        required:
+        - items
+        properties:
+          setup:
+            "$ref": "#/components/schemas/CollectionSetup"
+          body:
+            type: string
+            nullable: true
+          items:
+            type: array
+            items:
+              "$ref": "#/components/schemas/CollectionItem"
+    PackageSeoOverride:
+      type: object
+      nullable: true
+      additionalProperties: false
+      description: The overview page's search title and meta description set for the requested language; a null field keeps the template, and the site adds its brand suffix to the title. zh-Hant shows zh-CN's override converted to Traditional Chinese. Null when the language has none; other pages ignore it.
+      required:
+      - title
+      - description
+      properties:
+        title:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+    PackageCollectionRef:
+      type: object
+      required:
+      - slug
+      - title
+      properties:
+        slug:
+          type: string
+        title:
+          type: string
+    Artifacts:
+      type: object
+      required:
+      - apps
+      - binaries
+      - pkgs
+      properties:
+        apps:
+          type: array
+          items:
+            type: string
+        binaries:
+          type: array
+          items:
+            type: string
+        pkgs:
+          type: array
+          items:
+            type: string
+        uninstallNotes:
+          type: array
+          description: Localized uninstall actions, such as "Quit App" or "Remove background task com.microsoft.VSCode.ShipIt"
+          items:
+            type: string
+        entries:
+          type: array
+          description: Complete Homebrew install, uninstall and cleanup declarations for display only; never execute their scripts. target appears only when explicitly declared upstream and is not the actual local install path.
+          items:
+            "$ref": "#/components/schemas/CaskArtifact"
+    InstallStats:
+      type: object
+      required:
+      - d30
+      - d90
+      - d365
+      properties:
+        d30:
+          type: integer
+        d90:
+          type: integer
+        d365:
+          type: integer
+    CategoryRef:
+      type: object
+      required:
+      - slug
+      - name
+      - icon
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        icon:
+          type: string
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    FormulaDependencies:
+      type: object
+      required:
+      - runtime
+      - build
+      - test
+      - optional
+      - recommended
+      - usesFromMacos
+      properties:
+        runtime:
+          type: array
+          items:
+            type: string
+        build:
+          type: array
+          items:
+            type: string
+        test:
+          type: array
+          items:
+            type: string
+        optional:
+          type: array
+          items:
+            type: string
+        recommended:
+          type: array
+          items:
+            type: string
+        usesFromMacos:
+          type: array
+          items:
+            type: string
+    CaskDependsOn:
+      type: object
+      required:
+      - arch
+      - formulae
+      - casks
+      properties:
+        macos:
+          type: string
+          nullable: true
+        arch:
+          type: array
+          items:
+            type: string
+            enum:
+            - arm64
+            - x86_64
+        formulae:
+          type: array
+          items:
+            type: string
+        casks:
+          type: array
+          items:
+            type: string
+        requirements:
+          type: object
+          additionalProperties: true
+          description: Complete depends_on, preserving all macos/maximum_macos comparison operators and dependency constraints.
+    ConflictsWith:
+      type: object
+      required:
+      - casks
+      - formulae
+      properties:
+        casks:
+          type: array
+          items:
+            type: string
+        formulae:
+          type: array
+          items:
+            type: string
+        reasons:
+          type: array
+          items:
+            type: string
+    CaskPlatform:
+      type: object
+      description: macOS platforms from supported_platforms after applying variations using Homebrew whole-field overrides. Installability may depend on Rosetta and does not indicate native binary architecture.
+      required:
+      - tag
+      - macos
+      - arch
+      - version
+      - requiresRosetta
+      - dependsOn
+      - artifacts
+      - conflictsWith
+      properties:
+        tag:
+          type: string
+        macos:
+          type: string
+          description: macOS version associated with the platform label, not the application's minimum OS requirement.
+        arch:
+          type: string
+          enum:
+          - arm64
+          - x86_64
+        version:
+          type: string
+        downloadUrl:
+          type: string
+          nullable: true
+        downloadSha256:
+          type: string
+          nullable: true
+          description: Null when the checksum is absent or no_check.
+          pattern: "^[a-fA-F0-9]{64}$"
+        minMacos:
+          type: string
+          nullable: true
+        requiresRosetta:
+          type: boolean
+        dependsOn:
+          "$ref": "#/components/schemas/CaskDependsOn"
+        artifacts:
+          "$ref": "#/components/schemas/Artifacts"
+        conflictsWith:
+          "$ref": "#/components/schemas/ConflictsWith"
+    LifecycleNotice:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        replacement:
+          type: object
+          allOf:
+          - "$ref": "#/components/schemas/Replacement"
+          nullable: true
+    Screenshot:
+      type: object
+      required:
+      - url
+      - thumbUrl
+      - width
+      - height
+      - theme
+      properties:
+        url:
+          type: string
+        thumbUrl:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        caption:
+          type: string
+          nullable: true
+        theme:
+          type: string
+          enum:
+          - dark
+          - light
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+        variants:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ImageVariant"
+          description: Proportional 64/128/256 pixel WebP images. Empty or absent for legacy assets.
+        thumbnailVariants:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ImageVariant"
+          description: Stored WebP card crops in ascending width order. New screenshots contain 318 by 200 and 636 by 400 renditions of the same centered crop, upscaled when the source is smaller. Legacy assets may have only 318 by 200 or no crops; use separately from proportional variants.
+    ReleaseEntry:
+      type: object
+      description: 'Editorial notes are shown only in the requested locale: source text for the source locale, otherwise manual/machine text matching the current source hash. Unavailable editorial translations fall back to original upstream notes for the same version using source priority; without upstream notes, hasNotes is false and translation reports pending/failed/skipped. Editorial notes that only say the changes are not known count as unavailable in every locale: they fall back the same way, and without upstream notes the entry keeps its id, source, dates and sourceUrl with hasNotes false, no title, summary, body or sections, and translation none. The selected note supplies id/source/sourceLocale. Version and build grouping are preserved.'
+      required:
+      - version
+      - source
+      - isLatest
+      - isPrerelease
+      - hasNotes
+      - sections
+      - translation
+      properties:
+        compatibility:
+          "$ref": "#/components/schemas/VersionCompatibility"
+        id:
+          type: integer
+          format: int64
+          nullable: true
+          description: releases.id; null for entries derived only from Homebrew version records
+        version:
+          type: string
+          description: Base version (before the Homebrew build comma), or the full build version (0.1,49) on an entry for one build with notes of its own
+        versionBase:
+          type: string
+          description: Version before the Homebrew build comma; equals version except on build entries
+        build:
+          type: string
+          description: 'Only on entries for one Homebrew build with notes of its own: the text after the first comma (0.1,49 gives 49). Builds without their own notes share the entry of their base version.'
+        title:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        brewCommittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        source:
+          type: string
+          enum:
+          - github_release
+          - sparkle
+          - webpage
+          - manual
+          - homebrew
+          - editorial
+        sourceUrl:
+          type: string
+          nullable: true
+        isLatest:
+          type: boolean
+        isPrerelease:
+          type: boolean
+        hasNotes:
+          type: boolean
+        summary:
+          type: string
+          nullable: true
+        sections:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ReleaseSection"
+        bodyMarkdown:
+          type: string
+          nullable: true
+        translation:
+          "$ref": "#/components/schemas/TranslationInfo"
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    TranslationInfo:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - none
+          - source
+          - machine
+          - manual
+          - pending
+          - failed
+          - skipped
+          description: source is original text, machine is machine translation and manual is a correction. Editorial release notes never expose pending/failed or stale translated text; pending also represents a missing translation. Other content may retain old translations while pending/failed. none/skipped preserve legacy no-translation semantics.
+        locale:
+          type: string
+          allOf:
+          - "$ref": "#/components/schemas/Locale"
+          nullable: true
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    PackageIndexing:
+      type: object
+      required:
+      - indexable
+      - reason
+      - locales
+      - enforced
+      - notesCount
+      - pages
+      description: Index decision for the app's pages (WP11). Pages outside locales, or with indexable false, render noindex and stay out of hreflang and the sitemap.
+      properties:
+        detailsMerged:
+          type: boolean
+          description: Overview facts include the original details fields.
+        detailsRedirect:
+          type: boolean
+          description: Rollout enabled and this locale has an indexable overview; false for link apps.
+        indexable:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+          description: hidden, forced_noindex, unavailable, missing_summary or thin when not indexable.
+        locales:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Locale"
+        enforced:
+          type: boolean
+          description: Whether the index policy applies to this app. While false, pages keep today's behaviour.
+        notesCount:
+          type: integer
+          minimum: 0
+          description: Visible releases with their own notes; the versions page needs several to be indexed on its own.
+        pages:
+          "$ref": "#/components/schemas/PackagePageDecisions"
+    ReleaseStats:
+      type: object
+      required:
+      - count30d
+      - cadence
+      - brewLag
+      properties:
+        count30d:
+          type: integer
+        cadence:
+          type: string
+          enum:
+          - daily
+          - weekly
+          - biweekly
+          - monthly
+          - irregular
+        brewLag:
+          type: object
+          required:
+          - earlierCount
+          - compared
+          properties:
+            medianMinutes:
+              type: integer
+              nullable: true
+              description: Median Homebrew ingestion delay relative to upstream release, in minutes; may be negative
+            earlierCount:
+              type: integer
+              description: Number of versions ingested by Homebrew before upstream release
+            compared:
+              type: integer
+    AppFacts:
+      type: object
+      required:
+      - requirements
+      - uninstall
+      - overview
+      - alternatives
+      properties:
+        security:
+          "$ref": "#/components/schemas/SecurityFacts"
+        prices:
+          type: array
+          items:
+            "$ref": "#/components/schemas/PriceFact"
+        offers:
+          type: array
+          items:
+            "$ref": "#/components/schemas/PriceFact"
+        requirements:
+          type: array
+          items:
+            "$ref": "#/components/schemas/RequirementFact"
+        uninstall:
+          type: array
+          items:
+            "$ref": "#/components/schemas/UninstallFact"
+        overview:
+          "$ref": "#/components/schemas/OverviewFacts"
+        alternatives:
+          type: array
+          items:
+            "$ref": "#/components/schemas/PackageAlternative"
+        price:
+          "$ref": "#/components/schemas/AppPrice"
+        macosSupplement:
+          "$ref": "#/components/schemas/MacosSupplement"
+        issues:
+          type: array
+          items:
+            "$ref": "#/components/schemas/KnownIssueFact"
+        integrations:
+          type: array
+          items:
+            "$ref": "#/components/schemas/AppIntegrationFact"
+          description: Verified current integrations. Empty while web.appIntegrationsEnabled is false (default).
+    AppPrice:
+      type: object
+      required:
+      - type
+      - amount
+      - currency
+      - region
+      - plan
+      - period
+      - appVersion
+      - sourceUrl
+      - method
+      - verifiedAt
+      - stale
+      - offer
+      description: Verified price type with its evidence (WP12). Absent when unknown or marked for review; a free download never implies free.
+      properties:
+        type:
+          type: string
+          enum:
+          - free
+          - free_with_iap
+          - paid
+          - subscription
+          - trial
+        amount:
+          type: number
+          format: double
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+          description: ISO 3166-1 country the price was checked for
+        plan:
+          type: string
+          nullable: true
+          description: Vendor plan name as the vendor writes it; not translated
+        period:
+          type: string
+          nullable: true
+          enum:
+          - one_time
+          - month
+          - year
+        appVersion:
+          type: string
+          nullable: true
+        sourceUrl:
+          type: string
+        method:
+          type: string
+          enum:
+          - vendor_site
+          - app_store
+          - vendor_docs
+          - in_app
+          - other
+        verifiedAt:
+          type: string
+          format: date-time
+        stale:
+          type: boolean
+          description: 'Verified more than 365 days ago: show the date as possibly outdated'
+        offer:
+          type: boolean
+          description: 'Structured data may publish an offer: current, and free to obtain (price 0) or a complete amount with currency, region and plan'
+    MacosSupplement:
+      type: object
+      required:
+      - ranges
+      - appVersion
+      - sourceUrl
+      - method
+      - verifiedAt
+      - stale
+      - conflicts
+      description: Vendor-sourced macOS support kept beside Homebrew's requirements, never replacing them. With conflicts, show both as pending verification.
+      properties:
+        ranges:
+          type: array
+          items:
+            "$ref": "#/components/schemas/MacosRange"
+        appVersion:
+          type: string
+          nullable: true
+        sourceUrl:
+          type: string
+        method:
+          type: string
+          enum:
+          - vendor_site
+          - app_store
+          - vendor_docs
+          - in_app
+          - other
+        verifiedAt:
+          type: string
+          format: date-time
+        stale:
+          type: boolean
+        conflicts:
+          type: array
+          description: Where the supplement and Homebrew disagree
+          items:
+            type: string
+            enum:
+            - minimum
+            - maximum
+            - arm64
+            - x86_64
+    PackageAlternative:
+      type: object
+      required:
+      - package
+      - reasons
+      - limits
+      - bestFor
+      description: A human-confirmed alternative, in editor order. Distinct from automatically related apps.
+      properties:
+        attributes:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ComparisonAttributeFact"
+        prices:
+          type: array
+          items:
+            "$ref": "#/components/schemas/PriceFact"
+        migration:
+          "$ref": "#/components/schemas/MigrationGuide"
+        package:
+          "$ref": "#/components/schemas/PackageSummary"
+        reasons:
+          type: array
+          description: Why someone would pick it; translate the codes
+          items:
+            type: string
+            enum:
+            - free
+            - open_source
+            - lighter
+            - more_features
+            - simpler
+            - native_ui
+            - apple_silicon
+            - privacy
+            - offline
+            - collaboration
+            - cross_platform
+            - one_time_purchase
+            - active_development
+            - customizable
+        limits:
+          type: array
+          description: What to weigh before switching; translate the codes
+          items:
+            type: string
+            enum:
+            - paid
+            - subscription
+            - fewer_features
+            - requires_account
+            - learning_curve
+            - different_workflow
+            - no_apple_silicon
+            - online_only
+            - limited_languages
+        bestFor:
+          type: string
+          nullable: true
+          enum:
+          - everyday
+          - professionals
+          - developers
+          - teams
+          - beginners
+          - power_users
+    ArticleCard:
+      type: object
+      required:
+      - slug
+      - type
+      - title
+      - summary
+      - cover
+      - author
+      - publishedAt
+      - updatedAt
+      - readingMinutes
+      - locale
+      - machineTranslated
+      properties:
+        slug:
+          type: string
+        type:
+          "$ref": "#/components/schemas/ArticleType"
+        title:
+          type: string
+        summary:
+          type: string
+          nullable: true
+        cover:
+          type: object
+          allOf:
+          - "$ref": "#/components/schemas/ArticleCover"
+          nullable: true
+        author:
+          type: object
+          allOf:
+          - "$ref": "#/components/schemas/ArticleAuthorRef"
+          nullable: true
+          description: null is the editorial byline (the site organization)
+        publishedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: Latest substantive update
+        readingMinutes:
+          type: integer
+          minimum: 1
+        locale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+    HomebrewStatus:
+      type: object
+      required:
+      - state
+      - reason
+      - date
+      description: Homebrew's own lifecycle for the package, apart from OpenNavo's catalog rules (the 90-day rule behind disabled). reason is Homebrew's code or text as written upstream, untranslated.
+      properties:
+        state:
+          type: string
+          enum:
+          - active
+          - deprecated
+          - disabled
+          x-enum-varnames:
+          - HomebrewActive
+          - HomebrewDeprecated
+          - HomebrewDisabled
+        reason:
+          type: string
+          nullable: true
+        date:
+          type: string
+          format: date
+          nullable: true
+    OpenSourceFact:
+      type: object
+      required:
+      - repo
+      - url
+      - license
+      - archived
+      - checkedAt
+      description: License of the GitHub repository the Homebrew definition points at, read from the GitHub API by a scheduled job. Published only for public repositories with code under an OSI-approved license GitHub recognized.
+      properties:
+        repo:
+          type: string
+        url:
+          type: string
+        license:
+          type: string
+          description: SPDX identifier as GitHub reports it
+        archived:
+          type: boolean
+        checkedAt:
+          type: string
+          format: date-time
+    AppStoreListing:
+      type: object
+      required:
+      - name
+      - url
+      - bundleId
+      - price
+      - currency
+      - region
+      - languages
+      - checkedAt
+      description: The Mac App Store listing that shares a bundle identifier and a name with this app, read from Apple's lookup API for one storefront by a scheduled job. It describes the App Store edition, which can differ from the download Homebrew installs.
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        bundleId:
+          type: string
+        price:
+          type: number
+          format: double
+          description: 0 when the App Store edition is free to download
+        currency:
+          type: string
+        region:
+          type: string
+          description: ISO 3166-1 storefront the listing was read from
+        languages:
+          type: array
+          description: Interface languages as Apple lists them (ISO 639-1, upper case)
+          items:
+            type: string
+        checkedAt:
+          type: string
+          format: date-time
+    PageDecision:
+      type: object
+      required:
+      - robots
+      - canonicalPath
+      - hreflang
+      - inSitemap
+      - announce
+      - reason
+      properties:
+        robots:
+          type: string
+          enum:
+          - index, follow
+          - index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1
+          - noindex, follow
+        canonicalPath:
+          type: string
+          description: Empty means self; otherwise a locale-prefixed canonical path.
+        hreflang:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Locale"
+        inSitemap:
+          type: boolean
+        announce:
+          type: boolean
+        reason:
+          type: string
+    DependencyNode:
+      type: object
+      required:
+      - kind
+      - token
+      - name
+      - type
+      - children
+      properties:
+        kind:
+          "$ref": "#/components/schemas/PackageKind"
+        token:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+          nullable: true
+        summary:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum:
+          - runtime
+          - build
+          - test
+          - optional
+          - recommended
+          - usesFromMacos
+          - cask
+        children:
+          type: array
+          items:
+            "$ref": "#/components/schemas/DependencyNode"
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    LinkInfo:
+      type: object
+      additionalProperties: false
+      required:
+      - homepage
+      - downloadUrl
+      - github
+      - teamId
+      - pricing
+      - notes
+      - adoptedByCask
+      properties:
+        homepage:
+          type: string
+          nullable: true
+        downloadUrl:
+          type: string
+          nullable: true
+        github:
+          type: object
+          nullable: true
+          required:
+          - repo
+          - latest
+          properties:
+            repo:
+              type: string
+            latest:
+              "$ref": "#/components/schemas/GithubRelease"
+        teamId:
+          type: string
+          nullable: true
+        pricing:
+          type: string
+          enum:
+          - free
+          - paid
+          - freemium
+          - subscription
+          - open_source
+          - unknown
+        notes:
+          type: object
+          nullable: true
+          additionalProperties: false
+          properties:
+            en-US:
+              type: string
+              nullable: true
+            zh-CN:
+              type: string
+              nullable: true
+            ja-JP:
+              type: string
+              nullable: true
+            es-ES:
+              type: string
+              nullable: true
+            pt-BR:
+              type: string
+              nullable: true
+            ru-RU:
+              type: string
+              nullable: true
+            de-DE:
+              type: string
+              nullable: true
+            fr-FR:
+              type: string
+              nullable: true
+            it-IT:
+              type: string
+              nullable: true
+            zh-Hant:
+              type: string
+              nullable: true
+        adoptedByCask:
+          type: string
+          nullable: true
+    ImageVariant:
+      type: object
+      required:
+      - width
+      - height
+      - url
+      - type
+      properties:
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        url:
+          type: string
+          format: uri
+        type:
+          type: string
+          enum:
+          - image/webp
+      additionalProperties: false
+    Article:
+      type: object
+      required:
+      - slug
+      - type
+      - title
+      - summary
+      - bodyMarkdown
+      - testNote
+      - seoTitle
+      - seoDescription
+      - locale
+      - sourceLocale
+      - machineTranslated
+      - availableLocales
+      - author
+      - cover
+      - sources
+      - packages
+      - images
+      - related
+      - publishedAt
+      - updatedAt
+      - readingMinutes
+      - revision
+      properties:
+        slug:
+          type: string
+        type:
+          "$ref": "#/components/schemas/ArticleType"
+        title:
+          type: string
+        summary:
+          type: string
+          nullable: true
+        bodyMarkdown:
+          type: string
+          nullable: true
+          description: Markdown without raw HTML; ::app[token] lines embed current catalog cards (see packages).
+        testNote:
+          type: string
+          nullable: true
+        seoTitle:
+          type: string
+          nullable: true
+        seoDescription:
+          type: string
+          nullable: true
+        locale:
+          "$ref": "#/components/schemas/Locale"
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+        availableLocales:
+          type: array
+          description: Languages whose text is ready; pages in other languages show the source text and should not be indexed
+          items:
+            "$ref": "#/components/schemas/Locale"
+        author:
+          type: object
+          allOf:
+          - "$ref": "#/components/schemas/ArticleAuthor"
+          nullable: true
+        cover:
+          type: object
+          allOf:
+          - "$ref": "#/components/schemas/ArticleCover"
+          nullable: true
+        sources:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ArticleSource"
+        packages:
+          type: array
+          description: Apps the article covers, as the catalog shows them now (not a snapshot)
+          items:
+            "$ref": "#/components/schemas/PackageSummary"
+        images:
+          type: array
+          description: Body images with their stored sizes; images not listed are not rendered
+          items:
+            "$ref": "#/components/schemas/ArticleImage"
+        related:
+          type: array
+          maxItems: 3
+          description: 'Up to three other published articles: most shared apps first, then the same type, then the newest'
+          items:
+            "$ref": "#/components/schemas/ArticleCard"
+        publishedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        readingMinutes:
+          type: integer
+          minimum: 1
+        revision:
+          type: integer
+          description: Published revision number
+    SearchHit:
+      type: object
+      required:
+      - package
+      - score
+      properties:
+        package:
+          "$ref": "#/components/schemas/PackageSummary"
+        matchedName:
+          type: string
+          nullable: true
+          description: 'Matched alias or former name, for hints such as "Matched: VS Code"'
+        score:
+          type: number
+    CollectionPreviewItem:
+      type: object
+      required:
+      - kind
+      - token
+      - displayName
+      - iconUrl
+      - accentColor
+      properties:
+        kind:
+          "$ref": "#/components/schemas/PackageKind"
+        token:
+          type: string
+        displayName:
+          type: string
+        iconUrl:
+          type: string
+          nullable: true
+        accentColor:
+          type: string
+          nullable: true
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    CollectionSetup:
+      type: object
+      required:
+      - criteria
+      - installableTokens
+      - externalApps
+      - brewfile
+      - priceTotals
+      - priceUnknownCount
+      - compatibility
+      properties:
+        criteria:
+          type: object
+          nullable: true
+          allOf:
+          - "$ref": "#/components/schemas/CollectionCriteria"
+        installableTokens:
+          type: array
+          items:
+            type: string
+        externalApps:
+          type: array
+          items:
+            "$ref": "#/components/schemas/CollectionExternalApp"
+        brewfile:
+          type: string
+        priceTotals:
+          type: array
+          items:
+            "$ref": "#/components/schemas/CollectionPriceTotal"
+        priceUnknownCount:
+          type: integer
+        compatibility:
+          type: array
+          items:
+            "$ref": "#/components/schemas/CollectionCompatibility"
+    CollectionItem:
+      type: object
+      required:
+      - package
+      properties:
+        package:
+          "$ref": "#/components/schemas/PackageSummary"
+        note:
+          type: string
+          nullable: true
+        sourceLocale:
+          "$ref": "#/components/schemas/Locale"
+        machineTranslated:
+          type: boolean
+          description: Whether the returned text is machine-translated; false for source fallback or manual translations.
+    CaskArtifact:
+      type: object
+      required:
+      - type
+      - phase
+      - sources
+      - declaration
+      properties:
+        type:
+          type: string
+          description: Homebrew declaration type; unknown types are preserved unchanged.
+        phase:
+          type: string
+          enum:
+          - install
+          - uninstall
+          - cleanup
+        sources:
+          type: array
+          items:
+            type: string
+        target:
+          type: string
+          nullable: true
+        declaration:
+          type: object
+          additionalProperties: true
+          description: Complete upstream declaration, preserving arguments, scripts, explicit targets and future fields.
+    Replacement:
+      type: object
+      required:
+      - kind
+      - token
+      properties:
+        kind:
+          "$ref": "#/components/schemas/PackageKind"
+        token:
+          type: string
+    VersionCompatibility:
+      type: object
+      required:
+      - appVersion
+      - minimumMacOS
+      - maximumMacOS
+      - appleSilicon
+      - requirements
+      properties:
+        appVersion:
+          type: string
+          minLength: 1
+          maxLength: 100
+        minimumMacOS:
+          type: string
+          nullable: true
+        maximumMacOS:
+          type: string
+          nullable: true
+        appleSilicon:
+          type: string
+          enum:
+          - 'true'
+          - 'false'
+          - unknown
+        requirements:
+          type: array
+          items:
+            "$ref": "#/components/schemas/RequirementFact"
+      additionalProperties: false
+    ReleaseSection:
+      type: object
+      required:
+      - area
+      - items
+      properties:
+        area:
+          type: string
+        items:
+          type: array
+          items:
+            type: string
+    PackagePageDecisions:
+      type: object
+      required:
+      - overview
+      - versions
+      - dependencies
+      - details
+      properties:
+        troubleshooting:
+          description: Indexable only when the locale's overview is indexable and at least three verified, unexpired issues have complete content in that exact locale. Otherwise noindex with overview canonical, excluded from sitemap and announcements.
+          allOf:
+          - "$ref": "#/components/schemas/PageDecision"
+        alternatives:
+          "$ref": "#/components/schemas/PageDecision"
+        uninstall:
+          "$ref": "#/components/schemas/PageDecision"
+        overview:
+          "$ref": "#/components/schemas/PageDecision"
+        versions:
+          "$ref": "#/components/schemas/PageDecision"
+        dependencies:
+          "$ref": "#/components/schemas/PageDecision"
+        details:
+          "$ref": "#/components/schemas/PageDecision"
+    SecurityFacts:
+      type: object
+      required:
+      - identities
+      - vulnerabilities
+      - scanUrl
+      properties:
+        identities:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SecurityIdentityFact"
+        vulnerabilities:
+          type: array
+          items:
+            "$ref": "#/components/schemas/VulnerabilityFact"
+        scanUrl:
+          type: string
+    PriceFact:
+      type: object
+      required:
+      - region
+      - edition
+      - period
+      - usage
+      - downloadFree
+      - purchaseUrl
+      - channel
+      - evidence
+      properties:
+        region:
+          type: string
+          pattern: "^[A-Z]{2}$"
+        edition:
+          type: string
+          minLength: 1
+          maxLength: 100
+        period:
+          type: string
+          enum:
+          - free
+          - one_time
+          - monthly
+          - yearly
+          - unknown
+        usage:
+          type: string
+          enum:
+          - free
+          - free_with_iap
+          - paid
+          - subscription
+          - trial
+          - unknown
+        downloadFree:
+          type: boolean
+        amount:
+          type: string
+          pattern: "^(0|[1-9][0-9]{0,9})(\\.[0-9]{1,6})?$"
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        purchaseUrl:
+          type: string
+          format: uri
+        channel:
+          type: string
+          enum:
+          - vendor
+          - app_store
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+      additionalProperties: false
+    RequirementFact:
+      type: object
+      required:
+      - versions
+      - architectures
+      - platformMacOS
+      - minimumMacOS
+      - maximumMacOS
+      - appleSilicon
+      - downloadUrl
+      - sha256
+      - evidence
+      properties:
+        versions:
+          type: array
+          items:
+            type: string
+        architectures:
+          type: array
+          items:
+            type: string
+        platformMacOS:
+          type: array
+          items:
+            type: string
+        minimumMacOS:
+          type: string
+          nullable: true
+        maximumMacOS:
+          type: string
+          nullable: true
+        appleSilicon:
+          type: string
+          enum:
+          - 'true'
+          - 'false'
+          - unknown
+        downloadUrl:
+          type: string
+          nullable: true
+        sha256:
+          type: string
+          nullable: true
+          pattern: "^[a-fA-F0-9]{64}$"
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+    UninstallFact:
+      type: object
+      required:
+      - kind
+      - value
+      - phase
+      - deletesUserData
+      - evidence
+      properties:
+        kind:
+          type: string
+          enum:
+          - zap
+          - launchctl
+          - pkgutil
+          - login_item
+        value:
+          type: string
+        phase:
+          type: string
+          enum:
+          - uninstall
+          - zap
+        deletesUserData:
+          type: boolean
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+    OverviewFacts:
+      type: object
+      required:
+      - version
+      - downloadUrl
+      - sha256
+      - artifacts
+      - caveats
+      - aliases
+      - dependencyCount
+      - conflictCount
+      properties:
+        version:
+          type: string
+        downloadUrl:
+          type: string
+          nullable: true
+        sha256:
+          type: string
+          nullable: true
+          pattern: "^[a-fA-F0-9]{64}$"
+        artifacts:
+          "$ref": "#/components/schemas/Artifacts"
+        caveats:
+          type: string
+          nullable: true
+        aliases:
+          type: array
+          items:
+            type: string
+        dependencyCount:
+          type: integer
+        conflictCount:
+          type: integer
+    KnownIssueFact:
+      type: object
+      required:
+      - locale
+      - title
+      - symptom
+      - appVersions
+      - macosVersions
+      - steps
+      - communityLinks
+      - evidence
+      properties:
+        locale:
+          type: string
+          enum:
+          - en-US
+          - zh-CN
+          - ja-JP
+          - es-ES
+          - pt-BR
+          - ru-RU
+          - de-DE
+          - fr-FR
+          - it-IT
+          - zh-Hant
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        symptom:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        appVersions:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+          minItems: 1
+          maxItems: 32
+        macosVersions:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 32
+        steps:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4000
+          minItems: 1
+          maxItems: 20
+        communityLinks:
+          type: array
+          items:
+            type: string
+            format: uri
+          maxItems: 5
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+    AppIntegrationFact:
+      type: object
+      required:
+      - kind
+      - name
+      - repositoryUrl
+      - version
+      - installation
+      - clients
+      - permissions
+      - appleSilicon
+      - versions
+      - evidence
+      properties:
+        kind:
+          type: string
+          enum:
+          - mcp
+          - skill
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        appVersion:
+          type: string
+          maxLength: 100
+        repositoryUrl:
+          type: string
+          format: uri
+        version:
+          type: string
+          minLength: 1
+          maxLength: 100
+        installation:
+          type: object
+          required:
+          - method
+          - package
+          properties:
+            method:
+              type: string
+              enum:
+              - homebrew
+              - uv
+              - npm
+            package:
+              type: string
+              minLength: 1
+              maxLength: 200
+              description: Package identifier only. Commands, arguments, URLs and version selectors are not accepted.
+          additionalProperties: false
+        clients:
+          type: array
+          items:
+            type: string
+            enum:
+            - claude_desktop
+            - cursor
+            - codex
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+        permissions:
+          type: object
+          required:
+          - files
+          - network
+          properties:
+            files:
+              type: array
+              items:
+                type: object
+                required:
+                - path
+                - access
+                properties:
+                  path:
+                    type: string
+                    minLength: 1
+                    maxLength: 1024
+                  access:
+                    type: string
+                    enum:
+                    - read
+                    - write
+                    - read_write
+                additionalProperties: false
+              maxItems: 30
+            network:
+              type: array
+              items:
+                type: string
+                format: uri
+                description: HTTPS origin only.
+              maxItems: 30
+          additionalProperties: false
+        appleSilicon:
+          type: string
+          enum:
+          - 'true'
+          - 'false'
+          - unknown
+        versions:
+          type: array
+          items:
+            type: object
+            required:
+            - version
+            - releasedAt
+            - sourceUrl
+            properties:
+              version:
+                type: string
+                minLength: 1
+                maxLength: 100
+              releasedAt:
+                type: string
+                format: date-time
+              sourceUrl:
+                type: string
+                format: uri
+            additionalProperties: false
+          minItems: 1
+          maxItems: 30
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+      additionalProperties: false
+    MacosRange:
+      type: object
+      required:
+      - arch
+      - support
+      - minimum
+      - maximum
+      properties:
+        arch:
+          type: string
+          enum:
+          - arm64
+          - x86_64
+        support:
+          type: string
+          description: native, rosetta (arm64 only) or unsupported, as the vendor states it
+          enum:
+          - native
+          - rosetta
+          - unsupported
+        minimum:
+          type: string
+          nullable: true
+        maximum:
+          type: string
+          nullable: true
+    ComparisonAttributeFact:
+      type: object
+      required:
+      - name
+      - evidence
+      properties:
+        name:
+          type: string
+          enum:
+          - open_source
+          - offline
+          - apple_silicon
+          - import_formats
+          - export_formats
+        appVersion:
+          type: string
+        booleanValue:
+          type: boolean
+        formats:
+          type: array
+          items:
+            type: string
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+      additionalProperties: false
+    MigrationGuide:
+      type: object
+      required:
+      - targetPackageId
+      - locale
+      - steps
+      - evidence
+      properties:
+        targetPackageId:
+          type: integer
+          format: int64
+          minimum: 1
+        locale:
+          type: string
+          enum:
+          - en-US
+          - zh-CN
+          - ja-JP
+          - es-ES
+          - pt-BR
+          - ru-RU
+          - de-DE
+          - fr-FR
+          - it-IT
+          - zh-Hant
+        sourceVersion:
+          type: string
+        targetVersion:
+          type: string
+        steps:
+          type: array
+          items:
+            "$ref": "#/components/schemas/MigrationStep"
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+      additionalProperties: false
+    ArticleCover:
+      type: object
+      required:
+      - url
+      - width
+      - height
+      - alt
+      properties:
+        url:
+          type: string
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        alt:
+          type: string
+          description: Ready requested-language alt, falling back to ready English then revision source alt.
+    ArticleAuthorRef:
+      type: object
+      required:
+      - slug
+      - name
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+    GithubRelease:
+      type: object
+      additionalProperties: false
+      required:
+      - tag
+      - version
+      - publishedAt
+      - url
+      - assets
+      properties:
+        tag:
+          type: string
+        version:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+        url:
+          type: string
+          format: uri
+        assets:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ReleaseAsset"
+      nullable: true
+    ArticleAuthor:
+      type: object
+      required:
+      - slug
+      - name
+      - role
+      - bio
+      - avatarUrl
+      - links
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        links:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ArticleSource"
+    ArticleSource:
+      type: object
+      required:
+      - title
+      - url
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+    ArticleImage:
+      type: object
+      required:
+      - url
+      - width
+      - height
+      properties:
+        url:
+          type: string
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+    CollectionCriteria:
+      type: object
+      required:
+      - locale
+      - criteria
+      - evidence
+      properties:
+        locale:
+          type: string
+          enum:
+          - en-US
+          - zh-CN
+          - ja-JP
+          - es-ES
+          - pt-BR
+          - ru-RU
+          - de-DE
+          - fr-FR
+          - it-IT
+          - zh-Hant
+        criteria:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+    CollectionExternalApp:
+      type: object
+      required:
+      - token
+      - url
+      properties:
+        token:
+          type: string
+        url:
+          type: string
+          format: uri
+    CollectionPriceTotal:
+      type: object
+      required:
+      - region
+      - currency
+      - period
+      - amount
+      - coveredApps
+      properties:
+        region:
+          type: string
+        currency:
+          type: string
+        period:
+          type: string
+        amount:
+          type: string
+        coveredApps:
+          type: integer
+    CollectionCompatibility:
+      type: object
+      required:
+      - token
+      - requirements
+      properties:
+        token:
+          type: string
+        requirements:
+          type: array
+          items:
+            "$ref": "#/components/schemas/RequirementFact"
+    SecurityIdentityFact:
+      type: object
+      required:
+      - channels
+      - openSource
+      - evidence
+      properties:
+        appVersion:
+          type: string
+        developer:
+          type: string
+          maxLength: 160
+        teamId:
+          type: string
+          pattern: "^[A-Z0-9]{10}$"
+        channels:
+          type: array
+          items:
+            type: string
+            enum:
+            - homebrew
+            - vendor
+            - app_store
+        openSource:
+          type: string
+          enum:
+          - 'true'
+          - 'false'
+          - unknown
+        repositoryUrl:
+          type: string
+          format: uri
+        productCpe:
+          type: string
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+      additionalProperties: false
+    VulnerabilityFact:
+      type: object
+      required:
+      - id
+      - productCpe
+      - appVersion
+      - sourceUrl
+      - evidence
+      properties:
+        id:
+          type: string
+          pattern: "^CVE-[0-9]{4}-[0-9]{4,}$"
+        productCpe:
+          type: string
+        appVersion:
+          type: string
+        sourceUrl:
+          type: string
+          format: uri
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+    FactEvidence:
+      type: object
+      required:
+      - sourceUrl
+      - checkedAt
+      - validUntil
+      - status
+      properties:
+        sourceUrl:
+          type: string
+        checkedAt:
+          type: string
+          format: date-time
+          nullable: true
+        validUntil:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum:
+          - verified
+          - stale
+          - needs_review
+          - unknown
+    MigrationStep:
+      type: object
+      required:
+      - action
+      - text
+      - evidence
+      properties:
+        action:
+          type: string
+          enum:
+          - backup
+          - export
+          - import
+          - verify
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        evidence:
+          "$ref": "#/components/schemas/FactEvidence"
+      additionalProperties: false
+    ReleaseAsset:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - url
+      - size
+      - arch
+      - format
+      - sha256
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+        arch:
+          type: string
+          nullable: true
+          enum:
+          - arm64
+          - x86_64
+          - universal
+          -
+        format:
+          type: string
+          enum:
+          - dmg
+          - zip
+          - pkg
+          - other
+        sha256:
+          type: string
+          nullable: true
+          pattern: "^[a-f0-9]{64}$"
+  responses:
+    Error:
+      description: Error response; see the domain error codes in apps/server/internal/domain. data is null.
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/ErrorResponse"
+externalDocs:
+  description: OpenNavo developer documentation
+  url: https://opennavo.com/developers
