@@ -61,9 +61,13 @@ def prepare_on_host(root, api_environment, include_public_mcp=False):
         })
     (directory / 'deploy/rolling.compose.json').write_text(json.dumps(overlay))
     (directory / 'current-release.env').write_text('SERVER_IMAGE=old\n')
-    route = 'reverse_proxy web_previous:3000\n'
-    if include_public_mcp:
-        route += 'reverse_proxy public-mcp-proxy:8790\n'
+    route = ('{$WEB_DOMAIN} {\n'
+             '\timport security-web\n'
+             '\tencode zstd gzip\n'
+             '\treverse_proxy {\n'
+             '\t\tdynamic a\n'
+             '\t}\n'
+             '}\n')
     (directory / 'live.caddy').write_text(route)
     obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy', 'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
     with patch.object(deploy, 'command', return_value='fixture-container'):
@@ -189,7 +193,8 @@ class DeployTests(unittest.TestCase):
                 rolling = directory / 'deploy/rolling.compose.json'
                 rolling.write_text(json.dumps(overlay))
                 (directory / 'current-release.env').write_text('SERVER_IMAGE=old\n')
-                (directory / 'live.caddy').write_text('reverse_proxy web-previous-alias:3000\n')
+                (directory / 'live.caddy').write_text(
+                    '{$WEB_DOMAIN} {\n\treverse_proxy {\n\t dynamic a\n\t}\n}\n')
                 obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy',
                                          'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
                 with patch.object(deploy, 'command', return_value='fixture-container'):
@@ -246,6 +251,63 @@ class DeployTests(unittest.TestCase):
             self.assertEqual(obj.services['public-mcp'], 'public-mcp_' + obj.release.replace('-', '_'))
             self.assertIn('public-mcp-proxy-' + obj.release, (obj.directory / 'Caddyfile.next').read_text())
             self.assertIn(obj.services['public-mcp'], obj.candidate_up_args())
+
+    def test_public_mcp_route_is_inserted_idempotently_and_excludes_www(self):
+        source = ("http://{$WEB_DOMAIN} {\n"
+                  "\timport security-web\n"
+                  "\t@private path /agent-api /agent-api/*\n"
+                  "\trespond @private 404\n"
+                  "\treverse_proxy {\n\t\tdynamic a\n\t}\n"
+                  "}\n"
+                  "http://www.{$WEB_DOMAIN} {\n\treverse_proxy {\n\t}\n}\n")
+        routed = deploy.install_public_mcp_route(source, 'public-mcp-proxy-gh-test')
+        self.assertEqual(routed.count(deploy.PUBLIC_MCP_BEGIN), 1)
+        self.assertIn('reverse_proxy public-mcp-proxy-gh-test:8790', routed)
+        self.assertLess(routed.index(deploy.PUBLIC_MCP_END), routed.index('\treverse_proxy {'))
+        www = routed[routed.index('http://www.{$WEB_DOMAIN}'):]
+        self.assertNotIn(deploy.PUBLIC_MCP_BEGIN, www)
+        self.assertEqual(deploy.install_public_mcp_route(routed, 'public-mcp-proxy-gh-test'), routed)
+
+    def test_public_mcp_route_replaces_an_older_marked_block(self):
+        source = "{$WEB_DOMAIN} {\n" + deploy.public_mcp_route('public-mcp-proxy-old') + "\treverse_proxy {\n}\n}\n"
+        routed = deploy.install_public_mcp_route(source, 'public-mcp-proxy-new')
+        self.assertEqual(routed.count(deploy.PUBLIC_MCP_BEGIN), 1)
+        self.assertNotIn('public-mcp-proxy-old', routed)
+        self.assertIn('public-mcp-proxy-new:8790', routed)
+
+    def test_public_mcp_route_requires_one_web_block_and_catch_all_proxy(self):
+        for source in ['reverse_proxy {\n}\n', '{$WEB_DOMAIN} {\nreverse_proxy web:3000\n}\n']:
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                deploy.install_public_mcp_route(source, 'public-mcp-proxy-new')
+
+    def test_verify_public_mcp_handshake_propagates_session_and_requires_tools(self):
+        obj = object.__new__(deploy.Deployment)
+        obj.config = {'local_origin': 'http://127.0.0.1:80',
+                      'public_mcp_host': 'opennavo.com', 'checks': []}
+        responses = []
+
+        class Response(io.BytesIO):
+            status = 200
+            def __init__(self, body, session=None):
+                super().__init__(body)
+                self.headers = {'Mcp-Session-Id': session} if session else {}
+
+        def urlopen(request, timeout):
+            responses.append(request)
+            if len(responses) == 1:
+                return Response(b'{"result":{"protocolVersion":"2025-06-18"}}', 'session-1')
+            return Response(b'{"result":{"tools":[{"name":"search_apps"}]}}')
+
+        with patch.object(deploy.urllib.request, 'urlopen', side_effect=urlopen):
+            obj.verify_public_mcp()
+        self.assertEqual(responses[0].get_header('Host'), 'opennavo.com')
+        self.assertEqual(responses[1].get_header('Mcp-session-id'), 'session-1')
+        self.assertEqual(responses[0].get_header('Accept'), 'application/json, text/event-stream')
+
+        with patch.object(deploy.urllib.request, 'urlopen', side_effect=[
+                Response(b'{"result":{}}'), Response(b'{"result":{"tools":[]}}')]):
+            with self.assertRaisesRegex(RuntimeError, 'no tools'):
+                obj.verify_public_mcp()
 
     def test_monitoring_targets_preserves_other_jobs_and_follows_release_and_rollback(self):
         source = """global:

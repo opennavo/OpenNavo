@@ -64,7 +64,8 @@ class DeploymentHelperTests(unittest.TestCase):
             ]
             (directory / 'deploy/rolling.compose.json').write_text(json.dumps(overlay))
             (directory / 'current-release.env').write_text('SERVER_IMAGE=old\n')
-            (directory / 'live.caddy').write_text('reverse_proxy web_previous:3000\n')
+            (directory / 'live.caddy').write_text(
+                '{$WEB_DOMAIN} {\n\treverse_proxy {\n\t\tdynamic a\n\t}\n}\n')
             config = {'root': root, 'caddy_file': 'live.caddy', 'compose_file': 'compose.yml',
                       'project': 'fixture', 'web_replicas': 2}
             obj = deploy.Deployment(config, {

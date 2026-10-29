@@ -267,6 +267,16 @@ paths/checksum, preserves old hashed assets, takes and validates a PostgreSQL
 backup, applies migrations and grants, starts healthy candidates, and switches
 Caddy routes. It then updates the worker and verifies routes again. A failed
 switch restores old routes and the worker; it never runs down migrations.
+The Caddy bind mount is the host file named by `caddy_file`, so the receiver
+copies that live file into each release, rewrites only release aliases, and
+promotes `Caddyfile.next` in place before `caddy validate` and a graceful reload.
+For public MCP it maintains a marker-delimited route in the unique
+`WEB_DOMAIN` site block, immediately before the catch-all web proxy; a missing
+or ambiguous block aborts preparation before any switch. The post-switch check
+then sends streamable HTTP JSON-RPC `initialize` and `tools/list` requests
+through Caddy and requires at least one tool. Keep `public_mcp_host` (the
+`WEB_DOMAIN` host used with `local_origin`) in the receiver configuration when
+the homepage check does not identify it automatically.
 Schema changes must remain compatible with the previous application during the
 rollout. After both route checks and the worker update succeed, the receiver stops
 all retired application containers, retains at most one stopped previous release

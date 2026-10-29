@@ -60,6 +60,8 @@ MIN_MEM_AVAILABLE_PER_EXTRA_REPLICA = 2 * GIB
 DRAIN_GRACE_SECONDS = 300
 DRAIN_POLL_TIMEOUT_SECONDS = 90
 ROLLBACK_DRAIN_TIMEOUT_SECONDS = 30
+PUBLIC_MCP_BEGIN = '# BEGIN opennavo public-mcp'
+PUBLIC_MCP_END = '# END opennavo public-mcp'
 PUBLIC_MCP_PROXY_IP = '172.30.80.3'
 PUBLIC_MCP_PROXY_TOKEN = '${PUBLIC_MCP_PROXY_IP:-' + PUBLIC_MCP_PROXY_IP + '}'
 DEFAULT_TRUSTED_PROXIES = '${CADDY_PROXY_IP:-172.30.80.2},' + PUBLIC_MCP_PROXY_TOKEN + ',${SSR_PROXY_SUBNET:-172.30.81.0/24}'
@@ -336,6 +338,80 @@ def merge_public_mcp_trusted_proxy(value):
     return value + (',' if value else '') + PUBLIC_MCP_PROXY_TOKEN
 
 
+def public_mcp_route(alias):
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', alias):
+        raise ValueError('invalid public-MCP proxy alias')
+    return (f'{PUBLIC_MCP_BEGIN}\n'
+            '\t@publicMcp path /mcp\n'
+            '\thandle @publicMcp {\n'
+            '\t\trequest_body {\n'
+            '\t\t\tmax_size 2MB\n'
+            '\t\t}\n'
+            f'\t\treverse_proxy {alias}:8790 {{\n'
+            '\t\t\tflush_interval -1\n'
+            '\t\t}\n'
+            '\t}\n'
+            '\t@publicMcpOther path /mcp/*\n'
+            '\thandle @publicMcpOther {\n'
+            '\t\trespond 404\n'
+            '\t}\n'
+            f'{PUBLIC_MCP_END}\n')
+
+
+def _caddy_site_block(source, site_pattern):
+    """Return the unique Caddy site block matching site_pattern, or fail closed."""
+    starts = list(re.finditer(site_pattern, source, re.M))
+    if len(starts) != 1:
+        raise ValueError('WEB_DOMAIN Caddy site block is missing or ambiguous')
+    start = starts[0]
+    depth = 1
+    position = start.end()
+    for line in source[position:].splitlines(keepends=True):
+        # {$VAR} is a Caddy placeholder, not a block delimiter.
+        syntax = re.sub(r'\{\$[A-Za-z_][A-Za-z0-9_]*\}', '', line)
+        depth += syntax.count('{') - syntax.count('}')
+        position += len(line)
+        if depth == 0:
+            return start.start(), position
+        if depth < 0:
+            break
+    raise ValueError('WEB_DOMAIN Caddy site block has unbalanced braces')
+
+
+def install_public_mcp_route(source, alias):
+    """Install the public MCP route in the WEB_DOMAIN block before its catch-all proxy."""
+    block_start, block_end = _caddy_site_block(
+        source, r'^[ \t]*(?:(?:https?://)?\{\$WEB_DOMAIN\})[ \t]*\{[ \t]*$')
+    block = source[block_start:block_end]
+    if block.count(PUBLIC_MCP_BEGIN) != block.count(PUBLIC_MCP_END):
+        raise ValueError('public-MCP Caddy route markers are unbalanced')
+    markers = list(re.finditer(
+        re.escape(PUBLIC_MCP_BEGIN) + r'.*?' + re.escape(PUBLIC_MCP_END) + r'\n?',
+        block, re.S))
+    if len(markers) > 1:
+        raise ValueError('public-MCP Caddy route is ambiguous')
+    if markers:
+        block_without_route = block[:markers[0].start()] + block[markers[0].end():]
+    else:
+        block_without_route = block
+    proxies = []
+    depth = 0
+    position = 0
+    for line in block_without_route.splitlines(keepends=True):
+        syntax = re.sub(r'\{\$[A-Za-z_][A-Za-z0-9_]*\}', '', line)
+        if depth == 1 and re.fullmatch(r'[ \t]*reverse_proxy[ \t]*\{[ \t]*(?:#.*)?(?:\r?\n)?', line):
+            proxies.append(position)
+        depth += syntax.count('{') - syntax.count('}')
+        position += len(line)
+    if len(proxies) != 1:
+        raise ValueError('WEB_DOMAIN Caddy catch-all reverse_proxy is missing or ambiguous')
+    route = public_mcp_route(alias)
+    insertion = proxies[0]
+    # Keep the route at the same indentation as the surrounding site directives.
+    block_with_route = block_without_route[:insertion] + route + block_without_route[insertion:]
+    return source[:block_start] + block_with_route + source[block_end:]
+
+
 def monitoring_targets(source, services):
     """Replace only simple API/web scrape jobs; preserve globals, rules and unrelated jobs.
 
@@ -551,6 +627,8 @@ class Deployment:
                         service['environment'][key] = service['environment'][key].replace(old, replacement)
         for old, replacement in self.aliases.items():
             routes = routes.replace(old, replacement)
+        routes = install_public_mcp_route(
+            routes, self.aliases.get('public-mcp-proxy', 'public-mcp-proxy-' + self.release))
         routes = re.sub(r'X-OpenNavo-Release "[^"]+"', f'X-OpenNavo-Release "{self.payload["sha"][:12]}"', routes)
         overlay['services'].setdefault('worker', {})['image'] = self.payload['images']['server']
         # The cache notifier must follow the new web service when the previous release retires.
@@ -780,12 +858,91 @@ class Deployment:
             command(['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'])
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
+            # Validation or the reload signal may fail after the bind-mounted inode was
+            # replaced. Restore the snapshot before the caller attempts service rollback.
+            directory = getattr(self, 'directory', None)
+            before = directory / 'before-caddy' if directory is not None else None
+            try:
+                if before is not None and before.is_file():
+                    self.live_caddy.write_bytes(before.read_bytes())
+            except OSError:
+                pass
             self.mark_degraded('Caddy reload failed; routing unconfirmed')
             raise
         self.switch_at = time.monotonic()
 
+    @staticmethod
+    def _mcp_payload(body):
+        try:
+            return json.loads(body)
+        except (TypeError, ValueError):
+            # Streamable HTTP may return one or more SSE data events.
+            events = []
+            for line in body.decode('utf-8', 'replace').splitlines():
+                if line.startswith('data:'):
+                    try:
+                        events.append(json.loads(line[5:].strip()))
+                    except (TypeError, ValueError):
+                        continue
+            if not events:
+                raise RuntimeError('public MCP returned an invalid response')
+            return events[-1]
+
+    def verify_public_mcp(self):
+        checks = self.config.get('checks', [])
+        host = self.config.get('public_mcp_host') or next(
+            (check.get('host') for check in checks if check.get('path') == '/'), None)
+        if not host:
+            raise RuntimeError('public MCP verification requires WEB_DOMAIN host')
+        endpoint = self.config['local_origin'].rstrip('/') + '/mcp'
+        session = None
+
+        def post(request_id, method):
+            nonlocal session
+            params = ({
+                'protocolVersion': '2025-06-18',
+                'capabilities': {},
+                'clientInfo': {'name': 'opennavo-deploy', 'version': '1'},
+            } if method == 'initialize' else {})
+            request = urllib.request.Request(
+                endpoint,
+                data=json.dumps({'jsonrpc': '2.0', 'id': request_id, 'method': method,
+                                 'params': params}).encode(),
+                method='POST',
+                headers={
+                    'Host': host,
+                    'Accept': 'application/json, text/event-stream',
+                    'Content-Type': 'application/json',
+                    'MCP-Protocol-Version': '2025-06-18',
+                    **({'Mcp-Session-Id': session} if session else {}),
+                })
+            with urllib.request.urlopen(request, timeout=15) as response:
+                status = getattr(response, 'status', None)
+                if status is None:
+                    status = response.getcode()
+                if status != 200:
+                    raise RuntimeError('public MCP route returned an unexpected status')
+                body = response.read(2 * 1024 * 1024 + 1)
+                headers = getattr(response, 'headers', {})
+            for name in ('Mcp-Session-Id', 'MCP-Session-Id', 'mcp-session-id'):
+                value = headers.get(name)
+                if value:
+                    session = value
+                    break
+            payload = self._mcp_payload(body)
+            if not isinstance(payload, dict) or 'result' not in payload or 'error' in payload:
+                raise RuntimeError('public MCP JSON-RPC request failed')
+            return payload['result']
+
+        post(1, 'initialize')
+        result = post(2, 'tools/list')
+        if not isinstance(result, dict) or not isinstance(result.get('tools'), list) or not result['tools']:
+            raise RuntimeError('public MCP tools/list returned no tools')
+        print(f'Public MCP route verified ({len(result["tools"])} tools).', flush=True)
+
     def verify(self, expected=None):
         # A legacy deployment may have no recorded SHA; still check its routes without a header match.
+        checking_current = expected is None
         expected = self.payload['sha'][:12] if expected is None else expected
         last_error = None
         for _ in range(30):
@@ -797,6 +954,8 @@ class Deployment:
                             raise RuntimeError('route is not serving the new release')
                         while response.read(65536):
                             pass
+                if checking_current and 'public-mcp' in getattr(self, 'services', {}):
+                    self.verify_public_mcp()
                 return
             except Exception as error:
                 last_error = type(error).__name__
