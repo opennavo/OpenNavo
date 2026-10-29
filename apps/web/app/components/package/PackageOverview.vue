@@ -170,6 +170,7 @@ usePageSeo({
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
       :command="can.homebrew ? pkg.installCommand : undefined"
+      :info="[]"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
       :related-more-href="localePath('/apps')"
