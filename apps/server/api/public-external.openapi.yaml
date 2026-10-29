@@ -2825,8 +2825,8 @@ components:
         appleSilicon:
           type: string
           enum:
-          - 'true'
-          - 'false'
+          - 'yes'
+          - 'no'
           - unknown
         requirements:
           type: array
@@ -2975,8 +2975,8 @@ components:
         appleSilicon:
           type: string
           enum:
-          - 'true'
-          - 'false'
+          - 'yes'
+          - 'no'
           - unknown
         downloadUrl:
           type: string
@@ -3210,8 +3210,8 @@ components:
         appleSilicon:
           type: string
           enum:
-          - 'true'
-          - 'false'
+          - 'yes'
+          - 'no'
           - unknown
         versions:
           type: array
@@ -3525,8 +3525,8 @@ components:
         openSource:
           type: string
           enum:
-          - 'true'
-          - 'false'
+          - 'yes'
+          - 'no'
           - unknown
         repositoryUrl:
           type: string

@@ -1,20 +1,6 @@
 import { BRAND_FACTS } from '../../shared/utils/brandFacts';
+import { publicApiSpecUrl } from './publicApiSpec';
 import { siteMessage } from './siteCopy';
-
-const DEFAULT_PUBLIC_API_BASE = 'https://api.opennavo.com/api/v1';
-
-function publicApiSpecUrl(apiBase?: string): string {
-  if (!apiBase?.trim()) return `${DEFAULT_PUBLIC_API_BASE}/openapi.yaml`;
-  try {
-    const url = new URL(apiBase);
-    url.pathname = `${url.pathname.replace(/\/+$/, '')}/openapi.yaml`;
-    url.search = '';
-    url.hash = '';
-    return url.href;
-  } catch {
-    return `${DEFAULT_PUBLIC_API_BASE}/openapi.yaml`;
-  }
-}
 
 /**
  * A short English orientation, sharing the site's identity and linking stable public pages and interfaces.
