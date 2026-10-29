@@ -18,6 +18,7 @@ describe('G6 short English llms', () => {
     expect(text).toContain(`\n> ${siteMessage('en-US', BRAND_FACTS.definitionKey)}\n`);
     expect(text).toContain('\n## Main pages\n');
     expect(text).toContain(BRAND_FACTS.license);
+    expect(text).toContain('- Public API: <https://api.opennavo.com/api/v1/openapi.yaml>');
     expect(text.length).toBeLessThan(1800);
     const urls = [...text.matchAll(/\]\(([^)]+)\)/g)].map(match => new URL(match[1]!));
     expect(urls.map(url => url.pathname)).toEqual(['/', '/download', '/apps', '/security', '/about']);
@@ -34,7 +35,7 @@ describe('G6 short English llms', () => {
     async enabled => {
       vi.stubGlobal('useRuntimeConfig', () => ({
         llmsEnabled: enabled,
-        public: { siteUrl: 'https://opennavo.example' }
+        public: { siteUrl: 'https://opennavo.example', apiBase: 'https://api.opennavo.example/api/v1' }
       }));
       const socket = new Socket();
       try {
@@ -50,7 +51,7 @@ describe('G6 short English llms', () => {
         expect(getResponseHeader(event, 'content-type')).toBe('text/plain; charset=utf-8');
         expect(getResponseHeader(event, 'cache-control')).toBe('no-store');
         expect(getResponseHeader(event, 'x-robots-tag')).toBe('noindex, follow');
-        if (isEnabled) expect(body).toBe(renderLlms('https://opennavo.example'));
+        if (isEnabled) expect(body).toBe(renderLlms('https://opennavo.example', 'https://api.opennavo.example/api/v1'));
         else expect(body).not.toContain(siteMessage('en-US', BRAND_FACTS.definitionKey));
         const counter = new RequestCounter();
         countResponse(counter, event);

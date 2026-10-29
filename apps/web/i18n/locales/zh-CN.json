@@ -2033,7 +2033,7 @@
     "cursorTitle": "Cursor",
     "codexTitle": "Codex",
     "apiTitle": "公共 HTTP API",
-    "apiDescription": "公共 API 在 /api/v1 下提供稳定的匿名端点，主要使用 GET。/packages/lookup 仅支持 POST，参数必须放在 JSON 请求体中，不支持 GET ?tokens=。OpenAPI 文档是参数和响应结构的唯一依据。",
+    "apiDescription": "公共 API 在 /api/v1 下提供稳定的匿名端点，主要使用 GET。OpenAPI 文档是参数和响应结构的唯一依据。",
     "apiSpec": "OpenAPI 规范",
     "apiCatalog": "API 目录",
     "curlTitle": "用 curl 搜索",

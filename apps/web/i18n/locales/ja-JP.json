@@ -2033,7 +2033,7 @@
     "cursorTitle": "Cursor",
     "codexTitle": "Codex",
     "apiTitle": "公開 HTTP API",
-    "apiDescription": "公開 API は、ベースパス /api/v1 の下で安定した匿名 GET エンドポイントを提供します。/packages/lookup エンドポイントは POST のみ対応しています。パラメーターは JSON リクエスト本文に入れ、GET ?tokens= は使わないでください。パラメーターとレスポンススキーマの正本は OpenAPI ドキュメントです。",
+    "apiDescription": "公開 API は、ベースパス /api/v1 の下で安定した匿名 GET エンドポイントを提供します。パラメーターとレスポンススキーマの正本は OpenAPI ドキュメントです。",
     "apiSpec": "OpenAPI 仕様",
     "apiCatalog": "API カタログ",
     "curlTitle": "curl で検索",

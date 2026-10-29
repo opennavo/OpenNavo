@@ -2033,7 +2033,7 @@
     "cursorTitle": "Cursor",
     "codexTitle": "Codex",
     "apiTitle": "API HTTP publique",
-    "apiDescription": "L’API publique expose des points de terminaison GET stables et anonymes sous le chemin de base /api/v1. Le point de terminaison /packages/lookup accepte uniquement POST ; envoyez ses paramètres dans le corps JSON de la requête et n’utilisez pas GET ?tokens=. Le document OpenAPI fait foi pour les paramètres et les schémas de réponse.",
+    "apiDescription": "L’API publique expose des points de terminaison GET stables et anonymes sous le chemin de base /api/v1. Le document OpenAPI fait foi pour les paramètres et les schémas de réponse.",
     "apiSpec": "Spécification OpenAPI",
     "apiCatalog": "Catalogue de l’API",
     "curlTitle": "Rechercher avec curl",

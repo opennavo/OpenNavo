@@ -2033,7 +2033,7 @@
     "cursorTitle": "Cursor",
     "codexTitle": "Codex",
     "apiTitle": "Public HTTP API",
-    "apiDescription": "The public API exposes stable, anonymous GET endpoints under the /api/v1 base path. The /packages/lookup endpoint supports POST only; send its parameters in a JSON request body, and do not use GET ?tokens=. The OpenAPI document is the source of truth for parameters and response schemas.",
+    "apiDescription": "The public API exposes stable, anonymous GET endpoints under the /api/v1 base path. The OpenAPI document is the source of truth for parameters and response schemas.",
     "apiSpec": "OpenAPI specification",
     "apiCatalog": "API catalog",
     "curlTitle": "Search with curl",

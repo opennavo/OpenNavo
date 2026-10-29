@@ -2033,7 +2033,7 @@
     "cursorTitle": "Cursor",
     "codexTitle": "Codex",
     "apiTitle": "Öffentliche HTTP-API",
-    "apiDescription": "Die öffentliche API stellt stabile, anonyme GET-Endpunkte unter dem Basispfad /api/v1 bereit. Der Endpunkt /packages/lookup unterstützt ausschließlich POST. Senden Sie seine Parameter in einem JSON-Request-Body und verwenden Sie nicht GET ?tokens=. Das OpenAPI-Dokument ist die maßgebliche Quelle für Parameter und Antwortschemas.",
+    "apiDescription": "Die öffentliche API stellt stabile, anonyme GET-Endpunkte unter dem Basispfad /api/v1 bereit. Das OpenAPI-Dokument ist die maßgebliche Quelle für Parameter und Antwortschemas.",
     "apiSpec": "OpenAPI-Spezifikation",
     "apiCatalog": "API-Katalog",
     "curlTitle": "Mit curl suchen",

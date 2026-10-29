@@ -1,7 +1,7 @@
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Socket } from 'node:net';
 import { createEvent, getResponseHeader } from 'h3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import apiCatalog from '../server/routes/.well-known/api-catalog.get';
 import serverCard from '../server/routes/.well-known/mcp/server-card.json.get';
 
@@ -15,6 +15,7 @@ function eventFor(path: string) {
 
 describe('public discovery documents', () => {
   it('serves the RFC 9727 API catalog linkset with its profile content type', async () => {
+    vi.stubGlobal('useRuntimeConfig', () => ({ public: { apiBase: 'https://api.example.test/api/v1' } }));
     const { event, socket } = eventFor('/.well-known/api-catalog');
     try {
       const body = await apiCatalog(event);
@@ -22,12 +23,13 @@ describe('public discovery documents', () => {
         'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"'
       );
       expect(body.linkset[0].item.map(item => item.href)).toEqual([
-        'https://api.opennavo.com/api/v1/openapi.yaml',
+        'https://api.example.test/api/v1/openapi.yaml',
         'https://opennavo.com/developers',
         'https://opennavo.com/mcp'
       ]);
     } finally {
       socket.destroy();
+      vi.unstubAllGlobals();
     }
   });
 
