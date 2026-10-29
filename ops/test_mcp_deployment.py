@@ -68,7 +68,7 @@ class MCPDeploymentTests(unittest.TestCase):
         self.assertEqual(env['OPENNAVO_PUBLIC_MCP_RATE_LIMIT'], '60')
         self.assertEqual(env['OPENNAVO_PUBLIC_MCP_RATE_WINDOW_SECONDS'], '60')
         self.assertEqual(service['networks']['proxy']['ipv4_address'], verification.ENV['PUBLIC_MCP_PROXY_IP'])
-        self.assertIn(service['networks']['proxy']['ipv4_address'], self.config['services']['api']['environment']['TRUSTED_PROXIES'].split(','))
+        self.assertIn(service['networks']['proxy']['ipv4_address'] + '/32', self.config['services']['api']['environment']['TRUSTED_PROXIES'].split(','))
         self.assertFalse(set(env) & {'AGENT_GATEWAY_SECRET', 'OPENNAVO_AGENT_API_BASE', 'OPENNAVO_TOKEN', 'OPENNAVO_OAUTH_ISSUER'})
         self.assertNotIn('ports', service)
         self.assertEqual(service['user'], '10001:10001')

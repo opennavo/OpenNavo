@@ -42,7 +42,12 @@ assert caddy_ip not in (proxy_subnet.network_address, proxy_subnet.broadcast_add
     ipaddress.ip_address(proxy_ipam.get('gateway', str(proxy_subnet.network_address + 1)))), 'Caddy IP must be a usable non-gateway address'
 public_mcp_ip = ipaddress.ip_address(services['public-mcp']['networks']['proxy']['ipv4_address'])
 assert public_mcp_ip in proxy_subnet and public_mcp_ip not in proxy_pool and public_mcp_ip != caddy_ip, 'public-mcp IP must be reserved outside the dynamic pool and Caddy address'
-assert str(public_mcp_ip) in services['api']['environment']['TRUSTED_PROXIES'].split(','), 'API must trust the reserved public-mcp IP'
+public_mcp_alt_ip = ipaddress.ip_address(verification.ENV.get('PUBLIC_MCP_PROXY_IP_ALT', '172.30.80.4'))
+assert public_mcp_alt_ip in proxy_subnet and public_mcp_alt_ip not in proxy_pool and public_mcp_alt_ip != caddy_ip, 'alternate public-mcp IP must be reserved outside the dynamic pool and Caddy address'
+trusted_proxies = services['api']['environment']['TRUSTED_PROXIES'].split(',')
+assert str(public_mcp_ip) + '/32' in trusted_proxies, 'API must trust the reserved public-mcp IP as /32'
+assert str(public_mcp_alt_ip) + '/32' in trusted_proxies, 'API must trust the alternate public-mcp IP as /32'
+assert not any(str(public_mcp_ip).rsplit('.', 1)[0] + '/24' == entry for entry in trusted_proxies), 'API must not trust the public-mcp subnet'
 
 assert {name for name, service in services.items() if 'ssr' in service.get('networks', {})} == {'api', 'web'}
 assert config['networks']['ssr']['internal']

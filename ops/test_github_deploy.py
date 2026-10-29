@@ -40,6 +40,8 @@ def payload():
 def prepare_on_host(root, api_environment, include_public_mcp=False):
     """Prepare a release on a minimal existing host and return the deployment and its candidate overlay."""
     directory = Path(root)
+    # Pin host configuration so lint's isolated verification environment cannot change it.
+    (directory / '.env').write_text('PUBLIC_MCP_PROXY_IP=172.30.80.3\nPUBLIC_MCP_PROXY_IP_ALT=172.30.80.4\n')
     for name in ['deploy', 'releases', 'assets']:
         (directory / name).mkdir()
     (directory / 'admin.caddy').write_text(':8081 {}')
@@ -213,16 +215,17 @@ class DeployTests(unittest.TestCase):
     def test_prepare_gives_an_old_api_service_the_usage_country_proxy_and_keeps_host_values(self):
         # A host provisioned before the setting gets the same value as a fresh install from the base compose.
         default = '${CADDY_PROXY_IP:-172.30.80.2}'
-        public_proxy = '${PUBLIC_MCP_PROXY_IP:-172.30.80.3}'
-        trusted_default = '${CADDY_PROXY_IP:-172.30.80.2},' + public_proxy + ',${SSR_PROXY_SUBNET:-172.30.81.0/24}'
+        public_proxy = '${PUBLIC_MCP_PROXY_IP:-172.30.80.3}/32'
+        public_proxy_alt = '${PUBLIC_MCP_PROXY_IP_ALT:-172.30.80.4}/32'
+        trusted_default = '${CADDY_PROXY_IP:-172.30.80.2},' + public_proxy + ',' + public_proxy_alt + ',${SSR_PROXY_SUBNET:-172.30.81.0/24}'
         base = Path(__file__).with_name('docker-compose.prod.yml').read_text()
         self.assertIn('USAGE_COUNTRY_TRUSTED_PROXIES: ' + default + '\n', base)
         cases = [
             ({}, trusted_default, default),
-            ({'TRUSTED_PROXIES': '172.30.80.2'}, '172.30.80.2,' + public_proxy, default),
-            ({'TRUSTED_PROXIES': '192.0.2.10'}, '192.0.2.10,' + public_proxy, default),
-            ({'TRUSTED_PROXIES': '192.0.2.10,' + public_proxy}, '192.0.2.10,' + public_proxy, default),
-            ({'TRUSTED_PROXIES': '192.0.2.10,172.30.80.3'}, '192.0.2.10,172.30.80.3', default),
+            ({'TRUSTED_PROXIES': '172.30.80.2'}, '172.30.80.2,' + public_proxy + ',' + public_proxy_alt, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10'}, '192.0.2.10,' + public_proxy + ',' + public_proxy_alt, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10,' + public_proxy}, '192.0.2.10,' + public_proxy + ',' + public_proxy_alt, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10,172.30.80.3'}, '192.0.2.10,172.30.80.3,' + public_proxy_alt, default),
             ({'USAGE_COUNTRY_TRUSTED_PROXIES': '192.0.2.10'}, trusted_default, '192.0.2.10'),
             ({'USAGE_COUNTRY_TRUSTED_PROXIES': ''}, trusted_default, ''),
         ]
@@ -236,6 +239,17 @@ class DeployTests(unittest.TestCase):
                 # The rollback service stays exactly as it ran.
                 self.assertEqual(candidate['services']['api_previous']['environment'],
                                  environment)
+
+    def test_prepare_uses_host_proxy_addresses_with_conflicting_process_environment(self):
+        with patch.dict(os.environ, {'PUBLIC_MCP_PROXY_IP': '10.250.90.3',
+                                     'PUBLIC_MCP_PROXY_IP_ALT': '10.250.90.4'}), \
+                tempfile.TemporaryDirectory() as root:
+            obj, candidate = prepare_on_host(root, {})
+            self.assertEqual(obj.public_mcp_proxy_ips(), ('172.30.80.3', '172.30.80.4'))
+            self.assertEqual(candidate['services'][obj.services['public-mcp']]['networks']['proxy']['ipv4_address'],
+                             '172.30.80.3')
+            self.assertEqual(candidate['services'][obj.services['api']]['environment']['TRUSTED_PROXIES'],
+                             deploy.DEFAULT_TRUSTED_PROXIES)
 
     def test_prepare_creates_public_mcp_candidate_with_alias_and_health_check(self):
         with tempfile.TemporaryDirectory() as root:
@@ -251,6 +265,111 @@ class DeployTests(unittest.TestCase):
             self.assertEqual(obj.services['public-mcp'], 'public-mcp_' + obj.release.replace('-', '_'))
             self.assertIn('public-mcp-proxy-' + obj.release, (obj.directory / 'Caddyfile.next').read_text())
             self.assertIn(obj.services['public-mcp'], obj.candidate_up_args())
+
+    def test_public_mcp_proxy_preflight_rotates_reserved_addresses(self):
+        for old_ip, expected in [(None, '172.30.80.3'), ('172.30.80.3', '172.30.80.4'),
+                                 ('172.30.80.4', '172.30.80.3')]:
+            with self.subTest(old_ip=old_ip), tempfile.TemporaryDirectory() as root:
+                root = Path(root)
+                (root / '.env').write_text('PUBLIC_MCP_PROXY_IP=172.30.80.3\nPUBLIC_MCP_PROXY_IP_ALT=172.30.80.4\n')
+                old = 'public-mcp_previous'
+                (root / 'rolling.json').write_text(json.dumps({'services': {
+                    old: {'networks': {'proxy': ({'ipv4_address': old_ip} if old_ip else {})}}
+                }}))
+                obj = object.__new__(deploy.Deployment)
+                obj.root = root
+                obj.rolling = root / 'rolling.json'
+                obj.state = {'services': {'public-mcp': old}}
+                obj.config = {'project': 'fixture'}
+                containers = {}
+                if old_ip:
+                    containers['old-id'] = {'Name': 'fixture-public-mcp_previous-1', 'IPv4Address': old_ip + '/24'}
+
+                def command(args, output=None):
+                    if args[:3] == ['docker', 'network', 'inspect']:
+                        return json.dumps([{'Containers': containers}])
+                    if args[:2] == ['docker', 'inspect']:
+                        return json.dumps([{'Id': 'old-id', 'Config': {'Labels': {
+                            'com.docker.compose.project': 'fixture',
+                            'com.docker.compose.service': old}}}])
+                    raise AssertionError(args)
+
+                with patch.object(deploy, 'command', side_effect=command):
+                    obj.public_mcp_preflight()
+                self.assertEqual(obj.public_mcp_proxy_ip, expected)
+
+    def test_public_mcp_proxy_preflight_rejects_foreign_or_exhausted_addresses(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            (root / '.env').write_text('PUBLIC_MCP_PROXY_IP=172.30.80.3\nPUBLIC_MCP_PROXY_IP_ALT=172.30.80.4\n')
+            obj = object.__new__(deploy.Deployment)
+            obj.root = root
+            obj.rolling = root / 'missing-rolling.json'
+            obj.state = {'services': {}}
+            obj.config = {'project': 'fixture'}
+            foreign = {'foreign': {'Name': 'fixture-redis-1', 'IPv4Address': '172.30.80.3/24'}}
+            def foreign_command(args, output=None):
+                if args[:3] == ['docker', 'network', 'inspect']:
+                    return json.dumps([{'Containers': foreign}])
+                if args[:2] == ['docker', 'inspect']:
+                    return json.dumps([{'Id': 'foreign', 'Config': {'Labels': {
+                        'com.docker.compose.project': 'fixture', 'com.docker.compose.service': 'redis'}}}])
+                raise AssertionError(args)
+            with patch.object(deploy, 'command', side_effect=foreign_command), \
+                    self.assertRaisesRegex(RuntimeError, 'non-public-mcp'):
+                obj.public_mcp_preflight()
+
+            occupied = {
+                'old-a': {'Name': 'fixture-public-mcp_a-1', 'IPv4Address': '172.30.80.3/24'},
+                'old-b': {'Name': 'fixture-public-mcp_b-1', 'IPv4Address': '172.30.80.4/24'},
+            }
+            def full_command(args, output=None):
+                if args[:3] == ['docker', 'network', 'inspect']:
+                    return json.dumps([{'Containers': occupied}])
+                if args[:2] == ['docker', 'inspect']:
+                    return json.dumps([{'Id': item, 'Config': {'Labels': {
+                        'com.docker.compose.project': 'fixture',
+                        'com.docker.compose.service': 'public-mcp_' + item}}} for item in occupied])
+                raise AssertionError(args)
+            with patch.object(deploy, 'command', side_effect=full_command), \
+                    self.assertRaisesRegex(RuntimeError, 'both reserved addresses'):
+                obj.public_mcp_preflight()
+
+    def test_public_mcp_trusted_proxies_use_two_host_routes(self):
+        value = deploy.merge_public_mcp_trusted_proxy(None)
+        self.assertIn('${PUBLIC_MCP_PROXY_IP:-172.30.80.3}/32', value)
+        self.assertIn('${PUBLIC_MCP_PROXY_IP_ALT:-172.30.80.4}/32', value)
+        self.assertNotIn('172.30.80.0/24', value)
+        self.assertEqual(deploy.merge_public_mcp_trusted_proxy('192.0.2.1,192.0.2.1').count('192.0.2.1'), 1)
+
+    def test_rollback_keeps_previous_public_mcp_address_and_removes_candidate(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            obj = object.__new__(deploy.Deployment)
+            obj.config = {'project': 'fixture'}
+            obj.state = {'sha': 'c' * 40, 'services': {'public-mcp': 'public-mcp_old'}}
+            obj.services = {'public-mcp': 'public-mcp_new'}
+            obj.directory = root
+            obj.live_caddy, obj.env, obj.rolling = (root / name for name in ['live', 'env', 'rolling'])
+            obj.live_caddy.write_text('candidate')
+            (root / 'before-caddy').write_text('old')
+            (root / 'before-release.env').write_text('old-env')
+            previous_overlay = {'services': {'public-mcp_old': {'networks': {
+                'proxy': {'ipv4_address': '172.30.80.3'}}}}}
+            (root / 'before-rolling.json').write_text(json.dumps(previous_overlay))
+            events = []
+            obj.compose = lambda *args, **kwargs: events.append(args)
+            obj.reload = lambda: events.append('reload')
+            obj.verify = lambda expected=None: events.append(('verify', expected))
+            obj.update_monitoring = lambda services: events.append('monitoring')
+            obj.drain_retired = lambda *args, **kwargs: True
+            with patch.object(deploy, 'command', return_value='candidate-id'):
+                obj.rollback()
+            self.assertIn(('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
+                           'public-mcp_old', 'worker'), events)
+            self.assertIn(('stop', '--timeout', '90', 'public-mcp_new'), events)
+            self.assertIn(('rm', '--force', '--stop', 'public-mcp_new'), events)
+            self.assertEqual(json.loads((root / 'before-rolling.json').read_text()), previous_overlay)
 
     def test_public_mcp_route_is_inserted_idempotently_and_excludes_www(self):
         source = ("http://{$WEB_DOMAIN} {\n"
@@ -714,6 +833,8 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
 
             def command(args):
                 nonlocal reload_attempt
+                if args[:3] == ['docker', 'network', 'inspect']:
+                    return json.dumps([{'Containers': {}}])
                 if args[:3] == ['docker', 'image', 'inspect']:
                     return json.dumps({'org.opencontainers.image.revision': obj.payload['sha']})
                 if args[:2] == ['docker', 'create']:

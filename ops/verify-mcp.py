@@ -1,5 +1,6 @@
 """ Verify MCP boundaries with production configuration, invoked only by the isolated prod-verify project."""
 import json
+import ipaddress
 import struct
 import urllib.parse
 import uuid
@@ -38,7 +39,13 @@ def validate_config(config):
     assert not set(env) & {'DATABASE_URL', 'REDIS_URL', 'S3_ACCESS_KEY', 'S3_SECRET_KEY', 'LLM_API_KEY', 'OPENNAVO_TOKEN'}
     public = services['public-mcp']
     public_ip = public['networks']['proxy']['ipv4_address']
-    assert public_ip in services['api']['environment']['TRUSTED_PROXIES'].split(','), 'API must trust the reserved public-MCP proxy address'
+    trusted = services['api']['environment']['TRUSTED_PROXIES'].split(',')
+    assert public_ip + '/32' in trusted, 'API must trust the reserved public-MCP proxy address as /32'
+    proxy_subnet = ipaddress.ip_network(config['networks']['proxy']['ipam']['config'][0]['subnet'])
+    reserved = [entry[:-3] for entry in trusted if entry.endswith('/32') and
+                ipaddress.ip_address(entry[:-3]) in proxy_subnet]
+    assert len(set(reserved)) == 2 and public_ip in reserved, 'API must trust both reserved public-MCP proxy addresses as /32'
+    assert not any(entry.endswith('/24') and entry.startswith(public_ip.rsplit('.', 1)[0] + '.') for entry in trusted), 'API must not trust the public-MCP subnet'
     assert public_ip != services['caddy']['networks']['proxy']['ipv4_address']
 
 

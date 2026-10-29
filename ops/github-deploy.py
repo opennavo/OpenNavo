@@ -11,6 +11,7 @@ import copy
 import fcntl
 import hashlib
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -63,8 +64,13 @@ ROLLBACK_DRAIN_TIMEOUT_SECONDS = 30
 PUBLIC_MCP_BEGIN = '# BEGIN opennavo public-mcp'
 PUBLIC_MCP_END = '# END opennavo public-mcp'
 PUBLIC_MCP_PROXY_IP = '172.30.80.3'
-PUBLIC_MCP_PROXY_TOKEN = '${PUBLIC_MCP_PROXY_IP:-' + PUBLIC_MCP_PROXY_IP + '}'
-DEFAULT_TRUSTED_PROXIES = '${CADDY_PROXY_IP:-172.30.80.2},' + PUBLIC_MCP_PROXY_TOKEN + ',${SSR_PROXY_SUBNET:-172.30.81.0/24}'
+PUBLIC_MCP_PROXY_IP_ALT = '172.30.80.4'
+PUBLIC_MCP_PROXY_IP_TOKEN = '${PUBLIC_MCP_PROXY_IP:-' + PUBLIC_MCP_PROXY_IP + '}/32'
+PUBLIC_MCP_PROXY_IP_ALT_TOKEN = '${PUBLIC_MCP_PROXY_IP_ALT:-' + PUBLIC_MCP_PROXY_IP_ALT + '}/32'
+PUBLIC_MCP_PROXY_TOKENS = (PUBLIC_MCP_PROXY_IP_TOKEN, PUBLIC_MCP_PROXY_IP_ALT_TOKEN)
+DEFAULT_TRUSTED_PROXIES = ('${CADDY_PROXY_IP:-172.30.80.2},' +
+                           PUBLIC_MCP_PROXY_IP_TOKEN + ',' + PUBLIC_MCP_PROXY_IP_ALT_TOKEN +
+                           ',${SSR_PROXY_SUBNET:-172.30.81.0/24}')
 APPLICATION_SERVICES = ('api', 'web', 'mcp', 'public-mcp', 'admin')
 APPLICATION_SERVICE_PATTERN = r'(?:api|web|mcp|public-mcp|admin)(?:_[A-Za-z0-9_]+)?'
 WARM_HOST = 'opennavo.com'
@@ -326,16 +332,35 @@ def update_env(source, updates):
     return '\n'.join(lines) + '\n'
 
 
-def merge_public_mcp_trusted_proxy(value):
-    """Keep the existing proxy list and add the reserved public-MCP peer once."""
+def merge_public_mcp_trusted_proxy(value, proxy_ips=None):
+    """Keep the existing proxy list and add both reserved public-MCP peers once."""
+    proxy_ips = tuple(proxy_ips or (PUBLIC_MCP_PROXY_IP, PUBLIC_MCP_PROXY_IP_ALT))
+    if len(proxy_ips) != 2:
+        raise ValueError('two public-MCP proxy addresses are required')
+    tokens = (PUBLIC_MCP_PROXY_IP_TOKEN, PUBLIC_MCP_PROXY_IP_ALT_TOKEN) if proxy_ips == (PUBLIC_MCP_PROXY_IP, PUBLIC_MCP_PROXY_IP_ALT) else tuple(ip + '/32' for ip in proxy_ips)
     if value is None:
-        return DEFAULT_TRUSTED_PROXIES
+        return ('${CADDY_PROXY_IP:-172.30.80.2},' + ','.join(tokens) +
+                ',${SSR_PROXY_SUBNET:-172.30.81.0/24}')
     if not isinstance(value, str):
         raise ValueError('TRUSTED_PROXIES must be a string')
-    entries = [entry.strip() for entry in value.split(',')]
-    if any(entry == PUBLIC_MCP_PROXY_IP or 'PUBLIC_MCP_PROXY_IP' in entry for entry in entries):
-        return value
-    return value + (',' if value else '') + PUBLIC_MCP_PROXY_TOKEN
+    entries = []
+    seen = set()
+    for raw in value.split(','):
+        entry = raw.strip()
+        if entry and entry not in seen:
+            entries.append(entry)
+            seen.add(entry)
+    variables = ('PUBLIC_MCP_PROXY_IP', 'PUBLIC_MCP_PROXY_IP_ALT')
+    for index, (ip, token) in enumerate(zip(proxy_ips, tokens)):
+        # Preserve an already configured literal or token. Older hosts used the literal .3
+        # without /32; retaining it avoids rewriting operator configuration while the new
+        # default always emits explicit host routes.
+        variable = variables[index] if proxy_ips == (PUBLIC_MCP_PROXY_IP, PUBLIC_MCP_PROXY_IP_ALT) else None
+        if not any(entry in {ip, ip + '/32', token} or
+                   (variable and entry.startswith('${' + variable + ':-') and entry.endswith('}/32'))
+                   for entry in entries):
+            entries.append(token)
+    return ','.join(entries)
 
 
 def public_mcp_route(alias):
@@ -523,6 +548,125 @@ class Deployment:
         write_private(target / 'manifest.json', release_manifest(
             self.payload, getattr(self, 'current_web_assets', [])))
 
+    def public_mcp_proxy_ips(self):
+        """Resolve the two reserved proxy addresses without asking Compose to recreate a network."""
+        configured = getattr(self, 'config', {})
+        values = configured.get('public_mcp_proxy_ips')
+        if values is not None:
+            if isinstance(values, str):
+                values = [item.strip() for item in values.split(',')]
+            if not isinstance(values, (list, tuple)) or len(values) != 2:
+                raise RuntimeError('public-MCP proxy preflight requires exactly two proxy addresses')
+            raw = list(values)
+        else:
+            env = {}
+            try:
+                for line in (self.root / '.env').read_text().splitlines():
+                    if '=' in line and not line.lstrip().startswith('#'):
+                        key, value = line.split('=', 1)
+                        env[key.strip()] = value.strip()
+            except OSError:
+                pass
+            raw = [configured.get('public_mcp_proxy_ip') or env.get('PUBLIC_MCP_PROXY_IP') or
+                   os.environ.get('PUBLIC_MCP_PROXY_IP') or PUBLIC_MCP_PROXY_IP,
+                   configured.get('public_mcp_proxy_ip_alt') or env.get('PUBLIC_MCP_PROXY_IP_ALT') or
+                   os.environ.get('PUBLIC_MCP_PROXY_IP_ALT') or PUBLIC_MCP_PROXY_IP_ALT]
+        try:
+            addresses = tuple(str(ipaddress.ip_address(value)) for value in raw)
+        except ValueError as error:
+            raise RuntimeError('public-MCP proxy preflight found an invalid reserved address') from error
+        if len(set(addresses)) != 2:
+            raise RuntimeError('public-MCP proxy preflight requires two distinct reserved addresses')
+        return addresses
+
+    def public_mcp_overlay_ip(self, overlay=None):
+        """Read the live public-MCP address from the previous overlay when available."""
+        try:
+            for key in ('public_mcp_proxy_ip', 'public_mcp_ip'):
+                value = self.state.get(key)
+                if value:
+                    return str(ipaddress.ip_address(value))
+            state_service = self.state.get('public-mcp')
+            if isinstance(state_service, dict) and state_service.get('ipv4_address'):
+                return str(ipaddress.ip_address(state_service['ipv4_address']))
+            overlay = json.loads(self.rolling.read_text()) if overlay is None else overlay
+            old = self.state.get('services', {}).get('public-mcp')
+            options = overlay.get('services', {}).get(old, {}).get('networks', {}).get('proxy', {})
+            value = options.get('ipv4_address') if isinstance(options, dict) else None
+            return str(ipaddress.ip_address(value)) if value else None
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _container_is_public_mcp(container, network_entry, project):
+        labels = (container.get('Config') or {}).get('Labels') or {}
+        if labels:
+            return (labels.get('com.docker.compose.project') == project and
+                    ((labels.get('com.docker.compose.service') or '') == 'public-mcp' or
+                     (labels.get('com.docker.compose.service') or '').startswith('public-mcp_')))
+        # A mocked/older network inspect may expose only the container name. Use it only as
+        # a fallback; real Docker entries are checked through labels from docker inspect.
+        name = (network_entry or {}).get('Name', '').lstrip('/')
+        return name.startswith(project + '-public-mcp-') or name.startswith(project + '_public-mcp_')
+
+    def public_mcp_preflight(self):
+        """Check reserved proxy addresses before any pull, migration, or candidate start."""
+        if not hasattr(self, 'config'):
+            return
+        project = self.config.get('project')
+        if not project:
+            raise RuntimeError('public-MCP proxy preflight requires the Compose project name')
+        addresses = self.public_mcp_proxy_ips()
+        network = self.config.get('proxy_network') or project + '_proxy'
+        try:
+            inspected = json.loads(command(['docker', 'network', 'inspect', network]))
+            network_info = inspected[0]
+            entries = network_info.get('Containers') or {}
+        except (RuntimeError, OSError, TypeError, ValueError, IndexError, KeyError) as error:
+            raise RuntimeError(f'public-MCP proxy preflight could not inspect network {network}') from error
+
+        occupied = {address: [] for address in addresses}
+        for container_id, entry in entries.items():
+            raw_ip = (entry or {}).get('IPv4Address', '').split('/', 1)[0]
+            if raw_ip in occupied:
+                occupied[raw_ip].append((container_id, entry or {}))
+        details = {}
+        ids = [container_id for holders in occupied.values() for container_id, _ in holders]
+        if ids:
+            try:
+                inspected_containers = json.loads(command(['docker', 'inspect', *ids]))
+                details = {item.get('Id'): item for item in inspected_containers if isinstance(item, dict)}
+            except (RuntimeError, OSError, TypeError, ValueError):
+                # Network entries still carry enough information for the clear occupancy check
+                # in older Docker/mocked responses; an absent label is treated as non-public.
+                details = {}
+        public_holders = {}
+        for address, holders in occupied.items():
+            for container_id, entry in holders:
+                container = details.get(container_id, {})
+                if not self._container_is_public_mcp(container, entry, project):
+                    name = (entry.get('Name') or container_id).lstrip('/')
+                    raise RuntimeError(
+                        f'public-MCP proxy preflight refused: reserved address {address} is occupied '
+                        f'by non-public-mcp container {name}')
+                public_holders[address] = container_id
+
+        free = [address for address in addresses if not occupied[address]]
+        if not free:
+            raise RuntimeError('public-MCP proxy preflight refused: both reserved addresses are occupied')
+        old_ip = self.public_mcp_overlay_ip()
+        if old_ip in addresses:
+            choices = [address for address in addresses if address != old_ip and address in free]
+        else:
+            current = next((address for address in addresses if address in public_holders), None)
+            if current:
+                self.public_mcp_live_ip = current
+            choices = [address for address in addresses if address != current and address in free]
+        if not choices:
+            raise RuntimeError('public-MCP proxy preflight refused: no alternate reserved address is free')
+        self.public_mcp_proxy_ip = choices[0]
+        print(f'Public MCP proxy preflight passed: candidate address {self.public_mcp_proxy_ip}.', flush=True)
+
     def ensure_live_manifest(self):
         release = self.state.get('release')
         if not release:
@@ -552,6 +696,22 @@ class Deployment:
         # Capture a base public-MCP definition before filtering the previous overlay. Hosts
         # deployed before public-MCP was introduced have no state entry to clone.
         base_public_mcp = copy.deepcopy(overlay['services'].get('public-mcp'))
+        proxy_ips = self.public_mcp_proxy_ips()
+        old_public_mcp = self.state['services'].get('public-mcp')
+        old_public_mcp_ip = self.public_mcp_overlay_ip(overlay) if old_public_mcp else None
+        if old_public_mcp and not old_public_mcp_ip and getattr(self, 'public_mcp_live_ip', None):
+            old_options = overlay['services'].setdefault(old_public_mcp, {}).setdefault('networks', {}).setdefault('proxy', {})
+            old_options['ipv4_address'] = self.public_mcp_live_ip
+            # Preserve the live address in the rollback snapshot as well, so a restart during
+            # recovery cannot move the previous container to a dynamic address.
+            before_overlay_path = self.directory / 'before-rolling.json'
+            before_overlay = json.loads(before_overlay_path.read_text())
+            before_options = before_overlay['services'].setdefault(old_public_mcp, {}).setdefault('networks', {}).setdefault('proxy', {})
+            before_options['ipv4_address'] = self.public_mcp_live_ip
+            write_private(before_overlay_path, before_overlay)
+        candidate_public_mcp_ip = getattr(self, 'public_mcp_proxy_ip', None)
+        if candidate_public_mcp_ip is None:
+            candidate_public_mcp_ip = next((ip for ip in proxy_ips if ip != old_public_mcp_ip), proxy_ips[0])
         overlay['services'] = {name: service for name, service in overlay['services'].items()
                                if not re.match(r'^(?:api|web|mcp|public-mcp|admin)(?:_|$)', name) or name in live_services}
         routes = self.live_caddy.read_text()
@@ -576,7 +736,8 @@ class Deployment:
                         'OPENNAVO_PUBLIC_MCP_RATE_LIMIT': '60',
                         'OPENNAVO_PUBLIC_MCP_RATE_WINDOW_SECONDS': '60',
                     },
-                    'networks': {'proxy': {'aliases': ['public-mcp-proxy']}},
+                    'networks': {'proxy': {'aliases': ['public-mcp-proxy'],
+                                           'ipv4_address': candidate_public_mcp_ip}},
                     'deploy': {'resources': {'limits': {'memory': '256M'}}},
                     'depends_on': {'api': {'condition': 'service_healthy'}},
                 }
@@ -611,6 +772,8 @@ class Deployment:
                     'start_period': '60s', 'start_interval': '2s'}
             elif kind == 'public-mcp':
                 service.setdefault('entrypoint', ['opennavo-public-mcp'])
+                proxy = service.setdefault('networks', {}).setdefault('proxy', {})
+                proxy['ipv4_address'] = candidate_public_mcp_ip
                 # Compose --wait uses this liveness endpoint to reject a bad candidate before
                 # Caddy is switched. Keep it explicit for overlays from before public-MCP existed.
                 service['healthcheck'] = {
@@ -651,7 +814,7 @@ class Deployment:
         api_environment = overlay['services'][self.services['api']].setdefault('environment', {})
         api_environment.setdefault('USAGE_COUNTRY_TRUSTED_PROXIES', '${CADDY_PROXY_IP:-172.30.80.2}')
         api_environment['TRUSTED_PROXIES'] = merge_public_mcp_trusted_proxy(
-            api_environment.get('TRUSTED_PROXIES'))
+            api_environment.get('TRUSTED_PROXIES'), proxy_ips)
         write_private(self.directory / 'rolling.compose.json', overlay)
         (self.directory / 'release.env').write_text(update_env(self.env.read_text(), {
             'SERVER_IMAGE': self.payload['images']['server'], 'WEB_IMAGE': self.payload['images']['web'],
@@ -1004,6 +1167,9 @@ class Deployment:
             if not drained:
                 print('WARNING: rollback drain failed; stopping candidates with a 90s grace period.', flush=True)
             self.compose('stop', '--timeout', '90', *self.services.values())
+            # The previous release remains on its original fixed address; remove only the
+            # candidate service containers after the old route has been verified.
+            self.compose('rm', '--force', '--stop', *self.services.values())
         print('Previous routes and worker restored; database was not rolled back.', flush=True)
 
     def cleanup(self, previous):
@@ -1105,6 +1271,10 @@ class Deployment:
         # This read-only gate runs before image pulls, release directories, migrations or Caddy
         # changes. A second web replica therefore fails cleanly when the host cannot overlap it.
         self.capacity_gate()
+        # The production receiver always has a host .env. Lightweight unit-test doubles may
+        # omit the host installation files and exercise the rest of the rollout in isolation.
+        if (self.root / '.env').is_file():
+            self.public_mcp_preflight()
         with tempfile.TemporaryDirectory() as auth:
             token = self.payload.get('registry_token', '')
             if token:
