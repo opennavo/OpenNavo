@@ -44,7 +44,10 @@ const subtitle = computed(() => [props.detail?.developer, summary.value].filter(
 const iconUrl = computed(() => props.detail?.iconUrl ?? props.local?.iconUrl ?? null);
 const accent = computed(() => props.detail?.accentColor ?? props.local?.accentColor ?? null);
 const repoSignals = computed(() =>
-  toPackageRepoSignals(props.detail, props.detail?.openSource?.url ?? props.detail?.repoUrl)
+  toPackageRepoSignals(props.detail, {
+    repoUrl: props.detail?.openSource?.url ?? props.detail?.repoUrl,
+    archived: props.detail?.openSource?.archived
+  })
 );
 
 const installed = computed(() => library.find(props.kind, props.token));
