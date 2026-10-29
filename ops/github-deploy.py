@@ -334,6 +334,8 @@ def update_env(source, updates):
 
 def merge_public_mcp_trusted_proxy(value, proxy_ips=None):
     """Keep the existing proxy list and add both reserved public-MCP peers once."""
+    # No ownership ledger exists for old entries: even stale /32s may be operator-owned.
+    # Preserve them rather than infer ownership from their address or position.
     proxy_ips = tuple(proxy_ips or (PUBLIC_MCP_PROXY_IP, PUBLIC_MCP_PROXY_IP_ALT))
     if len(proxy_ips) != 2:
         raise ValueError('two public-MCP proxy addresses are required')
@@ -361,6 +363,14 @@ def merge_public_mcp_trusted_proxy(value, proxy_ips=None):
                    for entry in entries):
             entries.append(token)
     return ','.join(entries)
+
+
+def write_caddy_in_place(path, content):
+    """Keep the inode of the single-file Caddy bind mount and durably write its contents."""
+    with path.open('wb') as target:
+        target.write(content)
+        target.flush()
+        os.fsync(target.fileno())
 
 
 def public_mcp_route(alias):
@@ -419,6 +429,31 @@ def install_public_mcp_route(source, alias):
         block_without_route = block[:markers[0].start()] + block[markers[0].end():]
     else:
         block_without_route = block
+        # Older repository installations shipped these two routes without markers.
+        spans = []
+        for matcher, path in [('publicMcp', '/mcp'), ('publicMcpOther', '/mcp/*')]:
+            matches = list(re.finditer(
+                r'^[ \t]*@' + matcher + r'[ \t]+path[ \t]+' + re.escape(path) +
+                r'[ \t]*\n[ \t]*handle[ \t]+@' + matcher + r'[ \t]*\{[ \t]*\n', block, re.M))
+            if len(matches) > 1:
+                raise ValueError('legacy public-MCP Caddy route is ambiguous')
+            if not matches:
+                continue
+            match = matches[0]
+            depth, end = 1, match.end()
+            for line in block[end:].splitlines(keepends=True):
+                syntax = re.sub(r'\{\$[^}]+\}', '', line)
+                depth += syntax.count('{') - syntax.count('}')
+                end += len(line)
+                if depth == 0:
+                    break
+            if depth != 0:
+                raise ValueError('legacy public-MCP Caddy route has unbalanced braces')
+            spans.append((match.start(), end))
+        if spans and len(spans) != 2:
+            raise ValueError('legacy public-MCP Caddy route is incomplete')
+        for start, end in sorted(spans, reverse=True):
+            block_without_route = block_without_route[:start] + block_without_route[end:]
     proxies = []
     depth = 0
     position = 0
@@ -604,10 +639,7 @@ class Deployment:
             return (labels.get('com.docker.compose.project') == project and
                     ((labels.get('com.docker.compose.service') or '') == 'public-mcp' or
                      (labels.get('com.docker.compose.service') or '').startswith('public-mcp_')))
-        # A mocked/older network inspect may expose only the container name. Use it only as
-        # a fallback; real Docker entries are checked through labels from docker inspect.
-        name = (network_entry or {}).get('Name', '').lstrip('/')
-        return name.startswith(project + '-public-mcp-') or name.startswith(project + '_public-mcp_')
+        return False
 
     def public_mcp_preflight(self):
         """Check reserved proxy addresses before any pull, migration, or candidate start."""
@@ -637,10 +669,10 @@ class Deployment:
                 inspected_containers = json.loads(command(['docker', 'inspect', *ids]))
                 details = {item.get('Id'): item for item in inspected_containers if isinstance(item, dict)}
             except (RuntimeError, OSError, TypeError, ValueError):
-                # Network entries still carry enough information for the clear occupancy check
-                # in older Docker/mocked responses; an absent label is treated as non-public.
+                # Missing inspect labels cannot prove ownership; refuse the occupied address.
                 details = {}
         public_holders = {}
+        reclaim = []
         for address, holders in occupied.items():
             for container_id, entry in holders:
                 container = details.get(container_id, {})
@@ -649,7 +681,17 @@ class Deployment:
                     raise RuntimeError(
                         f'public-MCP proxy preflight refused: reserved address {address} is occupied '
                         f'by non-public-mcp container {name}')
-                public_holders[address] = container_id
+                state = container.get('State') or {}
+                if state.get('Running') is False and not state.get('Restarting') and not state.get('Paused'):
+                    reclaim.append((address, container_id, entry))
+                else:
+                    public_holders[address] = container_id
+
+        # Check every holder before changing anything. Disconnect only stopped, label-proven
+        # project services; retained containers remain available to Compose for rollback.
+        for address, container_id, entry in reclaim:
+            command(['docker', 'network', 'disconnect', network, container_id])
+            occupied[address].remove((container_id, entry))
 
         free = [address for address in addresses if not occupied[address]]
         if not free:
@@ -1016,18 +1058,35 @@ class Deployment:
             raise
         print('API and web monitoring targets updated and healthy.', flush=True)
 
+    def install_caddy(self, content):
+        """Validate a durable staged copy before updating the bind-mounted inode."""
+        container = self.config['caddy_container']
+        with tempfile.NamedTemporaryFile(dir=self.live_caddy.parent, prefix='.Caddyfile-', delete=False) as staged:
+            path = Path(staged.name)
+            remote = '/tmp/' + path.name
+            try:
+                staged.write(content)
+                staged.flush()
+                os.fsync(staged.fileno())
+                command(['docker', 'cp', str(path), container + ':' + remote])
+                command(['docker', 'exec', container, 'caddy', 'validate', '--config', remote, '--adapter', 'caddyfile'])
+                write_caddy_in_place(self.live_caddy, content)
+            finally:
+                path.unlink(missing_ok=True)
+                with contextlib.suppress(RuntimeError, OSError):
+                    command(['docker', 'exec', container, 'rm', '-f', remote])
+
     def reload(self):
         try:
             command(['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'])
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
-            # Validation or the reload signal may fail after the bind-mounted inode was
-            # replaced. Restore the snapshot before the caller attempts service rollback.
+            # Restore the snapshot before the caller attempts service rollback.
             directory = getattr(self, 'directory', None)
             before = directory / 'before-caddy' if directory is not None else None
             try:
                 if before is not None and before.is_file():
-                    self.live_caddy.write_bytes(before.read_bytes())
+                    write_caddy_in_place(self.live_caddy, before.read_bytes())
             except OSError:
                 pass
             self.mark_degraded('Caddy reload failed; routing unconfirmed')
@@ -1143,10 +1202,12 @@ class Deployment:
             print('Candidate env and rolling configuration restored for manual recovery.', flush=True)
             raise RuntimeError('degraded rollback: previous services failed to start; routing unconfirmed') from error
         print('Previous release services are healthy; switching Caddy back.', flush=True)
-        self.live_caddy.write_bytes((self.directory / 'before-caddy').read_bytes())
+        write_caddy_in_place(self.live_caddy, (self.directory / 'before-caddy').read_bytes())
         self.reload()
         try:
             self.verify(expected=self.state.get('sha', '')[:12])
+            if 'public-mcp' in self.state['services']:
+                self.verify_public_mcp()
             self.update_monitoring(self.state['services'])
         except Exception:
             print('WARNING: rollback verification or monitoring failed; candidate containers retained.', flush=True)
@@ -1315,7 +1376,7 @@ class Deployment:
         try:
             with phase('Switching routes and worker'):
                 # Preserve the inode because Caddy bind-mounts this file.
-                self.live_caddy.write_bytes((self.directory / 'Caddyfile.next').read_bytes())
+                self.install_caddy((self.directory / 'Caddyfile.next').read_bytes())
                 self.reload()
                 self.verify()
                 self.env.write_bytes((self.directory / 'release.env').read_bytes())

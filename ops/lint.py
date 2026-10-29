@@ -4,6 +4,7 @@ import importlib.util
 import json
 import ipaddress
 from pathlib import Path
+import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('production_verification', ROOT / 'ops/verify-production.py')
@@ -76,4 +77,26 @@ verification.run(['node', 'tooling/scripts/tasks/server.mjs', 'alerts-test'], ca
 verification.run(['docker', 'run', '--rm', '-v', str(ROOT / 'ops/caddy/Caddyfile') + ':/etc/caddy/Caddyfile:ro',
     '-e', 'WEB_DOMAIN', '-e', 'API_DOMAIN', '-e', 'ADMIN_DOMAIN', '-e', 'PUBLIC_BASE_URL', '-e', 'CADDY_GLOBAL_OPTIONS',
     'registry.hub.docker.com/library/caddy:2.11.6-alpine', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'], capture=False)
+# Exercise the installer against the actual repository file, its unmarked predecessor,
+# and the current production layout (no MCP route, existing trusted-proxy options).
+deploy_spec = importlib.util.spec_from_file_location('github_deploy', ROOT / 'ops/github-deploy.py')
+deploy = importlib.util.module_from_spec(deploy_spec)
+deploy_spec.loader.exec_module(deploy)
+source = (ROOT / 'ops/caddy/Caddyfile').read_text()
+legacy = source.replace('\t' + deploy.PUBLIC_MCP_BEGIN + '\n', '').replace('\t' + deploy.PUBLIC_MCP_END + '\n', '')
+start = source.index('\t' + deploy.PUBLIC_MCP_BEGIN)
+end = source.index(deploy.PUBLIC_MCP_END) + len(deploy.PUBLIC_MCP_END) + 1
+production = (source[:start] + source[end:]).replace('{$CADDY_GLOBAL_OPTIONS}',
+    'auto_https off\nservers {\n trusted_proxies static {$NGINX_PROXY_IP:172.30.82.1}\n'
+    ' trusted_proxies_strict\n client_ip_headers X-Forwarded-For\n}')
+with tempfile.TemporaryDirectory() as directory:
+    for fixture in [source, legacy, production]:
+        installed = deploy.install_public_mcp_route(fixture, 'public-mcp-proxy-lint')
+        assert installed.count('@publicMcp path /mcp') == 1
+        assert deploy.install_public_mcp_route(installed, 'public-mcp-proxy-lint') == installed
+        (Path(directory) / 'Caddyfile').write_text(installed)
+        verification.run(['docker', 'run', '--rm', '-v', directory + ':/etc/caddy:ro',
+            '-e', 'WEB_DOMAIN', '-e', 'API_DOMAIN', '-e', 'ADMIN_DOMAIN', '-e', 'PUBLIC_BASE_URL', '-e', 'CADDY_GLOBAL_OPTIONS',
+            'registry.hub.docker.com/library/caddy:2.11.6-alpine', 'caddy', 'validate',
+            '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'], capture=False)
 print('deployment configuration, shell scripts, collection safety and alert rules: passed')

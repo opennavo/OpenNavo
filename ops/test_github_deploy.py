@@ -342,11 +342,60 @@ class DeployTests(unittest.TestCase):
         self.assertNotIn('172.30.80.0/24', value)
         self.assertEqual(deploy.merge_public_mcp_trusted_proxy('192.0.2.1,192.0.2.1').count('192.0.2.1'), 1)
 
+    def test_public_mcp_preflight_reclaims_failed_and_retained_project_peers(self):
+        for running in [True, False]:
+            with self.subTest(running=running), tempfile.TemporaryDirectory() as root:
+                obj = object.__new__(deploy.Deployment)
+                obj.root, obj.rolling = Path(root), Path(root) / 'rolling.json'
+                obj.config = {'project': 'fixture', 'public_mcp_proxy_ips': ['172.30.80.3', '172.30.80.4']}
+                obj.state = {'public_mcp_proxy_ip': '172.30.80.3', 'services': {'public-mcp': 'public-mcp_live'}}
+                entries = {name: {'Name': 'fixture-' + name + '-1', 'IPv4Address': ip + '/24'}
+                           for name, ip in [('live', '172.30.80.3'), ('failed', '172.30.80.4')]}
+                details = [{'Id': name, 'State': {'Running': running if name == 'live' else False},
+                            'Config': {'Labels': {'com.docker.compose.project': 'fixture',
+                                                 'com.docker.compose.service': 'public-mcp_' + name}}}
+                           for name in entries]
+                disconnected = []
+                def command(args):
+                    if args[:3] == ['docker', 'network', 'inspect']:
+                        return json.dumps([{'Containers': entries}])
+                    if args[:2] == ['docker', 'inspect']:
+                        return json.dumps(details)
+                    self.assertEqual(args[:4], ['docker', 'network', 'disconnect', 'fixture_proxy'])
+                    self.assertFalse(next(item for item in details if item['Id'] == args[4])['State']['Running'])
+                    disconnected.append(args[4])
+                    return ''
+                with patch.object(deploy, 'command', side_effect=command):
+                    obj.public_mcp_preflight()
+                self.assertEqual(obj.public_mcp_proxy_ip, '172.30.80.4')
+                self.assertEqual(set(disconnected), {'failed'} if running else {'live', 'failed'})
+
+    def test_public_mcp_preflight_never_reclaims_foreign_or_unlabelled_peers(self):
+        for labels in [{}, {'com.docker.compose.project': 'other', 'com.docker.compose.service': 'public-mcp_old'},
+                       {'com.docker.compose.project': 'fixture', 'com.docker.compose.service': 'redis'}]:
+            with self.subTest(labels=labels), tempfile.TemporaryDirectory() as root:
+                obj = object.__new__(deploy.Deployment)
+                obj.root = Path(root)
+                obj.config = {'project': 'fixture', 'public_mcp_proxy_ips': ['172.30.80.3', '172.30.80.4']}
+                responses = [json.dumps([{'Containers': {'foreign': {
+                    'Name': 'fixture-public-mcp-old-1', 'IPv4Address': '172.30.80.4/24'}}}]),
+                    json.dumps([{'Id': 'foreign', 'State': {'Running': False}, 'Config': {'Labels': labels}}])]
+                with patch.object(deploy, 'command', side_effect=responses) as run, \
+                        self.assertRaisesRegex(RuntimeError, 'non-public-mcp'):
+                    obj.public_mcp_preflight()
+                self.assertEqual(run.call_count, 2)
+
+    def test_public_mcp_address_change_preserves_entries_without_ownership_evidence(self):
+        value = '192.0.2.1,172.30.80.3/32,172.30.80.4/32'
+        result = deploy.merge_public_mcp_trusted_proxy(value, ['172.30.82.3', '172.30.82.4'])
+        self.assertEqual(result, value + ',172.30.82.3/32,172.30.82.4/32')
+
     def test_rollback_keeps_previous_public_mcp_address_and_removes_candidate(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
             obj = object.__new__(deploy.Deployment)
-            obj.config = {'project': 'fixture'}
+            obj.config = {'project': 'fixture', 'local_origin': 'http://127.0.0.1:80',
+                          'public_mcp_host': 'web.example.test', 'checks': []}
             obj.state = {'sha': 'c' * 40, 'services': {'public-mcp': 'public-mcp_old'}}
             obj.services = {'public-mcp': 'public-mcp_new'}
             obj.directory = root
@@ -363,13 +412,30 @@ class DeployTests(unittest.TestCase):
             obj.verify = lambda expected=None: events.append(('verify', expected))
             obj.update_monitoring = lambda services: events.append('monitoring')
             obj.drain_retired = lambda *args, **kwargs: True
-            with patch.object(deploy, 'command', return_value='candidate-id'):
+            requests = []
+            def urlopen(request, timeout):
+                requests.append(json.loads(request.data)['method'])
+                response = io.BytesIO(json.dumps({'result': {'tools': [{'name': 'search_apps'}]}}).encode())
+                response.status, response.headers = 200, {}
+                return response
+            with patch.object(deploy, 'command', return_value='candidate-id'), \
+                    patch.object(deploy.urllib.request, 'urlopen', side_effect=urlopen):
                 obj.rollback()
+            self.assertEqual(requests, ['initialize', 'tools/list'])
+            self.assertLess(events.index('reload'), events.index('monitoring'))
             self.assertIn(('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
                            'public-mcp_old', 'worker'), events)
             self.assertIn(('stop', '--timeout', '90', 'public-mcp_new'), events)
             self.assertIn(('rm', '--force', '--stop', 'public-mcp_new'), events)
             self.assertEqual(json.loads((root / 'before-rolling.json').read_text()), previous_overlay)
+            events.clear()
+            with patch.object(deploy, 'command') as run, \
+                    patch.object(deploy.urllib.request, 'urlopen', side_effect=RuntimeError('handshake failed')), \
+                    self.assertRaisesRegex(RuntimeError, 'handshake failed'):
+                obj.rollback()
+            run.assert_not_called()
+            self.assertNotIn('monitoring', events)
+            self.assertFalse(any(isinstance(event, tuple) and event[0] in ('stop', 'rm') for event in events))
 
     def test_public_mcp_route_is_inserted_idempotently_and_excludes_www(self):
         source = ("http://{$WEB_DOMAIN} {\n"
@@ -393,6 +459,59 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(routed.count(deploy.PUBLIC_MCP_BEGIN), 1)
         self.assertNotIn('public-mcp-proxy-old', routed)
         self.assertIn('public-mcp-proxy-new:8790', routed)
+
+    def test_public_mcp_route_real_repo_and_unmarked_legacy_are_idempotent(self):
+        source = Path(__file__).with_name('caddy').joinpath('Caddyfile').read_text()
+        self.assertEqual(source.count(deploy.PUBLIC_MCP_BEGIN), 1)
+        for legacy in [False, True]:
+            with self.subTest(legacy=legacy):
+                fixture = source
+                if legacy:
+                    fixture = fixture.replace('\t' + deploy.PUBLIC_MCP_BEGIN + '\n', '').replace(
+                        '\t' + deploy.PUBLIC_MCP_END + '\n', '')
+                routed = deploy.install_public_mcp_route(fixture, 'public-mcp-proxy-new')
+                for _ in range(2):
+                    self.assertEqual(routed.count('@publicMcp path /mcp'), 1)
+                    self.assertEqual(routed.count('handle @publicMcp {'), 1)
+                    self.assertEqual(routed.count('@publicMcpOther path /mcp/*'), 1)
+                    self.assertEqual(routed.count(deploy.PUBLIC_MCP_BEGIN), 1)
+                    self.assertNotIn('reverse_proxy public-mcp-proxy:8790', routed)
+                    again = deploy.install_public_mcp_route(routed, 'public-mcp-proxy-new')
+                    self.assertEqual(again, routed)
+                    routed = again
+
+    def test_install_caddy_validates_staged_copy_and_preserves_live_inode(self):
+        for invalid in [False, True]:
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as root:
+                obj = object.__new__(deploy.Deployment)
+                obj.config = {'caddy_container': 'fixture-caddy'}
+                obj.live_caddy = Path(root) / 'Caddyfile'
+                obj.live_caddy.write_bytes(b'before')
+                inode = obj.live_caddy.stat().st_ino
+                (Path(root) / 'before-caddy').write_bytes(b'before')
+                def command(args):
+                    if args[:2] == ['docker', 'cp']:
+                        staged = Path(args[2])
+                        self.assertEqual(staged.parent, obj.live_caddy.parent)
+                        self.assertEqual(staged.read_bytes(), b'after')
+                    if 'validate' in args:
+                        self.assertEqual(obj.live_caddy.read_bytes(), b'before')
+                        self.assertIn('--adapter', args)
+                        if invalid:
+                            raise RuntimeError('invalid staged config')
+                    return ''
+                with patch.object(deploy, 'command', side_effect=command), \
+                        patch.object(deploy.os, 'fsync', wraps=os.fsync) as fsync:
+                    if invalid:
+                        with self.assertRaisesRegex(RuntimeError, 'invalid staged config'):
+                            obj.install_caddy(b'after')
+                    else:
+                        obj.install_caddy(b'after')
+                    self.assertEqual(fsync.call_count, 1 if invalid else 2)
+                self.assertEqual(obj.live_caddy.read_bytes(), b'before' if invalid else b'after')
+                self.assertEqual(obj.live_caddy.stat().st_ino, inode)
+                self.assertEqual((Path(root) / 'before-caddy').read_bytes(), b'before')
+                self.assertEqual(list(Path(root).glob('.Caddyfile-*')), [])
 
     def test_public_mcp_route_requires_one_web_block_and_catch_all_proxy(self):
         for source in ['reverse_proxy {\n}\n', '{$WEB_DOMAIN} {\nreverse_proxy web:3000\n}\n']:
@@ -816,6 +935,9 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                              'update_monitoring', 'cleanup', 'prune']:
                     setattr(target, name, unittest.mock.Mock())
                 target.drain_retired = unittest.mock.Mock(return_value=True)
+                # This test injects failures into reload, after staged validation succeeds.
+                target.install_caddy = lambda content: deploy.write_caddy_in_place(target.live_caddy, content)
+                target.verify_public_mcp = unittest.mock.Mock()
 
             stub_host_steps(obj)
             # The fixture has already prepared this run's release and rollback snapshots.
@@ -1189,6 +1311,8 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             obj.backup = lambda: events.append('backup')
             obj.compose = lambda *args, **kwargs: events.append(args)
             obj.reload = lambda: events.append('reload')
+            obj.install_caddy = lambda content: deploy.write_caddy_in_place(obj.live_caddy, content)
+            obj.verify_public_mcp = lambda: events.append('public-mcp handshake')
             obj.capacity_gate = lambda: None
             obj.warm_candidates = lambda: events.append('warm')
             obj.update_monitoring = lambda services: events.append(('monitoring', services))
