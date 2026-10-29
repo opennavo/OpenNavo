@@ -52,6 +52,32 @@ async def test_public_client_uses_only_configured_public_base() -> None:
         await close_client(client)
 
 
+async def test_public_client_forwards_only_resolved_peer() -> None:
+    calls: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        calls.append(request)
+        return httpx2.Response(200, json={"code": "0000", "data": {"records": []}})
+
+    client = PublicAPIClient(settings(), httpx2.AsyncClient(transport=httpx2.MockTransport(handle)))
+
+    async def endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+        await client.get("/categories")
+        await JSONResponse({"ok": True})(scope, receive, send)
+
+    app = PublicPeerMiddleware(endpoint, ["172.30.80.2/32"])
+    transport = httpx2.ASGITransport(app=app, client=("172.30.80.2", 1234))
+    try:
+        async with httpx2.AsyncClient(transport=transport, base_url="http://test") as caller:
+            response = await caller.get(
+                "/", headers={"X-Forwarded-For": "198.51.100.9, 203.0.113.10"}
+            )
+        assert response.status_code == 200
+        assert calls[0].headers["X-Forwarded-For"] == "203.0.113.10"
+    finally:
+        await close_client(client)
+
+
 @pytest.mark.parametrize(
     ("status", "message"),
     [
@@ -193,3 +219,24 @@ async def test_public_rate_middleware_returns_clean_429() -> None:
         "error": "rate_limited",
         "message": "Public MCP rate limit exceeded: per IP 60 requests / 60 s; retry after 1 s",
     }
+
+
+async def test_public_rate_quotas_are_per_resolved_peer_and_ignore_forged_xff() -> None:
+    async def endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+        await JSONResponse({"ok": True})(scope, receive, send)
+
+    limiter = PublicGCRALimiter(2, 60)
+    app = PublicPeerMiddleware(PublicRateLimitMiddleware(endpoint, limiter), [])
+    client_a_transport = httpx2.ASGITransport(app=app, client=("203.0.113.10", 1234))
+    client_b_transport = httpx2.ASGITransport(app=app, client=("203.0.113.11", 1234))
+    async with (
+        httpx2.AsyncClient(transport=client_a_transport, base_url="http://test") as client_a,
+        httpx2.AsyncClient(transport=client_b_transport, base_url="http://test") as client_b,
+    ):
+        headers = {"X-Forwarded-For": "198.51.100.11"}
+        assert (await client_a.post("/mcp", json={}, headers=headers)).status_code == 200
+        assert (await client_a.post("/mcp", json={}, headers=headers)).status_code == 200
+        assert (
+            await client_a.post("/mcp", json={}, headers={"X-Forwarded-For": "198.51.100.12"})
+        ).status_code == 429
+        assert (await client_b.post("/mcp", json={}, headers=headers)).status_code == 200

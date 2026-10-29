@@ -235,6 +235,8 @@ The rollout requires two healthy API replicas, applies migrations/permissions, r
 
 `python3 ops/lint.py` and the deployment unit tests validate configuration without deploying. `ops/verify-production.py` creates a fixed isolated verification stack; it is not a command for an existing production deployment. Browser verification must use browser-use CLI. Run restore and full-stack checks on a disposable host before relying on this configuration in production.
 
+The deployment configuration tests require the Docker CLI and its Compose v2 plugin because they run `docker compose config`; when Docker is unavailable, `ops/test_mcp_deployment.py` skips with that prerequisite in its reason. Install Docker Engine or Docker Desktop with Compose before expecting those tests to execute.
+
 ## GitHub production and desktop releases
 
 `Deploy production` is a manual workflow. Select a commit on `main`; backend,

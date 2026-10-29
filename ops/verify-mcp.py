@@ -36,6 +36,10 @@ def validate_config(config):
     assert env['OPENNAVO_AGENT_API_BASE'] == 'http://api-agent:8080/agent-api'
     assert json.loads(env['OPENNAVO_MCP_TRUSTED_PROXIES']) == [services['caddy']['networks']['proxy']['ipv4_address'] + '/32']
     assert not set(env) & {'DATABASE_URL', 'REDIS_URL', 'S3_ACCESS_KEY', 'S3_SECRET_KEY', 'LLM_API_KEY', 'OPENNAVO_TOKEN'}
+    public = services['public-mcp']
+    public_ip = public['networks']['proxy']['ipv4_address']
+    assert public_ip in services['api']['environment']['TRUSTED_PROXIES'].split(','), 'API must trust the reserved public-MCP proxy address'
+    assert public_ip != services['caddy']['networks']['proxy']['ipv4_address']
 
 
 def rpc(verification, token, method, params=None, extra_headers=None):

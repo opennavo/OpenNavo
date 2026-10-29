@@ -40,6 +40,9 @@ assert proxy_pool.subnet_of(proxy_subnet), 'proxy dynamic pool must stay inside 
 assert caddy_ip in proxy_subnet and caddy_ip not in proxy_pool, 'Caddy IP must be outside the dynamic pool'
 assert caddy_ip not in (proxy_subnet.network_address, proxy_subnet.broadcast_address,
     ipaddress.ip_address(proxy_ipam.get('gateway', str(proxy_subnet.network_address + 1)))), 'Caddy IP must be a usable non-gateway address'
+public_mcp_ip = ipaddress.ip_address(services['public-mcp']['networks']['proxy']['ipv4_address'])
+assert public_mcp_ip in proxy_subnet and public_mcp_ip not in proxy_pool and public_mcp_ip != caddy_ip, 'public-mcp IP must be reserved outside the dynamic pool and Caddy address'
+assert str(public_mcp_ip) in services['api']['environment']['TRUSTED_PROXIES'].split(','), 'API must trust the reserved public-mcp IP'
 
 assert {name for name, service in services.items() if 'ssr' in service.get('networks', {})} == {'api', 'web'}
 assert config['networks']['ssr']['internal']

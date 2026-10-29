@@ -32,7 +32,7 @@ def environment():
         REDIS_IMAGE='opennavo-redis:verify', CADDY_IMAGE='opennavo-caddy:verify',
         AGENT_GATEWAY_SECRET=secrets.token_urlsafe(48),
         CADDY_PROXY_SUBNET='10.250.90.0/24', CADDY_PROXY_IP_RANGE='10.250.90.128/25',
-        CADDY_PROXY_IP='10.250.90.2', SSR_PROXY_SUBNET='10.250.91.0/24', ADMIN_DIST=str(ROOT / 'apps/admin/dist'),
+        CADDY_PROXY_IP='10.250.90.2', PUBLIC_MCP_PROXY_IP='10.250.90.3', SSR_PROXY_SUBNET='10.250.91.0/24', ADMIN_DIST=str(ROOT / 'apps/admin/dist'),
         NUXT_OG_IMAGE_SECRET=secrets.token_hex(32),
         WEB_DOMAIN='http://web.opennavo.localhost', API_DOMAIN='http://api.opennavo.localhost',
         ADMIN_DOMAIN='http://admin.opennavo.localhost', CADDY_GLOBAL_OPTIONS='auto_https off',

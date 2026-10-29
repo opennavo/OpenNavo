@@ -16,6 +16,7 @@ import sys
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import urlsplit
@@ -42,6 +43,7 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 _KIND = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 logger = logging.getLogger(__name__)
+PUBLIC_PEER: ContextVar[str | None] = ContextVar("public_mcp_peer", default=None)
 
 
 class PublicMCPError(ToolError):
@@ -153,11 +155,15 @@ class PublicAPIClient:
         query = {
             key: value for key, value in (params or {}).items() if value is not None and value != ""
         }
+        headers = {"Accept": "application/json", "User-Agent": "OpenNavo-public-mcp/0.1"}
+        # Resolve the peer in PublicPeerMiddleware and never copy an inbound X-Forwarded-For.
+        if (peer := PUBLIC_PEER.get()) is not None:
+            headers["X-Forwarded-For"] = peer
         try:
             response = await self.http.get(
                 url,
                 params=query,
-                headers={"Accept": "application/json", "User-Agent": "OpenNavo-public-mcp/0.1"},
+                headers=headers,
             )
         except httpx2.TimeoutException:
             raise PublicMCPError(
@@ -797,7 +803,11 @@ class PublicPeerMiddleware:
             return
         state = scope.setdefault("state", {})
         state["public_peer"] = address
-        await self.app(scope, receive, send)
+        marker = PUBLIC_PEER.set(address)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            PUBLIC_PEER.reset(marker)
 
 
 @dataclass
@@ -879,8 +889,8 @@ def public_app(settings: PublicSettings | None = None) -> ASGIApp:
     server = create_public_server(settings)
     app = server.http_app(path=settings.path, stateless_http=True, transport="streamable-http")
     limiter = PublicGCRALimiter(settings.rate_limit, settings.rate_window_seconds)
-    return PublicRateLimitMiddleware(
-        PublicPeerMiddleware(app, settings.trusted_proxies), limiter, settings.path
+    return PublicPeerMiddleware(
+        PublicRateLimitMiddleware(app, limiter, settings.path), settings.trusted_proxies
     )
 
 
