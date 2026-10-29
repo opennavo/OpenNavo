@@ -95,7 +95,7 @@ sh ops/migrate.sh
 docker compose -f ops/docker-compose.prod.yml --profile ops run --rm storage-init
 docker compose -f ops/docker-compose.prod.yml --profile ops run --rm seed
 
-docker compose -f ops/docker-compose.prod.yml up -d --wait api worker web mcp caddy
+docker compose -f ops/docker-compose.prod.yml up -d --wait api worker web mcp public-mcp caddy
 docker compose -f ops/docker-compose.prod.yml ps
 ```
 
@@ -226,7 +226,7 @@ export COMPOSE_ENV_FILES="$HOME/.config/opennavo/production.env"
 sh ops/backup.sh
 python3 ops/rollout.py
 python3 ops/rollout.py --apply
-docker compose -f ops/docker-compose.prod.yml up -d --wait --no-deps web mcp caddy
+docker compose -f ops/docker-compose.prod.yml up -d --wait --no-deps web mcp public-mcp caddy
 ```
 
 The rollout requires two healthy API replicas, applies migrations/permissions, replaces APIs one at a time using a temporary third replica, then updates the worker. Install the matching admin bundle separately. A failed migration or incompatible schema may require a planned database restore, not merely an old image. Do not automatically run down migrations on production. For image-only rollback with a compatible schema, restore the previous tags and admin bundle, then repeat the rollout and frontend/MCP update. Keep the old backup until post-upgrade checks pass.

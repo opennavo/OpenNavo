@@ -47,6 +47,19 @@ class MCPDeploymentTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             mcp.validate_config(changed)
 
+    def test_public_mcp_isolated_and_anonymous(self):
+        service = self.config['services']['public-mcp']
+        env = service['environment']
+        self.assertEqual(service['entrypoint'], ['opennavo-public-mcp'])
+        self.assertEqual(set(service['networks']), {'proxy'})
+        self.assertEqual(env['OPENNAVO_PUBLIC_API_BASE'], 'http://api-proxy:8080/api/v1')
+        self.assertEqual(env['OPENNAVO_PUBLIC_MCP_RATE_LIMIT'], '60')
+        self.assertEqual(env['OPENNAVO_PUBLIC_MCP_RATE_WINDOW_SECONDS'], '60')
+        self.assertFalse(set(env) & {'AGENT_GATEWAY_SECRET', 'OPENNAVO_AGENT_API_BASE', 'OPENNAVO_TOKEN', 'OPENNAVO_OAUTH_ISSUER'})
+        self.assertNotIn('ports', service)
+        self.assertEqual(service['user'], '10001:10001')
+        self.assertTrue(service['read_only'] and 'ALL' in service['cap_drop'])
+
     def test_gateway_template_empty_and_verification_random(self):
         self.assertIn('AGENT_GATEWAY_SECRET=\n', (ROOT / '.env.example').read_text())
         with patch.dict(verification.os.environ, {'AGENT_GATEWAY_SECRET': 'do-not-inherit', 'LLM_BASE_URL': 'https://do-not-inherit.example', 'LLM_SETTINGS_ENCRYPTION_KEY': 'do-not-inherit'}):
@@ -66,6 +79,15 @@ class MCPDeploymentTests(unittest.TestCase):
         self.assertIn('max_size 2MB', text)
         self.assertIn('header_up -X-Agent-Gateway-Key', text)
         self.assertIn('header_up -X-Agent-Client-IP', text)
+
+    def test_public_mcp_is_on_web_domain_only(self):
+        text = (ROOT / 'caddy/Caddyfile').read_text()
+        web = text[text.index('{$WEB_DOMAIN} {'):text.index('{$API_DOMAIN} {')]
+        self.assertIn('@publicMcp path /mcp', web)
+        self.assertIn('reverse_proxy public-mcp-proxy:8790', web)
+        self.assertIn('@publicMcpOther path /mcp/*', web)
+        admin = text[text.index('{$ADMIN_DOMAIN} {'):]
+        self.assertIn('reverse_proxy mcp-proxy:8790', admin)
 
     def test_caddy_hides_internal_sitemap_feed(self):
         text = (ROOT / 'caddy/Caddyfile').read_text()

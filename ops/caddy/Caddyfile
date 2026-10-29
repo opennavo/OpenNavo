@@ -46,6 +46,19 @@
 	handle @internalAgent {
 		respond 404
 	}
+	@publicMcp path /mcp
+	handle @publicMcp {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy public-mcp-proxy:8790 {
+			flush_interval -1
+		}
+	}
+	@publicMcpOther path /mcp/*
+	handle @publicMcpOther {
+		respond 404
+	}
 	import security-web
 	encode zstd gzip
 	reverse_proxy {

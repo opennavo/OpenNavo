@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 opennavo-mcp = "opennavo_mcp.server:main"
+opennavo-public-mcp = "opennavo_mcp.public_server:main"
 
 [build-system]
 requires = ["hatchling"]

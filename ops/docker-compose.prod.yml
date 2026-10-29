@@ -116,6 +116,39 @@ services:
       retries: 3
       start_period: 60s
       start_interval: 2s
+  public-mcp:
+    image: ${MCP_IMAGE:?Build or pull MCP_IMAGE}
+    restart: unless-stopped
+    user: '10001:10001'
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
+    security_opt: ['no-new-privileges:true']
+    cap_drop: [ALL]
+    entrypoint: ['opennavo-public-mcp']
+    environment:
+      # The public MCP process has no gateway secret, token, OAuth issuer or agent API setting.
+      OPENNAVO_PUBLIC_API_BASE: http://api-proxy:8080/api/v1
+      OPENNAVO_PUBLIC_MCP_HOST: 0.0.0.0
+      OPENNAVO_PUBLIC_MCP_PORT: '8790'
+      OPENNAVO_PUBLIC_MCP_PATH: /mcp
+      OPENNAVO_PUBLIC_MCP_TRUSTED_PROXIES: '["${CADDY_PROXY_IP:-172.30.80.2}/32"]'
+      OPENNAVO_PUBLIC_MCP_RATE_LIMIT: '60'
+      OPENNAVO_PUBLIC_MCP_RATE_WINDOW_SECONDS: '60'
+    networks:
+      proxy:
+        aliases: [public-mcp-proxy]
+    deploy:
+      resources:
+        limits: {memory: 256M}
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ['CMD', 'python', '-I', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/healthz', timeout=2).close()"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
   worker:
     <<: *server
     entrypoint: ['/worker']
@@ -225,6 +258,7 @@ services:
       api: {condition: service_healthy}
       web: {condition: service_started}
       mcp: {condition: service_healthy}
+      public-mcp: {condition: service_healthy}
   redis:
     image: ${REDIS_IMAGE:-opennavo-redis:local}
     command: ['redis-server', '--appendonly', 'yes', '--maxmemory', '1024mb', '--maxmemory-policy', 'noeviction']

@@ -1,5 +1,31 @@
 # OpenNavo MCP
 
+## Public read-only MCP
+
+The `opennavo-public-mcp` entry point is a separate anonymous FastMCP server. It
+registers only the nine public catalog tools (`search_apps`, `get_app`,
+`get_app_releases`, `get_app_dependencies`, `similar_apps`, `list_categories`,
+`rankings`, `collections`, and `articles`) and sends only allowlisted `GET`
+requests to `OPENNAVO_PUBLIC_API_BASE` (default
+`https://api.opennavo.com/api/v1`). It has no admin tools, OAuth, gateway key,
+agent API, or credentials. Results select public fields, include OpenNavo links,
+and are capped at 24 KiB with bounded text and lists.
+
+Production Compose runs this process as `public-mcp` and Caddy routes the exact
+`/mcp` path on `WEB_DOMAIN` (`https://opennavo.com/mcp`) to it. The admin MCP
+continues to use `/mcp` on `ADMIN_DOMAIN`; the two services have separate
+containers and aliases.
+
+The MCP process uses a separate per-IP GCRA quota of **60 requests per 60
+seconds** (burst 60). That matches the public search quota (60/minute) and is
+below the 300/minute quota on the ordinary GET endpoints used by the other
+tools; this server does not expose package lookup, whose API quota is
+30/minute. Forwarded client IPs are accepted only when the direct peer is in
+`OPENNAVO_PUBLIC_MCP_TRUSTED_PROXIES`; otherwise the connection peer is used.
+The public API package lookup is intentionally `POST /packages/lookup` with a
+JSON body; `GET /packages/lookup?tokens=...` is outside the OpenAPI route and
+returns 404.
+
 Python 3.13 + uv, using FastMCP 4.0.x. The 103 tools and 9 resources adapt only the internal `/agent-api`.
 
 Run `uv sync --locked` in this directory. From the repository root, run `make gen-mcp lint-mcp test-mcp build-mcp` to generate and check artifacts. `make gen` and `make lint test` also include MCP. The authoritative tool manifest is `src/opennavo_mcp/tools/manifest.py`.
