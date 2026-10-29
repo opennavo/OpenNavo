@@ -109,6 +109,14 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
         :name="pkg.displayName"
         :command="pkg.installCommand"
       />
+      <PackageCommand
+        v-if="!isLink && !unavailable"
+        class="on-mobile-install-command hidden basis-full max-[640px]:block"
+        :command="pkg.installCommand"
+        :copy-label="t('package.copy.install')"
+        :title="t('package.install.run')"
+        @copied="trackEvent('copy_install_command')"
+      />
       <PackageOfficialDownload v-if="showOfficialDownload" :pkg="pkg" />
       <OnButton v-if="homepage" shape="round" :href="homepage" target="_blank" rel="noopener noreferrer">
         {{ t('package.homepage') }}

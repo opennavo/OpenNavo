@@ -169,7 +169,6 @@ usePageSeo({
       :screenshots-label="t('package.screenshots')"
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
-      :info="[]"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
       :related-more-href="localePath('/apps')"
@@ -209,7 +208,7 @@ usePageSeo({
         />
       </template>
       <template #aside>
-        <MonthlyInstalls v-if="can.installs" :installs="pkg.installs" />
+        <MonthlyInstalls v-if="can.installs" class="hidden lg:block" :installs="pkg.installs" />
         <PackageSecurityPromo v-if="isSecurityApp" />
       </template>
       <template #asideEnd>

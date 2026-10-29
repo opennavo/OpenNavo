@@ -6,8 +6,6 @@ import OnAppIcon from './OnAppIcon.vue';
 import type { OnImageVariant } from '../utils/image';
 import OnCodeText from './OnCodeText.vue';
 import OnInstallCommand from './OnInstallCommand.vue';
-import OnKeyValueList from './OnKeyValueList.vue';
-import type { OnKeyValueItem } from './OnKeyValueList.vue';
 import OnScreenshotGallery from './OnScreenshotGallery.vue';
 import type { OnScreenshot } from './OnScreenshotGallery.vue';
 
@@ -37,7 +35,6 @@ export interface OnPackageOverviewProps {
   caveatsTitle?: string;
   /** Install command; link apps have none and fill the `download` slot instead. */
   command?: string;
-  info: readonly OnKeyValueItem[];
   related?: readonly OnRelatedPackage[];
   relatedTitle?: string;
   relatedMoreHref?: string;
@@ -75,18 +72,33 @@ defineSlots<{
 </script>
 
 <template>
-  <div class="grid grid-cols-1 gap-20px pt-4px lg:grid-cols-[minmax(0,1fr)_320px]">
-    <div class="flex min-w-0 flex-col gap-16px">
+  <div class="grid grid-cols-1 gap-20px pt-4px lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+    <div v-if="$slots.top" class="min-w-0 lg:col-start-1 lg:row-start-1">
       <slot name="top" />
-      <OnScreenshotGallery
-        v-if="screenshots.length"
-        :items="screenshots"
-        :label="screenshotsLabel"
-        :name="screenshotsName"
-      />
-      <OnAboutSection v-if="hasAbout">
-        <slot name="about" />
-      </OnAboutSection>
+    </div>
+    <OnScreenshotGallery
+      v-if="screenshots.length"
+      class="min-w-0 lg:col-start-1 lg:row-start-1"
+      :items="screenshots"
+      :label="screenshotsLabel"
+      :name="screenshotsName"
+    />
+    <OnAboutSection v-if="hasAbout" class="min-w-0 lg:col-start-1 lg:row-start-2">
+      <slot name="about" />
+    </OnAboutSection>
+    <div v-if="$slots.spec" class="min-w-0 lg:col-start-2 lg:row-start-1">
+      <slot name="spec" />
+    </div>
+    <div v-if="$slots.download" class="min-w-0 lg:col-start-2 lg:row-start-2">
+      <slot name="download" />
+    </div>
+    <section
+      v-if="command"
+      class="min-w-0 rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px lg:col-start-2 lg:row-start-3"
+    >
+      <OnInstallCommand :command="command" @copied="emit('copied', $event)" />
+    </section>
+    <div class="flex min-w-0 flex-col gap-16px lg:col-start-1 lg:row-start-3">
       <slot name="main" />
       <section
         v-if="caveats"
@@ -98,62 +110,47 @@ defineSlots<{
         /></pre>
       </section>
     </div>
-    <aside class="flex min-w-0 flex-col gap-14px">
-      <slot name="download" />
-      <section
-        v-if="command"
-        class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px"
-      >
-        <OnInstallCommand :command="command" @copied="emit('copied', $event)" />
-      </section>
-      <slot name="spec" />
-      <section
-        v-if="info.length"
-        class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-4px"
-      >
-        <OnKeyValueList :items="info" />
-      </section>
+    <div v-if="$slots.aside" class="flex min-w-0 flex-col gap-14px lg:col-start-2 lg:row-start-4">
       <slot name="aside" />
-      <!-- Similar apps (.sim): 32 icon, name, summary, row dividers; whole row clickable. -->
-      <section v-if="related.length" class="mt-4px">
-        <h2 class="m-0 text-headline text-ink-primary">{{ relatedTitle }}</h2>
-        <ul class="m-0 mt-8px list-none p-0">
-          <li
-            v-for="pkg in related"
-            :key="pkg.key"
-            class="relative flex items-center gap-10px border-t border-t-solid border-line-subtle py-8px first:border-t-0"
-          >
-            <OnAppIcon
-              :kind="pkg.kind"
-              :token="pkg.token"
-              :name="pkg.name"
-              :src="pkg.src"
-              :variants="pkg.variants"
-              :accent="pkg.accent"
-              :size="32"
-            />
-            <span class="min-w-0 flex-1">
-              <component
-                :is="linkAs"
-                v-bind="linkAttrs(pkg.href)"
-                class="on-stretched block truncate text-12.5px font-600 text-ink-primary no-underline outline-none focus-visible:underline"
-              >
-                {{ pkg.name }}
-              </component>
-              <span v-if="pkg.description" class="block truncate text-11px text-ink-tertiary">{{
-                pkg.description
-              }}</span>
-            </span>
-          </li>
-        </ul>
-        <a
-          v-if="relatedMoreHref"
-          :href="relatedMoreHref"
-          class="mt-8px inline-flex text-12.5px font-600 text-ink-secondary no-underline hover:text-ink-primary"
-          >{{ relatedMoreLabel }}</a
+    </div>
+    <section v-if="related.length" class="min-w-0 lg:col-start-2 lg:row-start-5">
+      <h2 class="m-0 text-headline text-ink-primary">{{ relatedTitle }}</h2>
+      <ul class="m-0 mt-8px list-none p-0">
+        <li
+          v-for="pkg in related"
+          :key="pkg.key"
+          class="relative flex items-center gap-10px border-t border-t-solid border-line-subtle py-8px first:border-t-0"
         >
-      </section>
+          <OnAppIcon
+            :kind="pkg.kind"
+            :token="pkg.token"
+            :name="pkg.name"
+            :src="pkg.src"
+            :variants="pkg.variants"
+            :accent="pkg.accent"
+            :size="32"
+          />
+          <span class="min-w-0 flex-1">
+            <component
+              :is="linkAs"
+              v-bind="linkAttrs(pkg.href)"
+              class="on-stretched block truncate text-12.5px font-600 text-ink-primary no-underline outline-none focus-visible:underline"
+            >
+              {{ pkg.name }}
+            </component>
+            <span v-if="pkg.description" class="block truncate text-11px text-ink-tertiary">{{ pkg.description }}</span>
+          </span>
+        </li>
+      </ul>
+      <a
+        v-if="relatedMoreHref"
+        :href="relatedMoreHref"
+        class="mt-8px inline-flex text-12.5px font-600 text-ink-secondary no-underline hover:text-ink-primary"
+        >{{ relatedMoreLabel }}</a
+      >
+    </section>
+    <div v-if="$slots.asideEnd" class="min-w-0 lg:col-start-2 lg:row-start-6">
       <slot name="asideEnd" />
-    </aside>
+    </div>
   </div>
 </template>

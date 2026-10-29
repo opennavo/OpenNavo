@@ -459,6 +459,7 @@ export default {
       token: 'Token',
       installedVersion: '已安装版本',
       installLocation: '安装位置',
+      checked: '已检查',
       yes: '是',
       no: '否'
     },

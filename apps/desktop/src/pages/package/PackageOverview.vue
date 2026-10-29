@@ -120,7 +120,6 @@ function onCopied(text: string) {
     :caveats="detail?.caveats"
     :caveats-title="t('package.caveats')"
     :command="command"
-    :info="[]"
     :related="relatedItems"
     :related-title="t('package.related')"
     related-more-href="/discover"
@@ -152,11 +151,11 @@ function onCopied(text: string) {
         :rows="spec.rows"
         :title="t('package.spec.title')"
         :checked-at="spec.checkedAt"
-        :checked-label="t('package.quick.checked')"
+        :checked-label="t('package.spec.checked')"
       />
     </template>
     <template #aside>
-      <MonthlyInstallsCard v-if="detail && kind !== 'link'" :installs="detail.installs" />
+      <MonthlyInstallsCard v-if="detail && kind !== 'link'" class="hidden lg:block" :installs="detail.installs" />
       <MasAlsoPanel v-if="kind !== 'formula'" :bundle-ids="storeBundleIds" />
     </template>
   </OnPackageOverview>

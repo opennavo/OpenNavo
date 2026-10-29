@@ -57,6 +57,22 @@ const rows = computed(() =>
   })
 );
 
+const mobileRows = computed(() =>
+  rows.value.flatMap(row => {
+    const architectures = row.chips.split(' · ').filter(Boolean);
+    return (architectures.length ? architectures : [t('package.requirements.allChips')]).map((chip, index) => ({
+      ...row,
+      key: `${row.key}:${index}`,
+      chips: chip
+    }));
+  })
+);
+
+async function copySha(sha: string) {
+  if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+  await navigator.clipboard.writeText(sha).catch(() => undefined);
+}
+
 const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? []);
 </script>
 
@@ -71,7 +87,7 @@ const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? [
     <h2 id="requirements-title" class="m-0 text-13.5px font-600 text-ink-primary">
       {{ t('package.requirements.title') }}
     </h2>
-    <div class="mt-8px overflow-x-auto">
+    <div class="mt-8px overflow-x-auto max-[640px]:hidden">
       <table class="w-full border-collapse text-left text-12.5px leading-[1.5]">
         <thead>
           <tr class="text-11.5px text-ink-tertiary">
@@ -121,6 +137,48 @@ const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? [
           </tr>
         </tbody>
       </table>
+    </div>
+    <div class="mt-8px hidden flex-col gap-8px max-[640px]:flex">
+      <article
+        v-for="row in mobileRows"
+        :key="row.key"
+        class="rounded-default border border-solid border-line-subtle bg-surface-base px-12px py-10px"
+      >
+        <div class="flex items-start justify-between gap-10px">
+          <div>
+            <h3 class="m-0 text-12.5px font-600 text-ink-primary">{{ row.chips }}</h3>
+            <p class="m-0 mt-2px text-11.5px text-ink-tertiary">{{ row.macos || '—' }} · {{ row.versions || '—' }}</p>
+          </div>
+          <OnChip v-if="row.stale" tone="warning">{{ t('package.facts.stale') }}</OnChip>
+        </div>
+        <a
+          v-if="row.download"
+          :href="row.download"
+          rel="nofollow noopener noreferrer"
+          class="mt-8px block text-12px text-ink-secondary underline-offset-2 [overflow-wrap:anywhere] hover:text-ink-primary"
+          >{{ displayUrl(row.download) }}</a
+        >
+        <div v-if="row.sha256" class="mt-6px flex items-center justify-between gap-8px">
+          <code class="min-w-0 truncate font-mono text-11.5px text-component-mono-text"
+            >SHA-256 {{ row.sha256.slice(0, 12) }}…</code
+          >
+          <button
+            type="button"
+            class="m-0 inline-flex min-h-24px items-center rounded-tiny border border-solid border-line-default bg-transparent px-7px text-11px text-ink-secondary outline-none hover:text-ink-primary focus-visible:shadow-focus-ring"
+            :aria-label="t('download.copySha')"
+            @click="copySha(row.sha256)"
+          >
+            {{ t('common.copy') }}
+          </button>
+        </div>
+        <p class="m-0 mt-6px text-11px text-ink-tertiary [overflow-wrap:anywhere]">
+          {{ row.source
+          }}<template v-if="row.checked">
+            · {{ row.checked.before }}<time :datetime="row.checked.iso">{{ row.checked.date }}</time
+            >{{ row.checked.after }}</template
+          >
+        </p>
+      </article>
     </div>
     <p v-if="conflicts.length" class="m-0 mt-8px text-12px leading-[1.6] text-ink-secondary">
       {{

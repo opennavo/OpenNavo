@@ -92,10 +92,10 @@ const glow = computed(() => ({ background: detailGlow(props.accent ?? undefined)
       </div>
     </div>
     <div class="relative flex shrink-0 flex-col items-start gap-10px md:items-end">
-      <div v-if="$slots.actions" class="flex items-center gap-8px">
+      <div v-if="$slots.actions" class="flex w-full flex-wrap items-center gap-8px md:w-auto md:justify-end">
         <slot name="actions" />
       </div>
-      <small v-if="meta" class="text-12px text-ink-tertiary">{{ meta }}</small>
+      <small v-if="meta" class="text-12px text-ink-tertiary max-[640px]:hidden">{{ meta }}</small>
     </div>
     <!-- Default slot: header overlays, such as desktop uninstall confirmation. -->
     <slot />

@@ -473,6 +473,7 @@ const messages: MessageSchema = {
       token: 'Token',
       installedVersion: 'Installed version',
       installLocation: 'Install location',
+      checked: 'Checked',
       yes: 'Yes',
       no: 'No'
     },
