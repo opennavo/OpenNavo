@@ -14,6 +14,7 @@ import logging
 import re
 import sys
 import time
+from collections import OrderedDict
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -38,6 +39,7 @@ MAX_UPSTREAM_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_BYTES = 24 * 1024
 MAX_TEXT = 900
 MAX_LIST = 12
+PUBLIC_GCRA_MAX_ENTRIES = 10_000
 _TOKEN = re.compile(r"^[a-z0-9][a-z0-9+_.@-]{0,127}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 _KIND = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
@@ -817,15 +819,27 @@ class _Bucket:
 
 
 class PublicGCRALimiter:
-    """In-process GCRA matching the API's count/window/burst semantics."""
+    """In-process GCRA matching the API's count/window/burst semantics.
 
-    def __init__(self, count: int = 60, window_seconds: float = 60.0):
-        if count <= 0 or window_seconds <= 0:
+    Client keys are untrusted, so buckets use a hard bounded LRU. Expired
+    windows are removed on every access. A denied check refreshes that key's
+    LRU position, so an active limit can only reset after its bucket expires or
+    is evicted after enough other clients access the limiter to make it the LRU.
+    """
+
+    def __init__(
+        self,
+        count: int = 60,
+        window_seconds: float = 60.0,
+        max_entries: int = PUBLIC_GCRA_MAX_ENTRIES,
+    ):
+        if count <= 0 or window_seconds <= 0 or not 1 <= max_entries <= PUBLIC_GCRA_MAX_ENTRIES:
             raise ValueError("invalid rate limit")
         self.count = count
         self.window_seconds = window_seconds
         self.interval = window_seconds / count
-        self._buckets: dict[str, _Bucket] = {}
+        self.max_entries = max_entries
+        self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
         self._lock = asyncio.Lock()
 
     @property
@@ -839,16 +853,22 @@ class PublicGCRALimiter:
             raise ValueError("invalid rate limit cost")
         current = time.monotonic() if now is None else now
         async with self._lock:
+            for bucket_key, bucket in list(self._buckets.items()):
+                if bucket.expires <= current:
+                    del self._buckets[bucket_key]
             old = self._buckets.get(key)
+            if old is not None:
+                self._buckets.move_to_end(key)
             tat = old.tat if old and old.expires > current else current
             allow_at = tat - (self.count - cost) * self.interval
             if current < allow_at:
                 return False, max(1, int(allow_at - current + 0.999)), 0
             next_tat = max(tat, current) + cost * self.interval
             self._buckets[key] = _Bucket(next_tat, next_tat)
+            self._buckets.move_to_end(key)
             remaining = max(0, self.count - int((next_tat - current) / self.interval + 0.999))
-            if len(self._buckets) > 10_000:
-                self._buckets = {k: v for k, v in self._buckets.items() if v.expires > current}
+            while len(self._buckets) > self.max_entries:
+                self._buckets.popitem(last=False)
             return True, 0, remaining
 
 

@@ -182,6 +182,31 @@ async def test_public_gcra_is_per_ip_and_bounded() -> None:
     assert (await limiter.check("203.0.113.2", now=0.0))[0] is True
 
 
+async def test_public_gcra_caps_buckets_and_evicts_least_recently_used() -> None:
+    limiter = PublicGCRALimiter(1, 60, max_entries=3)
+    for key in ("a", "b", "c"):
+        assert (await limiter.check(key, now=0.0))[0] is True
+    assert list(limiter._buckets) == ["a", "b", "c"]  # pyright: ignore[reportPrivateUsage]
+
+    # A denied request still makes the limited client recent; the oldest other
+    # client is evicted when the fourth distinct client arrives.
+    allowed, _, _ = await limiter.check("a", now=0.0)
+    assert allowed is False
+    assert list(limiter._buckets) == ["b", "c", "a"]  # pyright: ignore[reportPrivateUsage]
+    assert (await limiter.check("d", now=1.0))[0] is True
+    assert list(limiter._buckets) == ["c", "a", "d"]  # pyright: ignore[reportPrivateUsage]
+    assert len(limiter._buckets) == 3  # pyright: ignore[reportPrivateUsage]
+    assert (await limiter.check("a", now=1.0))[0] is False
+
+
+async def test_public_gcra_purges_expired_buckets_on_access() -> None:
+    limiter = PublicGCRALimiter(1, 60, max_entries=3)
+    assert (await limiter.check("expired-a", now=0.0))[0] is True
+    assert (await limiter.check("expired-b", now=0.0))[0] is True
+    assert (await limiter.check("fresh", now=60.0))[0] is True
+    assert list(limiter._buckets) == ["fresh"]  # pyright: ignore[reportPrivateUsage]
+
+
 @pytest.mark.parametrize(
     ("trusted", "forwarded", "expected"),
     [
