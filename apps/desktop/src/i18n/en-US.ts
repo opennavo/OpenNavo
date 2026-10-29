@@ -462,6 +462,8 @@ const messages: MessageSchema = {
       license: 'License'
     },
     spec: {
+      downloadSource: 'Download source',
+      fontFiles: 'Font files',
       title: 'At a glance',
       price: 'Price',
       system: 'System',
