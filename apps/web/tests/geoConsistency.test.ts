@@ -225,7 +225,8 @@ describe('G5 cross-export normalized facts', () => {
         expect(schema?.softwareRequirements).toContain('13');
         break;
       case 'G5-23':
-        expect(html.requirements).toContain('2026-10-19');
+        expect(html.sources).toContain('2026-10-19');
+        expect(html.requirements).not.toContain('2026-10-19');
         expect(md).not.toContain('2020-01-01');
         expect(schema).toHaveProperty('softwareRequirements');
         break;

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { isThirdPartyTap } from '@opennavo/shared';
 import type { PackageKind } from '@opennavo/shared';
-import { displayUrl, OnCaskArtifacts, OnCodeText, OnKeyValueList, useUiMessages } from '@opennavo/ui';
+import { displayUrl, OnButton, OnCaskArtifacts, OnCodeText, OnKeyValueList, useUiMessages } from '@opennavo/ui';
 import type { OnKeyValueItem } from '@opennavo/ui';
 import { detailsDescription } from '~/utils/seoTitles';
+import { shownRequirements } from '~/utils/packageFacts';
 import PackageRequirements from './PackageRequirements.vue';
 import PackageUninstall from './PackageUninstall.vue';
 import PackageDependencySummary from './PackageDependencySummary.vue';
@@ -18,8 +19,23 @@ const { data: pkg, token } = await usePackage(props.kind);
 if (pkg.value?.kind === 'link') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true });
 
 const messages = useUiMessages();
+const toasts = useToasts();
 // T6: the download, its checksum, artifacts and caveats come from facts.overview, as on the overview.
 const overview = computed(() => pkg.value?.facts.overview);
+// Older API data can have summary download facts without a dated per-architecture row.
+const download = computed(() => {
+  const url = overview.value?.downloadUrl;
+  return url && !shownRequirements(pkg.value!).some(row => row.downloadUrl === url) ? url : null;
+});
+const checksum = computed(() => {
+  const sha = overview.value?.sha256;
+  return sha && !shownRequirements(pkg.value!).some(row => row.sha256 === sha) ? sha : null;
+});
+async function copyChecksum() {
+  if (!checksum.value) return;
+  await navigator.clipboard.writeText(checksum.value);
+  toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+}
 
 const items = computed<OnKeyValueItem[]>(() => {
   const value = pkg.value;
@@ -79,6 +95,32 @@ usePageSeo({
       <section class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-4px">
         <OnKeyValueList :items="items" />
       </section>
+      <dl
+        v-if="download || checksum"
+        class="m-0 min-w-0 rounded-big border border-solid border-line-subtle bg-surface-card px-18px py-16px text-12.5px"
+      >
+        <template v-if="download">
+          <dt class="text-ink-tertiary">{{ t('package.details.download') }}</dt>
+          <dd class="m-0 mt-6px [overflow-wrap:anywhere]">
+            <a :href="download" rel="nofollow noopener noreferrer" class="text-ink-primary">{{ download }}</a>
+          </dd>
+        </template>
+        <template v-if="checksum">
+          <dt class="mt-12px text-ink-tertiary first:mt-0">SHA-256</dt>
+          <dd class="m-0 mt-6px flex min-w-0 items-center gap-8px text-ink-primary">
+            <code class="detail-checksum-full min-w-0 [overflow-wrap:anywhere]">{{ checksum }}</code>
+            <code class="detail-checksum-short">{{ checksum.slice(0, 12) }}…</code>
+            <OnButton
+              size="xs"
+              icon="copy"
+              class="shrink-0"
+              :aria-label="`${t('common.copy')} SHA-256`"
+              @click="copyChecksum"
+              >{{ t('common.copy') }}</OnButton
+            >
+          </dd>
+        </template>
+      </dl>
       <OnCaskArtifacts v-if="overview?.artifacts.entries?.length" :entries="overview.artifacts.entries" />
       <PackageUninstall :pkg="pkg" :homebrew="true" :guide="false" />
       <section
@@ -95,3 +137,17 @@ usePageSeo({
     </div>
   </div>
 </template>
+
+<style>
+.detail-checksum-short {
+  display: none;
+}
+@media (max-width: 640px) {
+  .detail-checksum-full {
+    display: none;
+  }
+  .detail-checksum-short {
+    display: inline;
+  }
+}
+</style>
