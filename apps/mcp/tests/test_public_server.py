@@ -156,15 +156,141 @@ async def test_public_tools_are_read_only_and_compact() -> None:
         data = cast(dict[str, Any], result.data)
         assert data["link"] == "https://opennavo.com/apps/demo"
         assert data["installCommand"] == "brew install --cask demo"
+        assert data["safety"] == {"deprecated": False, "disabled": False}
         assert "hidden" not in json.dumps(data)
         assert "must not pass" not in json.dumps(data)
         assert len(json.dumps(data, ensure_ascii=False).encode()) <= MAX_OUTPUT_BYTES
+
+
+async def test_get_app_returns_disabled_package_with_lifecycle_notices() -> None:
+    notice = {
+        "date": "2026-10-01",
+        "reason": "no longer maintained",
+        "replacement": {"kind": "cask", "token": "successor"},
+    }
+
+    def handle(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            json={
+                "code": "0000",
+                "data": {
+                    "token": "demo",
+                    "disabled": True,
+                    "deprecated": True,
+                    "deprecation": {**notice, "internal": "must not pass"},
+                    "disable": notice,
+                },
+            },
+        )
+
+    api = PublicAPIClient(settings(), httpx2.AsyncClient(transport=httpx2.MockTransport(handle)))
+    async with Client(create_public_server(settings(), api)) as client:
+        result = await client.call_tool("get_app", {"token": "demo"})
+        assert result.is_error is False
+        data = cast(dict[str, Any], result.data)
+        assert data["link"] == "https://opennavo.com/apps/demo"
+        assert data["safety"] == {
+            "deprecated": True,
+            "disabled": True,
+            "deprecation": notice,
+            "disable": notice,
+        }
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("search_apps", {"q": "demo"}),
+        ("similar_apps", {"token": "demo"}),
+        ("rankings", {}),
+        ("collections", {}),
+        ("collections", {"slug": "demo"}),
+    ],
+)
+async def test_package_lists_preserve_packages_and_explicit_status(
+    tool: str, arguments: dict[str, Any]
+) -> None:
+    packages = [
+        {"token": "deprecated-app", "deprecated": True},
+        {"token": "disabled-app", "disabled": True},
+        {"token": "default-app"},
+        {"token": "hidden-app", "hidden": True, "deprecated": False, "disabled": False},
+    ]
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        data: Any
+        if request.url.path.endswith("/search"):
+            data = {"records": [{"package": package} for package in packages]}
+        elif request.url.path.endswith("/related"):
+            data = packages
+        elif request.url.path.endswith("/rankings"):
+            data = {"records": [{"package": package} for package in packages]}
+        elif request.url.path.endswith("/collections/demo"):
+            data = {"items": [{"package": package} for package in packages]}
+        else:
+            data = {"records": [{"slug": "demo", "previewItems": packages}]}
+        return httpx2.Response(200, json={"code": "0000", "data": data})
+
+    api = PublicAPIClient(settings(), httpx2.AsyncClient(transport=httpx2.MockTransport(handle)))
+    async with Client(create_public_server(settings(), api)) as client:
+        result = await client.call_tool(tool, arguments)
+        assert result.is_error is False
+        data = cast(dict[str, Any], result.data)
+        if tool == "rankings":
+            apps = [row["app"] for row in data["rankings"]]
+        elif tool == "collections" and not arguments:
+            apps = data["collections"][0]["apps"]
+        else:
+            apps = data["apps"]
+        assert [app["token"] for app in apps] == [package["token"] for package in packages]
+        assert [(app["deprecated"], app["disabled"]) for app in apps] == [
+            (True, False),
+            (False, True),
+            (False, False),
+            (False, False),
+        ]
+        assert all(type(app[key]) is bool for app in apps for key in ("deprecated", "disabled"))
+
+
+async def test_dependency_packages_include_status_recursively() -> None:
+    def handle(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            json={
+                "code": "0000",
+                "data": {
+                    "dependencies": [
+                        {
+                            "token": "disabled-app",
+                            "disabled": True,
+                            "children": [{"token": "deprecated-app", "deprecated": True}],
+                        }
+                    ],
+                    "dependents": {"count": 1, "top": [{"token": "default-app"}]},
+                },
+            },
+        )
+
+    api = PublicAPIClient(settings(), httpx2.AsyncClient(transport=httpx2.MockTransport(handle)))
+    async with Client(create_public_server(settings(), api)) as client:
+        result = await client.call_tool("get_app_dependencies", {"token": "demo"})
+        assert result.is_error is False
+        data = cast(dict[str, Any], result.data)
+        dependency = data["dependencies"][0]
+        child = dependency["children"][0]
+        dependent = data["dependents"]["top"][0]
+        assert dependency["disabled"] is True and dependency["deprecated"] is False
+        assert child["deprecated"] is True and child["disabled"] is False
+        assert dependent["deprecated"] is False and dependent["disabled"] is False
 
 
 def test_selected_outputs_have_links_and_size_caps() -> None:
     summary = app_summary({"kind": "cask", "token": "demo", "hidden": True})
     assert summary["link"] == "https://opennavo.com/apps/demo"
     assert "hidden" not in summary
+    assert summary["deprecated"] is False
+    assert summary["disabled"] is False
     result = fit_public_output(
         {"link": "https://opennavo.com/apps/demo", "items": ["x" * 10_000] * 100},
         "https://opennavo.com/apps/demo",

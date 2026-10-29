@@ -228,6 +228,10 @@ def _pick(source: Mapping[str, Any], *keys: str) -> dict[str, Any]:
     return {key: source[key] for key in keys if key in source and source[key] is not None}
 
 
+def _package_status(source: Mapping[str, Any]) -> dict[str, bool]:
+    return {key: bool(source.get(key, False)) for key in ("deprecated", "disabled")}
+
+
 def app_link(kind: str, token: str) -> str:
     return f"{PUBLIC_SITE}/apps/{token}"
 
@@ -256,14 +260,13 @@ def app_summary(value: Any) -> dict[str, Any]:
         "installs30d",
         "rank30d",
         "autoUpdates",
-        "deprecated",
-        "disabled",
         "editorChoice",
         "isFont",
         "isLibrary",
         "iconUrl",
         "accentColor",
     )
+    out.update(_package_status(source))
     if "summary" in source:
         out["summary"] = _text(source["summary"], 450)
     category = _category(source.get("primaryCategory"))
@@ -300,6 +303,7 @@ def _release(value: Any, link: str) -> dict[str, Any]:
 def _dependency(value: Any) -> dict[str, Any]:
     source = _map(value)
     out = _pick(source, "kind", "token", "name", "displayName", "version", "optional")
+    out.update(_package_status(source))
     token, kind = source.get("token"), source.get("kind", "cask")
     if isinstance(token, str) and token:
         out["link"] = app_link(str(kind), token)
@@ -423,9 +427,15 @@ def register_public_tools(server: FastMCP[Any], api: PublicAPIClient) -> None:
         if source.get("supports") and isinstance(source["supports"], dict):
             out["supports"] = _pick(_map(source["supports"]), "arm64", "x86_64")
         out["openSource"] = _pick(source, "repoUrl", "license")
-        out["safety"] = _pick(
-            source, "deprecated", "disabled", "autoUpdates", "kegOnly", "minMacos"
-        )
+        safety = _pick(source, "autoUpdates", "kegOnly", "minMacos")
+        safety.update(_package_status(source))
+        for key in ("deprecation", "disable"):
+            if isinstance(source.get(key), dict):
+                notice = _map(source[key])
+                safety[key] = _pick(notice, "date", "reason")
+                if isinstance(notice.get("replacement"), dict):
+                    safety[key]["replacement"] = _pick(_map(notice["replacement"]), "kind", "token")
+        out["safety"] = safety
         links = {"detail": link}
         for key, alias in (
             ("homepage", "homepage"),
