@@ -25,7 +25,7 @@ const formattingLocale = computed(() => toAppLocale(useI18nLocale.value));
 // then, in the order people search for them: price, alternatives, system requirements, install and uninstall
 // with optional data clean-up, the latest release, security facts, known issues, MCP servers and Skills,
 // dependencies, install details, questions, related articles and sources. Right: install command (or a link
-// app's download panel) → information → monthly installs → OpenNavo's malware scanning on security-category
+// app's download panel) → spec card → monthly installs → OpenNavo's malware scanning on security-category
 // apps → similar apps (fonts: similar fonts) → collections. Blocks follow what the distribution supports (T3):
 // link apps get facts, questions and articles but never a Homebrew command.
 const props = defineProps<{ kind: PackageKind }>();
@@ -46,13 +46,13 @@ const isSecurityApp = computed(
     Boolean(pkg.value?.categories?.some(category => category.slug === 'security'))
 );
 
-// T1: same-kind recommendations (apps for apps, fonts for fonts), eight of them.
+// T1: same-kind recommendations (apps for apps, fonts for fonts), four visible rows with a See more link.
 const { data: related } = await useAsyncData(
   () => `related:${kind.value}:${token.value}:${locale.value}`,
   () =>
     unwrap(
       api.GET('/packages/{kind}/{token}/related', {
-        params: { path: { kind: kind.value, token: token.value }, query: { limit: 8 } }
+        params: { path: { kind: kind.value, token: token.value }, query: { limit: 4 } }
       })
     ).catch(() => []),
   { transform: withVariantNames }
@@ -169,22 +169,18 @@ usePageSeo({
       :screenshots-label="t('package.screenshots')"
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
-      :command="can.homebrew ? pkg.installCommand : undefined"
       :info="[]"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
+      :related-more-href="localePath('/apps')"
+      :related-more-label="t('package.relatedMore')"
       :link-as="NuxtLink"
       @copied="onCopied"
     >
       <template #about>
-        <MarkdownContent size="md" :heading-level="3" :source="description" />
+        <MarkdownContent class="package-overview-description" size="md" :heading-level="3" :source="description" />
       </template>
       <template #main>
-        <PackagePrice :pkg="pkg" />
-        <PackageAlternatives :pkg="pkg" />
-        <PackageRequirements :pkg="pkg" />
-        <PackageInstall v-if="can.homebrew" :pkg="pkg" />
-        <PackageUninstall v-if="can.uninstall" :pkg="pkg" :homebrew="can.homebrew" />
         <LatestReleaseCard
           v-if="pkg.latestRelease"
           :release="pkg.latestRelease"
@@ -194,11 +190,11 @@ usePageSeo({
         <PackageSafety v-if="can.safety" :pkg="pkg" />
         <PackageIssues :pkg="pkg" />
         <PackageIntegrations :pkg="pkg" />
-        <PackageDependencySummary v-if="can.dependencies" :pkg="pkg" />
-        <PackageInstallFacts v-if="can.homebrew" :pkg="pkg" />
+        <PackageInstall v-if="can.homebrew" :pkg="pkg" />
+        <PackageUninstall v-if="can.uninstall" :pkg="pkg" :homebrew="can.homebrew" />
         <PackageFaq :pkg="pkg" />
+        <PackageAlternatives :pkg="pkg" />
         <PackageArticles :pkg="pkg" />
-        <PackageSources :pkg="pkg" />
       </template>
       <template v-if="pkg.kind === 'link' && pkg.link" #download>
         <LinkDownloadPanel :link="pkg.link" />
@@ -222,3 +218,11 @@ usePageSeo({
     </OnPackageOverview>
   </div>
 </template>
+
+<style>
+.package-overview-description .on-markdown {
+  font-size: 15px;
+  line-height: 1.75;
+  max-width: 76ch;
+}
+</style>

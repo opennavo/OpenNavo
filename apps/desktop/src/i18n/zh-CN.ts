@@ -434,6 +434,7 @@ export default {
       }
     },
     related: '相似应用',
+    relatedMore: '查看更多',
     screenshots: '截图',
     caveats: '注意事项',
     info: {

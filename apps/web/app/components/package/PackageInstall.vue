@@ -46,9 +46,13 @@ const sha256 = computed(() => props.pkg.facts.overview.sha256);
         :text="caveats"
       /></pre>
     </div>
-    <div v-if="download" class="mt-12px text-13px leading-[1.6] text-ink-secondary">
-      <h3 class="m-0 text-12.5px font-600 text-ink-primary">{{ t('package.guide.downloadTitle') }}</h3>
-      <p class="m-0 mt-4px">
+    <details v-if="download" class="mt-12px text-13px leading-[1.6] text-ink-secondary">
+      <summary
+        class="cursor-pointer text-12.5px font-600 text-ink-primary outline-none focus-visible:shadow-focus-ring"
+      >
+        {{ t('package.guide.downloadTitle') }}
+      </summary>
+      <p class="m-0 mt-6px">
         <template v-if="download.kind === 'direct'">
           {{ t('package.guide.downloadDirect') }}
           <a :href="download.url" rel="nofollow noopener noreferrer" class="text-ink-primary">{{
@@ -76,6 +80,6 @@ const sha256 = computed(() => props.pkg.facts.overview.sha256);
         {{ t('package.guide.sha') }}
         <a href="#requirements" class="text-ink-secondary">{{ t('package.guide.shaLink') }}</a>
       </p>
-    </div>
+    </details>
   </section>
 </template>

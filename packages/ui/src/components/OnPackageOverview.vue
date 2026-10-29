@@ -40,6 +40,8 @@ export interface OnPackageOverviewProps {
   info: readonly OnKeyValueItem[];
   related?: readonly OnRelatedPackage[];
   relatedTitle?: string;
+  relatedMoreHref?: string;
+  relatedMoreLabel?: string;
   linkAs?: string | Component;
 }
 
@@ -144,6 +146,12 @@ defineSlots<{
             </span>
           </li>
         </ul>
+        <a
+          v-if="relatedMoreHref"
+          :href="relatedMoreHref"
+          class="mt-8px inline-flex text-12.5px font-600 text-ink-secondary no-underline hover:text-ink-primary"
+          >{{ relatedMoreLabel }}</a
+        >
       </section>
       <slot name="asideEnd" />
     </aside>

@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { isThirdPartyTap } from '@opennavo/shared';
 import type { PackageKind } from '@opennavo/shared';
-import { displayUrl, OnButton, OnCaskArtifacts, OnCodeText, OnKeyValueList, useUiMessages } from '@opennavo/ui';
+import { displayUrl, OnCaskArtifacts, OnCodeText, OnKeyValueList, useUiMessages } from '@opennavo/ui';
 import type { OnKeyValueItem } from '@opennavo/ui';
 import { detailsDescription } from '~/utils/seoTitles';
+import PackageRequirements from './PackageRequirements.vue';
+import PackageUninstall from './PackageUninstall.vue';
+import PackageDependencySummary from './PackageDependencySummary.vue';
+import PackageSources from './PackageSources.vue';
 
 // Installation details (08 §10.8): location, bundled commands, uninstall behavior, caveats, download URLs, definition/formulae.brew.sh links.
 const props = defineProps<{ kind: PackageKind }>();
 
 const { t } = useI18n();
-const toasts = useToasts();
 const { data: pkg, token } = await usePackage(props.kind);
 // Link apps have no Homebrew definition; the layout hides this tab for them (usePackage resolves the kind).
 if (pkg.value?.kind === 'link') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true });
@@ -17,13 +20,11 @@ if (pkg.value?.kind === 'link') throw createError({ statusCode: 404, statusMessa
 const messages = useUiMessages();
 // T6: the download, its checksum, artifacts and caveats come from facts.overview, as on the overview.
 const overview = computed(() => pkg.value?.facts.overview);
-const downloadSha = computed(() => overview.value?.sha256);
 
 const items = computed<OnKeyValueItem[]>(() => {
   const value = pkg.value;
   if (!value) return [];
   const artifacts = value.facts.overview.artifacts;
-  const download = value.facts.overview.downloadUrl;
   const list: OnKeyValueItem[] = [{ key: 'tap', label: t('package.details.tap'), value: value.tap, mono: true }];
   if (value.names.length > 1)
     list.push({ key: 'names', label: t('package.details.names'), value: value.names.join(' · ') });
@@ -46,15 +47,6 @@ const items = computed<OnKeyValueItem[]>(() => {
     });
   if (value.kegOnly)
     list.push({ key: 'keg', label: t('package.details.kegOnly'), value: t('package.details.kegOnlyValue') });
-  if (download)
-    list.push({
-      key: 'download',
-      label: t('package.details.download'),
-      value: displayUrl(download),
-      href: download
-    });
-  // B8: the full SHA-256 is in the HTML (the row may still shorten it on screen); the button copies it.
-  if (downloadSha.value) list.push({ key: 'sha256', label: 'SHA-256', value: downloadSha.value, mono: true });
   list.push({
     key: 'source',
     label: t('package.details.source'),
@@ -74,21 +66,6 @@ const items = computed<OnKeyValueItem[]>(() => {
   return list;
 });
 
-function onCopied(command: string) {
-  toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
-}
-
-async function copySha() {
-  const sha = downloadSha.value;
-  if (!sha) return;
-  try {
-    await navigator.clipboard.writeText(sha);
-    toasts.push({ tone: 'success', title: t('download.shaCopied') });
-  } catch {
-    toasts.push({ tone: 'warning', title: t('toast.copyFailed'), description: sha, duration: 0 });
-  }
-}
-
 usePageSeo({
   title: () => t('package.details.metaTitle', { name: pkg.value?.displayName ?? token.value }),
   description: () => detailsDescription(pkg.value?.displayName ?? token.value, t)
@@ -98,15 +75,12 @@ usePageSeo({
 <template>
   <div v-if="pkg" class="grid grid-cols-1 gap-20px pt-4px lg:grid-cols-[minmax(0,1fr)_320px]">
     <div class="flex min-w-0 flex-col gap-16px">
+      <PackageRequirements :pkg="pkg" />
       <section class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-4px">
         <OnKeyValueList :items="items" />
-        <div v-if="downloadSha" class="flex justify-end pb-10px">
-          <OnButton size="xs" icon="copy" :aria-label="t('download.copySha')" @click="copySha">{{
-            t('download.copySha')
-          }}</OnButton>
-        </div>
       </section>
       <OnCaskArtifacts v-if="overview?.artifacts.entries?.length" :entries="overview.artifacts.entries" />
+      <PackageUninstall :pkg="pkg" :homebrew="true" :guide="false" />
       <section
         v-if="overview?.caveats"
         class="rounded-big border border-solid border-status-warning bg-surface-card px-18px py-14px"
@@ -116,11 +90,8 @@ usePageSeo({
           :text="overview.caveats"
         /></pre>
       </section>
+      <PackageDependencySummary :pkg="pkg" />
+      <PackageSources :pkg="pkg" />
     </div>
-    <aside class="min-w-0">
-      <section class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px">
-        <PackageCommand :command="pkg.installCommand" :copy-label="t('package.copy.install')" @copied="onCopied" />
-      </section>
-    </aside>
   </div>
 </template>

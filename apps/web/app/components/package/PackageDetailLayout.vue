@@ -105,25 +105,12 @@ const allTabs = computed(() => [
     : [])
 ]);
 // Link apps have no Homebrew definition, so there are no dependencies or install details to show.
-// H9: once the overview carries what install details showed and the server turns the redirect on (per
-// language, so a target that is not ready never receives it), the details tab answers one 301 to the
-// overview and drops out of the tabs, so no page links it.
-const detailsRedirect = computed(() => Boolean(pkg.value?.indexing?.detailsRedirect));
-// The API's DecidePage uses HasDependencyContent (including reverse dependencies). Other noindex
-// reasons and older APIs keep their links; an empty tab remains directly accessible with its decision.
-const emptyDependencies = computed(() => pkg.value?.indexing?.pages?.dependencies?.reason === 'duplicate_of_overview');
-if (tab.value === 'details' && detailsRedirect.value)
-  await navigateTo(localePath(packagePath(token.value)), { redirectCode: 301, replace: true });
 const tabs = computed(() =>
   isLink.value
     ? allTabs.value.filter(
         item => item.value === 'overview' || item.value === 'versions' || item.value === 'troubleshooting'
       )
-    : allTabs.value.filter(
-        item =>
-          (item.value !== 'details' || !detailsRedirect.value) &&
-          (item.value !== 'dependencies' || !emptyDependencies.value)
-      )
+    : allTabs.value
 );
 
 // Breadcrumbs are always Discover › primary category › app (› tab on subpages), the same in SSR and on the

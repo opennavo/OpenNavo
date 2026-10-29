@@ -95,8 +95,12 @@ function onCopied(command: string) {
         </div>
       </dl>
     </div>
-    <div v-if="cleanup.length" class="mt-12px flex flex-col gap-8px" data-testid="package-zap">
-      <h3 class="m-0 text-12.5px font-600 text-ink-primary">{{ t('package.guide.zapTitle') }}</h3>
+    <details v-if="cleanup.length" class="mt-12px flex flex-col gap-8px" data-testid="package-zap">
+      <summary
+        class="cursor-pointer text-12.5px font-600 text-ink-primary outline-none focus-visible:shadow-focus-ring"
+      >
+        {{ t('package.guide.zapTitle') }}
+      </summary>
       <PackageCommand
         v-if="homebrew"
         :command="`brew uninstall --zap --cask ${pkg.token}`"
@@ -132,7 +136,7 @@ function onCopied(command: string) {
           </div>
         </dl>
       </details>
-    </div>
+    </details>
     <p v-if="checked && (regular.length || cleanup.length)" class="m-0 mt-10px text-11.5px text-ink-tertiary">
       {{ checked.before }}<time :datetime="checked.iso">{{ checked.date }}</time
       >{{ checked.after }}
