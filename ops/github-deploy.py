@@ -60,6 +60,11 @@ MIN_MEM_AVAILABLE_PER_EXTRA_REPLICA = 2 * GIB
 DRAIN_GRACE_SECONDS = 300
 DRAIN_POLL_TIMEOUT_SECONDS = 90
 ROLLBACK_DRAIN_TIMEOUT_SECONDS = 30
+PUBLIC_MCP_PROXY_IP = '172.30.80.3'
+PUBLIC_MCP_PROXY_TOKEN = '${PUBLIC_MCP_PROXY_IP:-' + PUBLIC_MCP_PROXY_IP + '}'
+DEFAULT_TRUSTED_PROXIES = '${CADDY_PROXY_IP:-172.30.80.2},' + PUBLIC_MCP_PROXY_TOKEN + ',${SSR_PROXY_SUBNET:-172.30.81.0/24}'
+APPLICATION_SERVICES = ('api', 'web', 'mcp', 'public-mcp', 'admin')
+APPLICATION_SERVICE_PATTERN = r'(?:api|web|mcp|public-mcp|admin)(?:_[A-Za-z0-9_]+)?'
 WARM_HOST = 'opennavo.com'
 WARM_ORIGIN = 'http://127.0.0.1:3000'
 WARM_INTERNAL_ORIGIN = 'http://127.0.0.1:9091'
@@ -319,6 +324,18 @@ def update_env(source, updates):
     return '\n'.join(lines) + '\n'
 
 
+def merge_public_mcp_trusted_proxy(value):
+    """Keep the existing proxy list and add the reserved public-MCP peer once."""
+    if value is None:
+        return DEFAULT_TRUSTED_PROXIES
+    if not isinstance(value, str):
+        raise ValueError('TRUSTED_PROXIES must be a string')
+    entries = [entry.strip() for entry in value.split(',')]
+    if any(entry == PUBLIC_MCP_PROXY_IP or 'PUBLIC_MCP_PROXY_IP' in entry for entry in entries):
+        return value
+    return value + (',' if value else '') + PUBLIC_MCP_PROXY_TOKEN
+
+
 def monitoring_targets(source, services):
     """Replace only simple API/web scrape jobs; preserve globals, rules and unrelated jobs.
 
@@ -394,7 +411,7 @@ class Deployment:
         self.live_caddy = self.root / config['caddy_file']
         self.rolling = self.root / 'deploy/rolling.compose.json'
         self.env = self.root / 'current-release.env'
-        self.services = {kind: kind + '_' + self.release.replace('-', '_') for kind in ['api', 'web', 'mcp', 'admin']}
+        self.services = {kind: kind + '_' + self.release.replace('-', '_') for kind in APPLICATION_SERVICES}
         self.aliases = {}
         self.current_web_assets = []
         self.web_replicas = configured_web_replicas(config)
@@ -456,12 +473,39 @@ class Deployment:
         overlay = json.loads(self.rolling.read_text())
         # Keep only the live release as the rollback candidate in the next overlay.
         live_services = set(self.state['services'].values())
+        # Capture a base public-MCP definition before filtering the previous overlay. Hosts
+        # deployed before public-MCP was introduced have no state entry to clone.
+        base_public_mcp = copy.deepcopy(overlay['services'].get('public-mcp'))
         overlay['services'] = {name: service for name, service in overlay['services'].items()
-                               if not re.match(r'^(api|web|mcp|admin)(?:_|$)', name) or name in live_services}
+                               if not re.match(r'^(?:api|web|mcp|public-mcp|admin)(?:_|$)', name) or name in live_services}
         routes = self.live_caddy.read_text()
         for kind, new in self.services.items():
-            old = self.state['services'][kind]
-            service = copy.deepcopy(overlay['services'][old])
+            old = self.state['services'].get(kind)
+            if old is None and kind == 'public-mcp':
+                service = base_public_mcp or {
+                    'image': '${MCP_IMAGE:?Build or pull MCP_IMAGE}',
+                    'restart': 'unless-stopped',
+                    'user': '10001:10001',
+                    'read_only': True,
+                    'tmpfs': ['/tmp:rw,noexec,nosuid,size=64m'],
+                    'security_opt': ['no-new-privileges:true'],
+                    'cap_drop': ['ALL'],
+                    'entrypoint': ['opennavo-public-mcp'],
+                    'environment': {
+                        'OPENNAVO_PUBLIC_API_BASE': 'http://api-proxy:8080/api/v1',
+                        'OPENNAVO_PUBLIC_MCP_HOST': '0.0.0.0',
+                        'OPENNAVO_PUBLIC_MCP_PORT': '8790',
+                        'OPENNAVO_PUBLIC_MCP_PATH': '/mcp',
+                        'OPENNAVO_PUBLIC_MCP_TRUSTED_PROXIES': '["${CADDY_PROXY_IP:-172.30.80.2}/32"]',
+                        'OPENNAVO_PUBLIC_MCP_RATE_LIMIT': '60',
+                        'OPENNAVO_PUBLIC_MCP_RATE_WINDOW_SECONDS': '60',
+                    },
+                    'networks': {'proxy': {'aliases': ['public-mcp-proxy']}},
+                    'deploy': {'resources': {'limits': {'memory': '256M'}}},
+                    'depends_on': {'api': {'condition': 'service_healthy'}},
+                }
+            else:
+                service = copy.deepcopy(overlay['services'][old])
             for network, options in service.get('networks', {}).items():
                 if not options:
                     continue
@@ -473,7 +517,8 @@ class Deployment:
                     self.aliases[alias] = replacement
                     aliases[index] = replacement
             if kind != 'admin':
-                service['image'] = self.payload['images']['server' if kind == 'api' else kind]
+                image_kind = 'server' if kind == 'api' else 'mcp' if kind == 'public-mcp' else kind
+                service['image'] = self.payload['images'][image_kind]
             for mount in service.get('volumes', []):
                 if isinstance(mount, dict) and '/releases/' in mount.get('source', ''):
                     mount['source'] = str(self.directory / Path(mount['source']).name)
@@ -488,10 +533,19 @@ class Deployment:
                              "const signal=AbortSignal.timeout(2500);Promise.all([fetch('http://127.0.0.1:9091/healthz',{signal}),fetch('http://127.0.0.1:3000/robots.txt',{signal})]).then(async ([health,robots])=>{await Promise.all([health.arrayBuffer(),robots.arrayBuffer()]);process.exit(health.status===200&&robots.status===200?0:1)}).catch(()=>process.exit(1))"],
                     'interval': '30s', 'timeout': '3s', 'retries': 3,
                     'start_period': '60s', 'start_interval': '2s'}
+            elif kind == 'public-mcp':
+                service.setdefault('entrypoint', ['opennavo-public-mcp'])
+                # Compose --wait uses this liveness endpoint to reject a bad candidate before
+                # Caddy is switched. Keep it explicit for overlays from before public-MCP existed.
+                service['healthcheck'] = {
+                    'test': ['CMD', 'python', '-I', '-c',
+                             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/healthz', timeout=2).close()"],
+                    'interval': '30s', 'timeout': '3s', 'retries': 3,
+                    'start_period': '60s', 'start_interval': '2s'}
             overlay['services'][new] = service
         for kind, new in self.services.items():
             service = overlay['services'][new]
-            for key in ['NUXT_API_BASE_INTERNAL', 'OPENNAVO_AGENT_API_BASE']:
+            for key in ['NUXT_API_BASE_INTERNAL', 'OPENNAVO_AGENT_API_BASE', 'OPENNAVO_PUBLIC_API_BASE']:
                 if key in service.get('environment', {}):
                     for old, replacement in self.aliases.items():
                         service['environment'][key] = service['environment'][key].replace(old, replacement)
@@ -516,8 +570,10 @@ class Deployment:
         # Usage stats read CF-IPCountry only from these peers. The new API copies the previous release's
         # service, so an overlay that predates the setting gets the base compose value; a host value, even
         # an empty one, is kept.
-        overlay['services'][self.services['api']].setdefault('environment', {}).setdefault(
-            'USAGE_COUNTRY_TRUSTED_PROXIES', '${CADDY_PROXY_IP:-172.30.80.2}')
+        api_environment = overlay['services'][self.services['api']].setdefault('environment', {})
+        api_environment.setdefault('USAGE_COUNTRY_TRUSTED_PROXIES', '${CADDY_PROXY_IP:-172.30.80.2}')
+        api_environment['TRUSTED_PROXIES'] = merge_public_mcp_trusted_proxy(
+            api_environment.get('TRUSTED_PROXIES'))
         write_private(self.directory / 'rolling.compose.json', overlay)
         (self.directory / 'release.env').write_text(update_env(self.env.read_text(), {
             'SERVER_IMAGE': self.payload['images']['server'], 'WEB_IMAGE': self.payload['images']['web'],
@@ -805,7 +861,7 @@ class Deployment:
             labels = container['Config'].get('Labels') or {}
             service = labels.get('com.docker.compose.service', '')
             if (labels.get('com.docker.compose.project') != self.config['project']
-                    or not re.fullmatch(r'(api|web|mcp|admin)(?:_[A-Za-z0-9_]+)?', service)
+                    or not re.fullmatch(APPLICATION_SERVICE_PATTERN, service)
                     or service in current):
                 continue
             retired.append((container, service))

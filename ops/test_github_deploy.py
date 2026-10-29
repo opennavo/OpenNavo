@@ -37,13 +37,14 @@ def payload():
             'admin_archive': base64.b64encode(data).decode(), 'admin_sha256': hashlib.sha256(data).hexdigest()}
 
 
-def prepare_on_host(root, api_environment):
+def prepare_on_host(root, api_environment, include_public_mcp=False):
     """Prepare a release on a minimal existing host and return the deployment and its candidate overlay."""
     directory = Path(root)
     for name in ['deploy', 'releases', 'assets']:
         (directory / name).mkdir()
     (directory / 'admin.caddy').write_text(':8081 {}')
-    services = {kind: kind + '_previous' for kind in ['api', 'web', 'mcp', 'admin']}
+    kinds = ['api', 'web', 'mcp', 'admin'] + (['public-mcp'] if include_public_mcp else [])
+    services = {kind: kind + '_previous' for kind in kinds}
     (directory / 'deploy/github-state.json').write_text(json.dumps({'services': services}))
     overlay = {'services': {name: {'environment': {}, 'networks': {}} for name in services.values()}}
     overlay['services'][services['api']]['environment'] = dict(api_environment)
@@ -51,9 +52,19 @@ def prepare_on_host(root, api_environment):
     overlay['services'][services['admin']]['volumes'] = [
         {'source': str(directory / 'admin.caddy'), 'target': '/etc/caddy/Caddyfile'},
         {'source': str(directory / 'admin'), 'target': '/srv/admin'}]
+    if include_public_mcp:
+        overlay['services'][services['api']]['networks'] = {'proxy': {'aliases': ['api-proxy']}}
+        overlay['services'][services['public-mcp']].update({
+            'entrypoint': ['opennavo-public-mcp'],
+            'environment': {'OPENNAVO_PUBLIC_API_BASE': 'http://api-proxy:8080/api/v1'},
+            'networks': {'proxy': {'aliases': ['public-mcp-proxy']}},
+        })
     (directory / 'deploy/rolling.compose.json').write_text(json.dumps(overlay))
     (directory / 'current-release.env').write_text('SERVER_IMAGE=old\n')
-    (directory / 'live.caddy').write_text('reverse_proxy web_previous:3000\n')
+    route = 'reverse_proxy web_previous:3000\n'
+    if include_public_mcp:
+        route += 'reverse_proxy public-mcp-proxy:8790\n'
+    (directory / 'live.caddy').write_text(route)
     obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy', 'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
     with patch.object(deploy, 'command', return_value='fixture-container'):
         obj.prepare(archive())
@@ -197,17 +208,44 @@ class DeployTests(unittest.TestCase):
     def test_prepare_gives_an_old_api_service_the_usage_country_proxy_and_keeps_host_values(self):
         # A host provisioned before the setting gets the same value as a fresh install from the base compose.
         default = '${CADDY_PROXY_IP:-172.30.80.2}'
+        public_proxy = '${PUBLIC_MCP_PROXY_IP:-172.30.80.3}'
+        trusted_default = '${CADDY_PROXY_IP:-172.30.80.2},' + public_proxy + ',${SSR_PROXY_SUBNET:-172.30.81.0/24}'
         base = Path(__file__).with_name('docker-compose.prod.yml').read_text()
         self.assertIn('USAGE_COUNTRY_TRUSTED_PROXIES: ' + default + '\n', base)
-        for environment, expected in [({}, default), ({'USAGE_COUNTRY_TRUSTED_PROXIES': '192.0.2.10'}, '192.0.2.10'),
-                                      ({'USAGE_COUNTRY_TRUSTED_PROXIES': ''}, '')]:
+        cases = [
+            ({}, trusted_default, default),
+            ({'TRUSTED_PROXIES': '172.30.80.2'}, '172.30.80.2,' + public_proxy, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10'}, '192.0.2.10,' + public_proxy, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10,' + public_proxy}, '192.0.2.10,' + public_proxy, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10,172.30.80.3'}, '192.0.2.10,172.30.80.3', default),
+            ({'USAGE_COUNTRY_TRUSTED_PROXIES': '192.0.2.10'}, trusted_default, '192.0.2.10'),
+            ({'USAGE_COUNTRY_TRUSTED_PROXIES': ''}, trusted_default, ''),
+        ]
+        for environment, trusted_expected, usage_expected in cases:
             with self.subTest(environment=environment), tempfile.TemporaryDirectory() as root:
-                obj, candidate = prepare_on_host(root, {'TRUSTED_PROXIES': '172.30.80.2', **environment})
-                self.assertEqual(candidate['services'][obj.services['api']]['environment'],
-                                 {'TRUSTED_PROXIES': '172.30.80.2', 'USAGE_COUNTRY_TRUSTED_PROXIES': expected})
+                obj, candidate = prepare_on_host(root, environment)
+                self.assertEqual(candidate['services'][obj.services['api']]['environment'], {
+                    'TRUSTED_PROXIES': trusted_expected,
+                    'USAGE_COUNTRY_TRUSTED_PROXIES': usage_expected,
+                })
                 # The rollback service stays exactly as it ran.
                 self.assertEqual(candidate['services']['api_previous']['environment'],
-                                 {'TRUSTED_PROXIES': '172.30.80.2', **environment})
+                                 environment)
+
+    def test_prepare_creates_public_mcp_candidate_with_alias_and_health_check(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, candidate = prepare_on_host(root, {
+                'TRUSTED_PROXIES': '172.30.80.2',
+            }, include_public_mcp=True)
+            service = candidate['services'][obj.services['public-mcp']]
+            self.assertEqual(service['image'], payload()['images']['mcp'])
+            self.assertEqual(service['entrypoint'], ['opennavo-public-mcp'])
+            self.assertIn("127.0.0.1:8790/healthz", service['healthcheck']['test'][-1])
+            self.assertEqual(service['environment']['OPENNAVO_PUBLIC_API_BASE'],
+                             'http://api-proxy-' + obj.release + ':8080/api/v1')
+            self.assertEqual(obj.services['public-mcp'], 'public-mcp_' + obj.release.replace('-', '_'))
+            self.assertIn('public-mcp-proxy-' + obj.release, (obj.directory / 'Caddyfile.next').read_text())
+            self.assertIn(obj.services['public-mcp'], obj.candidate_up_args())
 
     def test_monitoring_targets_preserves_other_jobs_and_follows_release_and_rollback(self):
         source = """global:
@@ -949,12 +987,12 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             obj = object.__new__(deploy.Deployment)
             obj.root = directory
             obj.config = {'project': 'fixture'}
-            obj.state = {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'admin', 'mcp']}}
+            obj.state = {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'mcp', 'public-mcp', 'admin']}}
             obj.payload = payload()
             obj.directory = directory
             obj.state_path = directory / 'state.json'
             obj.release = 'test'
-            obj.services = {k: k + '_new' for k in ['api', 'web', 'admin', 'mcp']}
+            obj.services = {k: k + '_new' for k in ['api', 'web', 'mcp', 'public-mcp', 'admin']}
             obj.current_web_assets = ['legacy.js']
             obj.live_caddy = directory / 'live'
             obj.env = directory / 'env'
@@ -991,7 +1029,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             self.assertEqual(obj.rolling.read_text(), 'old')
             self.assertLess(events.index('backup'), events.index(('run', '--rm', '--no-deps', 'migrate', 'up')))
             old_up = ('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
-                      'api_previous', 'web_previous', 'admin_previous', 'mcp_previous', 'worker')
+                      'api_previous', 'web_previous', 'mcp_previous', 'public-mcp_previous', 'admin_previous', 'worker')
             self.assertIn(old_up, events)
             self.assertLess(events.index(old_up), len(events) - 1 - events[::-1].index('reload'))
             self.assertFalse(obj.state_path.exists())
@@ -1019,7 +1057,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             def cleanup(previous):
                 state = json.loads(obj.state_path.read_text())
                 self.assertEqual(state['sha'], obj.payload['sha'])
-                self.assertEqual(state['previous'], {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'admin', 'mcp']}})
+                self.assertEqual(state['previous'], {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'mcp', 'public-mcp', 'admin']}})
                 self.assertEqual(previous, state['previous'])
                 events.append('cleanup')
             obj.cleanup = cleanup
