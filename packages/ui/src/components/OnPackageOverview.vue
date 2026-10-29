@@ -94,7 +94,7 @@ defineSlots<{
     </div>
     <section
       v-if="command"
-      class="min-w-0 rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px lg:col-start-2 lg:row-start-3"
+      class="min-w-0 rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px max-[640px]:hidden lg:col-start-2 lg:row-start-3"
     >
       <OnInstallCommand :command="command" @copied="emit('copied', $event)" />
     </section>

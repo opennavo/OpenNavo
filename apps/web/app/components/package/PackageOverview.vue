@@ -169,6 +169,7 @@ usePageSeo({
       :screenshots-label="t('package.screenshots')"
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
+      :command="can.homebrew ? pkg.installCommand : undefined"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
       :related-more-href="localePath('/apps')"
