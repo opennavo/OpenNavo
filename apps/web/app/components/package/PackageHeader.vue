@@ -31,12 +31,7 @@ const meta = computed(() => {
 });
 
 const subtitle = computed(() => [props.pkg.developer, props.pkg.summary].filter(Boolean).join(' · '));
-const repoSignals = computed(() =>
-  toPackageRepoSignals(props.pkg, {
-    repoUrl: props.pkg.openSource?.url ?? props.pkg.repoUrl,
-    archived: props.pkg.openSource?.archived
-  })
-);
+const repoSignals = computed(() => toPackageRepoSignals(props.pkg));
 const unavailable = computed(() => Boolean(props.pkg.disable));
 
 const chips = computed<OnPackageHeaderChip[]>(() => {
@@ -61,7 +56,7 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
   if (link.value && link.value.pricing !== 'unknown')
     list.push({ key: 'pricing', label: t(`package.link.pricing.${link.value.pricing}`) });
   if (props.pkg.autoUpdates) list.push({ key: 'auto', label: t('package.autoUpdates'), tone: 'info' });
-  if (props.pkg.openSource?.archived || repoSignals.value?.archived)
+  if (repoSignals.value?.archived)
     list.push({ key: 'archived', label: t('package.repo.archived'), tone: 'danger', outline: true });
   if (disabledByHomebrew(props.pkg))
     list.push({ key: 'disabled', label: t('package.disabled'), tone: 'danger', outline: true });

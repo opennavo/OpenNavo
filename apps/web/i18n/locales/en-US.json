@@ -678,7 +678,8 @@
       "homepage": "Homepage",
       "token": "Token",
       "yes": "Yes",
-      "no": "No"
+      "no": "No",
+      "checked": "Checked"
     },
     "repo": {
       "stars": "★",
