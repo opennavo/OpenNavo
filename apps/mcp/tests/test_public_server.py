@@ -180,15 +180,16 @@ async def test_public_rate_middleware_returns_clean_429() -> None:
     async def endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         await JSONResponse({"ok": True})(scope, receive, send)
 
-    limiter = PublicGCRALimiter(1, 60)
+    limiter = PublicGCRALimiter(60, 60)
     app = PublicRateLimitMiddleware(endpoint, limiter)
     transport = httpx2.ASGITransport(app=app, client=("203.0.113.10", 1234))
     async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post("/mcp", json={})
-        second = await client.post("/mcp", json={})
-    assert first.status_code == 200
-    assert second.status_code == 429
-    assert second.json() == {
+        responses = [await client.post("/mcp", json={}) for _ in range(61)]
+    assert all(response.status_code == 200 for response in responses[:-1])
+    limited = responses[-1]
+    assert limited.status_code == 429
+    assert limited.headers["Retry-After"] == "1"
+    assert limited.json() == {
         "error": "rate_limited",
-        "message": "Public MCP rate limit exceeded",
+        "message": "Public MCP rate limit exceeded: per IP 60 requests / 60 s; retry after 1 s",
     }

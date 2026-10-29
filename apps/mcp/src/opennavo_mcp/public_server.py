@@ -818,6 +818,10 @@ class PublicGCRALimiter:
         self._buckets: dict[str, _Bucket] = {}
         self._lock = asyncio.Lock()
 
+    @property
+    def description(self) -> str:
+        return f"per IP {self.count} requests / {self.window_seconds:g} s"
+
     async def check(
         self, key: str, cost: int = 1, now: float | None = None
     ) -> tuple[bool, int, int]:
@@ -852,8 +856,12 @@ class PublicRateLimitMiddleware:
         peer = str(state.get("public_peer", "unknown"))
         allowed, retry_after, remaining = await self.limiter.check(peer)
         if not allowed:
+            message = (
+                f"Public MCP rate limit exceeded: {self.limiter.description}; "
+                f"retry after {retry_after} s"
+            )
             await JSONResponse(
-                {"error": "rate_limited", "message": "Public MCP rate limit exceeded"},
+                {"error": "rate_limited", "message": message},
                 status_code=429,
                 headers={
                     "Retry-After": str(retry_after),
