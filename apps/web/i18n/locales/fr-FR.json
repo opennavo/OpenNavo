@@ -28,7 +28,8 @@
     "themeSystem": "Comme le système",
     "themeLight": "Clair",
     "themeDark": "Sombre",
-    "skipToContent": "Aller au contenu"
+    "skipToContent": "Aller au contenu",
+    "developers": "Développeurs"
   },
   "sidebar": {
     "appLabel": "App Mac",
@@ -2017,5 +2018,38 @@
       "title": "Commencez par votre prochaine app.",
       "body": "OpenNavo est gratuit et open source, avec analyse antivirus, nettoyage et surveillance inclus. Il fonctionne sous macOS 13 ou version ultérieure. Vous pouvez aussi parcourir le catalogue sur le Web et copier la commande brew pour installer."
     }
+  },
+  "developers": {
+    "title": "Développer avec OpenNavo",
+    "metaTitle": "OpenNavo pour les développeurs — API publique et MCP",
+    "description": "Connectez vos outils au catalogue public d’apps Mac d’OpenNavo, en lecture seule, via MCP ou HTTP.",
+    "intro": "Utilisez le serveur MCP public et anonyme ou l’API HTTP en lecture seule pour rechercher dans le catalogue, consulter les apps, parcourir les versions et dépendances, et lire les collections et articles publics.",
+    "mcpTitle": "MCP public",
+    "mcpDescription": "Un serveur MCP HTTP en streaming avec 9 outils de catalogue en lecture seule. Aucun compte ni jeton n’est nécessaire.",
+    "mcpEndpoint": "Point de terminaison MCP",
+    "setupTitle": "Connecter un client MCP",
+    "claudeDesktopTitle": "Claude Desktop",
+    "claudeCodeTitle": "Claude Code",
+    "cursorTitle": "Cursor",
+    "codexTitle": "Codex",
+    "apiTitle": "API HTTP publique",
+    "apiDescription": "L’API publique expose des points de terminaison GET stables et anonymes sous le chemin de base /api/v1. Le point de terminaison /packages/lookup accepte uniquement POST ; envoyez ses paramètres dans le corps JSON de la requête et n’utilisez pas GET ?tokens=. Le document OpenAPI fait foi pour les paramètres et les schémas de réponse.",
+    "apiSpec": "Spécification OpenAPI",
+    "apiCatalog": "Catalogue de l’API",
+    "curlTitle": "Rechercher avec curl",
+    "rateTitle": "Limites de débit",
+    "rateIntro": "Les limites sont appliquées par IP cliente avec un limiteur GCRA adossé à Redis. Les en-têtes de réponse indiquent la capacité restante.",
+    "rateApi": "Points de terminaison de lecture ordinaires : 300 requêtes par 60 secondes et par IP.",
+    "rateSearch": "Recherche : 60 requêtes par 60 secondes et par IP.",
+    "rateMcp": "MCP public : la limite est de 60 requêtes par 60 secondes et par IP.",
+    "rateHeaders": "Les réponses HTTP 429 incluent Retry-After en secondes. Les réponses API réussies incluent X-RateLimit-Limit et X-RateLimit-Remaining.",
+    "termsTitle": "Conditions d’utilisation",
+    "termsIntro": "Ces interfaces permettent d’accéder utilement et de manière responsable aux données publiques du catalogue OpenNavo.",
+    "termsFairUse": "Usage raisonnable : gardez un volume de requêtes raisonnable et mettez les résultats en cache lorsque c’est pratique.",
+    "termsAttribution": "Attribution : créez un lien vers la page correspondante sur opennavo.com lorsque vous publiez des données du catalogue ou un travail dérivé.",
+    "termsSla": "Aucun SLA : les interfaces peuvent changer, être limitées ou indisponibles sans engagement de niveau de service.",
+    "termsScraping": "Scraping : ne récupérez pas de données au-delà des limites publiées et n’essayez pas de contourner les contrôles par IP.",
+    "termsReadOnly": "Lecture seule : l’API publique et MCP ne proposent aucune opération de compte, d’écriture ou d’administration.",
+    "viewMcp": "Ouvrir le point de terminaison MCP"
   }
 }

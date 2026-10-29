@@ -5,27 +5,17 @@ function checkTarget(name, lock) {
   try {
     const target = loadTarget(name),
       source = flatten(target.source),
-      english = flatten(target.english),
-      lockedSources = lock.targets[name]?.sources;
-    if (!lockedSources)
-      throw new Error(`Chinese source-text lock is outdated: ${name}; run make i18n-sync ARGS="--targets ${name}"`);
-    // A source hash is recorded only after every locale has a translation; absent hashes are intentional English fallbacks.
-    const fallbackKeys = Object.keys(source).filter(key => !(key in lockedSources));
+      english = flatten(target.english);
     for (const { code } of targetLocales(name))
       validate(
         source,
         english,
         flatten(code === 'zh-CN' ? target.source : code === 'en-US' ? target.english : read(target.path(code))),
         code,
-        name,
-        fallbackKeys
+        name
       );
-    const hashes = Object.fromEntries(
-      Object.entries(source)
-        .filter(([key]) => key in lockedSources)
-        .map(([key, value]) => [key, hash(value)])
-    );
-    if (JSON.stringify(lockedSources) !== JSON.stringify(hashes))
+    const hashes = Object.fromEntries(Object.entries(source).map(([key, value]) => [key, hash(value)]));
+    if (JSON.stringify(lock.targets[name]?.sources) !== JSON.stringify(hashes))
       throw new Error(`Chinese source-text lock is outdated: ${name}; run make i18n-sync ARGS="--targets ${name}"`);
     return Object.keys(source).length;
   } catch (error) {
