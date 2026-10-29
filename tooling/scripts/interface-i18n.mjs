@@ -113,10 +113,17 @@ const placeholders = text =>
     .map(x => x[0])
     .sort()
     .join(',');
-export function validate(source, english, translated, code, label) {
-  if (Object.keys(source).sort().join('\n') !== Object.keys(translated).sort().join('\n'))
+export function validate(source, english, translated, code, label, allowMissing = []) {
+  const allowed = new Set(allowMissing);
+  const sourceKeys = Object.keys(source);
+  const translatedKeys = Object.keys(translated);
+  if (
+    translatedKeys.some(key => !(key in source)) ||
+    sourceKeys.some(key => !(key in translated) && !allowed.has(key))
+  )
     throw new Error(`Locale keys do not match: ${label}/${code}`);
   for (const [key, value] of Object.entries(source)) {
+    if (!(key in translated)) continue;
     const plural = value.includes('|') || english[key]?.includes('|');
     const forms = translated[key].split('|').map(x => x.trim());
     const expected = plural ? manifest.locales.find(x => x.code === code).pluralCategories.length : 1;

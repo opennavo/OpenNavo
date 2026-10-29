@@ -5,6 +5,9 @@ import { toAppLocale, toRouteLocale } from '../app/utils/locale';
 
 const messages = (file: string) =>
   JSON.parse(readFileSync(new URL(`../i18n/locales/${file}.json`, import.meta.url), 'utf8')) as Record<string, unknown>;
+const i18nLock = JSON.parse(readFileSync(new URL('../../../tooling/i18n/i18n.lock.json', import.meta.url), 'utf8')) as {
+  targets: { web: { sources: Record<string, string> } };
+};
 
 const keys = (value: Record<string, unknown>, prefix = ''): string[] =>
   Object.entries(value).flatMap(([key, child]) =>
@@ -26,7 +29,16 @@ describe('Locales', () => {
     }
   });
 
-  it('Every site language has the same message keys', () => {
-    for (const locale of SITE_LOCALES) expect(keys(messages(locale)).sort()).toEqual(keys(messages('zh-CN')).sort());
+  it('Every site language has locked message keys; unlocked keys may use English fallback', () => {
+    const sourceKeys = keys(messages('zh-CN'));
+    const lockedKeys = new Set(Object.keys(i18nLock.targets.web.sources));
+    for (const locale of SITE_LOCALES) {
+      const localeKeys = keys(messages(locale));
+      expect(localeKeys.filter(key => !sourceKeys.includes(key))).toEqual([]);
+      expect(localeKeys.filter(key => !lockedKeys.has(key))).toEqual(
+        sourceKeys.filter(key => !lockedKeys.has(key) && localeKeys.includes(key))
+      );
+      expect(sourceKeys.filter(key => !localeKeys.includes(key)).every(key => !lockedKeys.has(key))).toBe(true);
+    }
   });
 });

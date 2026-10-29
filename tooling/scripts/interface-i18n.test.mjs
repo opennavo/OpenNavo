@@ -26,6 +26,13 @@ test('Invalid keys, placeholders, and plural forms are rejected', () => {
   );
 });
 
+test('Unlocked locale keys may be omitted for English fallback', () => {
+  const source = { translated: '已翻译', fallback: '待翻译' },
+    english = { translated: 'Translated', fallback: 'Fallback' };
+  validate(source, english, { translated: 'Translated' }, 'en-US', 'test', ['fallback']);
+  assert.throws(() => validate(source, english, { translated: 'Translated' }, 'en-US', 'test'), /keys/);
+});
+
 test('Failed writes persist nothing; successful writes update selected targets and preserve manual translations', async () => {
   const fs = await import('node:fs');
   const { exportPlan, writeResult, hash } = await import('./interface-i18n.mjs');
