@@ -122,3 +122,15 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
     </template>
   </OnPackageHeader>
 </template>
+
+<style>
+.on-mobile-install-command {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .on-mobile-install-command {
+    display: flex;
+  }
+}
+</style>
