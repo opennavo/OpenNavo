@@ -37,6 +37,44 @@ def payload():
             'admin_archive': base64.b64encode(data).decode(), 'admin_sha256': hashlib.sha256(data).hexdigest()}
 
 
+
+GOOD_CADDY = b'{$WEB_DOMAIN} {\n\treverse_proxy web:3000\n}\n'
+TRUNCATED_CADDY = b'{$WEB_DOMAIN} {\n\treverse_proxy'
+
+
+class FakeCaddy:
+    """Fake docker/caddy: validate reads the real file it was pointed at; contents in `good` pass."""
+
+    def __init__(self, live, good=(GOOD_CADDY,), validator='ok', signal_ok=True):
+        self.live, self.good, self.validator, self.signal_ok = live, set(good), validator, signal_ok
+        self.staged, self.events = {}, []
+
+    def __call__(self, args):
+        if args[:2] == ['docker', 'cp']:
+            self.staged[args[3].split(':', 1)[1]] = Path(args[2]).read_bytes()
+            return ''
+        if 'validate' in args:
+            target = args[args.index('--config') + 1]
+            content = self.live.read_bytes() if target == '/etc/caddy/Caddyfile' else self.staged[target]
+            self.events.append(('validate', target, content))
+            if self.validator == 'timeout':
+                raise deploy.subprocess.TimeoutExpired(args, 1)
+            if self.validator == 'daemon':
+                raise RuntimeError('command failed: docker (exit 125); inspect privately on host')
+            if self.validator == 'missing' or content not in self.good:
+                raise RuntimeError('command failed: docker (exit 1); inspect privately on host')
+            return ''
+        if 'version' in args:
+            if self.validator == 'missing':
+                raise RuntimeError('command failed: docker (exit 1); inspect privately on host')
+            return 'v2'
+        if '--signal=USR1' in args:
+            self.events.append(('signal', self.live.read_bytes()))
+            if not self.signal_ok:
+                raise RuntimeError('fixture reload failure')
+        return ''
+
+
 def prepare_on_host(root, api_environment, include_public_mcp=False):
     """Prepare a release on a minimal existing host and return the deployment and its candidate overlay."""
     directory = Path(root)
@@ -627,213 +665,132 @@ class DeployTests(unittest.TestCase):
                     self.assertEqual(again, routed)
                     routed = again
 
-    def test_deploy_start_validates_live_caddy_and_recovers_interrupted_write(self):
-        for same_sha in [False, True]:
-            for valid_live, valid_backup in [(False, True), (False, None), (False, False),
-                                             (True, True), (True, None)]:
-                with self.subTest(same_sha=same_sha, valid_live=valid_live, valid_backup=valid_backup), \
-                        tempfile.TemporaryDirectory() as root:
-                    obj, _ = prepare_on_host(root, {})
-                    if same_sha:
-                        obj.state['sha'] = obj.payload['sha']
-                    good = obj.live_caddy.read_bytes()
-                    truncated = b'{$WEB_DOMAIN} {\n\treverse_proxy'
-                    backup = obj.live_caddy.with_name('Caddyfile.bak')
-                    if valid_backup is not None:
-                        backup.write_bytes(good if valid_backup else truncated)
-                        backup_stat = backup.stat()
-                    if not valid_live:
-                        obj.live_caddy.write_bytes(truncated)
-                    before = obj.live_caddy.stat()
-                    observed = []
-                    validate = ['docker', 'exec', 'fixture-caddy', 'caddy', 'validate',
-                                '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
+    def _caddy_obj(self, root, live=GOOD_CADDY, backup=None):
+        obj = object.__new__(deploy.Deployment)
+        obj.root = obj.directory = Path(root)
+        (obj.root / 'deploy').mkdir(exist_ok=True)
+        obj.config = {'caddy_container': 'fixture-caddy'}
+        obj.release, obj.payload = 'fixture', {'sha': 'a' * 40}
+        obj.live_caddy = obj.root / 'Caddyfile'
+        obj.live_caddy.write_bytes(live)
+        if backup is not None:
+            (obj.root / 'Caddyfile.bak').write_bytes(backup)
+        return obj
 
-                    def command(args):
-                        self.assertEqual(args, validate)
-                        observed.append(obj.live_caddy.read_bytes())
-                        if observed[-1] != good:
-                            raise RuntimeError('invalid live Caddyfile')
-                        return ''
+    def test_validate_live_caddy_leaves_files_when_validator_cannot_run(self):
+        for mode in ['timeout', 'daemon', 'missing']:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
+                newer = GOOD_CADDY + b'# newer\n'
+                obj = self._caddy_obj(root, live=newer, backup=GOOD_CADDY)
+                fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer), validator=mode)
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()) as output, \
+                        self.assertRaises(deploy.CaddyValidatorUnavailable):
+                    obj.validate_live_caddy()
+                self.assertEqual(obj.live_caddy.read_bytes(), newer)
+                self.assertNotIn('restoring', output.getvalue())
 
-                    continued = valid_live or valid_backup is True
-                    error = ('deployment continued' if continued else
-                             'backup .*Caddyfile.bak is missing' if valid_backup is None else
-                             'invalid live Caddyfile')
-                    with patch.object(deploy, 'command', side_effect=command), \
-                            patch.object(deploy.os, 'fsync', wraps=os.fsync) as fsync, \
-                            patch.object(obj, 'capacity_gate', side_effect=RuntimeError('deployment continued')) as capacity, \
-                            patch.object(obj, 'verify', side_effect=RuntimeError('deployment continued')) as verify, \
-                            patch.object(obj, 'prepare') as prepare, \
-                            patch.object(obj, 'backup') as db_backup, \
-                            contextlib.redirect_stdout(io.StringIO()) as output, \
-                            self.assertRaisesRegex(RuntimeError, error):
-                        obj.apply(archive())
-                    recovered = not valid_live and valid_backup is not None
-                    self.assertEqual(observed, [good] if valid_live else
-                                     [truncated, good if valid_backup else truncated] if recovered else
-                                     [truncated])
-                    self.assertEqual(fsync.call_count, int(recovered))
-                    self.assertEqual(obj.live_caddy.stat().st_ino, before.st_ino)
-                    self.assertEqual(obj.live_caddy.read_bytes(), good if continued else truncated)
-                    if valid_live:
-                        self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
-                        self.assertEqual(obj.live_caddy.stat().st_ctime_ns, before.st_ctime_ns)
-                    if valid_backup is not None:
-                        self.assertEqual(backup.read_bytes(), good if valid_backup else truncated)
-                        self.assertEqual(backup.stat().st_mtime_ns, backup_stat.st_mtime_ns)
-                    else:
-                        self.assertFalse(backup.exists())
-                    if recovered:
-                        self.assertIn(f'restoring {obj.live_caddy} in place from {backup}', output.getvalue())
-                        if continued:
-                            self.assertIn('Restored live Caddyfile', output.getvalue())
-                            self.assertIn('validation passed', output.getvalue())
-                    else:
-                        self.assertNotIn('restoring', output.getvalue())
-                    self.assertEqual(capacity.call_count, int(continued and not same_sha))
-                    self.assertEqual(verify.call_count, int(continued and same_sha))
-                    prepare.assert_not_called()
-                    db_backup.assert_not_called()
-
-    def test_reload_recovers_truncated_live_caddy_and_revalidates_before_signal(self):
+    def test_valid_new_caddy_is_never_replaced_by_stale_backup(self):
         with tempfile.TemporaryDirectory() as root:
-            obj, _ = prepare_on_host(root, {})
-            good = obj.live_caddy.read_bytes()
-            backup = obj.live_caddy.with_name('Caddyfile.bak')
-            backup.write_bytes(good)
-            truncated = b'{$WEB_DOMAIN} {\n\treverse_proxy'
-            obj.live_caddy.write_bytes(truncated)
-            inode = obj.live_caddy.stat().st_ino
-            events = []
-
-            def command(args):
-                self.assertEqual(args, ['docker', 'exec', 'fixture-caddy', 'caddy', 'validate',
-                                        '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
-                                 if 'validate' in args else
-                                 ['docker', 'kill', '--signal=USR1', 'fixture-caddy'])
-                content = obj.live_caddy.read_bytes()
-                events.append(('validate' if 'validate' in args else 'signal', content))
-                if content != good:
-                    raise RuntimeError('invalid live Caddyfile')
-                return ''
-
-            with patch.object(deploy, 'command', side_effect=command), \
-                    patch.object(deploy.os, 'fsync', wraps=os.fsync) as fsync, \
+            newer = GOOD_CADDY + b'# newer\n'
+            obj = self._caddy_obj(root, live=newer, backup=GOOD_CADDY)
+            fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer))
+            with patch.object(deploy, 'command', side_effect=fake), \
                     contextlib.redirect_stdout(io.StringIO()) as output:
                 obj.reload()
-            self.assertEqual(events, [('validate', truncated), ('validate', good), ('signal', good)])
-            self.assertEqual(obj.live_caddy.stat().st_ino, inode)
-            self.assertEqual(backup.read_bytes(), good)
-            fsync.assert_called_once()
-            self.assertIn('Restored live Caddyfile', output.getvalue())
-            self.assertIn('validation passed', output.getvalue())
-            self.assertFalse(obj.degraded_path.exists())
-            self.assertTrue(hasattr(obj, 'switch_at'))
+            self.assertEqual(obj.live_caddy.read_bytes(), newer)
+            self.assertEqual(fake.events[-1], ('signal', newer))
+            self.assertNotIn('restoring', output.getvalue())
 
-    def test_install_caddy_validates_staged_copy_and_preserves_live_inode(self):
-        for invalid in [False, True]:
-            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as root:
-                obj = object.__new__(deploy.Deployment)
-                obj.config = {'caddy_container': 'fixture-caddy'}
-                obj.live_caddy = Path(root) / 'Caddyfile'
-                obj.live_caddy.write_bytes(b'before')
+    def test_invalid_live_caddy_restored_only_from_valid_backup(self):
+        for backup in [GOOD_CADDY, TRUNCATED_CADDY, None]:
+            with self.subTest(backup=backup), tempfile.TemporaryDirectory() as root:
+                obj = self._caddy_obj(root, live=TRUNCATED_CADDY, backup=backup)
                 inode = obj.live_caddy.stat().st_ino
-                (Path(root) / 'before-caddy').write_bytes(b'release snapshot')
-                backup = Path(root) / 'Caddyfile.bak'
-                backup.write_bytes(b'stale backup')
-                def command(args):
-                    self.assertEqual(backup.read_bytes(), b'before')
-                    if args[:2] == ['docker', 'cp']:
-                        staged = Path(args[2])
-                        self.assertEqual(staged.parent, obj.live_caddy.parent)
-                        self.assertEqual(staged.read_bytes(), b'after')
-                    if 'validate' in args:
-                        self.assertEqual(obj.live_caddy.read_bytes(), b'before')
-                        self.assertIn('--adapter', args)
-                        if invalid:
-                            raise RuntimeError('invalid staged config')
-                    return ''
-                with patch.object(deploy, 'command', side_effect=command), \
-                        patch.object(deploy.os, 'fsync', wraps=os.fsync) as fsync:
-                    if invalid:
-                        with self.assertRaisesRegex(RuntimeError, 'invalid staged config'):
-                            obj.install_caddy(b'after')
+                fake = FakeCaddy(obj.live_caddy)
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    if backup == GOOD_CADDY:
+                        obj.validate_live_caddy()
                     else:
-                        obj.install_caddy(b'after')
-                    self.assertEqual(fsync.call_count, 3)
-                self.assertEqual(obj.live_caddy.read_bytes(), b'before' if invalid else b'after')
+                        with self.assertRaisesRegex(RuntimeError, 'missing' if backup is None else 'invalid too'):
+                            obj.validate_live_caddy()
+                self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY if backup == GOOD_CADDY else TRUNCATED_CADDY)
                 self.assertEqual(obj.live_caddy.stat().st_ino, inode)
-                self.assertEqual(backup.read_bytes(), b'before')
-                self.assertEqual((Path(root) / 'before-caddy').read_bytes(), b'release snapshot')
-                self.assertEqual(list(Path(root).glob('.Caddyfile-*')), [])
+                if backup == GOOD_CADDY:
+                    self.assertIn('restoring', output.getvalue())
+                    self.assertIn('validation passed', output.getvalue())
 
-    def test_install_caddy_restores_adjacent_backup_after_partial_write(self):
+    def test_interrupted_in_place_write_is_detected_even_if_it_validates(self):
         with tempfile.TemporaryDirectory() as root:
-            obj = object.__new__(deploy.Deployment)
-            obj.config = {'caddy_container': 'fixture-caddy'}
-            obj.live_caddy = Path(root) / 'Caddyfile'
-            obj.live_caddy.write_bytes(b'live before switch')
+            prefix = b'{$WEB_DOMAIN} {\n}\n'
+            obj = self._caddy_obj(root, live=prefix, backup=GOOD_CADDY)
+            deploy.write_atomic(deploy.caddy_intent_path(obj.live_caddy),
+                                (deploy.hashlib.sha256(GOOD_CADDY + b'# more\n').hexdigest() + '\n').encode())
+            fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, prefix))
+            with patch.object(deploy, 'command', side_effect=fake), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                obj.validate_live_caddy()
+            self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
+            self.assertIn('interrupted write', output.getvalue())
+            self.assertFalse(deploy.caddy_intent_path(obj.live_caddy).exists())
+
+    def test_completed_write_clears_intent_and_keeps_inode(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj = self._caddy_obj(root, live=b'before')
             inode = obj.live_caddy.stat().st_ino
-            write = deploy.write_caddy_in_place
-            writes = []
-            def fail_partial_write(path, content):
-                if path == obj.live_caddy:
-                    writes.append(content)
-                    if len(writes) == 1:
-                        path.write_bytes(b'partial')
-                        raise OSError('fixture partial write')
-                write(path, content)
-            with patch.object(deploy, 'command', return_value=''), \
-                    patch.object(deploy, 'write_caddy_in_place', side_effect=fail_partial_write), \
-                    self.assertRaisesRegex(OSError, 'fixture partial write'):
-                obj.install_caddy(b'candidate')
-            self.assertEqual(writes, [b'candidate', b'live before switch'])
-            self.assertEqual(obj.live_caddy.read_bytes(), b'live before switch')
+            newer = GOOD_CADDY + b'# newer\n'
+            fake = FakeCaddy(obj.live_caddy, good=(newer,))
+            with patch.object(deploy, 'command', side_effect=fake):
+                obj.install_caddy(newer)
+            self.assertEqual(obj.live_caddy.read_bytes(), newer)
             self.assertEqual(obj.live_caddy.stat().st_ino, inode)
-            self.assertEqual((Path(root) / 'Caddyfile.bak').read_bytes(), b'live before switch')
-            self.assertEqual(list(Path(root).glob('.Caddyfile-*')), [])
+            self.assertEqual((obj.root / 'Caddyfile.bak').read_bytes(), b'before')
+            self.assertFalse(deploy.caddy_intent_path(obj.live_caddy).exists())
+            self.assertEqual(list(obj.root.glob('.Caddyfile-*')), [])
 
-    def test_install_caddy_backup_failure_leaves_live_untouched(self):
+    def test_install_caddy_invalid_or_unvalidated_candidate_never_touches_live(self):
+        for mode in ['invalid', 'timeout', 'daemon']:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
+                obj = self._caddy_obj(root, live=GOOD_CADDY)
+                before = obj.live_caddy.stat()
+                fake = FakeCaddy(obj.live_caddy, validator='ok' if mode == 'invalid' else mode)
+                with patch.object(deploy, 'command', side_effect=fake), self.assertRaises(RuntimeError):
+                    obj.install_caddy(TRUNCATED_CADDY)
+                self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
+                self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
+                self.assertEqual(list(obj.root.glob('.Caddyfile-*')), [])
+
+    def test_install_caddy_partial_write_restores_backup(self):
         with tempfile.TemporaryDirectory() as root:
-            obj = object.__new__(deploy.Deployment)
-            obj.config = {'caddy_container': 'fixture-caddy'}
-            obj.live_caddy = Path(root) / 'Caddyfile'
-            obj.live_caddy.write_bytes(b'before')
-            with patch.object(deploy, 'command') as run, \
-                    patch.object(deploy, 'write_caddy_in_place', side_effect=OSError('backup failed')), \
-                    self.assertRaisesRegex(OSError, 'backup failed'):
-                obj.install_caddy(b'after')
-            run.assert_not_called()
-            self.assertEqual(obj.live_caddy.read_bytes(), b'before')
+            obj = self._caddy_obj(root, live=GOOD_CADDY)
+            newer = GOOD_CADDY + b'# newer\n'
+            real = deploy.write_caddy_in_place
+            calls = []
+            def partial(path, content):
+                calls.append(content)
+                if len(calls) == 1:
+                    path.write_bytes(b'partial')
+                    raise OSError('fixture partial write')
+                real(path, content)
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(newer,))), \
+                    patch.object(deploy, 'write_caddy_in_place', side_effect=partial), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaisesRegex(OSError, 'fixture partial write'):
+                obj.install_caddy(newer)
+            self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
 
-    def test_reload_restores_adjacent_backup_on_validate_or_signal_failure(self):
-        for failure in ['validate', '--signal=USR1']:
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as root:
-                obj = object.__new__(deploy.Deployment)
-                obj.root = Path(root)
-                (obj.root / 'deploy').mkdir()
-                obj.config = {'caddy_container': 'fixture-caddy'}
-                obj.release, obj.payload = 'fixture', {'sha': 'a' * 40}
-                obj.directory = obj.root
-                (obj.directory / 'before-caddy').write_bytes(b'release snapshot')
-                obj.live_caddy = obj.root / 'Caddyfile'
-                obj.live_caddy.write_bytes(b'candidate')
-                inode = obj.live_caddy.stat().st_ino
-                backup = obj.root / 'Caddyfile.bak'
-                backup.write_bytes(b'live before switch')
-                def command(args):
-                    if failure in args:
-                        raise RuntimeError('fixture reload failure')
-                    return ''
-                with patch.object(deploy, 'command', side_effect=command), \
-                        contextlib.redirect_stdout(io.StringIO()), \
-                        self.assertRaisesRegex(RuntimeError, 'fixture reload failure'):
-                    obj.reload()
-                self.assertEqual(obj.live_caddy.read_bytes(), b'live before switch')
-                self.assertEqual(obj.live_caddy.stat().st_ino, inode)
-                self.assertEqual(backup.read_bytes(), b'live before switch')
-                self.assertTrue(obj.degraded_path.exists())
+    def test_reload_signal_failure_restores_validated_backup_and_marks_degraded(self):
+        with tempfile.TemporaryDirectory() as root:
+            newer = GOOD_CADDY + b'# newer\n'
+            obj = self._caddy_obj(root, live=newer, backup=GOOD_CADDY)
+            fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer), signal_ok=False)
+            with patch.object(deploy, 'command', side_effect=fake), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaisesRegex(RuntimeError, 'fixture reload failure'):
+                obj.reload()
+            self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
+            self.assertTrue(obj.degraded_path.exists())
 
     def test_public_mcp_route_requires_one_web_block_and_catch_all_proxy(self):
         for source in ['reverse_proxy {\n}\n', '{$WEB_DOMAIN} {\nreverse_proxy web:3000\n}\n']:
@@ -1195,7 +1152,9 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 obj, _ = prepare_on_host(root, {})
                 obj.config['caddy_container'] = 'fixture-caddy'
                 error = RuntimeError('fixture Caddy failure')
-                commands = [error] if fail_validation else ['', error]
+                # Invalid live file (caddy exit 1, caddy runnable) with no backup, or a failed signal.
+                commands = ([RuntimeError('command failed: docker (exit 1); inspect privately on host'), '']
+                            if fail_validation else ['', error])
                 with patch.object(deploy, 'command', side_effect=commands), \
                         contextlib.redirect_stdout(io.StringIO()) as output, \
                         self.assertRaisesRegex(RuntimeError, 'Live Caddyfile validation failed'

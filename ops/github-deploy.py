@@ -366,11 +366,89 @@ def merge_public_mcp_trusted_proxy(value, proxy_ips=None):
 
 
 def write_caddy_in_place(path, content):
-    """Keep the inode of the single-file Caddy bind mount and durably write its contents."""
+    """Keep the inode of the single-file Caddy bind mount and durably write its contents.
+
+    docker-compose.prod.yml bind-mounts ./caddy/Caddyfile as a single file, so a rename would
+    swap the host inode and the container would keep reading the old one. The write is therefore
+    in place, bracketed by an atomically written intent record (expected SHA-256) that lets the
+    next run detect an interrupted write, and verified by reading the file back.
+    """
+    intent = caddy_intent_path(path)
+    digest = hashlib.sha256(content).hexdigest()
+    write_atomic(intent, (digest + '\n').encode())
     with path.open('wb') as target:
         target.write(content)
         target.flush()
         os.fsync(target.fileno())
+    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        raise OSError(f'{path} does not match the content just written; intent kept for recovery')
+    intent.unlink(missing_ok=True)
+    fsync_directory(path.parent)
+
+
+def caddy_intent_path(path):
+    return path.with_name('.' + path.name + '.intent')
+
+
+def fsync_directory(directory):
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_atomic(path, content):
+    """Write a non-mounted sidecar file: same-directory temp, fsync, rename, fsync directory."""
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.' + path.name + '-', delete=False) as staged:
+        try:
+            staged.write(content)
+            staged.flush()
+            os.fsync(staged.fileno())
+        except BaseException:
+            Path(staged.name).unlink(missing_ok=True)
+            raise
+    os.replace(staged.name, path)
+    fsync_directory(path.parent)
+
+
+def interrupted_caddy_write(path):
+    """True when an intent record exists and the live file does not hold its expected content."""
+    intent = caddy_intent_path(path)
+    if not intent.is_file():
+        return False
+    expected = intent.read_text().strip()
+    if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == expected:
+        intent.unlink(missing_ok=True)
+        return False
+    return True
+
+
+class CaddyValidatorUnavailable(RuntimeError):
+    """caddy validate could not run, so the configuration's validity is unknown."""
+
+
+def caddy_validate(container, config_path):
+    """Return True/False for a valid/invalid Caddyfile; raise CaddyValidatorUnavailable otherwise.
+
+    Only a clean exit 1 from caddy itself counts as "invalid". Timeouts, OS errors, other exit
+    codes, or an exit 1 while the container cannot run caddy at all are "unknown".
+    """
+    try:
+        command(['docker', 'exec', container, 'caddy', 'validate', '--config', config_path,
+                 '--adapter', 'caddyfile'])
+        return True
+    except RuntimeError as error:
+        text = str(error)
+        if '(exit ' in text and '(exit 1)' not in text:
+            raise CaddyValidatorUnavailable(f'caddy validate could not run: {text}') from error
+    except (OSError, subprocess.SubprocessError) as error:
+        raise CaddyValidatorUnavailable(f'caddy validate could not run: {type(error).__name__}') from error
+    try:
+        command(['docker', 'exec', container, 'caddy', 'version'])
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        raise CaddyValidatorUnavailable('caddy validate failed and caddy is not runnable in the container') from error
+    return False
 
 
 def public_mcp_route(alias):
@@ -1094,50 +1172,71 @@ class Deployment:
             raise
         print('API and web monitoring targets updated and healthy.', flush=True)
 
+    def _validate_staged(self, content):
+        """Validate content as a staged copy inside the Caddy container; never touches the live file."""
+        container = self.config['caddy_container']
+        with tempfile.NamedTemporaryFile(dir=self.live_caddy.parent, prefix='.Caddyfile-', delete=False) as staged:
+            path = Path(staged.name)
+            remote = '/tmp/' + path.name
+            try:
+                staged.write(content)
+                staged.flush()
+                os.fsync(staged.fileno())
+                command(['docker', 'cp', str(path), container + ':' + remote])
+                return caddy_validate(container, remote)
+            finally:
+                path.unlink(missing_ok=True)
+                with contextlib.suppress(RuntimeError, OSError):
+                    command(['docker', 'exec', container, 'rm', '-f', remote])
+
     def install_caddy(self, content):
         """Back up the live file and validate a staged copy before updating its inode."""
-        container = self.config['caddy_container']
         backup = self.live_caddy.with_name('Caddyfile.bak')
-        write_caddy_in_place(backup, self.live_caddy.read_bytes())
+        write_atomic(backup, self.live_caddy.read_bytes())
+        if not self._validate_staged(content):
+            raise RuntimeError('invalid staged Caddyfile; live configuration left untouched')
         try:
-            with tempfile.NamedTemporaryFile(dir=self.live_caddy.parent, prefix='.Caddyfile-', delete=False) as staged:
-                path = Path(staged.name)
-                remote = '/tmp/' + path.name
-                try:
-                    staged.write(content)
-                    staged.flush()
-                    os.fsync(staged.fileno())
-                    command(['docker', 'cp', str(path), container + ':' + remote])
-                    command(['docker', 'exec', container, 'caddy', 'validate', '--config', remote, '--adapter', 'caddyfile'])
-                    write_caddy_in_place(self.live_caddy, content)
-                finally:
-                    path.unlink(missing_ok=True)
-                    with contextlib.suppress(RuntimeError, OSError):
-                        command(['docker', 'exec', container, 'rm', '-f', remote])
+            write_caddy_in_place(self.live_caddy, content)
         except Exception:
+            print(f'WARNING: writing {self.live_caddy} failed; restoring it in place from {backup}.', flush=True)
             write_caddy_in_place(self.live_caddy, backup.read_bytes())
+            print(f'Restored {self.live_caddy} from {backup}.', flush=True)
             raise
 
     def validate_live_caddy(self):
-        """Recover an interrupted in-place write before trusting the live configuration."""
-        args = ['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate',
-                '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
-        try:
-            command(args)
-        except Exception as error:
-            backup = self.live_caddy.with_name('Caddyfile.bak')
-            if not backup.is_file():
-                raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy}; '
-                                   f'backup {backup} is missing. Aborting deployment.') from error
-            print(f'WARNING: live Caddyfile validation failed; restoring {self.live_caddy} '
-                  f'in place from {backup}.', flush=True)
-            write_caddy_in_place(self.live_caddy, backup.read_bytes())
-            command(args)
-            print(f'Restored live Caddyfile from {backup}; validation passed.', flush=True)
+        """Recover an interrupted or invalid in-place write before trusting the live configuration.
+
+        The backup is restored only when caddy definitively rejects the live file (or an intent
+        record shows the last write never completed) and the backup itself validates. If the
+        validator cannot run, nothing is touched and the deployment aborts.
+        """
+        container = self.config['caddy_container']
+        backup = self.live_caddy.with_name('Caddyfile.bak')
+        interrupted = interrupted_caddy_write(self.live_caddy)
+        if not interrupted and caddy_validate(container, '/etc/caddy/Caddyfile'):
+            return
+        reason = 'an interrupted write' if interrupted else 'live Caddyfile validation failed'
+        if not backup.is_file():
+            raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}); '
+                               f'backup {backup} is missing. Aborting deployment.')
+        if not self._validate_staged(backup.read_bytes()):
+            raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}) and '
+                               f'backup {backup} is invalid too. Aborting deployment without changes.')
+        print(f'WARNING: {reason}; restoring {self.live_caddy} in place from {backup}.', flush=True)
+        write_caddy_in_place(self.live_caddy, backup.read_bytes())
+        if not caddy_validate(container, '/etc/caddy/Caddyfile'):
+            raise RuntimeError(f'Restored {self.live_caddy} from {backup} but it still fails validation.')
+        print(f'Restored live Caddyfile from {backup}; validation passed.', flush=True)
 
     def reload(self):
         try:
             self.validate_live_caddy()
+        except Exception:
+            # validate_live_caddy already restored a good backup when that was provably safe;
+            # never overwrite a file whose validity is unknown.
+            self.mark_degraded('Caddy reload failed; routing unconfirmed')
+            raise
+        try:
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
             # Prefer the adjacent backup of the actual live file at this switch.
