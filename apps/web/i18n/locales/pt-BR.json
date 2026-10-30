@@ -648,8 +648,7 @@
       "alternativesQ": "Quais são as alternativas ao {name}?",
       "alternativesA": "Algumas alternativas são {list}.",
       "titleFor": "Perguntas frequentes sobre o {name}",
-      "repositoryQ": "{name} tem um repositório público no GitHub?",
-      "source": "Fonte: {source}."
+      "repositoryQ": "{name} tem um repositório público no GitHub?"
     },
     "securityPromo": {
       "title": "OpenNavo: verificação de vírus e firewall de apps",
@@ -683,6 +682,7 @@
     },
     "repo": {
       "stars": "★",
+      "checked": "Dados do repositório verificados em {date}.",
       "updated": "Atualizado há {days} dias",
       "unmaintained": "Pode não receber mais manutenção",
       "archived": "Arquivado"
@@ -846,6 +846,18 @@
       "label": "Download oficial · {host}",
       "checksum": "SHA-256 registrado no Homebrew",
       "active": "Não desativado pelo Homebrew"
+    },
+    "sourceBadge": {
+      "label": "Fonte oficial",
+      "verified": "Fonte oficial · Verificada",
+      "disabled": "Fonte oficial · App desativado",
+      "deprecated": "Fonte oficial · App obsoleto",
+      "paused": "Fonte oficial · Em pausa",
+      "domain": "Origem: {domain}",
+      "checksum": "SHA-256: {sha256}",
+      "checksumUnknown": "SHA-256 não registrado",
+      "checked": "Verificação: {date}",
+      "unchecked": "Data de verificação não registrada"
     }
   },
   "collections": {

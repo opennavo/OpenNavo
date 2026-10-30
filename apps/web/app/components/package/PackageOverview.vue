@@ -83,7 +83,8 @@ const relatedItems = computed<OnRelatedPackage[]>(() =>
   }))
 );
 
-const spec = computed(() => packageSpec(pkg.value!, t, toAppLocale(locale.value)));
+const specNow = usePackageSpecNow();
+const spec = computed(() => packageSpec(pkg.value!, t, toAppLocale(locale.value), specNow.value));
 type SoftwareAppInput = NonNullable<Parameters<typeof defineSoftwareApp>[0]>;
 
 // WP10 SoftwareApplication (utils/structuredData): only what the page shows, offers only for

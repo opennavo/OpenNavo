@@ -6,12 +6,11 @@ import { SITE_LOCALES } from '@opennavo/shared';
 import { siteMessage } from '../server/utils/siteCopy';
 import { leadSentences } from '../app/utils/appAnswer';
 import { formatDate } from '../app/utils/packageDate';
-import { mergeReleaseEntries, officialDownload, subpageAppNode } from '../app/utils/packageFacts';
+import { mergeReleaseEntries, officialSource, subpageAppNode } from '../app/utils/packageFacts';
 import LatestRelease from '../app/components/package/LatestReleaseCard.vue';
 import Price from '../app/components/package/PackagePrice.vue';
 import Requirements from '../app/components/package/PackageRequirements.vue';
 import Timeline from '../app/components/package/PackageVersionTimeline.vue';
-import Download from '../app/components/package/PackageOfficialDownload.vue';
 import Command from '../app/components/package/PackageCommand.vue';
 import { GEO_SAMPLES, geoPrice, geoRequirement } from './geoFixtures';
 import { pageOf } from './packageFixtures';
@@ -238,7 +237,7 @@ describe('application SEO repair', () => {
     const html = await render(Timeline, { entries });
     expect(html.match(/class="on-version-entry /g)).toHaveLength(1);
   });
-  it('links verified evidence to Install details without repeating downloads or dates', async () => {
+  it('keeps dated source evidence available for lifecycle warnings without claiming missing checksums', () => {
     const pkg = page();
     pkg.homebrewStatus = { state: 'active', reason: null, date: null };
     pkg.facts.requirements = [
@@ -254,19 +253,17 @@ describe('application SEO repair', () => {
         }
       })
     ];
-    const html = await render(Download, { pkg });
-    expect(html).toContain(`href="/apps/${pkg.token}/details#sources"`);
-    expect(html).not.toContain('href="https://vendor.example/app.dmg"');
-    expect(html).toContain('Official download · vendor.example');
-    expect(html).toContain('SHA-256 recorded by Homebrew');
-    expect(html).toContain('Not disabled by Homebrew');
-    expect(html).not.toContain('<time');
+    expect(officialSource(pkg)).toMatchObject({
+      verified: true,
+      checkedAt: '2026-10-21T00:00:00Z',
+      entries: [{ host: 'vendor.example', sha256: 'a'.repeat(64) }]
+    });
     pkg.facts.requirements[0]!.sha256 = null;
-    expect(await render(Download, { pkg })).not.toContain('SHA-256');
+    expect(officialSource(pkg)).toMatchObject({ verified: false, entries: [{ sha256: null }] });
     pkg.homebrewStatus.state = 'disabled';
-    expect(officialDownload(pkg)).toBeNull();
+    expect(officialSource(pkg)).not.toBeNull();
     pkg.kind = 'link';
-    expect(await render(Download, { pkg })).not.toContain('<a');
+    expect(officialSource(pkg)).toBeNull();
   });
   it('gives clipboard buttons distinct accessible names', async () => {
     for (const key of ['install', 'uninstall', 'cleanup']) {

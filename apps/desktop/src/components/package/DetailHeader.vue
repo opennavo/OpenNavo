@@ -2,10 +2,11 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { PackageDetail } from '@opennavo/api';
-import { formatDate, isThirdPartyTap, packageInstallState } from '@opennavo/shared';
+import { formatDate, isThirdPartyTap, packageInstallState, toPackageSource } from '@opennavo/shared';
 import { displayUrl, OnButton, OnIcon, OnMenu, OnPackageHeader, toPackageRepoSignals } from '@opennavo/ui';
 import type { OnPackageHeaderChip } from '@opennavo/ui';
 import PackageGetButton from './PackageGetButton.vue';
+import DetailSourceBadge from './DetailSourceBadge.vue';
 import type { Kind } from '@/ipc/bindings';
 import type { LocalItem } from '@/ipc/client';
 import { useAppLocale } from '@/composables/useAppLocale';
@@ -44,10 +45,12 @@ const subtitle = computed(() => [props.detail?.developer, summary.value].filter(
 const iconUrl = computed(() => props.detail?.iconUrl ?? props.local?.iconUrl ?? null);
 const accent = computed(() => props.detail?.accentColor ?? props.local?.accentColor ?? null);
 const repoSignals = computed(() => toPackageRepoSignals(props.detail));
+const officialSource = computed(() => (props.detail ? toPackageSource(props.detail) : null));
 
 const installed = computed(() => library.find(props.kind, props.token));
 const outdated = computed(() => updates.find(props.kind, props.token));
-const unavailable = computed(() => packageInstallState(props.detail ?? props.local ?? {}) === 'disabled');
+const installState = computed(() => packageInstallState(props.detail ?? props.local ?? {}));
+const unavailable = computed(() => installState.value === 'disabled');
 const state = computed(() => stateOf(props.kind, props.token, unavailable.value));
 const latest = computed(() => outdated.value?.currentVersion ?? props.detail?.version ?? props.local?.version ?? '');
 
@@ -81,12 +84,11 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
     list.push({ key: 'archived', label: t('package.repo.archived'), tone: 'danger', outline: true });
   if (installedChip.value) list.push({ key: 'installed', label: installedChip.value, tone: 'success', dot: true });
   if (installed.value?.pinned) list.push({ key: 'pinned', label: t('package.pinned') });
-  if (unavailable.value) list.push({ key: 'disabled', label: t('package.disabled'), tone: 'danger', outline: true });
-  else if (props.detail?.deprecation ?? props.local?.deprecated)
+  if (installState.value !== 'active' && !officialSource.value)
     list.push({
-      key: 'deprecated',
-      label: t('package.deprecated'),
-      tone: 'warning',
+      key: installState.value,
+      label: t(`package.${installState.value}`),
+      tone: unavailable.value ? 'danger' : 'warning',
       outline: true
     });
   return list;
@@ -108,7 +110,6 @@ const meta = computed(() => {
   const parts: string[] = [];
   if (props.kind === 'link')
     return source.value ? t('package.link.meta', { source: source.value }) : t('package.link.notHosted');
-  if (props.detail?.tap) parts.push(`${t('package.fromTap')} ${props.detail.tap}`);
   if (installed.value?.installedAt)
     parts.push(
       t('package.installedAt', {
@@ -149,6 +150,9 @@ const onSelect = (key: string) => {
     :chips="chips"
     :meta="meta"
   >
+    <template #tags>
+      <DetailSourceBadge v-if="detail && officialSource" :pkg="detail" />
+    </template>
     <template #actions>
       <OnButton
         v-if="kind === 'cask'"

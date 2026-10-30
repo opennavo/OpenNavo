@@ -16,7 +16,8 @@ const items = computed(() =>
   sources.value.map(source => ({
     key: `${source.kind}:${source.url}`,
     label: `${t('package.facts.labelled', { label: t(`package.sources.kinds.${source.kind}`) })}${['zh-CN', 'zh-Hant', 'ja-JP'].includes(appLocale.value) ? '' : ' '}`,
-    url: source.url
+    url: source.url,
+    tap: source.kind === 'homebrew' ? props.pkg.tap : null
   }))
 );
 // A conservative overall date: the oldest dated source, never a fabricated current check.
@@ -58,7 +59,7 @@ const checked = computed(() => {
           rel="nofollow noopener noreferrer"
           class="text-ink-primary underline-offset-2 [overflow-wrap:anywhere] hover:underline"
           >{{ displayUrl(item.url) }}</a
-        >
+        ><code v-if="item.tap" class="ml-6px font-mono text-11.5px">{{ item.tap }}</code>
       </li>
     </ul>
     <p v-if="checked" class="m-0 mt-10px text-11.5px text-ink-tertiary">

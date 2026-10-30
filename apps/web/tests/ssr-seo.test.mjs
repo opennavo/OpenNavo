@@ -13,6 +13,15 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { LOCALE_METADATA, SITE_LOCALES } from '@opennavo/shared/locales';
 
+const lifecycleCases = JSON.parse(
+  await readFile(new URL('../../../packages/shared/tests/fixtures/packageInstallStates.json', import.meta.url), 'utf8')
+);
+const qaTokens = [
+  ...lifecycleCases.map((_, index) => `qa-lifecycle-${index}`),
+  'qa-spec-metadata',
+  'qa-invalid-repository'
+];
+
 // Former public labels, retained only as regression assertions.
 const translationProvenanceLabels = {
   'en-US': ['AI translation', 'View original', 'AI translated'],
@@ -893,6 +902,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       match &&
       [
         ...seoApps,
+        ...qaTokens,
         'versioned-app@11',
         'plus-app++',
         'ordinary-app',
@@ -1016,6 +1026,33 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
                   deprecated: true,
                   homebrewStatus: { state: 'deprecated', reason: 'unmaintained' },
                   deprecation: { reason: 'unmaintained' }
+                }
+              : {}),
+            ...(token === 'qa-spec-metadata'
+              ? {
+                  version: '2.0.0',
+                  license: 'Apache-2.0',
+                  supports: { status: 'known', arm64: true, x86_64: true, requiresRosetta: true },
+                  platforms: [
+                    { tag: 'arm64_sonoma', arch: 'arm64', macos: '14', version: '2.0.0', minMacos: '14' },
+                    { tag: 'ventura', arch: 'x86_64', macos: '13', version: '1.0.0', minMacos: '12' }
+                  ],
+                  repository: {
+                    url: 'https://github.com/acme/example',
+                    stars: 999950,
+                    pushedAt: '2025-10-30T00:00:00Z',
+                    signalsCheckedAt: '2026-10-02T00:00:00Z'
+                  }
+                }
+              : {}),
+            ...(token === 'qa-invalid-repository'
+              ? {
+                  repository: {
+                    url: 'https://github.com/acme/example',
+                    stars: 12345,
+                    signalsCheckedAt: 'not-a-date',
+                    pushedAt: 'not-a-date'
+                  }
                 }
               : {}),
             ...(token === 'facts-app' || token === 'seo-uninstall' ? factsApp : {}),
@@ -1340,8 +1377,18 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     }
     if (data?.token && data.artifacts) {
       data.facts = factsFrom(data);
+      if (data.token === 'qa-spec-metadata')
+        data.facts.security.identities.push({
+          developer: 'Verified Developer',
+          teamId: 'EXAMPLE123',
+          channels: [],
+          openSource: 'unknown',
+          evidence: evidence('https://example.test/identity')
+        });
       data.collections = [];
-      data.recommendationPaused = false;
+      data.recommendationPaused ??= false;
+      if (data.token.startsWith('qa-lifecycle-'))
+        Object.assign(data, lifecycleCases[Number(data.token.slice('qa-lifecycle-'.length))].fields);
       // L1: current entity decisions can open all ten locales; keep the explicit legacy fixture.
       if (!data.indexing && data.token !== 'versioned-app@11')
         data.indexing = { locales: Object.keys(localePrefixes), notesCount: data.releaseCount };
@@ -1804,6 +1851,129 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       assert.ok(!/Variant App(?! Beta)/.test(title(text) + description(text)), `${page} never says the bare name`);
     }
   });
+  await t.test(
+    'lifecycle banners, commands, spec rows and header chips share disabled > deprecated > paused priority',
+    async () => {
+      for (const [index, { name, expected }] of lifecycleCases.entries()) {
+        const response = await fetch(`${origin}/apps/qa-lifecycle-${index}`);
+        const html = await response.text();
+        assert.equal(response.status, 200, name + logs);
+        const page = JSDOM.fragment(html);
+        const banner = page.querySelector('[data-testid="package-lifecycle-banner"]');
+        const command = page.querySelector('[data-testid="package-install-command"]');
+        const header = page.querySelector('h1').parentElement;
+        for (const [state, label] of Object.entries({
+          disabled: 'Disabled',
+          deprecated: 'Deprecated',
+          paused: 'Paused by OpenNavo'
+        }))
+          assert.equal(header.textContent.includes(label), expected === state, `${name}: ${state} chip`);
+        const card = page.querySelector('[data-testid="package-spec-card"]');
+        const homebrew = [...card.querySelectorAll('dt')].find(row => row.textContent === 'Homebrew');
+        const status = {
+          active: 'Available; updated by Homebrew',
+          disabled: 'Disabled by Homebrew',
+          deprecated: 'Deprecated',
+          paused: 'Still offered by Homebrew; paused by OpenNavo'
+        };
+        assert.equal(homebrew?.nextElementSibling?.textContent.trim(), status[expected], `${name}: Homebrew row`);
+        assert.equal(Boolean(banner), expected !== 'active', name);
+        assert.equal(Boolean(command?.querySelector('code')), expected !== 'disabled', name);
+        assert.equal(Boolean(command?.querySelector('button')), expected !== 'disabled', name);
+        if (banner) {
+          const notices = {
+            disabled: 'Homebrew has disabled this package:',
+            deprecated: 'Homebrew has deprecated this package:',
+            paused: 'No new version for more than 90 days'
+          };
+          assert.ok(banner.textContent.trim().startsWith(notices[expected]), `${name}: lifecycle banner`);
+          assert.ok(
+            banner.classList.contains(expected === 'disabled' ? 'text-status-danger' : 'text-status-warning'),
+            name
+          );
+          assert.equal(command.querySelector('[role="note"]').textContent.trim(), banner.textContent.trim(), name);
+        }
+      }
+    }
+  );
+
+  await t.test('source badges retain full source domains, SHA-256, lifecycle and check-date text in SSR', async () => {
+    for (const [prefix, label, domain, checked] of [
+      ['', 'Official source · Verified', 'Source: vendor.example', 'Checked:'],
+      ['/zh', '官方来源 · 已核查', '来源域名：vendor.example', '核查日期：']
+    ]) {
+      const response = await fetch(`${origin}${prefix}/apps/facts-app`);
+      assert.equal(response.status, 200, logs);
+      const page = JSDOM.fragment(await response.text());
+      const badge = page.querySelector('[data-testid="package-source-badge"]');
+      assert.equal(badge?.textContent.trim(), label);
+      assert.equal(badge.tagName, 'BUTTON');
+      assert.equal(badge.getAttribute('type'), 'button');
+      assert.ok(badge.closest('[data-testid="package-header-tags"]'));
+      const id = badge.getAttribute('aria-describedby');
+      assert.ok(id);
+      const tooltip = page.querySelector(`[role="tooltip"][id="${id}"]`);
+      assert.ok(tooltip, 'aria-describedby refers to a description in server HTML');
+      for (const text of [domain, 'b'.repeat(64), checked, '2025']) assert.ok(tooltip.textContent.includes(text), text);
+      const actions = page.querySelector('[data-testid="package-header-actions"]');
+      assert.equal(actions.children.length, 2);
+      assert.ok(!actions.contains(badge));
+      assert.ok(!actions.closest('section').textContent.includes('homebrew/cask'));
+      const details = JSDOM.fragment(await (await fetch(`${origin}${prefix}/apps/facts-app/details`)).text());
+      assert.ok(details.querySelector('[data-testid="package-sources"]').textContent.includes('homebrew/cask'));
+    }
+    const disabled = JSDOM.fragment(await (await fetch(`${origin}/apps/repair-disabled`)).text());
+    assert.equal(disabled.querySelector('[data-testid="package-source-badge"]').getAttribute('data-state'), 'disabled');
+    assert.ok(disabled.querySelector('[data-testid="package-header-actions"] button[disabled]'));
+  });
+
+  await t.test(
+    'deduplicated metadata keeps architectures, non-native status, older builds and identity IDs',
+    async () => {
+      const response = await fetch(`${origin}/apps/qa-spec-metadata`);
+      const html = await response.text();
+      assert.equal(response.status, 200, logs);
+      const page = JSDOM.fragment(html);
+      const card = page.querySelector('[data-testid="package-spec-card"]');
+      for (const text of ['Apple silicon', 'Apache-2.0', 'Verified Developer', 'EXAMPLE123'])
+        assert.ok(card.textContent.includes(text), text);
+      const detailsResponse = await fetch(`${origin}/apps/qa-spec-metadata/details`);
+      assert.equal(detailsResponse.status, 200, logs);
+      const details = JSDOM.fragment(await detailsResponse.text());
+      const requirements = details.querySelector('[data-testid="package-requirements"]');
+      assert.ok(requirements);
+      for (const text of ['Apple silicon', 'Intel', '2.0.0', '1.0.0', 'macOS 12'])
+        assert.ok(requirements.textContent.includes(text), text);
+      assert.ok(requirements.textContent.includes('Not native on Apple silicon'), requirements.textContent);
+      // Bundle IDs and link signatures are checked on the existing Lumen link fixture below.
+    }
+  );
+
+  await t.test('repository SSR links and descriptions are complete and malformed dates stay hidden', async () => {
+    const response = await fetch(`${origin}/apps/qa-spec-metadata`);
+    const html = await response.text();
+    assert.equal(response.status, 200, logs);
+    const page = JSDOM.fragment(html);
+    const card = page.querySelector('[data-testid="package-spec-card"]');
+    assert.ok(card.textContent.includes('★1.0M'), card.textContent);
+    const trigger = card.querySelector('button[aria-describedby]');
+    assert.ok(trigger, 'repository tooltip trigger is associated in SSR');
+    const description = page.querySelector(`[id="${trigger.getAttribute('aria-describedby')}"]`);
+    assert.equal(description?.getAttribute('role'), 'tooltip');
+    assert.ok(description.textContent.includes('Oct 2, 2026'), description.textContent);
+    for (const link of card.querySelectorAll('a[href^="https://"]')) {
+      assert.equal(link.getAttribute('target'), '_blank');
+      assert.equal(link.getAttribute('rel'), 'noopener noreferrer');
+      assert.ok(link.querySelector('svg'), 'external-link indicator');
+    }
+    const invalid = await fetch(`${origin}/apps/qa-invalid-repository`);
+    const invalidPage = JSDOM.fragment(await invalid.text());
+    assert.equal(invalid.status, 200, logs);
+    const invalidCard = invalidPage.querySelector('[data-testid="package-spec-card"]');
+    assert.ok(invalidCard.textContent.includes('★12.3K'));
+    assert.equal(invalidCard.querySelector('button[aria-describedby]'), null);
+  });
+
   await t.test('link apps share /apps and download from the developer instead of installing', async () => {
     const response = await fetch(`${origin}/apps/lumen-notes`, {
       headers: { accept: 'text/html' }
@@ -3364,7 +3534,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     assert.match(faq, /<details[\s\S]*?<summary[^>]*><h3[^>]*>Is Facts App safe\?<\/h3>/);
     // Inline code renders each word in its own element (OnCodeText), so compare the text without tags.
     const faqText = faq.replace(/<[^>]*>/g, '');
-    assert.ok(!faqText.includes('checked Dec 1, 2025'), 'FAQ source attribution excludes evidence check dates');
+    assert.ok(faqText.includes('checked Dec 1, 2025'), 'existing FAQ source attribution retains evidence check dates');
     assert.ok(faqText.includes('Is Facts App free?') && faqText.includes('requires a subscription'), faqText);
     assert.ok(faqText.includes('brew uninstall --zap --cask facts-app'), 'collapsed answers are in the HTML');
     assert.ok(faqText.includes('Its settings are in ~/Library/Preferences/facts.plist.'), faqText);
@@ -3440,13 +3610,10 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const facts = visible(await page('/apps/facts-app'));
     const header =
       /<section\b[^>]*class="[^"]*bg-component-detail-header-bg[^"]*"[\s\S]*?<\/section>/.exec(facts)?.[0] ?? '';
-    assert.match(
-      header,
-      /<a\b[^>]*href="\/apps\/facts-app\/details#sources"[^>]*>\s*Official download · vendor\.example\s*<\/a>/
-    );
+    assert.match(header, /data-testid="package-source-badge"/);
+    assert.ok(header.includes('Official source · Verified'));
     assert.match(header, /aria-label="Get Facts App"/);
-    assert.ok(header.includes('SHA-256 recorded by Homebrew'));
-    assert.ok(!header.includes('<time'), 'Verified does not duplicate the checked date');
+    assert.ok(!header.includes('From homebrew/cask'));
     for (const path of ['/apps/ordinary-app', '/apps/repair-disabled', '/apps/lumen-notes'])
       assert.ok(!visible(await page(path)).includes('Official download ·'), path);
     const details = visible(await page('/apps/facts-app/details'));
@@ -4166,6 +4333,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     [...requestedTokens].sort(),
     [
       ...seoApps,
+      ...qaTokens,
       'dependency-content-app',
       'facts-app',
       'font-sample',
