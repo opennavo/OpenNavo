@@ -100,6 +100,9 @@
     "addedToBrewfile": "{name} を Brewfile リストに追加しました",
     "brewfileFull": "リストは最大 200 項目です。追加するには、いくつか削除してください"
   },
+  "common": {
+    "copy": "コピー"
+  },
   "catalog": {
     "appsTitle": "App",
     "appsMetaTitle": "Mac App カタログ · OpenNavo",

@@ -45,11 +45,12 @@ const linkAttrs = (href: string) => (props.linkAs === 'a' ? { href } : { to: hre
         </span>
       </li>
     </ul>
-    <a
+    <component
+      :is="linkAs"
       v-if="relatedMoreHref"
-      :href="relatedMoreHref"
+      v-bind="linkAttrs(relatedMoreHref)"
       class="mt-8px inline-flex text-12.5px font-600 text-ink-secondary no-underline hover:text-ink-primary"
-      >{{ relatedMoreLabel }}</a
+      >{{ relatedMoreLabel }}</component
     >
   </section>
 </template>

@@ -185,7 +185,7 @@ function factsFrom(detail) {
       sha256: detail.downloadSha256 ?? null,
       artifacts: detail.artifacts,
       caveats: detail.caveats ?? null,
-      aliases: [],
+      aliases: detail.aliases ?? [],
       dependencyCount: (detail.dependsOn?.casks.length ?? 0) + (detail.dependsOn?.formulae.length ?? 0),
       conflictCount: (detail.conflictsWith?.casks.length ?? 0) + (detail.conflictsWith?.formulae.length ?? 0)
     },
@@ -359,6 +359,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
   const factsApp = {
     displayName: 'Facts App',
     names: ['Facts App', 'facts-app', 'Facts Alternate'],
+    aliases: ['facts-app-old'],
     autoUpdates: true,
     homepage: 'https://vendor.example/',
     downloadUrl: 'https://vendor.example/FactsApp.dmg',
@@ -666,6 +667,16 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
             conflictsWith: { casks: [], formulae: [] },
             supports: { status: 'unknown', arm64: false, x86_64: false },
             platforms: [],
+            // Link apps have no Install Details tab, so their vendor requirements and source must stay on the overview.
+            macosSupplement: {
+              ranges: [{ arch: 'arm64', support: 'native', minimum: '13', maximum: null }],
+              appVersion: '2.4.1',
+              sourceUrl: 'https://lumen.app/requirements',
+              method: 'vendor_docs',
+              verifiedAt: '2025-12-01T08:00:00Z',
+              stale: false,
+              conflicts: []
+            },
             screenshots: [],
             releaseCount: 0,
             releaseStats: { count30d: 0, cadence: 'unknown', brewLag: null },
@@ -2100,12 +2111,31 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     assert.ok(!html.includes('/apps/lumen-notes/details'), 'no install details tab');
     for (const tab of ['dependencies', 'details'])
       assert.equal((await fetch(`${origin}/apps/lumen-notes/${tab}`)).status, 404, tab);
+    // Link apps have no Install Details tab, so requirements and sources stay visible on the overview.
+    const overview = JSDOM.fragment(html);
+    const requirements = overview.querySelector('[data-testid="package-requirements"]');
+    assert.ok(requirements, 'link apps keep requirements on the overview');
+    assert.ok(requirements.textContent.includes('macOS 13'), requirements.textContent);
+    const sources = overview.querySelector('[data-testid="package-sources"]');
+    assert.ok(sources, 'link apps keep sources on the overview');
+    assert.ok(sources.textContent.includes('lumen.app'), sources.textContent);
     // Version history comes from the link app's own releases.
     const versions = await fetch(`${origin}/apps/lumen-notes/versions`);
     const versionsHtml = await versions.text();
     assert.equal(versions.status, 200, logs);
     assert.ok(versionsHtml.includes('Lumen link release notes'));
     assert.ok(!versionsHtml.includes('Added to Homebrew'), 'no Homebrew adoption lag for link apps');
+  });
+
+  await t.test('install details keep former tokens and show the install command', async () => {
+    const response = await fetch(`${origin}/apps/facts-app/details`);
+    const html = await response.text();
+    assert.equal(response.status, 200, logs);
+    const details = JSDOM.fragment(html);
+    const command = details.querySelector('[data-testid="package-install-command"]');
+    assert.ok(command, 'install details keep the install command');
+    assert.ok(command.textContent.includes('brew install --cask facts-app'), command.textContent);
+    assert.ok(details.textContent.includes('facts-app-old'), 'former tokens stay visible');
   });
 
   await t.test('release label totals match locale and original mode', async () => {

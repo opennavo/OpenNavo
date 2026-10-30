@@ -100,6 +100,9 @@
     "addedToBrewfile": "Added {name} to your Brewfile list",
     "brewfileFull": "The list holds up to 200 items. Remove some first."
   },
+  "common": {
+    "copy": "Copy"
+  },
   "catalog": {
     "appsTitle": "Apps",
     "appsMetaTitle": "Mac Apps · OpenNavo",

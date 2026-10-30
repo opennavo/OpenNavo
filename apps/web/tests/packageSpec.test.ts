@@ -209,6 +209,18 @@ describe('package specification repository rows', () => {
     expect(html).toContain('GitHub repository');
   });
 
+  it('drops unsafe homepage and stars hrefs before rendering', () => {
+    const pkg = page({
+      repository: { url: 'javascript:alert(1)', stars: 42 },
+      homepage: 'javascript:alert(2)'
+    });
+    const rows = packageSpec(pkg, t, 'en-US', SPEC_NOW).rows;
+    const repository = rows.find(row => row.key === 'openSource')!;
+    expect(repository.href).toBeUndefined();
+    expect(repository.stars?.href).toBeUndefined();
+    expect(rows.some(row => row.key === 'homepage')).toBe(false);
+  });
+
   it('falls back only to OSI archived and never to the OSI signal check date', () => {
     const osi = {
       repo: 'acme/osi',

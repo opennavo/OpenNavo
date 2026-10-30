@@ -15,18 +15,20 @@ import {
   withVariantNames
 } from '~/utils/seoTitles';
 import { packageSpec } from '~/utils/packageSpec';
+import PackageRequirements from './PackageRequirements.vue';
+import PackageSources from './PackageSources.vue';
 
 const { locale: useI18nLocale } = useI18n();
 const formattingLocale = computed(() => toAppLocale(useI18nLocale.value));
 
 // Overview (08 §10.5, T2): shared OnPackageOverview (ADR-017). One facts model (PackageDetail.facts) feeds every
-// block, the questions and the JSON-LD. The lead says what the app is; the facts table opens the main column;
-// then, in the order people search for them: price, alternatives, system requirements, install and uninstall
-// with optional data clean-up, the latest release, security facts, known issues, MCP servers and Skills,
-// dependencies, install details, questions, related articles and sources. Right: install command (or a link
-// app's download panel) → spec card → monthly installs → OpenNavo's malware scanning on security-category
-// apps → similar apps (fonts: similar fonts) → collections. Blocks follow what the distribution supports (T3):
-// link apps get facts, questions and articles but never a Homebrew command.
+// block, the questions and the JSON-LD. The lead says what the app is; the main column then follows what people
+// search for: the latest release, security facts for link apps, known issues, integrations, install and
+// uninstall, questions, alternatives, system requirements and sources for link apps (their Install Details tab
+// is hidden), then related articles. Right: install command (or a link app's download panel) → spec card →
+// monthly installs → OpenNavo's malware scanning on security-category apps → similar apps (fonts: similar fonts)
+// → collections. Blocks follow what the distribution supports (T3): link apps get facts, questions and articles
+// but never a Homebrew command.
 const props = defineProps<{ kind: PackageKind }>();
 
 const { t, locale } = useI18n();
@@ -181,12 +183,14 @@ usePageSeo({
           :versions-href="localePath(packagePath(pkg.token, 'versions'))"
         />
         <PackageSafety v-if="can.safety && pkg.kind === 'link'" :pkg="pkg" :show-checked="false" />
+        <PackageRequirements v-if="pkg.kind === 'link'" :pkg="pkg" />
         <PackageIssues :pkg="pkg" />
         <PackageIntegrations :pkg="pkg" />
         <PackageInstall v-if="can.homebrew" :pkg="pkg" />
         <PackageUninstall v-if="!can.homebrew && can.uninstall" :pkg="pkg" :homebrew="false" compact />
         <PackageFaq :pkg="pkg" />
         <PackageAlternatives :pkg="pkg" />
+        <PackageSources v-if="pkg.kind === 'link'" :pkg="pkg" />
         <PackageArticles :pkg="pkg" />
       </template>
       <template v-if="pkg.kind === 'link' && pkg.link" #download>

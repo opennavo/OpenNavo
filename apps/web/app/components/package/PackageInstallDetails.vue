@@ -5,12 +5,15 @@ import { displayUrl, OnButton, OnCaskArtifacts, OnCodeText, OnKeyValueList, useU
 import type { OnKeyValueItem } from '@opennavo/ui';
 import { detailsDescription } from '~/utils/seoTitles';
 import { shownRequirements } from '~/utils/packageFacts';
+import PackageCommand from './PackageCommand.vue';
 import PackageRequirements from './PackageRequirements.vue';
 import PackageUninstall from './PackageUninstall.vue';
 import PackageDependencySummary from './PackageDependencySummary.vue';
 import PackageSources from './PackageSources.vue';
 
-// Installation details (08 §10.8): location, bundled commands, uninstall behavior, caveats, download URLs, definition/formulae.brew.sh links.
+// Installation details (08 §10.8): the install command, system requirements, price, safety facts, tap and
+// former tokens, bundled commands, uninstall behavior, download URLs and checksums, caveats, dependency
+// summary, definition/formulae.brew.sh links and sources.
 const props = defineProps<{ kind: PackageKind }>();
 
 const { t } = useI18n();
@@ -33,8 +36,16 @@ const checksum = computed(() => {
 });
 async function copyChecksum() {
   if (!checksum.value) return;
-  await navigator.clipboard.writeText(checksum.value);
-  toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+  try {
+    await navigator.clipboard.writeText(checksum.value);
+    toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+  } catch {
+    toasts.push({ tone: 'warning', title: t('toast.copyFailed'), description: 'SHA-256', duration: 0 });
+  }
+}
+
+function onCopied(command: string) {
+  toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
 }
 
 const items = computed<OnKeyValueItem[]>(() => {
@@ -42,6 +53,13 @@ const items = computed<OnKeyValueItem[]>(() => {
   if (!value) return [];
   const artifacts = value.facts.overview.artifacts;
   const list: OnKeyValueItem[] = [{ key: 'tap', label: t('package.details.tap'), value: value.tap, mono: true }];
+  if (value.facts.overview.aliases.length)
+    list.push({
+      key: 'aliases',
+      label: t('package.details.aliases'),
+      value: value.facts.overview.aliases.join(', '),
+      mono: true
+    });
   if (value.names.length > 1)
     list.push({ key: 'names', label: t('package.details.names'), value: value.names.join(' · ') });
   if (!artifacts.entries?.length && artifacts.apps.length)
@@ -108,8 +126,14 @@ usePageSeo({
 </script>
 
 <template>
-  <div v-if="pkg" class="grid grid-cols-1 gap-20px pt-4px lg:grid-cols-[minmax(0,1fr)_320px]">
+  <div v-if="pkg" class="flex flex-col gap-20px pt-4px">
     <div class="flex min-w-0 flex-col gap-16px">
+      <section
+        class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px"
+        data-testid="package-install-command"
+      >
+        <PackageCommand :command="pkg.installCommand" :copy-label="t('package.copy.install')" @copied="onCopied" />
+      </section>
       <PackageRequirements :pkg="pkg" />
       <p v-if="overview?.sha256" class="m-0 text-12px leading-[1.6] text-ink-tertiary">
         {{ t('package.guide.sha') }}

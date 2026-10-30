@@ -100,6 +100,9 @@
     "addedToBrewfile": "已把 {name} 加入 Brewfile 清单",
     "brewfileFull": "清单最多 200 项，先删掉一些再加入"
   },
+  "common": {
+    "copy": "复制"
+  },
   "catalog": {
     "appsTitle": "App",
     "appsMetaTitle": "Mac App 大全 · OpenNavo",

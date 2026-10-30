@@ -12,8 +12,12 @@ const props = defineProps<{ pkg: PackagePage }>();
 const { t } = useI18n();
 const toasts = useToasts();
 async function copyChecksum(value: string) {
-  await navigator.clipboard.writeText(value);
-  toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+  try {
+    await navigator.clipboard.writeText(value);
+    toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+  } catch {
+    toasts.push({ tone: 'warning', title: t('toast.copyFailed'), description: value, duration: 0 });
+  }
 }
 
 const archLabel = (arch: string) => (arch === 'arm64' || arch === 'x86_64' ? t(`package.arch.${arch}`) : arch);

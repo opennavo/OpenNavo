@@ -100,6 +100,9 @@
     "addedToBrewfile": "{name} ajouté à votre liste Brewfile",
     "brewfileFull": "La liste peut contenir jusqu’à 200 éléments. Retirez-en d’abord quelques-uns."
   },
+  "common": {
+    "copy": "Copier"
+  },
   "catalog": {
     "appsTitle": "Apps",
     "appsMetaTitle": "Apps pour Mac · OpenNavo",

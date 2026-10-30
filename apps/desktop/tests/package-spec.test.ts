@@ -236,6 +236,17 @@ describe('QA spec card regressions', () => {
     }
   });
 
+  it('drops unsafe homepage and stars hrefs before rendering', () => {
+    const pkg = Object.assign(detail(), {
+      repository: { url: 'javascript:alert(1)', stars: 42 },
+      homepage: 'javascript:alert(2)'
+    });
+    const spec = packageSpec(pkg, null, null, t, 'en-US', SPEC_NOW);
+    expect(spec.rows.find(row => row.key === 'openSource')?.href).toBeUndefined();
+    expect(spec.rows.find(row => row.key === 'openSource')?.stars?.href).toBeUndefined();
+    expect(spec.rows.some(row => row.key === 'homepage')).toBe(false);
+  });
+
   it.each(['cask', 'formula', 'link'] as const)(
     'keeps a standalone top-level license without OSI data for %s',
     kind => {
