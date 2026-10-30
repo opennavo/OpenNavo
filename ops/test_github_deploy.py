@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import os
 import subprocess
 from pathlib import Path
@@ -989,6 +990,8 @@ class DeployTests(unittest.TestCase):
             deploy.write_private(obj.state_path, obj.state)
             deploy.write_private(obj.directory / 'before-state.json', obj.state)
             candidate_caddy = (obj.directory / 'Caddyfile.next').read_bytes()
+            previous_caddy = obj.live_caddy.read_bytes()
+            deploy.write_atomic(obj.live_caddy.with_name('Caddyfile.bak'), previous_caddy)  # as install_caddy does
             obj.record_switch(deploy.SWITCH_CADDY_WRITING)
             deploy.write_caddy_in_place(obj.live_caddy, candidate_caddy)
             env, rolling = obj.env.read_bytes(), obj.rolling.read_bytes()
@@ -1014,11 +1017,114 @@ class DeployTests(unittest.TestCase):
             retry.cleanup = unittest.mock.Mock()
             retry.capacity_gate = unittest.mock.Mock(side_effect=RuntimeError('full deployment path'))
             with contextlib.redirect_stdout(io.StringIO()) as out, \
+                    patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(previous_caddy,))), \
                     self.assertRaisesRegex(RuntimeError, 'full deployment path'):
                 retry.apply(archive())
             self.assertNotIn('already deployed', out.getvalue())
+            self.assertEqual(obj.live_caddy.read_bytes(), previous_caddy)  # reconciled from Caddyfile.bak
             retry.verify.assert_not_called()
             retry.cleanup.assert_not_called()
+
+    def retry_after_interrupt(self, obj, good):
+        """A later run: reconcile, validate live, then the real prepare(); returns its Caddyfile.next."""
+        retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+        with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=good)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            retry.reconcile_interrupted_switch()
+            retry.validate_live_caddy()
+        with patch.object(deploy, 'command', return_value='fixture-container'):
+            retry.prepare(archive())
+        routes = (retry.directory / 'Caddyfile.next').read_text()
+        releases = set(re.findall(r'gh-[0-9a-f]{12}-\d+-\d+', routes))
+        self.assertEqual(releases, {retry.release})                      # only -124-1
+        self.assertNotIn(obj.release, routes)                            # no failed -123-1
+        self.assertIsNone(re.search(r'-\d+-\d+-gh-', routes))            # no spliced aliases
+        overlay = json.loads((retry.directory / 'rolling.compose.json').read_text())
+        for kind, name in retry.services.items():
+            for options in overlay['services'][name].get('networks', {}).values():
+                for alias in (options or {}).get('aliases', []):
+                    self.assertTrue(alias.endswith(retry.release), alias)
+                    self.assertNotIn(obj.release, alias)
+        return retry
+
+    def _writing_interrupted(self, root):
+        obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+        self._staged.stop()
+        previous_caddy = obj.live_caddy.read_bytes()
+        candidate_caddy = (obj.directory / 'Caddyfile.next').read_bytes()
+        obj.degraded_marker_written = False
+        fake = FakeCaddy(obj.live_caddy, good=(previous_caddy, candidate_caddy))
+        # The complete candidate reached live, then the run stopped before recording caddy-written.
+        with patch.object(deploy, 'command', side_effect=fake), \
+                patch.object(obj, 'record_switch', wraps=obj.record_switch) as record:
+            obj.install_caddy(candidate_caddy, before_write=lambda: obj.record_switch(deploy.SWITCH_CADDY_WRITING))
+        record.assert_called_once_with(deploy.SWITCH_CADDY_WRITING)
+        self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+        return obj, previous_caddy, candidate_caddy
+
+    def test_retry_after_caddy_writing_restores_backup_and_prepares_clean_aliases(self):
+        for aborted in (True, False):  # aborted rollback vs. process killed with no marker
+            with self.subTest(aborted=aborted), tempfile.TemporaryDirectory() as root:
+                obj, previous_caddy, candidate_caddy = self._writing_interrupted(root)
+                if aborted:
+                    obj.compose = unittest.mock.Mock()
+                    with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, validator='daemon')), \
+                            contextlib.redirect_stdout(io.StringIO()), self.assertRaises(deploy.CaddyValidatorUnavailable):
+                        obj.rollback()
+                    obj.degraded_path.unlink()  # manual removal
+                self.assertFalse(obj.degraded_path.exists())
+                retry = self.retry_after_interrupt(obj, good=(previous_caddy,))
+                self.assertEqual(obj.live_caddy.read_bytes(), previous_caddy)
+                self.assertEqual(retry.state['services'], json.loads(
+                    (obj.directory / 'before-state.json').read_text())['services'])
+                self.assertTrue(retry.state['unverified'])
+                self.assertNotIn('switch', retry.state)
+                self._staged.start()
+
+    def test_retry_after_caddy_writing_with_unusable_backup_marks_degraded(self):
+        for problem in ('invalid', 'unavailable'):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as root:
+                obj, _, candidate_caddy = self._writing_interrupted(root)
+                retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+                fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy,),
+                                 validator='ok' if problem == 'invalid' else 'daemon')
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(Exception):
+                    retry.apply(archive())
+                self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+                self.assertIn('could not be reconciled', json.loads(obj.degraded_path.read_text())['reason'])
+                self._staged.start()
+
+    def test_retry_after_killed_switch_adopts_candidate_and_prepares_clean_aliases(self):
+        for phase in deploy.SWITCH_ROUTED_TO_CANDIDATE:
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as root:
+                obj, candidate_caddy = self._switched(root, GOOD_CADDY, phase)
+                self.assertFalse(obj.degraded_path.exists() and phase != deploy.SWITCH_CADDY_WRITTEN)
+                obj.degraded_path.unlink(missing_ok=True)  # killed: no abort marker (or removed)
+                retry = self.retry_after_interrupt(obj, good=(candidate_caddy,))
+                self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+                self.assertEqual(obj.env.read_bytes(), (obj.directory / 'release.env').read_bytes())
+                self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'rolling.compose.json').read_bytes())
+                self.assertEqual((retry.state['release'], retry.state['services'], retry.state['unverified']),
+                                 (obj.release, obj.services, True))
+                self._staged.start()
+
+    def test_private_state_write_is_atomic(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {})
+            before = obj.state_path.read_bytes()
+            with patch.object(deploy.os, 'replace', side_effect=OSError(28, 'No space left on device')), \
+                    self.assertRaises(OSError):
+                deploy.write_private(obj.state_path, {'services': {}})
+            self.assertEqual(obj.state_path.read_bytes(), before)
+            self.assertEqual(list(obj.state_path.parent.glob('.github-state.json-*')), [])
+            with patch.object(deploy.os, 'fsync', side_effect=OSError(5, 'I/O error')), self.assertRaises(OSError):
+                deploy.write_private(obj.degraded_path, {'reason': 'x'})
+            self.assertFalse(obj.degraded_path.exists())
+            again = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+            self.assertEqual(again.state, json.loads(before))
+            deploy.write_private(obj.state_path, again.state)
+            self.assertEqual(obj.state_path.stat().st_mode & 0o777, 0o600)
 
     def test_rollback_abort_with_unrecorded_phase_reports_files_as_found(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1040,13 +1146,18 @@ class DeployTests(unittest.TestCase):
             with self.subTest(failing=failing), tempfile.TemporaryDirectory() as root:
                 obj, candidate_caddy = self._switched(root, TRUNCATED_CADDY, deploy.SWITCH_CADDY_RELOADED)
                 target = getattr(obj, failing)
-                original = Path.write_bytes
+                original, original_atomic = Path.write_bytes, deploy.write_atomic
                 def write_bytes(path, data):
                     if path == target:
                         raise OSError(28, 'No space left on device')
                     return original(path, data)
+                def write_atomic(path, data, mode=None):
+                    if path == target:
+                        raise OSError(28, 'No space left on device')
+                    return original_atomic(path, data, mode)
                 with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy,))), \
                         patch.object(Path, 'write_bytes', write_bytes), \
+                        patch.object(deploy, 'write_atomic', write_atomic), \
                         contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
                     obj.rollback()
                 reason = json.loads(obj.degraded_path.read_text())['reason']
@@ -1062,17 +1173,18 @@ class DeployTests(unittest.TestCase):
                 obj, candidate_caddy = self._switched(root, GOOD_CADDY, deploy.SWITCH_CADDY_RELOADED)
                 target = getattr(obj, failing)
                 fails = {'left': 1}
-                original_bytes, original_text = Path.write_bytes, Path.write_text
+                original_bytes, original_text, original_atomic = Path.write_bytes, Path.write_text, deploy.write_atomic
                 def failing_once(original):
-                    def write(path, data):
+                    def write(path, data, *rest, **options):
                         if path == target and fails['left']:
                             fails['left'] -= 1
                             raise OSError(28, 'No space left on device')
-                        return original(path, data)
+                        return original(path, data, *rest, **options)
                     return write
                 with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY))), \
                         patch.object(Path, 'write_bytes', failing_once(original_bytes)), \
                         patch.object(Path, 'write_text', failing_once(original_text)), \
+                        patch.object(deploy, 'write_atomic', failing_once(original_atomic)), \
                         contextlib.redirect_stdout(io.StringIO()), self.assertRaises(OSError):
                     obj.rollback()
                 # The restore failed part-way; alignment put everything back on the candidate.

@@ -316,8 +316,8 @@ def phase(name):
 
 
 def write_private(path, value):
-    path.write_text(json.dumps(value, indent=2) + '\n')
-    path.chmod(0o600)
+    """Atomically replace a private JSON file (state, degraded marker); a failed write keeps the old file."""
+    write_atomic(path, (json.dumps(value, indent=2) + '\n').encode(), mode=0o600)
 
 
 def update_env(source, updates):
@@ -398,17 +398,23 @@ def fsync_directory(directory):
         os.close(fd)
 
 
-def write_atomic(path, content):
+def write_atomic(path, content, mode=None):
     """Write a non-mounted sidecar file: same-directory temp, fsync, rename, fsync directory."""
     with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.' + path.name + '-', delete=False) as staged:
         try:
+            if mode is not None:
+                os.chmod(staged.name, mode)
             staged.write(content)
             staged.flush()
             os.fsync(staged.fileno())
         except BaseException:
             Path(staged.name).unlink(missing_ok=True)
             raise
-    os.replace(staged.name, path)
+    try:
+        os.replace(staged.name, path)
+    except BaseException:
+        Path(staged.name).unlink(missing_ok=True)
+        raise
     fsync_directory(path.parent)
 
 
@@ -629,7 +635,7 @@ def monitoring_targets(source, services):
 SWITCH_NONE = 'not-switched'              # live Caddyfile, env, rolling and state are all previous
 SWITCH_CADDY_WRITING = 'caddy-writing'    # candidate validated; in-place write of live started
 SWITCH_CADDY_WRITTEN = 'caddy-written'    # live file is the candidate; USR1 not yet confirmed
-SWITCH_CADDY_RELOADED = 'caddy-reloaded'  # USR1 succeeded; Caddy process routes to the candidate
+SWITCH_CADDY_RELOADED = 'caddy-reloaded'  # USR1 sent to Caddy; routing not verified
 SWITCH_CONFIG_PROMOTED = 'config-promoted'  # env and rolling overlay promoted to the candidate
 SWITCH_ROUTED_TO_CANDIDATE = (SWITCH_CADDY_WRITTEN, SWITCH_CADDY_RELOADED, SWITCH_CONFIG_PROMOTED)
 SWITCH_PROCESS = {
@@ -1406,11 +1412,62 @@ class Deployment:
         """Record the forward-switch phase in memory first, then durably in github-state.json."""
         self._switch_phase = phase
         try:
-            write_private(self.state_path, {**self.state, 'switch': {'release': self.release, 'phase': phase}})
+            write_private(self.state_path, {**self.state, 'switch': self._switch_record(phase)})
         except Exception:
             self.mark_degraded(f'could not record switch phase {phase} in {self.state_path.name}; '
                                f'{SWITCH_PROCESS.get(phase, "")}')
             raise
+
+    def _switch_record(self, phase, **extra):
+        return {'release': self.release, 'phase': phase, 'sha': self.payload['sha'],
+                'services': self.services, **extra}
+
+    def reconcile_interrupted_switch(self):
+        """Make live Caddy, env, rolling and state agree before a deployment trusts any of them.
+
+        A recorded switch phase means an earlier run stopped mid-switch (aborted rollback, or the
+        process was killed with no marker). caddy-writing: the live file may be the complete
+        candidate, partial or previous, so restore the validated Caddyfile.bak and the previous
+        env/rolling/state. Later phases: Caddy was given the candidate file, so adopt the candidate
+        for env/rolling/state. Otherwise prepare() would rewrite candidate aliases using the
+        previous state and route to retired containers.
+        """
+        record = self.state.get('switch')
+        if not isinstance(record, dict):
+            return
+        phase, release = record.get('phase'), str(record.get('release'))
+        previous_dir = self.root / 'releases' / release
+        try:
+            before_state = json.loads((previous_dir / 'before-state.json').read_text())
+            base = {key: value for key, value in before_state.items() if key not in ('switch', 'unverified')}
+            if phase in (SWITCH_NONE, SWITCH_CADDY_WRITING):
+                if phase == SWITCH_CADDY_WRITING:
+                    backup = self.live_caddy.with_name('Caddyfile.bak').read_bytes()
+                    if not self._validate_staged(backup):
+                        raise RuntimeError('Caddyfile.bak failed caddy validate')
+                    if self.live_caddy.read_bytes() != backup:
+                        write_caddy_in_place(self.live_caddy, backup)
+                sources, route = ('before-release.env', 'before-rolling.json'), 'previous'
+                # Still unverified: the live file was replaced or restored after the last verification.
+                state = {**base, 'unverified': True}
+            elif phase in SWITCH_ROUTED_TO_CANDIDATE and record.get('sha') and record.get('services'):
+                sources, route = ('release.env', 'rolling.compose.json'), 'candidate'
+                state = {'sha': record['sha'], 'release': release, 'services': record['services'],
+                         'previous': {key: value for key, value in base.items() if key != 'previous'},
+                         'unverified': True}
+            else:
+                raise RuntimeError('unknown or incomplete switch record')
+            write_atomic(self.env, (previous_dir / sources[0]).read_bytes())
+            write_atomic(self.rolling, (previous_dir / sources[1]).read_bytes())
+            write_private(self.state_path, state)
+        except Exception as error:
+            self.mark_degraded(f'interrupted switch of {release} (phase {phase}) could not be reconciled '
+                               f'({type(error).__name__}: {error}); live Caddyfile, env, rolling and state were '
+                               'not all aligned; verify them manually')
+            raise
+        self.state = state
+        print(f'Reconciled interrupted switch of {release} (phase {phase}): live Caddyfile, env, rolling and '
+              f'state now all name the {route} release (unverified).', flush=True)
 
     def _previous_state(self):
         return json.loads((self.directory / 'before-state.json').read_text())
@@ -1453,9 +1510,10 @@ class Deployment:
                 try:
                     content = source()
                     if not path.exists() or path.read_bytes() != content:
-                        path.write_bytes(content)
                         if path == self.state_path:
-                            path.chmod(0o600)
+                            write_atomic(path, content, mode=0o600)
+                        else:
+                            path.write_bytes(content)
                 except Exception as error:
                     failed.append(f'{path.name} ({type(error).__name__})')
         except Exception as error:  # defensive: the marker must still be written truthfully
@@ -1469,6 +1527,9 @@ class Deployment:
                      f'failed, so those files may hold either release')
         else:
             files = f'{self.live_caddy.name} file, {names} all name the {target} release'
+            if target == 'candidate':
+                files += ('; if this marker is removed manually, the next deployment treats this unverified '
+                          'candidate as its rollback target')
             if phase == SWITCH_CADDY_WRITING:
                 # The in-place write may have completed, stopped part-way or been undone by recovery.
                 files = (f'{self.live_caddy.name} content is unknown (may be the candidate, partially written '
@@ -1481,7 +1542,7 @@ class Deployment:
         return 'degraded rollback: ' + message
 
     def _state_bytes(self, state, phase):
-        state = {**state, 'switch': {'release': self.release, 'phase': phase, 'rollback': 'aborted'}}
+        state = {**state, 'switch': self._switch_record(phase, rollback='aborted')}
         return (json.dumps(state, indent=2) + '\n').encode()
 
     def rollback(self):
@@ -1656,6 +1717,7 @@ class Deployment:
         if self.degraded_path.exists():
             raise RuntimeError('deployment blocked by persistent degraded marker. ' + self.recovery_instructions())
         self.degraded_marker_written = False
+        self.reconcile_interrupted_switch()
         self.validate_live_caddy()
         if self.state.get('sha') == self.payload['sha'] and not self.state.get('unverified'):
             self.services = self.state['services']
