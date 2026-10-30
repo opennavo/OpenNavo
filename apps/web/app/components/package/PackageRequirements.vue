@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { formatDate } from '~/utils/packageDate';
-import { displayUrl, OnChip } from '@opennavo/ui';
-import { aroundDate, shownRequirements, isoDate, macosText } from '~/utils/packageFacts';
+import { displayUrl, OnButton, OnChip } from '@opennavo/ui';
+import { shownRequirements, macosText } from '~/utils/packageFacts';
 import type { PackagePage, RequirementFact } from '~/utils/packageFacts';
 
 // System requirements (T2): facts.requirements as a table, one row per distinct declaration (Homebrew's per
 // chip and macOS release, the developer's statements, per-version compatibility). Every row names its source
-// and check date; a stale row reads "as of" its date. Statements pending verification are omitted. A minimum is never read as support for future releases, and the macOS
+// and links to its source; check dates live once in Sources. Statements pending verification are omitted. A minimum is never read as support for future releases, and the macOS
 // label of a Homebrew build is not a minimum. Downloads and their full SHA-256 come from the same rows.
 const props = defineProps<{ pkg: PackagePage }>();
 
-const { t, locale } = useI18n();
-const appLocale = computed(() => toAppLocale(locale.value));
+const { t } = useI18n();
+const toasts = useToasts();
+async function copyChecksum(value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+  } catch {
+    toasts.push({ tone: 'warning', title: t('toast.copyFailed'), description: value, duration: 0 });
+  }
+}
 
 const archLabel = (arch: string) => (arch === 'arm64' || arch === 'x86_64' ? t(`package.arch.${arch}`) : arch);
 
@@ -35,7 +42,6 @@ const rows = computed(() =>
   shownRequirements(props.pkg).map((row, index) => {
     const evidence = row.evidence;
     const homebrew = Boolean(props.pkg.sourceUrl) && evidence.sourceUrl === props.pkg.sourceUrl;
-    const checkedAt = evidence.checkedAt;
     return {
       key: `${index}:${row.versions.join(',')}:${row.architectures.join(',')}`,
       macos: macos(row),
@@ -45,14 +51,7 @@ const rows = computed(() =>
       sha256: row.sha256,
       source: homebrew ? 'Homebrew' : displayUrl(evidence.sourceUrl),
       sourceUrl: evidence.sourceUrl,
-      stale: evidence.status === 'stale',
-      checked: checkedAt
-        ? {
-            iso: isoDate(checkedAt),
-            date: formatDate(checkedAt, { locale: appLocale.value }),
-            ...aroundDate(t, evidence.status === 'stale' ? 'package.facts.asOf' : 'package.facts.checkedOn')
-          }
-        : null
+      stale: evidence.status === 'stale'
     };
   })
 );
@@ -113,9 +112,14 @@ const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? [
                 >
                 <span v-if="row.sha256" class="mt-2px block text-11px text-ink-tertiary"
                   >SHA-256
-                  <code class="font-mono text-component-mono-text [overflow-wrap:anywhere]">{{
-                    row.sha256
-                  }}</code></span
+                  <code class="font-mono text-component-mono-text [overflow-wrap:anywhere]">{{ row.sha256 }}</code>
+                  <OnButton
+                    size="xs"
+                    icon="copy"
+                    :aria-label="t('download.copySha')"
+                    @click="copyChecksum(row.sha256)"
+                    >{{ t('common.copy') }}</OnButton
+                  ></span
                 >
               </template>
               <template v-else>—</template>
@@ -127,10 +131,6 @@ const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? [
                 rel="nofollow noopener noreferrer"
                 class="text-ink-secondary underline-offset-2 [overflow-wrap:anywhere] hover:text-ink-primary"
                 >{{ row.source }}</a
-              >
-              <span v-if="row.checked" class="block"
-                >{{ row.checked.before }}<time :datetime="row.checked.iso">{{ row.checked.date }}</time
-                >{{ row.checked.after }}</span
               >
               <OnChip v-if="row.stale" class="mt-4px" tone="warning">{{ t('package.facts.stale') }}</OnChip>
             </td>
@@ -171,13 +171,7 @@ const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? [
             {{ t('common.copy') }}
           </button>
         </div>
-        <p class="m-0 mt-6px text-11px text-ink-tertiary [overflow-wrap:anywhere]">
-          {{ row.source
-          }}<template v-if="row.checked">
-            · {{ row.checked.before }}<time :datetime="row.checked.iso">{{ row.checked.date }}</time
-            >{{ row.checked.after }}</template
-          >
-        </p>
+        <p class="m-0 mt-6px text-11px text-ink-tertiary [overflow-wrap:anywhere]">{{ row.source }}</p>
       </article>
     </div>
     <p v-if="conflicts.length" class="m-0 mt-8px text-12px leading-[1.6] text-ink-secondary">

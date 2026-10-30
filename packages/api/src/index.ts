@@ -13,15 +13,8 @@ type Schemas = components['schemas'];
 export type PackageKind = Schemas['PackageKind'];
 export type PackageSummary = Schemas['PackageSummary'];
 export type PackageDetail = Schemas['PackageDetail'];
-/** Optional repository signals added by the public package detail contract. */
-export interface PackageRepository {
-  url?: string;
-  stars?: number | null;
-  pushedAt?: string | null;
-  archived?: boolean;
-  signalsCheckedAt?: string | null;
-}
-export type PackageDetailWithRepository = PackageDetail & { repository?: PackageRepository };
+/** Repository signals from the public package detail contract; null when no public repository is known. */
+export type PackageRepository = Schemas['RepositoryFact'] | null;
 export type CaskPlatform = Schemas['CaskPlatform'];
 export type CaskArtifact = Schemas['CaskArtifact'];
 export type Artifacts = Schemas['Artifacts'];

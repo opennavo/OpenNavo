@@ -116,7 +116,7 @@ async function copySha() {
 
 <template>
   <OfflineNotice v-if="error && !detail" />
-  <div v-else-if="detail" class="grid grid-cols-[minmax(0,1fr)_320px] gap-20px pt-4px">
+  <div v-else-if="detail" class="pt-4px">
     <div class="flex min-w-0 flex-col gap-16px">
       <section class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-4px">
         <OnKeyValueList :items="items" />

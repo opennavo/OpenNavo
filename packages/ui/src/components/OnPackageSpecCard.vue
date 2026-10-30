@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { Component } from 'vue';
 import OnChip from './OnChip.vue';
+import OnIcon from './OnIcon.vue';
+import OnTooltip from './OnTooltip.vue';
 
 export interface OnPackageSpecRow {
   key: string;
@@ -8,6 +9,7 @@ export interface OnPackageSpecRow {
   value?: string | null;
   href?: string;
   mono?: boolean;
+  stars?: { label: string; href?: string; checked?: string };
   badge?: { label: string; tone?: 'neutral' | 'info' | 'success' | 'warning' | 'danger' };
 }
 
@@ -16,17 +18,15 @@ export interface OnPackageSpecCardProps {
   title?: string;
   checkedAt?: { iso: string; label: string } | null;
   checkedLabel?: string;
-  linkAs?: string | Component;
 }
 
-const props = withDefaults(defineProps<OnPackageSpecCardProps>(), {
+withDefaults(defineProps<OnPackageSpecCardProps>(), {
   title: undefined,
   checkedAt: null,
-  checkedLabel: undefined,
-  linkAs: 'a'
+  checkedLabel: undefined
 });
 
-const linkAttrs = (href: string) => (props.linkAs === 'a' ? { href } : { to: href });
+const isHttps = (href: string | undefined): href is string => Boolean(href && /^https:\/\//i.test(href));
 </script>
 
 <template>
@@ -47,15 +47,39 @@ const linkAttrs = (href: string) => (props.linkAs === 'a' ? { href } : { to: hre
           class="m-0 min-w-0 text-ink-primary [overflow-wrap:anywhere]"
           :class="row.mono ? 'font-mono text-12px' : ''"
         >
-          <component
-            :is="linkAs"
-            v-if="row.href"
-            v-bind="linkAttrs(row.href)"
-            class="text-ink-primary underline-offset-2 hover:underline"
+          <a
+            v-if="isHttps(row.href)"
+            :href="row.href"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex max-w-full items-center gap-4px text-ink-primary no-underline hover:underline"
           >
-            {{ row.value }}
-          </component>
+            <span class="min-w-0">{{ row.value }}</span>
+            <OnIcon name="lucide:arrow-up-right" :size="13" />
+          </a>
           <template v-else>{{ row.value }}</template>
+          <span v-if="row.stars" class="inline-flex items-center gap-4px">
+            <span aria-hidden="true"> · </span>
+            <a
+              v-if="isHttps(row.stars.href ?? row.href)"
+              :href="row.stars.href ?? row.href"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex max-w-full items-center gap-4px text-ink-primary no-underline hover:underline"
+              >{{ row.stars.label }}<OnIcon name="lucide:arrow-up-right" :size="13"
+            /></a>
+            <span v-else>{{ row.stars.label }}</span>
+            <OnTooltip v-if="row.stars.checked" v-slot="{ describedBy }" :content="row.stars.checked" toggle-on-click>
+              <button
+                type="button"
+                :aria-label="checkedLabel"
+                :aria-describedby="describedBy"
+                class="inline-flex min-h-24px min-w-24px cursor-pointer items-center justify-center rounded-tiny border-none bg-transparent p-2px text-ink-tertiary outline-none hover:text-ink-primary focus-visible:shadow-focus-ring"
+              >
+                <OnIcon name="info" :size="13" />
+              </button>
+            </OnTooltip>
+          </span>
           <OnChip v-if="row.badge" class="ml-6px align-middle" size="sm" :tone="row.badge.tone">
             {{ row.badge.label }}
           </OnChip>

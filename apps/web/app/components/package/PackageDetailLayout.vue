@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { subpageAppNode } from '~/utils/packageFacts';
-import { disabledByHomebrew, recentReturnPath } from '@opennavo/shared';
+import { packageInstallState, recentReturnPath } from '@opennavo/shared';
 import { unwrap } from '@opennavo/api';
 import type { PackageKind } from '@opennavo/shared';
 import { OnBreadcrumb, OnErrorState, OnIcon, OnPackageNotice, OnTabs } from '@opennavo/ui';
@@ -105,12 +105,25 @@ const allTabs = computed(() => [
     : [])
 ]);
 // Link apps have no Homebrew definition, so there are no dependencies or install details to show.
+// H9: once the overview carries what install details showed and the server turns the redirect on (per
+// language, so a target that is not ready never receives it), the details tab answers one 301 to the
+// overview and drops out of the tabs, so no page links it.
+const detailsRedirect = computed(() => Boolean(pkg.value?.indexing?.detailsRedirect));
+// The API's DecidePage uses HasDependencyContent (including reverse dependencies). Other noindex
+// reasons and older APIs keep their links; an empty tab remains directly accessible with its decision.
+const emptyDependencies = computed(() => pkg.value?.indexing?.pages?.dependencies?.reason === 'duplicate_of_overview');
+if (tab.value === 'details' && detailsRedirect.value)
+  await navigateTo(localePath(packagePath(token.value)), { redirectCode: 301, replace: true });
 const tabs = computed(() =>
   isLink.value
     ? allTabs.value.filter(
         item => item.value === 'overview' || item.value === 'versions' || item.value === 'troubleshooting'
       )
-    : allTabs.value
+    : allTabs.value.filter(
+        item =>
+          (item.value !== 'details' || !detailsRedirect.value) &&
+          (item.value !== 'dependencies' || !emptyDependencies.value)
+      )
 );
 
 // Breadcrumbs are always Discover › primary category › app (› tab on subpages), the same in SSR and on the
@@ -177,22 +190,22 @@ const notice = computed(() => {
       text: t('package.link.adopted'),
       replacement: { kind: 'cask' as const, token: value.link.adoptedByCask }
     };
-  if (value.disable && disabledByHomebrew(value))
-    return {
-      tone: 'danger' as const,
-      text: t('package.disabledNotice', { reason: value.disable.reason ?? t('package.noReason') }),
-      replacement: value.disable.replacement
-    };
-  if (value.deprecation)
-    return {
-      tone: 'warning' as const,
-      text: t('package.deprecatedNotice', { reason: value.deprecation.reason ?? t('package.noReason') }),
-      replacement: value.deprecation.replacement
-    };
-  // Paused only by OpenNavo's 90-day rule: Homebrew still offers and installs the app.
-  if (value.disable)
-    return { tone: 'warning' as const, text: t('package.staleNotice'), replacement: value.disable.replacement };
-  return null;
+  const state = packageInstallState(value);
+  if (state === 'active') return null;
+  const lifecycle = state === 'deprecated' ? value.deprecation : value.disable;
+  const reason = lifecycle?.reason ?? value.homebrewStatus?.reason ?? t('package.noReason');
+  return {
+    tone: state === 'disabled' ? ('danger' as const) : ('warning' as const),
+    text: t(
+      state === 'disabled'
+        ? 'package.disabledNotice'
+        : state === 'deprecated'
+          ? 'package.deprecatedNotice'
+          : 'package.staleNotice',
+      { reason }
+    ),
+    replacement: lifecycle?.replacement
+  };
 });
 </script>
 
@@ -214,6 +227,7 @@ const notice = computed(() => {
       </div>
       <OnPackageNotice
         v-if="notice"
+        data-testid="package-lifecycle-banner"
         :tone="notice.tone"
         :text="notice.text"
         :replacement-label="
@@ -226,7 +240,7 @@ const notice = computed(() => {
         "
         :link-as="NuxtLink"
       />
-      <PackageHeader :pkg="pkg" :heading-suffix="headingSuffix" :show-official-download="tab === 'overview'" />
+      <PackageHeader :pkg="pkg" :heading-suffix="headingSuffix" />
       <PackageStats v-if="!isLink" :pkg="pkg" :release-stats="releaseStats" />
       <OnTabs
         class="mt-2px"

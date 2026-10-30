@@ -322,8 +322,21 @@ const messages: MessageSchema = {
     autoUpdates: 'Auto-updates',
     disabled: 'Disabled',
     deprecated: 'Deprecated',
+    paused: 'Paused by OpenNavo',
     homepage: 'Homepage',
-    fromTap: 'From',
+    sourceBadge: {
+      label: 'Official source',
+      verified: '✓ Official source · Verified',
+      disabled: 'Official source · Disabled',
+      deprecated: 'Official source · Deprecated',
+      paused: 'Official source · Paused by OpenNavo',
+      domain: 'Source: {domain}',
+      checksum: 'SHA-256: {sha256}',
+      checksumUnknown: 'SHA-256 not recorded',
+      checked: 'Checked: {date}',
+      unchecked: 'No check date recorded',
+      active: 'Not disabled by Homebrew'
+    },
     thirdPartyTap: 'Third-party tap',
     stats: {
       label: 'Stats',
@@ -462,6 +475,8 @@ const messages: MessageSchema = {
       license: 'License'
     },
     spec: {
+      downloadSource: 'Download source',
+      fontFiles: 'Font files',
       title: 'At a glance',
       price: 'Price',
       system: 'System',
@@ -470,18 +485,20 @@ const messages: MessageSchema = {
       openSource: 'Open source',
       repository: 'Repository',
       githubRepository: 'GitHub repository',
+      checked: 'Checked',
       developer: 'Developer',
       homepage: 'Homepage',
       token: 'Token',
+      bundleId: 'Bundle ID',
       installedVersion: 'Installed version',
       installLocation: 'Install location',
-      checked: 'Checked',
       yes: 'Yes',
       no: 'No'
     },
     repo: {
       stars: 'Stars',
-      updated: 'Updated {days} days ago',
+      checked: 'Repository data checked {date}.',
+      updated: 'Updated {days} day ago | Updated {days} days ago',
       unmaintained: 'May no longer be maintained',
       archived: 'Archived'
     },
@@ -1100,6 +1117,8 @@ const messages: MessageSchema = {
       'A web page asked to install this on your Mac. Confirm to run the command below; cancel to do nothing.',
     installConfirm: 'Install',
     formulaUnsupported: 'OpenNavo only lists apps (Homebrew casks). This link points to a command-line tool.',
+    confirmationBusy: 'Another confirmation is still open. Close it and try again.',
+    confirmationTimeout: 'The confirmation prompt timed out. Close it and try again.',
     preview: {
       invalid: 'This link can’t be opened',
       invalidBody: 'Its parameters are missing or not in the form OpenNavo accepts, so nothing was done.',

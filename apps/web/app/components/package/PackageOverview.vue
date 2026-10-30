@@ -7,7 +7,6 @@ import type { OnRelatedPackage } from '@opennavo/ui';
 import { capabilities } from '~/utils/packageFacts';
 import { packagePath } from '~/utils/packageView';
 import { appEntityId, softwareAppNode } from '~/utils/structuredData';
-import { trackEvent } from '~/utils/analytics';
 import {
   overrideDescription,
   overrideTitle,
@@ -16,24 +15,25 @@ import {
   withVariantNames
 } from '~/utils/seoTitles';
 import { packageSpec } from '~/utils/packageSpec';
+import PackageRequirements from './PackageRequirements.vue';
+import PackageSources from './PackageSources.vue';
 
 const { locale: useI18nLocale } = useI18n();
 const formattingLocale = computed(() => toAppLocale(useI18nLocale.value));
 
 // Overview (08 §10.5, T2): shared OnPackageOverview (ADR-017). One facts model (PackageDetail.facts) feeds every
-// block, the questions and the JSON-LD. The lead says what the app is; the facts table opens the main column;
-// then, in the order people search for them: price, alternatives, system requirements, install and uninstall
-// with optional data clean-up, the latest release, security facts, known issues, MCP servers and Skills,
-// dependencies, install details, questions, related articles and sources. Right: install command (or a link
-// app's download panel) → spec card → monthly installs → OpenNavo's malware scanning on security-category
-// apps → similar apps (fonts: similar fonts) → collections. Blocks follow what the distribution supports (T3):
-// link apps get facts, questions and articles but never a Homebrew command.
+// block, the questions and the JSON-LD. The lead says what the app is; the main column then follows what people
+// search for: the latest release, security facts for link apps, known issues, integrations, install and
+// uninstall, questions, alternatives, system requirements and sources for link apps (their Install Details tab
+// is hidden), then related articles. Right: install command (or a link app's download panel) → spec card →
+// monthly installs → OpenNavo's malware scanning on security-category apps → similar apps (fonts: similar fonts)
+// → collections. Blocks follow what the distribution supports (T3): link apps get facts, questions and articles
+// but never a Homebrew command.
 const props = defineProps<{ kind: PackageKind }>();
 
 const { t, locale } = useI18n();
 const api = useApi();
 const localePath = useLocalePath();
-const toasts = useToasts();
 const NuxtLink = resolveComponent('NuxtLink');
 
 const { data: pkg, token } = await usePackage(props.kind);
@@ -85,13 +85,8 @@ const relatedItems = computed<OnRelatedPackage[]>(() =>
   }))
 );
 
-const spec = computed(() => packageSpec(pkg.value!, t, toAppLocale(locale.value)));
-
-function onCopied(command: string) {
-  toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
-  trackEvent('copy_install_command');
-}
-
+const specNow = usePackageSpecNow();
+const spec = computed(() => packageSpec(pkg.value!, t, toAppLocale(locale.value), specNow.value));
 type SoftwareAppInput = NonNullable<Parameters<typeof defineSoftwareApp>[0]>;
 
 // WP10 SoftwareApplication (utils/structuredData): only what the page shows, offers only for
@@ -169,14 +164,13 @@ usePageSeo({
       :screenshots-label="t('package.screenshots')"
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
-      :command="can.homebrew ? pkg.installCommand : undefined"
+      related-in-main
       :info="[]"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
       :related-more-href="localePath('/apps')"
       :related-more-label="t('package.relatedMore')"
       :link-as="NuxtLink"
-      @copied="onCopied"
     >
       <template #about>
         <MarkdownContent class="package-overview-description" size="md" :heading-level="3" :source="description" />
@@ -188,13 +182,15 @@ usePageSeo({
           :total="pkg.releaseCount"
           :versions-href="localePath(packagePath(pkg.token, 'versions'))"
         />
-        <PackageSafety v-if="can.safety" :pkg="pkg" />
+        <PackageSafety v-if="can.safety && pkg.kind === 'link'" :pkg="pkg" :show-checked="false" />
+        <PackageRequirements v-if="pkg.kind === 'link'" :pkg="pkg" />
         <PackageIssues :pkg="pkg" />
         <PackageIntegrations :pkg="pkg" />
         <PackageInstall v-if="can.homebrew" :pkg="pkg" />
-        <PackageUninstall v-if="can.uninstall" :pkg="pkg" :homebrew="can.homebrew" />
+        <PackageUninstall v-if="!can.homebrew && can.uninstall" :pkg="pkg" :homebrew="false" compact />
         <PackageFaq :pkg="pkg" />
         <PackageAlternatives :pkg="pkg" />
+        <PackageSources v-if="pkg.kind === 'link'" :pkg="pkg" />
         <PackageArticles :pkg="pkg" />
       </template>
       <template v-if="pkg.kind === 'link' && pkg.link" #download>
@@ -205,7 +201,7 @@ usePageSeo({
           :rows="spec.rows"
           :title="t('package.spec.title')"
           :checked-at="spec.checkedAt"
-          :checked-label="t('package.quick.checked')"
+          :checked-label="t('package.spec.checked')"
           :link-as="NuxtLink"
         />
       </template>

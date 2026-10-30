@@ -100,6 +100,9 @@
     "addedToBrewfile": "{name} を Brewfile リストに追加しました",
     "brewfileFull": "リストは最大 200 項目です。追加するには、いくつか削除してください"
   },
+  "common": {
+    "copy": "コピー"
+  },
   "catalog": {
     "appsTitle": "App",
     "appsMetaTitle": "Mac App カタログ · OpenNavo",
@@ -214,7 +217,6 @@
     "disabled": "無効化済み",
     "deprecated": "非推奨",
     "homepage": "ホームページ",
-    "fromTap": "提供元",
     "stats": {
       "label": "データ",
       "installs30d": "過去 30 日間のインストール数",
@@ -326,9 +328,9 @@
       }
     },
     "related": "類似アプリ",
-    "relatedMore": "See more",
-    "verified": "Verified",
-    "verifiedDetails": "Verified download details",
+    "relatedMore": "もっと見る",
+    "verified": "確認済み",
+    "verifiedDetails": "確認済みのダウンロード情報",
     "screenshots": "スクリーンショット",
     "caveats": "注意事項",
     "info": {
@@ -441,7 +443,6 @@
       "downloadVaries": "ダウンロードするファイルは macOS のバージョンで異なるため、公式サイトで選んでください：",
       "downloadOfficial": "公式サイトからダウンロードしてください：",
       "sha": "SHA-256 はダウンロードしたファイルが完全かを確かめるためのもので、安全性の認証ではありません。",
-      "shaLink": "SHA-256 とダウンロード URL を見る",
       "uninstallTitle": "アンインストールのコマンド",
       "uninstall": "通常のアンインストールではアプリ本体だけを削除し、設定とキャッシュは残ります。",
       "zapTitle": "完全な削除（任意）",
@@ -584,10 +585,8 @@
       "priceStoreNote": "Homebrew がインストールするのは開発者のサイトで配布されている版で、価格や機能が App Store 版と異なることがあります。",
       "openSourceQ": "{name} はオープンソースですか？",
       "openSourceA": "{name} のソースコードは GitHub（{repo}）で公開されており、ライセンスは {license} です。",
-      "openSourceNoLicenseA": "{name} has a public GitHub repository ({repo}), but OpenNavo has not verified an OSI license.",
+      "openSourceNoLicenseA": "{name} には公開 GitHub リポジトリ（{repo}）がありますが、OpenNavo は OSI ライセンスを確認していません。",
       "openSourceArchived": "このリポジトリはアーカイブされていて、更新されていません。",
-      "openSourceStars": "Repository stars: {stars}.",
-      "openSourceChecked": "Repository data checked {date}.",
       "uninstallQ": "Mac から {name} を完全にアンインストールするには？",
       "uninstallRun": "`brew uninstall --cask {token}` を実行します。",
       "uninstallDoes": "これにより{actions}が行われます。",
@@ -649,7 +648,8 @@
       },
       "alternativesQ": "{name} の代わりになるアプリは？",
       "alternativesA": "{list} などがあります。",
-      "titleFor": "{name} についてよくある質問"
+      "titleFor": "{name} についてよくある質問",
+      "repositoryQ": "{name} には公開 GitHub リポジトリがありますか？"
     },
     "securityPromo": {
       "title": "OpenNavo：ウイルススキャンとApp ファイアウォール",
@@ -666,25 +666,28 @@
       "source": "インストーラは {source} からダウンロードします。"
     },
     "spec": {
-      "title": "At a glance",
-      "price": "Price",
-      "system": "System",
-      "chip": "Chip",
-      "autoUpdates": "Auto-updates",
-      "openSource": "Open source",
-      "repository": "Repository",
-      "githubRepository": "GitHub repository",
-      "developer": "Developer",
-      "homepage": "Homepage",
-      "token": "Token",
-      "yes": "Yes",
-      "no": "No"
+      "title": "基本情報",
+      "price": "価格",
+      "system": "システム要件",
+      "chip": "チップ",
+      "autoUpdates": "自動更新",
+      "openSource": "オープンソース",
+      "repository": "リポジトリ",
+      "githubRepository": "GitHub リポジトリ",
+      "developer": "開発元",
+      "homepage": "ホームページ",
+      "token": "パッケージ識別子",
+      "yes": "はい",
+      "no": "いいえ",
+      "checked": "確認日",
+      "bundleId": "Bundle ID"
     },
     "repo": {
       "stars": "★",
-      "updated": "Updated {days} days ago",
-      "unmaintained": "May no longer be maintained",
-      "archived": "Archived"
+      "checked": "リポジトリ情報の確認日：{date}。",
+      "updated": "{days} 日前に更新",
+      "unmaintained": "メンテナンスが終了している可能性があります",
+      "archived": "アーカイブ済み"
     },
     "quick": {
       "title": "基本情報",
@@ -741,8 +744,7 @@
       "builtFor": "macOS {versions} 向けのビルド"
     },
     "install": {
-      "title": "Mac に {name} をインストールする方法",
-      "run": "「ターミナル」で次のコマンドを実行します："
+      "title": "Mac に {name} をインストールする方法"
     },
     "uninstall": {
       "title": "{name} のアンインストールと任意のデータ削除",
@@ -845,6 +847,18 @@
       "label": "公式ダウンロード · {host}",
       "checksum": "Homebrew に SHA-256 を記録済み",
       "active": "Homebrew で無効化されていません"
+    },
+    "sourceBadge": {
+      "label": "公式配布元",
+      "verified": "✓ 公式配布元 · 確認済み",
+      "disabled": "公式配布元 · 無効化済み",
+      "deprecated": "公式配布元 · 非推奨",
+      "paused": "公式配布元 · おすすめを一時停止",
+      "domain": "配布元：{domain}",
+      "checksum": "SHA-256：{sha256}",
+      "checksumUnknown": "SHA-256 の記録なし",
+      "checked": "確認日：{date}",
+      "unchecked": "確認日の記録なし"
     }
   },
   "collections": {
