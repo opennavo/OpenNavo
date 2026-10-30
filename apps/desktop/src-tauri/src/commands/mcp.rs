@@ -27,7 +27,8 @@ pub async fn mcp_set_enabled(
     enabled: bool,
 ) -> Result<McpStatus, AppError> {
     let broker = broker.inner().clone();
-    crate::blocking(move || broker.set_enabled(enabled).map_err(map_error)).await?;
+    let switch = Arc::clone(&broker);
+    crate::blocking(move || switch.set_enabled(enabled).map_err(map_error)).await?;
     Ok(broker.status())
 }
 
