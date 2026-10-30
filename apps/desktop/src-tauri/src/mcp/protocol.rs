@@ -377,6 +377,19 @@ fn write_tools_call<W: Write>(
     backend: &mut Backend,
     session: &Session,
 ) -> io::Result<()> {
+    // The master switch is checked before any validation: while it is off,
+    // every call (unknown names and malformed params included) gets the same
+    // disabled error.
+    if let Some((code, data_code, message)) = backend.availability().disabled_error() {
+        return write_error(
+            output,
+            id,
+            code,
+            message,
+            Some(json!({ "code": data_code })),
+        );
+    }
+
     let Some(params) = params.and_then(Value::as_object) else {
         return write_error(
             output,
@@ -405,18 +418,6 @@ fn write_tools_call<W: Write>(
             -32602,
             &format!("Unknown tool: {name}"),
             Some(json!({ "code": "E_TOOL_NOT_FOUND" })),
-        );
-    }
-
-    if let Backend::Static(availability) = &*backend
-        && let Some((code, data_code, message)) = availability.disabled_error()
-    {
-        return write_error(
-            output,
-            id,
-            code,
-            message,
-            Some(json!({ "code": data_code })),
         );
     }
 
@@ -859,6 +860,24 @@ mod tests {
             let error = &responses[1]["error"];
             assert_eq!(error["code"], -32602, "name {name}");
             assert_eq!(error["data"]["code"], "E_TOOL_NOT_FOUND", "name {name}");
+        }
+    }
+
+    #[test]
+    fn switch_off_rejects_every_call_before_validation() {
+        for params in [
+            r#"{"name":"delete_everything","arguments":{}}"#,
+            r#"{"name":"install_app"}"#,
+            r#"{"arguments":{}}"#,
+            r#""not an object""#,
+        ] {
+            let input = with_initialize(&format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{params}}}\n"
+            ));
+            let (responses, _) = run(&input, Availability::SwitchOff);
+            let error = &responses[1]["error"];
+            assert_eq!(error["code"], -32001, "params {params}");
+            assert_eq!(error["data"]["code"], "E_MCP_DISABLED", "params {params}");
         }
     }
 

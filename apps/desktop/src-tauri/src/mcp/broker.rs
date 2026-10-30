@@ -90,7 +90,10 @@ struct Inner {
     thread: Option<JoinHandle<()>>,
     connections: HashMap<u64, UnixStream>,
     sessions: HashSet<u64>,
+    /// Never reset, so ids stay unique across disable/enable cycles.
     next_connection: u64,
+    /// Identity of the socket file this broker published.
+    socket_id: Option<socket::SocketId>,
 }
 
 /// Shared broker handle. Tauri manages `Arc<Broker>`.
@@ -98,6 +101,9 @@ pub struct Broker {
     data_dir: PathBuf,
     host: Option<Arc<dyn ToolHost>>,
     inner: Mutex<Inner>,
+    /// Serializes whole switch transitions (bind/persist/stop), so runtime
+    /// state and the persisted switch cannot diverge under concurrent toggles.
+    lifecycle: Mutex<()>,
 }
 
 impl Broker {
@@ -116,6 +122,7 @@ impl Broker {
                 enabled,
                 ..Inner::default()
             }),
+            lifecycle: Mutex::new(()),
         }
     }
 
@@ -135,6 +142,7 @@ impl Broker {
 
     /// Bind at startup iff the persisted switch is on.
     pub fn start_if_enabled(self: &Arc<Self>) -> Result<(), BrokerError> {
+        let _transition = self.transition();
         if self.status().enabled {
             self.enable()
         } else {
@@ -150,6 +158,7 @@ impl Broker {
 
     /// Apply the master switch immediately and persist it.
     pub fn set_enabled(self: &Arc<Self>, enabled: bool) -> Result<(), BrokerError> {
+        let _transition = self.transition();
         if enabled {
             self.enable()
         } else {
@@ -171,7 +180,7 @@ impl Broker {
             inner.error = Some(failure.to_string());
             failure
         })?;
-        let listener = socket::bind(&resolved).map_err(|error| {
+        let (listener, socket_id) = socket::bind_owned(&resolved).map_err(|error| {
             let failure = BrokerError::io(error);
             inner.error = Some(failure.to_string());
             failure
@@ -179,7 +188,7 @@ impl Broker {
 
         if let Err(error) = state::save(&self.data_dir, true) {
             drop(listener);
-            socket::remove_owned(&self.data_dir);
+            socket::remove_if_same(&self.data_dir, socket_id);
             let failure = BrokerError::io(error);
             inner.error = Some(failure.to_string());
             return Err(failure);
@@ -191,7 +200,7 @@ impl Broker {
         inner.path = Some(resolved.path);
         inner.error = None;
         inner.stop = Some(stop.clone());
-        inner.next_connection = 0;
+        inner.socket_id = Some(socket_id);
 
         let weak = Arc::downgrade(self);
         let stop_thread = stop.clone();
@@ -209,10 +218,11 @@ impl Broker {
                 inner.running = false;
                 inner.path = None;
                 inner.stop = None;
+                inner.socket_id = None;
                 let failure = BrokerError::io(error);
                 inner.error = Some(failure.to_string());
                 let _ = state::save(&self.data_dir, previous_enabled);
-                socket::remove_owned(&self.data_dir);
+                socket::remove_if_same(&self.data_dir, socket_id);
                 Err(failure)
             }
         }
@@ -237,6 +247,7 @@ impl Broker {
     /// Stop accepting, drop connections, and clear sessions without changing
     /// the persisted switch (used on app exit).
     pub fn shutdown(&self) {
+        let _transition = self.transition();
         let thread = {
             let mut inner = self.lock();
             self.stop_runtime(&mut inner)
@@ -257,8 +268,16 @@ impl Broker {
         }
         inner.connections.clear();
         inner.sessions.clear();
-        socket::remove_owned(&self.data_dir);
+        if let Some(socket_id) = inner.socket_id.take() {
+            socket::remove_if_same(&self.data_dir, socket_id);
+        }
         inner.thread.take()
+    }
+
+    fn transition(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.lifecycle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -354,6 +373,13 @@ impl Broker {
         Some(id)
     }
 
+    /// Whether a connection still belongs to the running broker. A worker
+    /// from a previous enable cycle (or a disabled broker) gets `false`.
+    fn is_active(&self, id: u64) -> bool {
+        let inner = self.lock();
+        inner.running && inner.connections.contains_key(&id)
+    }
+
     fn unregister(&self, id: u64) {
         let mut inner = self.lock();
         inner.connections.remove(&id);
@@ -393,6 +419,11 @@ fn connection_loop(
             }
             Err(_) => break,
         };
+        // Re-check before every dispatch: once the switch is turned off (or
+        // this connection was dropped), no further request is served.
+        if !weak.upgrade().is_some_and(|broker| broker.is_active(id)) {
+            break;
+        }
         let request: Value = match serde_json::from_slice(&line) {
             Ok(request) => request,
             Err(_) => {
@@ -433,6 +464,14 @@ fn connection_loop(
 }
 
 fn call_tool(host: Option<&dyn ToolHost>, params: Value) -> Result<Value, RpcError> {
+    // Availability is checked before any validation so an unavailable broker
+    // answers every call the same way, whatever the name or arguments.
+    let Some(host) = host else {
+        return Err(rpc_error(
+            "E_MCP_DISABLED",
+            "Local MCP read tools are unavailable",
+        ));
+    };
     let Some(params) = params.as_object() else {
         return Err(rpc_error("E_INVALID_ARG", "Invalid tool call"));
     };
@@ -440,12 +479,6 @@ fn call_tool(host: Option<&dyn ToolHost>, params: Value) -> Result<Value, RpcErr
         return Err(rpc_error("E_INVALID_ARG", "Missing tool name"));
     };
     let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
-    let Some(host) = host else {
-        return Err(rpc_error(
-            "E_MCP_DISABLED",
-            "Local MCP read tools are unavailable",
-        ));
-    };
     super::tools::call(host, name, arguments)
         .map_err(|error: ToolError| (error.code, error.message))
 }
@@ -579,9 +612,8 @@ impl ToolHost for LiveTools {
             offset: 0,
         };
         let database = self.core.database.clone();
-        let page = blocking_tool(move || {
-            crate::catalog::search(&database, &query, chrono::Utc::now().timestamp_millis())
-        })?;
+        let page =
+            blocking_tool(move || crate::catalog::search_without_history(&database, &query))?;
         serde_json::to_value(page).map_err(json_error)
     }
 

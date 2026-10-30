@@ -91,37 +91,99 @@ pub fn prepare(data_dir: &Path) -> io::Result<SocketPath> {
     Ok(resolved)
 }
 
+/// Identity of the socket file this process bound (device and inode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SocketId {
+    dev: u64,
+    ino: u64,
+}
+
 /// Bind and harden the socket. The caller owns the listener and must remove the
 /// path when it stops.
 pub fn bind(resolved: &SocketPath) -> io::Result<UnixListener> {
-    let listener = UnixListener::bind(&resolved.path)?;
-    if let Err(error) = fs::set_permissions(&resolved.path, fs::Permissions::from_mode(SOCKET_MODE))
-    {
-        drop(listener);
-        let _ = fs::remove_file(&resolved.path);
-        return Err(error);
+    bind_owned(resolved).map(|(listener, _)| listener)
+}
+
+/// Bind the socket privately, then publish it at the final path.
+///
+/// The listener is bound at a unique temporary name inside the `0700`
+/// directory, chmod-ed to `0600` and verified there, and only then hard-linked
+/// to the well-known path. No client can reach the socket before its mode is
+/// final, and `link` never replaces an existing entry, so a concurrent broker's
+/// live socket is never overwritten. Returns the identity used by
+/// [`remove_if_same`] so shutdown only ever removes this instance's socket.
+pub fn bind_owned(resolved: &SocketPath) -> io::Result<(UnixListener, SocketId)> {
+    // The temporary name is no longer than `mcp.sock`, so it always fits the
+    // same `sun_path` budget as the final path.
+    let mut attempt = 0;
+    let (temporary, listener) = loop {
+        let candidate = resolved
+            .directory
+            .join(format!(".{:07x}", unique_suffix() & 0x0fff_ffff));
+        match UnixListener::bind(&candidate) {
+            Ok(listener) => break (candidate, listener),
+            Err(error) if error.kind() == ErrorKind::AddrInUse && attempt < 8 => {
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    let published = (|| {
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(SOCKET_MODE))?;
+        let metadata = fs::symlink_metadata(&temporary)?;
+        if !metadata.file_type().is_socket()
+            || metadata.file_type().is_symlink()
+            || metadata.uid() != current_uid()
+        {
+            return Err(io::Error::new(
+                ErrorKind::PermissionDenied,
+                "MCP socket is not private to the current user",
+            ));
+        }
+        if metadata.mode() & 0o777 != SOCKET_MODE {
+            return Err(io::Error::new(
+                ErrorKind::PermissionDenied,
+                "MCP socket permissions are too broad",
+            ));
+        }
+        match fs::hard_link(&temporary, &resolved.path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                return Err(io::Error::new(
+                    ErrorKind::AddrInUse,
+                    "MCP socket is already in use",
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+        Ok(SocketId {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+        })
+    })();
+    let _ = fs::remove_file(&temporary);
+    match published {
+        Ok(id) => Ok((listener, id)),
+        Err(error) => {
+            drop(listener);
+            Err(error)
+        }
     }
-    let metadata = fs::symlink_metadata(&resolved.path)?;
-    if !metadata.file_type().is_socket()
-        || metadata.file_type().is_symlink()
-        || metadata.uid() != current_uid()
-    {
-        drop(listener);
-        let _ = fs::remove_file(&resolved.path);
-        return Err(io::Error::new(
-            ErrorKind::PermissionDenied,
-            "MCP socket is not private to the current user",
-        ));
-    }
-    if metadata.mode() & 0o777 != SOCKET_MODE {
-        drop(listener);
-        let _ = fs::remove_file(&resolved.path);
-        return Err(io::Error::new(
-            ErrorKind::PermissionDenied,
-            "MCP socket permissions are too broad",
-        ));
-    }
-    Ok(listener)
+}
+
+fn unique_suffix() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| u64::from(duration.subsec_nanos()))
+        .unwrap_or(0);
+    let mixed = nanos ^ u64::from(std::process::id()).rotate_left(17);
+    mixed.wrapping_add(
+        COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_mul(0x9e37_79b9),
+    )
 }
 
 /// Remove a stale socket owned by this user without ever touching a regular
@@ -153,13 +215,17 @@ pub fn remove_stale(data_dir: &Path) -> io::Result<()> {
     }
 }
 
-/// Remove the socket on shutdown only when it is still our socket.
-pub fn remove_owned(data_dir: &Path) {
+/// Remove the socket on shutdown only when the path still refers to the exact
+/// socket file this instance bound. A socket published later by another broker
+/// (same user, different inode) is left alone.
+pub fn remove_if_same(data_dir: &Path, id: SocketId) {
     let resolved = path(data_dir);
     if let Ok(metadata) = fs::symlink_metadata(&resolved.path)
         && metadata.file_type().is_socket()
         && !metadata.file_type().is_symlink()
         && metadata.uid() == current_uid()
+        && metadata.dev() == id.dev
+        && metadata.ino() == id.ino
     {
         let _ = fs::remove_file(&resolved.path);
     }

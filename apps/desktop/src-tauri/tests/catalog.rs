@@ -184,6 +184,28 @@ fn fixtures_import_delta_search_and_atomic_failure() {
         Ok(())
     })
     .unwrap();
+    let before: Vec<(String, i64)> = db
+        .with(|c| {
+            let mut s = c.prepare("SELECT q,count FROM search_history ORDER BY q")?;
+            let rows = s
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .unwrap();
+    for q in ["query3", "readonly-mcp"] {
+        let _ = catalog::search_without_history(&db, &search(q)).unwrap();
+    }
+    let after: Vec<(String, i64)> = db
+        .with(|c| {
+            let mut s = c.prepare("SELECT q,count FROM search_history ORDER BY q")?;
+            let rows = s
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .unwrap();
+    assert_eq!(before, after, "read-only search must not touch history");
 }
 #[test]
 fn sixteen_thousand_import_and_short_queries() {

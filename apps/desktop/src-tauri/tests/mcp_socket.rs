@@ -700,3 +700,106 @@ fn subprocess_switch_off_returns_E_MCP_DISABLED() {
     );
     assert!(!socket::path(&data).path.exists());
 }
+
+#[test]
+fn failed_second_broker_does_not_remove_the_live_socket() {
+    let dir = tempdir();
+    let first = start_broker(dir.path());
+    let path = socket::path(dir.path()).path;
+
+    let second = Arc::new(Broker::new(dir.path().to_path_buf()));
+    assert!(second.set_enabled(true).is_err(), "second bind must fail");
+    second.shutdown();
+    drop(second);
+
+    assert!(
+        fs::symlink_metadata(&path)
+            .expect("socket still present")
+            .file_type()
+            .is_socket()
+    );
+    let response = request(&path, json!({"v":1,"id":"ping","method":"ping"}));
+    assert_eq!(response["ok"], true);
+    first.shutdown();
+    assert!(
+        fs::symlink_metadata(&path).is_err(),
+        "owner removes its socket"
+    );
+}
+
+#[test]
+fn published_socket_never_has_broad_permissions_and_no_temp_left() {
+    let dir = tempdir();
+    let broker = start_broker(dir.path());
+    let resolved = socket::path(dir.path());
+    let metadata = fs::symlink_metadata(&resolved.path).expect("socket");
+    assert_eq!(metadata.permissions().mode() & 0o777, socket::SOCKET_MODE);
+    let entries: Vec<String> = fs::read_dir(&resolved.directory)
+        .expect("dir")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with('.') && !name.starts_with(".state-"))
+        .collect();
+    assert!(entries.is_empty(), "temporary sockets left: {entries:?}");
+    broker.shutdown();
+}
+
+#[test]
+fn overlapping_toggles_keep_runtime_and_persisted_switch_in_sync() {
+    let dir = tempdir();
+    let broker = Arc::new(Broker::new(dir.path().to_path_buf()));
+    let workers: Vec<_> = (0..8)
+        .map(|index| {
+            let broker = broker.clone();
+            thread::spawn(move || {
+                for round in 0..10 {
+                    let _ = broker.set_enabled((index + round) % 2 == 0);
+                }
+            })
+        })
+        .collect();
+    for worker in workers {
+        worker.join().expect("toggle thread");
+    }
+    let status = broker.status();
+    assert_eq!(status.enabled, state::load(dir.path()).enabled);
+    assert_eq!(status.running, status.enabled);
+    assert_eq!(
+        socket::path(dir.path()).path.exists(),
+        status.enabled,
+        "socket presence follows the switch"
+    );
+    broker.shutdown();
+}
+
+#[test]
+fn connection_from_previous_cycle_is_not_served_after_disable() {
+    let dir = tempdir();
+    let broker = start_broker(dir.path());
+    let path = socket::path(dir.path()).path;
+    let mut old = UnixStream::connect(&path).expect("connect");
+    old.set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("timeout");
+    old.write_all(b"{\"v\":1,\"id\":1,\"method\":\"ping\"}\n")
+        .expect("write");
+    let mut reader = BufReader::new(old.try_clone().expect("clone"));
+    let mut line = String::new();
+    reader.read_line(&mut line).expect("first reply");
+    assert!(line.contains("\"ok\":true"));
+
+    broker.set_enabled(false).expect("disable");
+    broker.set_enabled(true).expect("re-enable");
+    wait_running(&broker);
+
+    let _ = old.write_all(b"{\"v\":1,\"id\":2,\"method\":\"ping\"}\n");
+    line.clear();
+    let read = reader.read_line(&mut line);
+    assert!(
+        matches!(read, Ok(0)) || read.is_err(),
+        "old connection must not be served: {line:?}"
+    );
+    // New connections still work after re-enable.
+    let response = request(&path, json!({"v":1,"id":"new","method":"ping"}));
+    assert_eq!(response["ok"], true);
+    broker.shutdown();
+}
