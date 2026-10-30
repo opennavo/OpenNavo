@@ -71,7 +71,8 @@ def prepare_on_host(root, api_environment, include_public_mcp=False):
              '\t}\n'
              '}\n')
     (directory / 'live.caddy').write_text(route)
-    obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy', 'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
+    obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy', 'caddy_container': 'fixture-caddy',
+                             'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
     with patch.object(deploy, 'command', return_value='fixture-container'):
         obj.prepare(archive())
     return obj, json.loads((obj.directory / 'rolling.compose.json').read_text())
@@ -626,6 +627,110 @@ class DeployTests(unittest.TestCase):
                     self.assertEqual(again, routed)
                     routed = again
 
+    def test_deploy_start_validates_live_caddy_and_recovers_interrupted_write(self):
+        for same_sha in [False, True]:
+            for valid_live, valid_backup in [(False, True), (False, None), (False, False),
+                                             (True, True), (True, None)]:
+                with self.subTest(same_sha=same_sha, valid_live=valid_live, valid_backup=valid_backup), \
+                        tempfile.TemporaryDirectory() as root:
+                    obj, _ = prepare_on_host(root, {})
+                    if same_sha:
+                        obj.state['sha'] = obj.payload['sha']
+                    good = obj.live_caddy.read_bytes()
+                    truncated = b'{$WEB_DOMAIN} {\n\treverse_proxy'
+                    backup = obj.live_caddy.with_name('Caddyfile.bak')
+                    if valid_backup is not None:
+                        backup.write_bytes(good if valid_backup else truncated)
+                        backup_stat = backup.stat()
+                    if not valid_live:
+                        obj.live_caddy.write_bytes(truncated)
+                    before = obj.live_caddy.stat()
+                    observed = []
+                    validate = ['docker', 'exec', 'fixture-caddy', 'caddy', 'validate',
+                                '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
+
+                    def command(args):
+                        self.assertEqual(args, validate)
+                        observed.append(obj.live_caddy.read_bytes())
+                        if observed[-1] != good:
+                            raise RuntimeError('invalid live Caddyfile')
+                        return ''
+
+                    continued = valid_live or valid_backup is True
+                    error = ('deployment continued' if continued else
+                             'backup .*Caddyfile.bak is missing' if valid_backup is None else
+                             'invalid live Caddyfile')
+                    with patch.object(deploy, 'command', side_effect=command), \
+                            patch.object(deploy.os, 'fsync', wraps=os.fsync) as fsync, \
+                            patch.object(obj, 'capacity_gate', side_effect=RuntimeError('deployment continued')) as capacity, \
+                            patch.object(obj, 'verify', side_effect=RuntimeError('deployment continued')) as verify, \
+                            patch.object(obj, 'prepare') as prepare, \
+                            patch.object(obj, 'backup') as db_backup, \
+                            contextlib.redirect_stdout(io.StringIO()) as output, \
+                            self.assertRaisesRegex(RuntimeError, error):
+                        obj.apply(archive())
+                    recovered = not valid_live and valid_backup is not None
+                    self.assertEqual(observed, [good] if valid_live else
+                                     [truncated, good if valid_backup else truncated] if recovered else
+                                     [truncated])
+                    self.assertEqual(fsync.call_count, int(recovered))
+                    self.assertEqual(obj.live_caddy.stat().st_ino, before.st_ino)
+                    self.assertEqual(obj.live_caddy.read_bytes(), good if continued else truncated)
+                    if valid_live:
+                        self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
+                        self.assertEqual(obj.live_caddy.stat().st_ctime_ns, before.st_ctime_ns)
+                    if valid_backup is not None:
+                        self.assertEqual(backup.read_bytes(), good if valid_backup else truncated)
+                        self.assertEqual(backup.stat().st_mtime_ns, backup_stat.st_mtime_ns)
+                    else:
+                        self.assertFalse(backup.exists())
+                    if recovered:
+                        self.assertIn(f'restoring {obj.live_caddy} in place from {backup}', output.getvalue())
+                        if continued:
+                            self.assertIn('Restored live Caddyfile', output.getvalue())
+                            self.assertIn('validation passed', output.getvalue())
+                    else:
+                        self.assertNotIn('restoring', output.getvalue())
+                    self.assertEqual(capacity.call_count, int(continued and not same_sha))
+                    self.assertEqual(verify.call_count, int(continued and same_sha))
+                    prepare.assert_not_called()
+                    db_backup.assert_not_called()
+
+    def test_reload_recovers_truncated_live_caddy_and_revalidates_before_signal(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {})
+            good = obj.live_caddy.read_bytes()
+            backup = obj.live_caddy.with_name('Caddyfile.bak')
+            backup.write_bytes(good)
+            truncated = b'{$WEB_DOMAIN} {\n\treverse_proxy'
+            obj.live_caddy.write_bytes(truncated)
+            inode = obj.live_caddy.stat().st_ino
+            events = []
+
+            def command(args):
+                self.assertEqual(args, ['docker', 'exec', 'fixture-caddy', 'caddy', 'validate',
+                                        '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
+                                 if 'validate' in args else
+                                 ['docker', 'kill', '--signal=USR1', 'fixture-caddy'])
+                content = obj.live_caddy.read_bytes()
+                events.append(('validate' if 'validate' in args else 'signal', content))
+                if content != good:
+                    raise RuntimeError('invalid live Caddyfile')
+                return ''
+
+            with patch.object(deploy, 'command', side_effect=command), \
+                    patch.object(deploy.os, 'fsync', wraps=os.fsync) as fsync, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                obj.reload()
+            self.assertEqual(events, [('validate', truncated), ('validate', good), ('signal', good)])
+            self.assertEqual(obj.live_caddy.stat().st_ino, inode)
+            self.assertEqual(backup.read_bytes(), good)
+            fsync.assert_called_once()
+            self.assertIn('Restored live Caddyfile', output.getvalue())
+            self.assertIn('validation passed', output.getvalue())
+            self.assertFalse(obj.degraded_path.exists())
+            self.assertTrue(hasattr(obj, 'switch_at'))
+
     def test_install_caddy_validates_staged_copy_and_preserves_live_inode(self):
         for invalid in [False, True]:
             with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as root:
@@ -1093,7 +1198,8 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 commands = [error] if fail_validation else ['', error]
                 with patch.object(deploy, 'command', side_effect=commands), \
                         contextlib.redirect_stdout(io.StringIO()) as output, \
-                        self.assertRaisesRegex(RuntimeError, 'fixture Caddy failure'):
+                        self.assertRaisesRegex(RuntimeError, 'Live Caddyfile validation failed'
+                                               if fail_validation else 'fixture Caddy failure'):
                     obj.reload()
                 self.assertIn('routing unconfirmed', output.getvalue())
                 self.assertNotIn('Caddy still routes to the candidate', output.getvalue())
@@ -1169,9 +1275,10 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
 
             obj.verify.side_effect = verify_rollback
             reload_attempt = 0
+            starting_deploy = True
 
             def command(args):
-                nonlocal reload_attempt
+                nonlocal reload_attempt, starting_deploy
                 if args[:3] == ['docker', 'network', 'inspect']:
                     return json.dumps([{'Containers': {}}])
                 if args[:3] == ['docker', 'image', 'inspect']:
@@ -1180,6 +1287,9 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                     return 'fixture-container'
                 step = None
                 if 'validate' in args:
+                    if starting_deploy:
+                        starting_deploy = False
+                        return ''
                     reload_attempt += 1
                     step = 'validate'
                     if reload_attempt == 2:
@@ -1199,7 +1309,8 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             with patch.object(deploy, 'command', side_effect=command), \
                     contextlib.redirect_stdout(io.StringIO()):
                 failure = 'rollback ' + rollback_failure if rollback_failure else 'forward ' + forward_failure
-                with self.assertRaisesRegex(RuntimeError, failure + ' failed'):
+                error = 'Live Caddyfile validation failed' if failure.endswith('validate') else failure + ' failed'
+                with self.assertRaisesRegex(RuntimeError, error):
                     obj.apply(archive())
                 self.assertEqual(reload_attempt, 2)
                 self.assertEqual(obj.state_path.read_bytes(), before_state)
@@ -1221,6 +1332,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                     self.assertFalse(obj.degraded_path.exists())
                     obj.verify.assert_called_once_with(expected=obj.state['sha'][:12])
                     obj.update_monitoring.assert_called_once_with(obj.state['services'])
+                    starting_deploy = True
                     retry.apply(archive())
                     self.assertEqual(reload_attempt, 3)
                     self.assertEqual(json.loads(retry.state_path.read_text())['release'], retry.release)
@@ -1256,13 +1368,14 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
         obj.payload = payload()
         obj.state = {'sha': obj.payload['sha'], 'services': {'api': 'api_live', 'web': 'web_live'}}
         events = []
+        obj.validate_live_caddy = lambda: events.append('validate live Caddy')
         obj.verify = lambda: events.append('verify')
         obj.update_monitoring = lambda services: events.append('monitoring')
         obj.cleanup = lambda previous: events.append('cleanup')
         obj.prune = lambda previous: events.append('prune')
         obj.capacity_gate = lambda: (_ for _ in ()).throw(AssertionError('short circuit must skip capacity'))
         obj.apply(archive())
-        self.assertEqual(events, ['verify', 'monitoring', 'cleanup', 'prune'])
+        self.assertEqual(events, ['validate live Caddy', 'verify', 'monitoring', 'cleanup', 'prune'])
 
     def test_drain_timeout_warns_and_reports_failure(self):
         obj = object.__new__(deploy.Deployment)
@@ -1286,13 +1399,14 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
         previous = {'services': {'api': 'api_previous'}}
         obj.state = {'sha': obj.payload['sha'], 'services': {'api': 'api_live'}, 'previous': previous}
         events = []
+        obj.validate_live_caddy = lambda: events.append('validate live Caddy')
         obj.verify = lambda: events.append('verify')
         obj.update_monitoring = lambda services: events.append('monitoring')
         obj.cleanup = lambda state: events.append(('cleanup', state))
         obj.prune = lambda state: events.append(('prune', state))
         obj.apply(archive())
         self.assertEqual(obj.services, obj.state['services'])
-        self.assertEqual(events, ['verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
+        self.assertEqual(events, ['validate live Caddy', 'verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
 
     def test_retry_continues_when_live_release_directory_is_missing(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1307,6 +1421,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 'previous': previous,
             }
             events = []
+            obj.validate_live_caddy = lambda: events.append('validate live Caddy')
             obj.verify = lambda: events.append('verify')
             obj.update_monitoring = lambda services: events.append('monitoring')
             obj.cleanup = lambda state: events.append(('cleanup', state))
@@ -1314,7 +1429,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             with patch('builtins.print') as output:
                 obj.apply(archive())
 
-            self.assertEqual(events, ['verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
+            self.assertEqual(events, ['validate live Caddy', 'verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
             output.assert_any_call('Live release manifest repair skipped; continuing deployment.', flush=True)
 
     def test_retry_rebuilds_a_missing_live_manifest_without_sensitive_fields(self):
@@ -1327,6 +1442,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             obj.root = root
             obj.payload = {**payload(), 'registry_token': 'secret-token', 'admin_archive': 'secret-archive'}
             obj.state = {'sha': obj.payload['sha'], 'release': 'live', 'services': {'api': 'api_live'}}
+            obj.validate_live_caddy = unittest.mock.Mock()
             obj.verify = lambda: None
             obj.update_monitoring = lambda services: None
             obj.cleanup = lambda state: None
@@ -1334,6 +1450,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
 
             obj.apply(archive())
 
+            obj.validate_live_caddy.assert_called_once_with()
             manifest = json.loads((release / 'manifest.json').read_text())
             self.assertEqual(manifest['web_assets'], ['live.js'])
             self.assertNotIn('registry_token', manifest)
@@ -1455,6 +1572,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             with self.subTest(revision=revision), tempfile.TemporaryDirectory() as root:
                 obj = object.__new__(deploy.Deployment)
                 obj.root = Path(root)
+                obj.validate_live_caddy = unittest.mock.Mock()
                 obj.payload, obj.state = payload(), {}
                 events = []
                 def stop(_):
@@ -1508,7 +1626,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             directory = Path(root)
             obj = object.__new__(deploy.Deployment)
             obj.root = directory
-            obj.config = {'project': 'fixture'}
+            obj.config = {'project': 'fixture', 'caddy_container': 'fixture-caddy'}
             obj.state = {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'mcp', 'public-mcp', 'admin']}}
             obj.payload = payload()
             obj.directory = directory

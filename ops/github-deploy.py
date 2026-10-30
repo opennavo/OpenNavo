@@ -1118,9 +1118,26 @@ class Deployment:
             write_caddy_in_place(self.live_caddy, backup.read_bytes())
             raise
 
+    def validate_live_caddy(self):
+        """Recover an interrupted in-place write before trusting the live configuration."""
+        args = ['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate',
+                '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
+        try:
+            command(args)
+        except Exception as error:
+            backup = self.live_caddy.with_name('Caddyfile.bak')
+            if not backup.is_file():
+                raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy}; '
+                                   f'backup {backup} is missing. Aborting deployment.') from error
+            print(f'WARNING: live Caddyfile validation failed; restoring {self.live_caddy} '
+                  f'in place from {backup}.', flush=True)
+            write_caddy_in_place(self.live_caddy, backup.read_bytes())
+            command(args)
+            print(f'Restored live Caddyfile from {backup}; validation passed.', flush=True)
+
     def reload(self):
         try:
-            command(['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'])
+            self.validate_live_caddy()
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
             # Prefer the adjacent backup of the actual live file at this switch.
@@ -1367,6 +1384,7 @@ class Deployment:
         if self.degraded_path.exists():
             raise RuntimeError('deployment blocked by persistent degraded marker. ' + self.recovery_instructions())
         self.degraded_marker_written = False
+        self.validate_live_caddy()
         if self.state.get('sha') == self.payload['sha']:
             self.services = self.state['services']
             self.ensure_live_manifest()
