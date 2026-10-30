@@ -6,6 +6,7 @@ import type { UninstallFact } from '~/utils/packageFacts';
 import { aroundDate, isoDate, uninstallFacts } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
 import { packagePath } from '~/utils/packageView';
+import { installLifecycle } from '~/utils/packageInstall';
 import { uninstallPageOpen } from '~/utils/uninstallPage';
 
 // Uninstall {name} and optional data cleanup (T2): the regular uninstall with what Homebrew's definition
@@ -30,6 +31,8 @@ const { t, locale } = useI18n();
 const localePath = useLocalePath();
 const toasts = useToasts();
 const appLocale = computed(() => toAppLocale(locale.value));
+// Homebrew-disabled packages hide uninstall / Deep clean commands (same guard as install).
+const commandsAllowed = computed(() => installLifecycle(props.pkg, t).state !== 'disabled');
 
 const KINDS = ['launchctl', 'login_item', 'pkgutil', 'zap'] as const;
 
@@ -60,7 +63,12 @@ const checked = computed(() => {
     ...aroundDate(t, evidence.status === 'stale' ? 'package.uninstall.asOf' : 'package.uninstall.checked')
   };
 });
-const visible = computed(() => props.homebrew || regular.value.length > 0 || cleanup.value.length > 0);
+const visible = computed(
+  () =>
+    (props.homebrew && commandsAllowed.value) ||
+    regular.value.length > 0 ||
+    (cleanup.value.length > 0 && commandsAllowed.value)
+);
 const guidePath = computed(() =>
   props.guide && uninstallPageOpen(props.pkg) ? localePath(packagePath(props.pkg.token, 'uninstall')) : null
 );
@@ -89,7 +97,7 @@ function onCopyFailed() {
     <h2 id="uninstall-title" class="m-0 text-13.5px font-600 text-ink-primary">
       {{ t('package.uninstall.title', { name: pkg.displayName }) }}
     </h2>
-    <div v-if="homebrew" class="mt-10px flex flex-col gap-8px">
+    <div v-if="homebrew && commandsAllowed" class="mt-10px flex flex-col gap-8px">
       <PackageCommand
         :command="`brew uninstall --cask ${pkg.token}`"
         :copy-label="t('package.copy.uninstall')"
@@ -115,7 +123,7 @@ function onCopyFailed() {
         </div>
       </dl>
     </div>
-    <details v-if="cleanup.length" class="mt-12px flex flex-col gap-8px" data-testid="package-zap">
+    <details v-if="cleanup.length && commandsAllowed" class="mt-12px flex flex-col gap-8px" data-testid="package-zap">
       <summary
         class="cursor-pointer text-12.5px font-600 text-ink-primary outline-none focus-visible:shadow-focus-ring"
       >
