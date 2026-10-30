@@ -326,7 +326,7 @@ const messages: MessageSchema = {
     homepage: 'Homepage',
     sourceBadge: {
       label: 'Official source',
-      verified: 'Official source · Verified',
+      verified: '✓ Official source · Verified',
       disabled: 'Official source · Disabled',
       deprecated: 'Official source · Deprecated',
       paused: 'Official source · Paused by OpenNavo',
@@ -337,7 +337,6 @@ const messages: MessageSchema = {
       unchecked: 'No check date recorded',
       active: 'Not disabled by Homebrew'
     },
-    fromTap: 'From',
     thirdPartyTap: 'Third-party tap',
     stats: {
       label: 'Stats',
@@ -490,6 +489,7 @@ const messages: MessageSchema = {
       developer: 'Developer',
       homepage: 'Homepage',
       token: 'Token',
+      bundleId: 'Bundle ID',
       installedVersion: 'Installed version',
       installLocation: 'Install location',
       yes: 'Yes',
@@ -498,7 +498,7 @@ const messages: MessageSchema = {
     repo: {
       stars: 'Stars',
       checked: 'Repository data checked {date}.',
-      updated: 'Updated {days} days ago',
+      updated: 'Updated {days} day ago | Updated {days} days ago',
       unmaintained: 'May no longer be maintained',
       archived: 'Archived'
     },
@@ -1117,6 +1117,8 @@ const messages: MessageSchema = {
       'A web page asked to install this on your Mac. Confirm to run the command below; cancel to do nothing.',
     installConfirm: 'Install',
     formulaUnsupported: 'OpenNavo only lists apps (Homebrew casks). This link points to a command-line tool.',
+    confirmationBusy: 'Another confirmation is still open. Close it and try again.',
+    confirmationTimeout: 'The confirmation prompt timed out. Close it and try again.',
     preview: {
       invalid: 'This link can’t be opened',
       invalidBody: 'Its parameters are missing or not in the form OpenNavo accepts, so nothing was done.',

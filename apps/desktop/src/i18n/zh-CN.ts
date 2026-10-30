@@ -319,7 +319,7 @@ export default {
     homepage: '主页',
     sourceBadge: {
       label: '官方来源',
-      verified: '官方来源 · 已核查',
+      verified: '✓ 官方来源 · 已核查',
       disabled: '官方来源 · 已停用',
       deprecated: '官方来源 · 已弃用',
       paused: '官方来源 · 暂停推荐',
@@ -330,7 +330,6 @@ export default {
       unchecked: '暂无核查日期',
       active: '未被 Homebrew 禁用'
     },
-    fromTap: '来自',
     thirdPartyTap: '第三方仓库',
     stats: {
       label: '数据',
@@ -476,6 +475,7 @@ export default {
       developer: '开发者',
       homepage: '主页',
       token: '软件包标识符',
+      bundleId: 'Bundle ID',
       installedVersion: '已安装版本',
       installLocation: '安装位置',
       yes: '是',
@@ -1091,6 +1091,8 @@ export default {
     installDescription: '网页请求在这台 Mac 上安装它。确认后将执行下面的命令；取消则不做任何操作。',
     installConfirm: '安装',
     formulaUnsupported: 'OpenNavo 只收录 App（Homebrew Cask），这个链接指向的是命令行工具。',
+    confirmationBusy: '另一个确认窗口还开着。请先关闭它，再重试。',
+    confirmationTimeout: '确认窗口已超时。请先关闭它，再重试。',
     preview: {
       invalid: '这个链接打不开',
       invalidBody: '链接里的参数不完整或不符合要求，OpenNavo 没有做任何操作。',

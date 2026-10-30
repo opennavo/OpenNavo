@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { createSSRApp, h } from 'vue';
+import { renderToString } from 'vue/server-renderer';
+import { OnPackageSpecCard } from '@opennavo/ui';
 import { packageSpec } from '../app/utils/packageSpec';
+import { siteMessage } from '../server/utils/siteCopy';
 import type { PackagePage } from '../app/utils/packageFacts';
 
 const SPEC_NOW = Date.parse('2026-10-30T00:00:00Z');
 
-const t = (key: string, named: Record<string, unknown> = {}) => {
+const identityOnlyFixture = {
+  channels: [],
+  openSource: 'yes',
+  repositoryUrl: 'https://github.com/acme/identity-only',
+  evidence: { status: 'verified', checkedAt: '2026-10-01T00:00:00Z' }
+};
+
+const t = (key: string, named: Record<string, unknown> = {}, plural?: number) => {
   const values: Record<string, string> = {
     'package.spec.price': 'Price',
     'package.spec.system': 'System',
@@ -16,13 +27,14 @@ const t = (key: string, named: Record<string, unknown> = {}) => {
     'package.spec.githubRepository': 'GitHub repository',
     'package.spec.developer': 'Developer',
     'package.spec.homepage': 'Homepage',
+    'package.spec.bundleId': 'Bundle ID',
     'package.spec.token': 'Token',
     'package.spec.yes': 'Yes',
     'package.spec.no': 'No',
     'package.stats.latest': 'Latest version',
     'package.quick.source': 'Download source',
     'package.repo.stars': '★',
-    'package.repo.updated': `Updated ${named.days ?? 0} days ago`,
+    'package.repo.updated': `Updated ${named.days ?? 0} ${plural === 1 ? 'day' : 'days'} ago`,
     'package.repo.checked': `Repository data checked ${named.date}.`
   };
   return values[key] ?? key;
@@ -87,6 +99,7 @@ describe('package specification repository rows', () => {
     );
     const repoRow = result.rows.find(row => row.key === 'openSource')!;
     expect(repoRow.value).toContain('Open source · MIT · Updated');
+    expect(repoRow.value).toContain('Updated 29 days ago');
     expect(repoRow.value).not.toContain('★');
     expect(repoRow.stars).toMatchObject({ label: '★12.3K', href: 'https://github.com/acme/osi' });
     expect(repoRow.stars?.checked).toMatch(/Repository data checked.*2026/);
@@ -104,12 +117,96 @@ describe('package specification repository rows', () => {
     );
     const repoRow = result.rows.find(row => row.key === 'openSource')!;
     expect(repoRow.value).toBe('GitHub repository');
-    expect(repoRow.stars).toMatchObject({ label: '★1.0K', checked: undefined });
+    expect(repoRow.stars).toMatchObject({ label: '★1K', checked: undefined });
+  });
+
+  it('uses the repository fallback URL for stars when the repository has no URL', () => {
+    const result = packageSpec(
+      page({
+        openSource: {
+          repo: 'acme/fallback',
+          url: 'https://github.com/acme/fallback',
+          license: 'MIT',
+          archived: false,
+          checkedAt: '2026-10-01T00:00:00Z'
+        },
+        repository: { stars: 1000, archived: false }
+      }),
+      t,
+      'en-US',
+      SPEC_NOW
+    );
+    const repoRow = result.rows.find(row => row.key === 'openSource')!;
+    expect(repoRow.stars?.href).toBe('https://github.com/acme/fallback');
+  });
+
+  it('uses the singular plural form for a one-day repository age', () => {
+    const result = packageSpec(
+      page({ repository: { url: 'https://github.com/acme/one-day', stars: 5, pushedAt: '2026-10-29T00:00:00Z' } }),
+      t,
+      'en-US',
+      SPEC_NOW
+    );
+    expect(result.rows.find(row => row.key === 'openSource')?.value).toContain('Updated 1 day ago');
+  });
+
+  it.each([
+    ['en-US', 1, '2026-10-29T00:00:00Z', 'Updated 1 day ago'],
+    ['en-US', 2, '2026-10-28T00:00:00Z', 'Updated 2 days ago'],
+    ['de-DE', 1, '2026-10-29T00:00:00Z', 'Vor 1 Tag aktualisiert'],
+    ['de-DE', 2, '2026-10-28T00:00:00Z', 'Vor 2 Tagen aktualisiert']
+  ] as const)('selects the %s plural form for a %s-day repository age', (locale, _days, pushedAt, expected) => {
+    const translate = (key: string, named?: Record<string, unknown>, plural?: number) =>
+      siteMessage(locale, key, named as Record<string, string | number>, plural);
+    const result = packageSpec(
+      page({ repository: { url: 'https://github.com/acme/plural', stars: 5, pushedAt } }),
+      translate,
+      locale,
+      SPEC_NOW
+    );
+    expect(result.rows.find(row => row.key === 'openSource')?.value).toContain(expected);
   });
 
   it('hides the repository row when neither repository nor OSI data exists', () => {
     const result = packageSpec(page(), t, 'en-US', SPEC_NOW);
     expect(result.rows.some(row => row.key === 'openSource')).toBe(false);
+  });
+
+  it('falls back to the first verified identity for identity-only open-source evidence', () => {
+    const pkg = page({
+      facts: {
+        ...page().facts,
+        security: {
+          identities: [
+            {
+              channels: [],
+              openSource: 'yes',
+              repositoryUrl: 'https://github.com/acme/unverified',
+              evidence: { status: 'stale', checkedAt: '2026-09-01T00:00:00Z' }
+            },
+            identityOnlyFixture
+          ]
+        }
+      }
+    });
+    const result = packageSpec(pkg, t, 'en-US', SPEC_NOW);
+    expect(result.rows.find(row => row.key === 'openSource')).toMatchObject({
+      value: 'Open source',
+      href: identityOnlyFixture.repositoryUrl
+    });
+    expect(result.checkedAt?.iso).toBe('2026-10-01');
+  });
+
+  it('renders no link for javascript: repository URLs', async () => {
+    const pkg = page({
+      repository: { url: 'javascript:alert(1)', stars: 42 },
+      homepage: 'https://example.com/'
+    });
+    const rows = packageSpec(pkg, t, 'en-US', SPEC_NOW).rows;
+    const html = await renderToString(createSSRApp({ render: () => h(OnPackageSpecCard, { rows }) }));
+    expect(html).not.toContain('javascript:');
+    expect(html).toContain('href="https://example.com/"');
+    expect(html).toContain('GitHub repository');
   });
 
   it('falls back only to OSI archived and never to the OSI signal check date', () => {
@@ -146,7 +243,10 @@ describe('quick-info field parity with main', () => {
       value: 'github.com/ELY-Open-Source/ElyOffice'
     });
     expect(rows.find(row => row.key === 'openSource')?.href).toBe('https://github.com/ELY-Open-Source/ElyOffice');
-    expect(rows.find(row => row.key === 'bundle')?.value).toBe('org.example.ely-office');
+    expect(rows.find(row => row.key === 'bundle')).toMatchObject({
+      label: 'Bundle ID',
+      value: 'org.example.ely-office'
+    });
     expect(rows.some(row => ['auto', 'homebrew', 'install'].includes(row.key))).toBe(false);
   });
 
@@ -209,20 +309,24 @@ describe('quick-info field parity with main', () => {
 
 describe('spec card alternate names', () => {
   const locales = ['en-US', 'zh-CN', 'zh-Hant', 'ja-JP', 'es-ES', 'pt-BR', 'ru-RU', 'de-DE', 'fr-FR', 'it-IT'] as const;
-  it.each(locales)('filters aliases in %s for all package kinds', locale => {
+  const names = [
+    'Visual Studio Code',
+    'vscode',
+    'VS Code 编辑器',
+    'VS Code エディター',
+    'Редактор VS Code',
+    'VS Code 편집기'
+  ];
+  const aliases = 'vscode, VS Code 编辑器, VS Code エディター, Редактор VS Code, VS Code 편집기';
+  it.each(locales)('keeps every alias except the displayed name in %s for all package kinds', locale => {
     for (const kind of ['cask', 'formula', 'link'] as const) {
-      const pkg = page({
-        kind,
-        displayName: 'Visual Studio Code',
-        names: ['Visual Studio Code', 'vscode', 'VS Code 编辑器']
-      });
-      const value = packageSpec(pkg, t, locale, SPEC_NOW).rows.find(row => row.key === 'names')?.value;
-      expect(value).toBe(['zh-CN', 'zh-Hant', 'ja-JP'].includes(locale) ? 'vscode, VS Code 编辑器' : 'vscode');
-      pkg.names = ['Visual Studio Code', 'VS Code 编辑器'];
-      expect(packageSpec(pkg, t, locale, SPEC_NOW).rows.some(row => row.key === 'names')).toBe(
-        ['zh-CN', 'zh-Hant', 'ja-JP'].includes(locale)
-      );
+      const pkg = page({ kind, displayName: 'Visual Studio Code', names });
+      expect(packageSpec(pkg, t, locale, SPEC_NOW).rows.find(row => row.key === 'names')?.value).toBe(aliases);
     }
+  });
+  it('keeps aliases in their original languages on English pages, like main Quick facts', () => {
+    const pkg = page({ kind: 'cask', displayName: 'Visual Studio Code', names });
+    expect(packageSpec(pkg, t, 'en-US', SPEC_NOW).rows.find(row => row.key === 'names')?.value).toBe(aliases);
   });
 });
 

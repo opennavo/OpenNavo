@@ -18,14 +18,14 @@ export interface DesktopPackageSpec {
   repoSignals: PackageRepoSignals | null;
 }
 
-type Translate = (key: string, named?: Record<string, unknown>) => string;
+type Translate = (key: string, named?: Record<string, unknown>, plural?: number) => string;
 
 function repoSummary(signals: PackageRepoSignals | null, t: Translate, now: number) {
   if (!signals) return { value: '', badge: undefined };
   const values: string[] = [];
   const days = repoSignalDays(signals, now);
   const status = repoMaintenanceStatus(signals, now);
-  if (days !== null && status !== 'archived') values.push(t('package.repo.updated', { days }));
+  if (days !== null && status !== 'archived') values.push(t('package.repo.updated', { days }, days));
   if (status === 'archived')
     return { value: values.join(' · '), badge: { label: t('package.repo.archived'), tone: 'danger' as const } };
   if (status === 'unmaintained')
@@ -124,21 +124,37 @@ export function packageSpec(
     ?.repository;
   const osi = detail?.openSource;
   const github = value.kind === 'link' && link?.github;
-  if (repository || osi || github) {
+  const repoIdentity = detail?.facts?.security?.identities.find(
+    item =>
+      item.evidence.status === 'verified' &&
+      item.evidence.checkedAt &&
+      (item.openSource === 'yes' || item.repositoryUrl)
+  );
+  const identityOpenSource = !osi && repoIdentity?.openSource === 'yes';
+  const repositoryUrl =
+    repository?.url ??
+    osi?.url ??
+    (github ? `https://github.com/${github.repo}` : undefined) ??
+    repoIdentity?.repositoryUrl;
+  if (repository || osi || github || identityOpenSource || repoIdentity?.repositoryUrl) {
     const summary = repoSummary(signals, t, now);
     rows.push({
       key: 'openSource',
       label: t('package.spec.repository'),
-      value: [osi ? t('package.spec.openSource') : t('package.spec.githubRepository'), osi?.license, summary.value]
+      value: [
+        osi || identityOpenSource ? t('package.spec.openSource') : t('package.spec.githubRepository'),
+        osi?.license,
+        summary.value
+      ]
         .filter(Boolean)
         .join(' · '),
-      href: repository?.url ?? osi?.url ?? (github ? `https://github.com/${github.repo}` : undefined),
+      href: repositoryUrl,
       stars:
         signals?.stars === undefined
           ? undefined
           : {
               label: `★${formatRepoStars(signals.stars, locale)}`,
-              href: repository?.url ?? undefined,
+              href: repository?.url ?? repositoryUrl,
               checked: signals.checkedAt
                 ? t('package.repo.checked', { date: formatDate(signals.checkedAt, { locale }) })
                 : undefined
@@ -164,7 +180,7 @@ export function packageSpec(
     });
   const bundleIds = detail?.bundleIds ?? local?.bundleIds ?? [];
   if (value.kind === 'link' && bundleIds.length)
-    rows.push({ key: 'bundle', label: 'Bundle ID', value: bundleIds.join(' '), mono: true });
+    rows.push({ key: 'bundle', label: t('package.spec.bundleId'), value: bundleIds.join(' '), mono: true });
   const names = packageAliases(value.names ?? [], detail?.displayName ?? local?.name ?? '', locale);
   if (names.length) rows.push({ key: 'names', label: t('package.details.names'), value: names.join(', ') });
   if (value.kind !== 'link') {

@@ -319,7 +319,7 @@
     "homepage": "Sito web",
     "sourceBadge": {
       "label": "Fonte ufficiale",
-      "verified": "Fonte ufficiale · Verificata",
+      "verified": "✓ Fonte ufficiale · Verificata",
       "disabled": "Fonte ufficiale · App disattivata",
       "deprecated": "Fonte ufficiale · App deprecata",
       "paused": "Fonte ufficiale · In pausa",
@@ -330,7 +330,6 @@
       "unchecked": "Data di verifica non registrata",
       "active": "Non disabilitato da Homebrew"
     },
-    "fromTap": "Da",
     "thirdPartyTap": "Repository di terze parti",
     "stats": {
       "label": "Statistiche",
@@ -485,11 +484,12 @@
       "no": "No",
       "checked": "Verificato",
       "downloadSource": "Fonte del download",
-      "fontFiles": "File dei font"
+      "fontFiles": "File dei font",
+      "bundleId": "Bundle ID"
     },
     "repo": {
       "stars": "★",
-      "updated": "Aggiornato {days} giorni fa",
+      "updated": "Aggiornato {days} giorno fa | Aggiornato {days} giorni fa",
       "unmaintained": "La manutenzione potrebbe essere terminata",
       "archived": "Archiviato",
       "checked": "Dati del repository verificati il {date}."
@@ -1097,6 +1097,8 @@
     "installDescription": "Una pagina web ha richiesto questa installazione sul Mac. Conferma per eseguire il comando qui sotto; annulla per non eseguire alcuna operazione.",
     "installConfirm": "Installa",
     "formulaUnsupported": "OpenNavo elenca solo app (Homebrew Cask). Questo link rimanda a uno strumento da riga di comando.",
+    "confirmationBusy": "Un’altra finestra di conferma è ancora aperta. Chiudila e riprova.",
+    "confirmationTimeout": "La finestra di conferma è scaduta. Chiudila e riprova.",
     "preview": {
       "invalid": "Impossibile aprire questo link",
       "invalidBody": "I parametri del link sono incompleti o non validi. OpenNavo non ha eseguito alcuna operazione.",

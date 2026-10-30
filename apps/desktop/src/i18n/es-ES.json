@@ -319,7 +319,7 @@
     "homepage": "Inicio",
     "sourceBadge": {
       "label": "Fuente oficial",
-      "verified": "Fuente oficial · Verificada",
+      "verified": "✓ Fuente oficial · Verificada",
       "disabled": "Fuente oficial · App desactivada",
       "deprecated": "Fuente oficial · App obsoleta",
       "paused": "Fuente oficial · En pausa",
@@ -330,7 +330,6 @@
       "unchecked": "Sin fecha de verificación",
       "active": "No deshabilitada por Homebrew"
     },
-    "fromTap": "De",
     "thirdPartyTap": "Repositorio de terceros",
     "stats": {
       "label": "Datos",
@@ -485,11 +484,12 @@
       "no": "No",
       "checked": "Comprobado",
       "downloadSource": "Origen de la descarga",
-      "fontFiles": "Archivos de fuente"
+      "fontFiles": "Archivos de fuente",
+      "bundleId": "Bundle ID"
     },
     "repo": {
       "stars": "★",
-      "updated": "Actualizado hace {days} días",
+      "updated": "Actualizado hace {days} día | Actualizado hace {days} días",
       "unmaintained": "Puede que ya no reciba mantenimiento",
       "archived": "Archivado",
       "checked": "Datos del repositorio comprobados el {date}."
@@ -1097,6 +1097,8 @@
     "installDescription": "Una página web solicita instalarlo en este Mac. Si confirmas, se ejecutará el comando siguiente; si cancelas, no se hará nada.",
     "installConfirm": "Instalar",
     "formulaUnsupported": "OpenNavo solo incluye apps (Homebrew Cask). Este enlace lleva a una herramienta de línea de comandos.",
+    "confirmationBusy": "Hay otro cuadro de confirmación abierto. Ciérralo y vuelve a intentarlo.",
+    "confirmationTimeout": "El cuadro de confirmación agotó el tiempo de espera. Ciérralo y vuelve a intentarlo.",
     "preview": {
       "invalid": "No se puede abrir este enlace",
       "invalidBody": "Faltan parámetros o no tienen el formato que acepta OpenNavo, así que no se ha hecho nada.",

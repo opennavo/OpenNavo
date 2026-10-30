@@ -319,7 +319,7 @@
     "homepage": "主頁",
     "sourceBadge": {
       "label": "官方來源",
-      "verified": "官方來源 · 已核查",
+      "verified": "✓ 官方來源 · 已核查",
       "disabled": "官方來源 · 已停用",
       "deprecated": "官方來源 · 已棄用",
       "paused": "官方來源 · 暫停推薦",
@@ -330,7 +330,6 @@
       "unchecked": "暫無核查日期",
       "active": "未被 Homebrew 停用"
     },
-    "fromTap": "來自",
     "thirdPartyTap": "第三方倉庫",
     "stats": {
       "label": "資料",
@@ -482,6 +481,7 @@
       "developer": "開發者",
       "homepage": "主頁",
       "token": "套件識別碼",
+      "bundleId": "Bundle ID",
       "installedVersion": "已安裝版本",
       "installLocation": "安裝位置",
       "yes": "是",
@@ -1097,6 +1097,8 @@
     "installDescription": "網頁請求在這台 Mac 上安裝它。確認後將執行下面的命令；取消則不做任何操作。",
     "installConfirm": "安裝",
     "formulaUnsupported": "OpenNavo 只收錄 App（Homebrew Cask），這個連結指向的是命令列工具。",
+    "confirmationBusy": "另一個確認視窗還開著。請先關閉它，再重試。",
+    "confirmationTimeout": "確認視窗已超時。請先關閉它，再重試。",
     "preview": {
       "invalid": "這個連結打不開",
       "invalidBody": "連結裡的引數不完整或不符合要求，OpenNavo 沒有做任何操作。",

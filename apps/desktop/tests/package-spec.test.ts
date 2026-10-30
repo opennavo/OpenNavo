@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { mount } from '@vue/test-utils';
+import { OnPackageSpecCard } from '@opennavo/ui';
 import type { PackageDetail } from '@opennavo/api';
 import type { LocalItem } from '@/ipc/client';
 import { packageSpec } from '@/utils/packageSpec';
@@ -41,7 +43,10 @@ describe('desktop quick-info field parity', () => {
     expect(spec.find(row => row.key === 'source')?.value).toBe('github.com/ELY-Open-Source/ElyOffice');
     expect(spec.find(row => row.key === 'openSource')?.href).toBe('https://github.com/ELY-Open-Source/ElyOffice');
     expect(spec.find(row => row.key === 'teamId')?.value).toBe('EXAMPLE123');
-    expect(spec.find(row => row.key === 'bundle')?.value).toBe('org.example.ely-office');
+    expect(spec.find(row => row.key === 'bundle')).toMatchObject({
+      label: 'package.spec.bundleId',
+      value: 'org.example.ely-office'
+    });
     expect(spec.find(row => row.key === 'homepage')?.href).toBe('https://ely.example/');
     expect(spec.some(row => ['auto', 'binaries', 'install'].includes(row.key))).toBe(false);
   });
@@ -76,6 +81,36 @@ describe('desktop quick-info field parity', () => {
       expect(spec.some(row => row.key === 'auto')).toBe(kind === 'cask');
     }
   );
+
+  it('uses the repository fallback URL for stars when the repository has no URL', () => {
+    const pkg = detail({
+      openSource: {
+        repo: 'acme/fallback',
+        url: 'https://github.com/acme/fallback',
+        license: 'MIT',
+        archived: false,
+        checkedAt: '2026-10-01T00:00:00Z'
+      } as PackageDetail['openSource'],
+      repository: { stars: 1000, archived: false } as PackageDetail['repository']
+    });
+    expect(rows(pkg).find(row => row.key === 'openSource')?.stars?.href).toBe('https://github.com/acme/fallback');
+  });
+
+  it('passes the repository age to the i18n plural selector', () => {
+    const pkg = detail({
+      repository: {
+        url: 'https://github.com/acme/one-day',
+        stars: 5,
+        pushedAt: '2026-10-29T00:00:00Z'
+      } as PackageDetail['repository']
+    });
+    const translate = (key: string, named: Record<string, unknown> = {}, plural?: number) =>
+      key === 'package.repo.updated' ? `Updated ${named.days} ${plural === 1 ? 'day' : 'days'} ago` : key;
+    expect(
+      packageSpec(pkg, null, null, translate as never, 'en-US', SPEC_NOW).rows.find(row => row.key === 'openSource')
+        ?.value
+    ).toContain('Updated 1 day ago');
+  });
 
   it.each([
     [{ status: 'unknown', arm64: false, x86_64: false }, 'Not confirmed'],
@@ -134,29 +169,73 @@ describe('desktop quick-info field parity', () => {
 
 describe('desktop alternate names', () => {
   const locales = ['en-US', 'zh-CN', 'zh-Hant', 'ja-JP', 'es-ES', 'pt-BR', 'ru-RU', 'de-DE', 'fr-FR', 'it-IT'] as const;
-  it.each(locales)('filters online and offline aliases in %s for all package kinds', locale => {
+  const names = [
+    'Visual Studio Code',
+    'vscode',
+    'VS Code 编辑器',
+    'VS Code エディター',
+    'Редактор VS Code',
+    'VS Code 편집기'
+  ];
+  const aliases = 'vscode, VS Code 编辑器, VS Code エディター, Редактор VS Code, VS Code 편집기';
+  it.each(locales)('keeps every alias except the displayed name in %s for all package kinds', locale => {
     for (const kind of ['cask', 'formula', 'link'] as const) {
-      const pkg = detail({
-        kind,
-        displayName: 'Visual Studio Code',
-        names: ['Visual Studio Code', 'vscode', 'VS Code 编辑器']
-      });
+      const pkg = detail({ kind, displayName: 'Visual Studio Code', names });
       const local = { ...pkg, name: pkg.displayName } as unknown as LocalItem;
-      const expected = ['zh-CN', 'zh-Hant', 'ja-JP'].includes(locale) ? 'vscode, VS Code 编辑器' : 'vscode';
       for (const spec of [
         packageSpec(pkg, null, null, t, locale, SPEC_NOW),
         packageSpec(null, local, null, t, locale, SPEC_NOW)
       ])
-        expect(spec.rows.find(row => row.key === 'names')?.value).toBe(expected);
-      pkg.names = ['Visual Studio Code', 'VS Code 编辑器'];
-      expect(packageSpec(pkg, null, null, t, locale, SPEC_NOW).rows.some(row => row.key === 'names')).toBe(
-        ['zh-CN', 'zh-Hant', 'ja-JP'].includes(locale)
-      );
+        expect(spec.rows.find(row => row.key === 'names')?.value).toBe(aliases);
     }
   });
 });
 
 describe('QA spec card regressions', () => {
+  it('falls back to the first verified identity for identity-only open-source evidence', () => {
+    const pkg = detail({
+      facts: {
+        overview: { artifacts: { entries: [] } },
+        security: {
+          identities: [
+            {
+              channels: [],
+              openSource: 'yes',
+              repositoryUrl: 'https://github.com/acme/unverified',
+              evidence: { status: 'stale', checkedAt: '2026-09-01T00:00:00Z' }
+            },
+            {
+              channels: [],
+              openSource: 'yes',
+              repositoryUrl: 'https://github.com/acme/identity-only',
+              evidence: { status: 'verified', checkedAt: '2026-10-01T00:00:00Z' }
+            }
+          ]
+        }
+      }
+    } as unknown as Partial<PackageDetail>);
+    const spec = packageSpec(pkg, null, null, t, 'en-US', SPEC_NOW);
+    expect(spec.rows.find(row => row.key === 'openSource')).toMatchObject({
+      value: 'package.spec.openSource',
+      href: 'https://github.com/acme/identity-only'
+    });
+  });
+
+  it('renders no link for javascript: repository URLs', () => {
+    const pkg = Object.assign(detail(), {
+      repository: { url: 'javascript:alert(1)', stars: 42 },
+      homepage: 'https://example.com/'
+    });
+    const spec = packageSpec(pkg, null, null, t, 'en-US', SPEC_NOW);
+    const wrapper = mount(OnPackageSpecCard, { props: { rows: spec.rows } });
+    try {
+      expect(wrapper.html()).not.toContain('javascript:');
+      expect(wrapper.findAll('a').map(link => link.attributes('href'))).toEqual(['https://example.com/']);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it.each(['cask', 'formula', 'link'] as const)(
     'keeps a standalone top-level license without OSI data for %s',
     kind => {
