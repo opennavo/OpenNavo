@@ -17,6 +17,7 @@ import {
 import { packageSpec } from '~/utils/packageSpec';
 import PackageRequirements from './PackageRequirements.vue';
 import PackageSources from './PackageSources.vue';
+import PackageInstallDetailsContent from './PackageInstallDetailsContent.vue';
 
 const { locale: useI18nLocale } = useI18n();
 const formattingLocale = computed(() => toAppLocale(useI18nLocale.value));
@@ -187,6 +188,12 @@ usePageSeo({
         <PackageIssues :pkg="pkg" />
         <PackageIntegrations :pkg="pkg" />
         <PackageInstall v-if="can.homebrew" :pkg="pkg" />
+        <PackageInstallDetailsContent
+          v-if="can.homebrew && pkg.indexing?.detailsRedirect"
+          :pkg="pkg"
+          :show-command="false"
+          uninstall-guide
+        />
         <PackageUninstall v-if="!can.homebrew && can.uninstall" :pkg="pkg" :homebrew="false" compact />
         <PackageFaq :pkg="pkg" />
         <PackageAlternatives :pkg="pkg" />

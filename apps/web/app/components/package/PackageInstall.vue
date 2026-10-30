@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { packageInstallState } from '@opennavo/shared';
 import { installNote } from '~/utils/appAnswer';
 import { downloadChoice } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
+import { installLifecycle } from '~/utils/packageInstall';
 import { packagePath } from '~/utils/packageView';
 import { trackEvent } from '~/utils/analytics';
 
@@ -13,21 +13,15 @@ const localePath = useLocalePath();
 const toasts = useToasts();
 const note = computed(() => installNote(props.pkg));
 const download = computed(() => downloadChoice(props.pkg));
-const state = computed(() => packageInstallState(props.pkg));
-const notice = computed(() => {
-  if (state.value === 'active') return undefined;
-  const key =
-    state.value === 'disabled'
-      ? 'package.disabledNotice'
-      : state.value === 'deprecated'
-        ? 'package.deprecatedNotice'
-        : 'package.staleNotice';
-  const reason =
-    (state.value === 'deprecated' ? props.pkg.deprecation?.reason : props.pkg.disable?.reason) ??
-    props.pkg.homebrewStatus?.reason ??
-    t('package.noReason');
-  return t(key, { reason });
-});
+const lifecycle = computed(() => installLifecycle(props.pkg, t));
+const state = computed(() => lifecycle.value.state);
+const notice = computed(() => lifecycle.value.notice);
+// H9: when the server consolidates Install details into the overview, the layout 301s the details
+// page here. Link the same-page body instead (rendered by the overview), never the redirected tab.
+const detailsRedirect = computed(() => Boolean(props.pkg.indexing?.detailsRedirect));
+const detailsHref = computed(() =>
+  detailsRedirect.value ? '#install-details' : `${localePath(packagePath(props.pkg.token, 'details'))}#requirements`
+);
 function onCopied(command: string) {
   toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
   trackEvent('copy_install_command');
@@ -89,14 +83,11 @@ function onCopied(command: string) {
                   : 'package.guide.downloadOfficial'
           )
         }}
-        <NuxtLink
-          :to="localePath(packagePath(pkg.token, 'details')) + '#requirements'"
-          class="text-ink-primary underline-offset-2 hover:underline"
-        >
+        <NuxtLink :to="detailsHref" class="text-ink-primary underline-offset-2 hover:underline">
           {{ t('package.tabs.details') }}
         </NuxtLink>
       </p>
     </details>
-    <PackageUninstall :pkg="pkg" :homebrew="true" compact />
+    <PackageUninstall v-if="!detailsRedirect" :pkg="pkg" :homebrew="true" compact />
   </section>
 </template>
