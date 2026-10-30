@@ -88,6 +88,6 @@ function onCopied(command: string) {
         </NuxtLink>
       </p>
     </details>
-    <PackageUninstall v-if="!detailsRedirect" :pkg="pkg" :homebrew="true" compact />
+    <PackageUninstall v-if="!detailsRedirect && state !== 'disabled'" :pkg="pkg" :homebrew="true" compact />
   </section>
 </template>

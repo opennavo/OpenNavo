@@ -3,8 +3,10 @@ import { computed, createSSRApp, h, ref, resolveComponent } from 'vue';
 import type { Component } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import PackageCommand from '../app/components/package/PackageCommand.vue';
 import PackageInstall from '../app/components/package/PackageInstall.vue';
 import PackageInstallDetailsContent from '../app/components/package/PackageInstallDetailsContent.vue';
+import PackageUninstall from '../app/components/package/PackageUninstall.vue';
 import type { PackagePage } from '../app/utils/packageFacts';
 import { siteMessage } from '../server/utils/siteCopy';
 import production from './fixtures/packageFaq.production.json';
@@ -37,6 +39,9 @@ async function render(component: Component, props: Record<string, unknown>) {
       () =>
         h('a', { href: linkProps.to }, slots.default?.())
   });
+  // PackageInstall relies on Nuxt auto-imports for these; register them for unit tests.
+  app.component('PackageCommand', PackageCommand);
+  app.component('PackageUninstall', PackageUninstall);
   const page = document.createElement('div');
   page.innerHTML = await renderToString(app);
   return page;
@@ -104,4 +109,39 @@ it.each([
   expect(page.textContent).toContain(notice);
   expect(page.textContent?.includes('brew install --cask iterm2')).toBe(command);
   expect(page.querySelector('[data-testid="package-install-notice"]')).not.toBeNull();
+});
+
+it('hides install, uninstall and Deep clean when Homebrew disabled the package', async () => {
+  const value = {
+    ...pkg(),
+    homebrewStatus: { state: 'disabled', reason: 'discontinued', date: null },
+    disabled: true
+  } as PackagePage;
+  const page = await render(PackageInstall, { pkg: value });
+  expect(page.textContent?.includes('brew install --cask iterm2')).toBe(false);
+  expect(page.querySelector('[data-testid="package-uninstall"]')).toBeNull();
+  expect(page.querySelector('[data-testid="package-zap"]')).toBeNull();
+  expect(page.textContent?.includes('brew uninstall')).toBe(false);
+  expect(page.textContent).toContain('Homebrew has disabled this package: discontinued');
+});
+
+it('keeps uninstall and Deep clean on the overview for an active package', async () => {
+  const page = await render(PackageInstall, { pkg: pkg() });
+  expect(page.querySelector('[data-testid="package-install-command"]')).not.toBeNull();
+  expect(page.textContent).toContain('brew install --cask iterm2');
+  expect(page.querySelector('[data-testid="package-uninstall"]')).not.toBeNull();
+  expect(page.querySelector('[data-testid="package-zap"]')).not.toBeNull();
+  expect(page.textContent).toContain('brew uninstall --cask iterm2');
+});
+
+it('hides uninstall and Deep clean in the details body when disabled', async () => {
+  const value = {
+    ...pkg(),
+    homebrewStatus: { state: 'disabled', reason: 'discontinued', date: null },
+    disabled: true
+  } as PackagePage;
+  const page = await render(PackageInstallDetailsContent, { pkg: value });
+  expect(page.querySelector('[data-testid="package-uninstall"]')).toBeNull();
+  expect(page.querySelector('[data-testid="package-zap"]')).toBeNull();
+  expect(page.textContent?.includes('brew uninstall')).toBe(false);
 });
