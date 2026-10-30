@@ -677,6 +677,8 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
               stale: false,
               conflicts: []
             },
+            // Link apps have no Install Details tab, so the full price table must stay on the overview too.
+            price: { ...factsApp.price, sourceUrl: 'https://lumen.app/pricing' },
             screenshots: [],
             releaseCount: 0,
             releaseStats: { count30d: 0, cadence: 'unknown', brewLag: null },
@@ -2119,6 +2121,9 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const sources = overview.querySelector('[data-testid="package-sources"]');
     assert.ok(sources, 'link apps keep sources on the overview');
     assert.ok(sources.textContent.includes('lumen.app'), sources.textContent);
+    const price = overview.querySelector('[data-testid="package-price"]');
+    assert.ok(price, 'link apps keep the full price table on the overview');
+    assert.ok(price.innerHTML.includes('https://lumen.app/pricing'), 'link apps keep the purchase link');
     // Version history comes from the link app's own releases.
     const versions = await fetch(`${origin}/apps/lumen-notes/versions`);
     const versionsHtml = await versions.text();

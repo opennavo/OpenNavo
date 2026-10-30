@@ -185,6 +185,7 @@ usePageSeo({
         />
         <PackageSafety v-if="can.safety && pkg.kind === 'link'" :pkg="pkg" :show-checked="false" />
         <PackageRequirements v-if="pkg.kind === 'link'" :pkg="pkg" />
+        <PackagePrice v-if="pkg.kind === 'link'" :pkg="pkg" />
         <PackageIssues :pkg="pkg" />
         <PackageIntegrations :pkg="pkg" />
         <PackageInstall v-if="can.homebrew" :pkg="pkg" />
@@ -194,7 +195,8 @@ usePageSeo({
           :show-command="false"
           uninstall-guide
         />
-        <PackageUninstall v-if="!can.homebrew && can.uninstall" :pkg="pkg" :homebrew="false" compact />
+        <!-- Link apps have no details or uninstall tab, so their declarations and cleanup paths stay here in full. -->
+        <PackageUninstall v-if="!can.homebrew && can.uninstall" :pkg="pkg" :homebrew="false" :guide="false" />
         <PackageFaq :pkg="pkg" />
         <PackageAlternatives :pkg="pkg" />
         <PackageSources v-if="pkg.kind === 'link'" :pkg="pkg" />
