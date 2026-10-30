@@ -625,6 +625,7 @@
       "versionA": "最新バージョンは {version} です。",
       "versionDated": "最新バージョンは {version} で、Homebrew には {date} に追加されました。",
       "versionAuto": "{name} は自動でアップデートされます。Homebrew でアップデートするときは `brew upgrade --cask --greedy {token}` を実行します。",
+      "versionSelf": "{name} は自動でアップデートされます。",
       "versionBrew": "`brew upgrade --cask {token}` を実行するとアップデートできます。",
       "versionChannels": "Homebrew には {list} もありますが、同時にはインストールできません。",
       "extrasQ": "{name} をインストールすると、ほかに何が入りますか？",

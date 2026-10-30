@@ -625,6 +625,7 @@
       "versionA": "The latest version is {version}.",
       "versionDated": "The latest version is {version}, added to Homebrew on {date}.",
       "versionAuto": "{name} updates itself; to update it with Homebrew, run `brew upgrade --cask --greedy {token}`.",
+      "versionSelf": "{name} updates itself.",
       "versionBrew": "Run `brew upgrade --cask {token}` to update it.",
       "versionChannels": "Homebrew also offers {list}, which cannot be installed alongside it.",
       "extrasQ": "What else does installing {name} add?",

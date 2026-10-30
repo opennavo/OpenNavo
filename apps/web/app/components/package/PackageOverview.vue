@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { unwrap } from '@opennavo/api';
-import { formatCount, formatList, formatVersion } from '@opennavo/shared';
+import { formatCount, formatList, formatVersion, packageInstallState } from '@opennavo/shared';
 import type { PackageKind } from '@opennavo/shared';
 import { imageSrcset, OnPackageOverview, OnPackageSpecCard } from '@opennavo/ui';
 import type { OnRelatedPackage } from '@opennavo/ui';
@@ -142,7 +142,8 @@ usePageSeo({
     if (!value) return undefined;
     const custom = overrideDescription(value);
     if (custom) return custom;
-    if (!legacyTitles.value)
+    // The legacy template embeds the install command, which a Homebrew-disabled package no longer has.
+    if (!legacyTitles.value || packageInstallState(value) === 'disabled')
       return overviewDescription(value, t, values => formatList(values, { locale: formattingLocale.value }));
     return t(
       'package.metaDescription',

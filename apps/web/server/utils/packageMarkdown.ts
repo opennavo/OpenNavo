@@ -1,6 +1,6 @@
 import type { PublicComponents } from '@opennavo/api';
 import { createError, sendRedirect, type H3Event } from 'h3';
-import { formatCount, installCommand, LOCALE_METADATA, sharedMessages } from '@opennavo/shared';
+import { formatCount, installCommand, LOCALE_METADATA, packageInstallState, sharedMessages } from '@opennavo/shared';
 import type { SiteLocale } from '@opennavo/shared';
 import { fetchPackageDetail, publicApi } from './publicApi';
 import { siteMessage } from './siteCopy';
@@ -125,6 +125,8 @@ export function renderPackageMarkdown(pkg: PackageDetail, { siteUrl, locale }: P
   const m = (key: string, params?: Record<string, unknown>) =>
     siteMessage(locale, key, params as Record<string, string | number>);
   const model = slimPackage(pkg);
+  // Same lifecycle guard as the page: a Homebrew-disabled cask gets no brew commands.
+  const commands = pkg.kind === 'cask' && packageInstallState(pkg) !== 'disabled';
   const lines: string[] = [`# ${mdText(pkg.displayName)}`, ''];
   if (pkg.summary) lines.push(mdText(pkg.summary), '');
   if (pkg.isFont) lines.push(m('package.answer.font', { name: mdText(pkg.displayName) }), '');
@@ -145,7 +147,7 @@ export function renderPackageMarkdown(pkg: PackageDetail, { siteUrl, locale }: P
         .map(category => `[${mdText(category.name)}](${siteUrl}${prefix}/categories/${category.slug})`)
         .join(', ')
     ]);
-  if (pkg.kind !== 'link')
+  if (pkg.kind !== 'link' && (pkg.kind !== 'cask' || commands))
     facts.push([m('markdown.install'), `\`${pkg.installCommand || installCommand(pkg.kind, pkg.token)}\``]);
   else if (pkg.link?.downloadUrl) facts.push([m('package.link.downloadTitle'), pkg.link.downloadUrl]);
   if (pkg.kind !== 'link') facts.push([m('package.stats.installs30d'), formatCount(pkg.installs.d30, { locale })]);
@@ -282,9 +284,11 @@ export function renderPackageMarkdown(pkg: PackageDetail, { siteUrl, locale }: P
 
   const regular = uninstallFacts(model, 'uninstall');
   const zap = uninstallFacts(model, 'zap');
-  if (pkg.kind === 'cask' || regular.length || zap.length) {
+  // Disabled casks keep the declarations but not the deep-clean block, whose point is the --zap command.
+  const cleanup = zap.length > 0 && (pkg.kind !== 'cask' || commands);
+  if (commands || regular.length || cleanup) {
     lines.push(`## ${m('markdown.uninstall')}`, '');
-    if (pkg.kind === 'cask')
+    if (commands)
       lines.push(`- \`brew uninstall --cask ${pkg.token}\``, '', m('package.guide.uninstall'), '');
     const declarations = (items: typeof regular) => {
       for (const item of items)
@@ -297,12 +301,12 @@ export function renderPackageMarkdown(pkg: PackageDetail, { siteUrl, locale }: P
       lines.push(`### ${m('package.uninstall.also')}`, '');
       declarations(regular);
     }
-    if (zap.length) {
+    if (cleanup) {
       lines.push(`### ${m('package.guide.zapTitle')}`, '');
-      if (pkg.kind === 'cask') lines.push(`- \`brew uninstall --zap --cask ${pkg.token}\``, '');
+      if (commands) lines.push(`- \`brew uninstall --zap --cask ${pkg.token}\``, '');
       // Keep the user-data risk and the choice to omit --zap immediately beside the command.
       lines.push(m('package.guide.zap'), '');
-      if (pkg.kind === 'cask') lines.push(m('package.guide.uninstall'), '');
+      if (commands) lines.push(m('package.guide.uninstall'), '');
       declarations(zap);
     }
   }
