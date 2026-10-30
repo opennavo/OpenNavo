@@ -141,13 +141,7 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     {
         ensure_trusted_ancestors(parent)?;
     }
-    let raw = c_path(path)?;
-    if unsafe { nix::libc::mkdir(raw.as_ptr(), 0o700) } != 0 {
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(nix::libc::EEXIST) {
-            return Err(error);
-        }
-    }
+    mkdir_private(path)?;
     verify_private_dir(path)
 }
 
@@ -187,7 +181,7 @@ pub fn verify_private_dir(path: &Path) -> io::Result<()> {
         }
         #[allow(clippy::unnecessary_cast)]
         let mode = stat.st_mode as u32;
-        if mode & 0o777 != 0o700 {
+        if mode & 0o7777 != 0o700 {
             return Err(denied("MCP directory permissions are too broad"));
         }
         Ok(())
@@ -206,13 +200,7 @@ fn ensure_trusted_ancestors(parent: &Path) -> io::Result<()> {
         let metadata = match fs::symlink_metadata(&current) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let raw = c_path(&current)?;
-                if unsafe { nix::libc::mkdir(raw.as_ptr(), 0o700) } != 0 {
-                    let error = io::Error::last_os_error();
-                    if error.raw_os_error() != Some(nix::libc::EEXIST) {
-                        return Err(error);
-                    }
-                }
+                mkdir_private(&current)?;
                 fs::symlink_metadata(&current)?
             }
             Err(error) => return Err(error),
@@ -236,6 +224,40 @@ fn ensure_trusted_ancestors(parent: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// `mkdir(0700)` and, when this call created the directory, force the mode to
+/// exactly `0700` through an `O_NOFOLLOW` descriptor so a restrictive umask
+/// cannot leave it unusable. An existing directory is left untouched (and is
+/// verified by the caller).
+fn mkdir_private(path: &Path) -> io::Result<()> {
+    let raw = c_path(path)?;
+    if unsafe { nix::libc::mkdir(raw.as_ptr(), 0o700) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(nix::libc::EEXIST) {
+            return Ok(());
+        }
+        return Err(error);
+    }
+    let fd = unsafe {
+        nix::libc::open(
+            raw.as_ptr(),
+            nix::libc::O_RDONLY
+                | nix::libc::O_DIRECTORY
+                | nix::libc::O_NOFOLLOW
+                | nix::libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let result = if unsafe { nix::libc::fchmod(fd, 0o700) } != 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    };
+    unsafe { nix::libc::close(fd) };
+    result
 }
 
 fn c_path(path: &Path) -> io::Result<std::ffi::CString> {
@@ -377,5 +399,37 @@ mod tests {
                 0o700
             );
         }
+    }
+
+    /// Runs in a child process because the umask is process-wide and would
+    /// race with other tests in this binary.
+    #[test]
+    fn created_directories_are_0700_under_a_strict_umask() {
+        use std::os::unix::fs::PermissionsExt;
+
+        if let Some(root) = std::env::var_os("OPENNAVO_UMASK_CHILD_DIR") {
+            unsafe { nix::libc::umask(0o277) };
+            let nested = PathBuf::from(root).join("a/mcp");
+            ensure_private_dir(&nested).expect("ensure under strict umask");
+            for path in [nested.parent().expect("parent").to_path_buf(), nested] {
+                assert_eq!(
+                    fs::metadata(&path).expect("meta").permissions().mode() & 0o7777,
+                    0o700
+                );
+            }
+            return;
+        }
+        let dir = tempdir();
+        let status = std::process::Command::new(std::env::current_exe().expect("exe"))
+            .args([
+                "--exact",
+                "mcp::state::tests::created_directories_are_0700_under_a_strict_umask",
+                "--test-threads=1",
+            ])
+            .env("OPENNAVO_UMASK_CHILD_DIR", dir.path())
+            .status()
+            .expect("spawn child");
+        assert!(status.success());
+        assert!(dir.path().join("a/mcp").is_dir());
     }
 }

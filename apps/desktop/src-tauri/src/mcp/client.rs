@@ -193,8 +193,8 @@ impl Client {
             let resolved = socket::path(&self.data_dir);
             let stream = socket::connect_timeout(&resolved.path, CONNECT_TIMEOUT)
                 .map_err(map_connect_error)?;
-            // macOS reports EINVAL from setsockopt/getpeereid once the peer
-            // has already closed; that is a disconnect, not a protocol error.
+            // macOS reports EINVAL from setsockopt once the peer has already
+            // closed; that is a disconnect, not a protocol error.
             stream
                 .set_write_timeout(Some(WRITE_TIMEOUT))
                 .and_then(|_| stream.set_read_timeout(Some(self.read_timeout)))
@@ -203,7 +203,7 @@ impl Client {
                 if error.kind() == ErrorKind::PermissionDenied {
                     CallError::UntrustedPeer(error.to_string())
                 } else {
-                    map_setup_error(error)
+                    map_stream_error(error)
                 }
             })?;
             self.stream = Some(BufReader::new(stream));
@@ -228,6 +228,8 @@ fn map_connect_error(error: io::Error) -> CallError {
     }
 }
 
+/// Only used for setting socket timeouts: macOS reports EINVAL there once
+/// the peer has already closed.
 fn map_setup_error(error: io::Error) -> CallError {
     if error.raw_os_error() == Some(nix::libc::EINVAL) {
         CallError::Disconnected
