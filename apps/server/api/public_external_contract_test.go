@@ -159,16 +159,25 @@ func requirePublicExternalContractSubset(t publicContractTestingT, external, int
 	}
 }
 
-func TestPublicRequestSchemaSubsetAllowsOmittedRequiredAndEnumValues(t *testing.T) {
+func TestPublicRequestSchemaSubsetChecksRequiredAndEnumValues(t *testing.T) {
 	internal := &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Required: []string{"public", "internal"},
 		Enum:     []any{"stable", "internal"},
 	}}
 	for name, schema := range map[string]*openapi3.Schema{
-		"narrower": {Required: []string{"public"}, Enum: []any{"stable"}},
-		"omitted":  {},
+		"narrower":         {Required: []string{"public"}, Enum: []any{"stable"}},
+		"omitted required": {Enum: []any{"stable"}},
+		"omitted":          {},
 	} {
 		t.Run(name, func(t *testing.T) {
+			if name == "omitted" {
+				failure := &publicContractFailure{}
+				require.PanicsWithValue(t, failure, func() {
+					requirePublicSchemaSubset(failure, name, &openapi3.SchemaRef{Value: schema}, internal, publicRequestSchema, map[[2]*openapi3.Schema]bool{})
+				})
+				require.Contains(t, failure.message, name+": enum")
+				return
+			}
 			requirePublicSchemaSubset(t, name, &openapi3.SchemaRef{Value: schema}, internal, publicRequestSchema, map[[2]*openapi3.Schema]bool{})
 		})
 	}
@@ -181,6 +190,13 @@ func TestPublicExternalContractRejectsReversePatches(t *testing.T) {
 		want     string
 		response bool
 	}{
+		{
+			name: "omitted request enum",
+			patch: func(external, _ *openapi3.T) {
+				external.Paths.Value("/rankings").Get.Parameters[1].Value.Schema.Value.Enum = nil
+			},
+			want: "GET /rankings.parameters.query:period.schema: enum",
+		},
 		{
 			name: "response enum omits no",
 			patch: func(external, _ *openapi3.T) {
@@ -206,6 +222,13 @@ func TestPublicExternalContractRejectsReversePatches(t *testing.T) {
 			},
 			want:     ".properties.appleSilicon: enum",
 			response: true,
+		},
+		{
+			name: "changed minItems",
+			patch: func(external, _ *openapi3.T) {
+				external.Components.Schemas["CollectionSummary"].Value.Properties["previewItems"].Value.MinItems = 1
+			},
+			want: ".properties.previewItems: minItems",
 		},
 		{
 			name: "changed maxItems",
@@ -280,6 +303,20 @@ func TestPublicExternalContractAllowsCompatiblePatches(t *testing.T) {
 			name: "request enum is a subset",
 			patch: func(external, _ *openapi3.T) {
 				external.Paths.Value("/rankings").Get.Parameters[1].Value.Schema.Value.Enum = []any{"30d"}
+			},
+		},
+		{
+			name: "request enum is unrestricted internally",
+			patch: func(_, internal *openapi3.T) {
+				internal.Paths.Value("/rankings").Get.Parameters[1].Value.Schema.Value.Enum = nil
+			},
+		},
+		{
+			name: "request enum is unrestricted in both contracts",
+			patch: func(external, internal *openapi3.T) {
+				for _, spec := range []*openapi3.T{external, internal} {
+					spec.Paths.Value("/rankings").Get.Parameters[1].Value.Schema.Value.Enum = nil
+				}
 			},
 		},
 		{
@@ -370,6 +407,7 @@ func requirePublicSchemaSubset(t publicContractTestingT, path string, external, 
 	require.Equal(t, b.Format, a.Format, "%s: format", path)
 	require.Equal(t, b.MinLength, a.MinLength, "%s: minLength", path)
 	require.Equal(t, b.MaxLength, a.MaxLength, "%s: maxLength", path)
+	require.Equal(t, b.MinItems, a.MinItems, "%s: minItems", path)
 	require.Equal(t, b.MaxItems, a.MaxItems, "%s: maxItems", path)
 	require.Equal(t, b.Default, a.Default, "%s: default", path)
 	require.Equal(t, b.Pattern, a.Pattern, "%s: pattern", path)
@@ -382,12 +420,17 @@ func requirePublicSchemaSubset(t publicContractTestingT, path string, external, 
 	for _, required := range a.Required {
 		require.Contains(t, b.Required, required, "%s: required", path)
 	}
-	values, allowed := a.Enum, b.Enum
 	if usage == publicResponseSchema {
-		values, allowed = b.Enum, a.Enum
-	}
-	for _, value := range values {
-		require.Contains(t, allowed, value, "%s: enum", path)
+		for _, value := range b.Enum {
+			require.Contains(t, a.Enum, value, "%s: enum", path)
+		}
+	} else if len(b.Enum) > 0 {
+		// An absent request enum is unrestricted, so external requests must
+		// declare an enum whenever the internal contract restricts it.
+		require.NotEmpty(t, a.Enum, "%s: enum", path)
+		for _, value := range a.Enum {
+			require.Contains(t, b.Enum, value, "%s: enum", path)
+		}
 	}
 	for name, property := range a.Properties {
 		internalProperty, ok := b.Properties[name]
