@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import os
 import subprocess
 from pathlib import Path
@@ -37,13 +38,54 @@ def payload():
             'admin_archive': base64.b64encode(data).decode(), 'admin_sha256': hashlib.sha256(data).hexdigest()}
 
 
-def prepare_on_host(root, api_environment):
+
+GOOD_CADDY = b'{$WEB_DOMAIN} {\n\treverse_proxy web:3000\n}\n'
+TRUNCATED_CADDY = b'{$WEB_DOMAIN} {\n\treverse_proxy'
+
+
+class FakeCaddy:
+    """Fake docker/caddy: validate reads the real file it was pointed at; contents in `good` pass."""
+
+    def __init__(self, live, good=(GOOD_CADDY,), validator='ok', signal_ok=True):
+        self.live, self.good, self.validator, self.signal_ok = live, set(good), validator, signal_ok
+        self.staged, self.events = {}, []
+
+    def __call__(self, args):
+        if args[:2] == ['docker', 'cp']:
+            self.staged[args[3].split(':', 1)[1]] = Path(args[2]).read_bytes()
+            return ''
+        if 'validate' in args:
+            target = args[args.index('--config') + 1]
+            content = self.live.read_bytes() if target == '/etc/caddy/Caddyfile' else self.staged[target]
+            self.events.append(('validate', target, content))
+            if self.validator == 'timeout':
+                raise deploy.subprocess.TimeoutExpired(args, 1)
+            if self.validator == 'daemon':
+                raise RuntimeError('command failed: docker (exit 125); inspect privately on host')
+            if self.validator == 'missing' or content not in self.good:
+                raise RuntimeError('command failed: docker (exit 1); inspect privately on host')
+            return ''
+        if 'version' in args:
+            if self.validator == 'missing':
+                raise RuntimeError('command failed: docker (exit 1); inspect privately on host')
+            return 'v2'
+        if '--signal=USR1' in args:
+            self.events.append(('signal', self.live.read_bytes()))
+            if not self.signal_ok:
+                raise RuntimeError('fixture reload failure')
+        return ''
+
+
+def prepare_on_host(root, api_environment, include_public_mcp=False):
     """Prepare a release on a minimal existing host and return the deployment and its candidate overlay."""
     directory = Path(root)
+    # Pin host configuration so lint's isolated verification environment cannot change it.
+    (directory / '.env').write_text('PUBLIC_MCP_PROXY_IP=172.30.80.3\nPUBLIC_MCP_PROXY_IP_ALT=172.30.80.4\n')
     for name in ['deploy', 'releases', 'assets']:
         (directory / name).mkdir()
     (directory / 'admin.caddy').write_text(':8081 {}')
-    services = {kind: kind + '_previous' for kind in ['api', 'web', 'mcp', 'admin']}
+    kinds = ['api', 'web', 'mcp', 'admin'] + (['public-mcp'] if include_public_mcp else [])
+    services = {kind: kind + '_previous' for kind in kinds}
     (directory / 'deploy/github-state.json').write_text(json.dumps({'services': services}))
     overlay = {'services': {name: {'environment': {}, 'networks': {}} for name in services.values()}}
     overlay['services'][services['api']]['environment'] = dict(api_environment)
@@ -51,16 +93,73 @@ def prepare_on_host(root, api_environment):
     overlay['services'][services['admin']]['volumes'] = [
         {'source': str(directory / 'admin.caddy'), 'target': '/etc/caddy/Caddyfile'},
         {'source': str(directory / 'admin'), 'target': '/srv/admin'}]
+    if include_public_mcp:
+        overlay['services'][services['api']]['networks'] = {'proxy': {'aliases': ['api-proxy']}}
+        overlay['services'][services['public-mcp']].update({
+            'entrypoint': ['opennavo-public-mcp'],
+            'environment': {'OPENNAVO_PUBLIC_API_BASE': 'http://api-proxy:8080/api/v1'},
+            'networks': {'proxy': {'aliases': ['public-mcp-proxy']}},
+        })
     (directory / 'deploy/rolling.compose.json').write_text(json.dumps(overlay))
     (directory / 'current-release.env').write_text('SERVER_IMAGE=old\n')
-    (directory / 'live.caddy').write_text('reverse_proxy web_previous:3000\n')
-    obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy', 'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
+    route = ('{$WEB_DOMAIN} {\n'
+             '\timport security-web\n'
+             '\tencode zstd gzip\n'
+             '\treverse_proxy {\n'
+             '\t\tdynamic a\n'
+             '\t}\n'
+             '}\n')
+    (directory / 'live.caddy').write_text(route)
+    obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy', 'caddy_container': 'fixture-caddy',
+                             'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
     with patch.object(deploy, 'command', return_value='fixture-container'):
         obj.prepare(archive())
     return obj, json.loads((obj.directory / 'rolling.compose.json').read_text())
 
 
+
+def fake_public_mcp(requests=None, *, call_result=None, subpath_status=404):
+    """urlopen fake for the public MCP: handshake, tools/list, tools/call and the /mcp/x probe."""
+    requests = [] if requests is None else requests
+    if call_result is None:
+        call_result = {'result': {'content': [{'type': 'text', 'text': '[{"slug":"developer-tools"}]'}]}}
+
+    class Response(io.BytesIO):
+        def __init__(self, body, session=None, status=200):
+            super().__init__(json.dumps(body).encode())
+            self.status = status
+            self.headers = {'Mcp-Session-Id': session} if session else {}
+
+    def urlopen(request, timeout):
+        if request.data is None:
+            requests.append(('GET', request.full_url))
+            if subpath_status >= 400:
+                raise deploy.urllib.error.HTTPError(request.full_url, subpath_status, 'probe', {}, None)
+            return Response({}, status=subpath_status)
+        method = json.loads(request.data)['method']
+        requests.append(method)
+        if method == 'initialize':
+            return Response({'result': {'protocolVersion': '2025-06-18'}}, 'session-1')
+        if method == 'tools/list':
+            return Response({'result': {'tools': [{'name': 'list_categories'}]}})
+        return Response(call_result)
+    return urlopen
+
+
 class DeployTests(unittest.TestCase):
+    def setUp(self):
+        # Rollback flows validate before-caddy as a staged copy. Tests that script the exact docker
+        # command sequence treat that step as passing; Caddy-specific tests use the real check.
+        self._staged = patch.object(deploy.Deployment, '_validate_staged', return_value=True)
+        self._staged.start()
+        # Route the no-redirect probe through whatever urlopen fake a test installs.
+        patch.object(deploy, 'open_without_redirects',
+                     side_effect=lambda request, timeout: deploy.urllib.request.urlopen(request, timeout)).start()
+        self.addCleanup(patch.stopall)
+
+    def real_staged_validation(self):
+        self._staged.stop()
+
     def test_merge_web_assets_keeps_recent_old_files_and_expires_stale_files(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
@@ -178,7 +277,8 @@ class DeployTests(unittest.TestCase):
                 rolling = directory / 'deploy/rolling.compose.json'
                 rolling.write_text(json.dumps(overlay))
                 (directory / 'current-release.env').write_text('SERVER_IMAGE=old\n')
-                (directory / 'live.caddy').write_text('reverse_proxy web-previous-alias:3000\n')
+                (directory / 'live.caddy').write_text(
+                    '{$WEB_DOMAIN} {\n\treverse_proxy {\n\t dynamic a\n\t}\n}\n')
                 obj = deploy.Deployment({'root': root, 'caddy_file': 'live.caddy',
                                          'compose_file': 'compose.yml', 'project': 'fixture'}, payload())
                 with patch.object(deploy, 'command', return_value='fixture-container'):
@@ -197,17 +297,1069 @@ class DeployTests(unittest.TestCase):
     def test_prepare_gives_an_old_api_service_the_usage_country_proxy_and_keeps_host_values(self):
         # A host provisioned before the setting gets the same value as a fresh install from the base compose.
         default = '${CADDY_PROXY_IP:-172.30.80.2}'
+        public_proxy = '${PUBLIC_MCP_PROXY_IP:-172.30.80.3}/32'
+        public_proxy_alt = '${PUBLIC_MCP_PROXY_IP_ALT:-172.30.80.4}/32'
+        trusted_default = '${CADDY_PROXY_IP:-172.30.80.2},' + public_proxy + ',' + public_proxy_alt + ',${SSR_PROXY_SUBNET:-172.30.81.0/24}'
         base = Path(__file__).with_name('docker-compose.prod.yml').read_text()
         self.assertIn('USAGE_COUNTRY_TRUSTED_PROXIES: ' + default + '\n', base)
-        for environment, expected in [({}, default), ({'USAGE_COUNTRY_TRUSTED_PROXIES': '192.0.2.10'}, '192.0.2.10'),
-                                      ({'USAGE_COUNTRY_TRUSTED_PROXIES': ''}, '')]:
+        cases = [
+            ({}, trusted_default, default),
+            ({'TRUSTED_PROXIES': '172.30.80.2'}, '172.30.80.2,' + public_proxy + ',' + public_proxy_alt, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10'}, '192.0.2.10,' + public_proxy + ',' + public_proxy_alt, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10,' + public_proxy}, '192.0.2.10,' + public_proxy + ',' + public_proxy_alt, default),
+            ({'TRUSTED_PROXIES': '192.0.2.10,172.30.80.3'}, '192.0.2.10,172.30.80.3,' + public_proxy_alt, default),
+            ({'USAGE_COUNTRY_TRUSTED_PROXIES': '192.0.2.10'}, trusted_default, '192.0.2.10'),
+            ({'USAGE_COUNTRY_TRUSTED_PROXIES': ''}, trusted_default, ''),
+        ]
+        for environment, trusted_expected, usage_expected in cases:
             with self.subTest(environment=environment), tempfile.TemporaryDirectory() as root:
-                obj, candidate = prepare_on_host(root, {'TRUSTED_PROXIES': '172.30.80.2', **environment})
-                self.assertEqual(candidate['services'][obj.services['api']]['environment'],
-                                 {'TRUSTED_PROXIES': '172.30.80.2', 'USAGE_COUNTRY_TRUSTED_PROXIES': expected})
+                obj, candidate = prepare_on_host(root, environment)
+                self.assertEqual(candidate['services'][obj.services['api']]['environment'], {
+                    'TRUSTED_PROXIES': trusted_expected,
+                    'USAGE_COUNTRY_TRUSTED_PROXIES': usage_expected,
+                })
                 # The rollback service stays exactly as it ran.
                 self.assertEqual(candidate['services']['api_previous']['environment'],
-                                 {'TRUSTED_PROXIES': '172.30.80.2', **environment})
+                                 environment)
+
+    def test_prepare_uses_host_proxy_addresses_with_conflicting_process_environment(self):
+        with patch.dict(os.environ, {'PUBLIC_MCP_PROXY_IP': '10.250.90.3',
+                                     'PUBLIC_MCP_PROXY_IP_ALT': '10.250.90.4'}), \
+                tempfile.TemporaryDirectory() as root:
+            obj, candidate = prepare_on_host(root, {})
+            self.assertEqual(obj.public_mcp_proxy_ips(), ('172.30.80.3', '172.30.80.4'))
+            self.assertEqual(candidate['services'][obj.services['public-mcp']]['networks']['proxy']['ipv4_address'],
+                             '172.30.80.3')
+            self.assertEqual(candidate['services'][obj.services['api']]['environment']['TRUSTED_PROXIES'],
+                             deploy.DEFAULT_TRUSTED_PROXIES)
+
+    def test_prepare_creates_public_mcp_candidate_with_alias_and_health_check(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, candidate = prepare_on_host(root, {
+                'TRUSTED_PROXIES': '172.30.80.2',
+            }, include_public_mcp=True)
+            service = candidate['services'][obj.services['public-mcp']]
+            self.assertEqual(service['image'], payload()['images']['mcp'])
+            self.assertEqual(service['entrypoint'], ['opennavo-public-mcp'])
+            self.assertIn("127.0.0.1:8790/healthz", service['healthcheck']['test'][-1])
+            self.assertEqual(service['environment']['OPENNAVO_PUBLIC_API_BASE'],
+                             'http://api-proxy-' + obj.release + ':8080/api/v1')
+            self.assertEqual(obj.services['public-mcp'], 'public-mcp_' + obj.release.replace('-', '_'))
+            self.assertIn('public-mcp-proxy-' + obj.release, (obj.directory / 'Caddyfile.next').read_text())
+            self.assertIn(obj.services['public-mcp'], obj.candidate_up_args())
+
+    def test_public_mcp_proxy_preflight_rotates_reserved_addresses(self):
+        for old_ip, expected in [(None, '172.30.80.3'), ('172.30.80.3', '172.30.80.4'),
+                                 ('172.30.80.4', '172.30.80.3')]:
+            with self.subTest(old_ip=old_ip), tempfile.TemporaryDirectory() as root:
+                root = Path(root)
+                (root / '.env').write_text('PUBLIC_MCP_PROXY_IP=172.30.80.3\nPUBLIC_MCP_PROXY_IP_ALT=172.30.80.4\n')
+                old = 'public-mcp_previous'
+                (root / 'rolling.json').write_text(json.dumps({'services': {
+                    old: {'networks': {'proxy': ({'ipv4_address': old_ip} if old_ip else {})}}
+                }}))
+                obj = object.__new__(deploy.Deployment)
+                obj.root = root
+                obj.rolling = root / 'rolling.json'
+                obj.state = {'services': {'public-mcp': old}}
+                obj.config = {'project': 'fixture'}
+                containers = {}
+                if old_ip:
+                    containers['old-id'] = {'Name': 'fixture-public-mcp_previous-1', 'IPv4Address': old_ip + '/24'}
+
+                def command(args, output=None):
+                    if args[:3] == ['docker', 'network', 'inspect']:
+                        return json.dumps([{'Containers': containers}])
+                    if args[:2] == ['docker', 'inspect']:
+                        return json.dumps([{'Id': 'old-id', 'Config': {'Labels': {
+                            'com.docker.compose.project': 'fixture',
+                            'com.docker.compose.service': old}}}])
+                    raise AssertionError(args)
+
+                with patch.object(deploy, 'command', side_effect=command):
+                    obj.public_mcp_preflight()
+                self.assertEqual(obj.public_mcp_proxy_ip, expected)
+
+    def test_public_mcp_proxy_preflight_rejects_foreign_or_exhausted_addresses(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            (root / '.env').write_text('PUBLIC_MCP_PROXY_IP=172.30.80.3\nPUBLIC_MCP_PROXY_IP_ALT=172.30.80.4\n')
+            obj = object.__new__(deploy.Deployment)
+            obj.root = root
+            obj.rolling = root / 'missing-rolling.json'
+            obj.state = {'services': {}}
+            obj.config = {'project': 'fixture'}
+            foreign = {'foreign': {'Name': 'fixture-redis-1', 'IPv4Address': '172.30.80.3/24'}}
+            def foreign_command(args, output=None):
+                if args[:3] == ['docker', 'network', 'inspect']:
+                    return json.dumps([{'Containers': foreign}])
+                if args[:2] == ['docker', 'inspect']:
+                    return json.dumps([{'Id': 'foreign', 'Config': {'Labels': {
+                        'com.docker.compose.project': 'fixture', 'com.docker.compose.service': 'redis'}}}])
+                raise AssertionError(args)
+            with patch.object(deploy, 'command', side_effect=foreign_command), \
+                    self.assertRaisesRegex(RuntimeError, 'non-public-mcp'):
+                obj.public_mcp_preflight()
+
+            occupied = {
+                'old-a': {'Name': 'fixture-public-mcp_a-1', 'IPv4Address': '172.30.80.3/24'},
+                'old-b': {'Name': 'fixture-public-mcp_b-1', 'IPv4Address': '172.30.80.4/24'},
+            }
+            def full_command(args, output=None):
+                if args[:3] == ['docker', 'network', 'inspect']:
+                    return json.dumps([{'Containers': occupied}])
+                if args[:2] == ['docker', 'inspect']:
+                    return json.dumps([{'Id': item, 'Config': {'Labels': {
+                        'com.docker.compose.project': 'fixture',
+                        'com.docker.compose.service': 'public-mcp_' + item}}} for item in occupied])
+                raise AssertionError(args)
+            with patch.object(deploy, 'command', side_effect=full_command), \
+                    self.assertRaisesRegex(RuntimeError, 'both reserved addresses'):
+                obj.public_mcp_preflight()
+
+    def test_public_mcp_trusted_proxies_use_two_host_routes(self):
+        value = deploy.merge_public_mcp_trusted_proxy(None)
+        self.assertIn('${PUBLIC_MCP_PROXY_IP:-172.30.80.3}/32', value)
+        self.assertIn('${PUBLIC_MCP_PROXY_IP_ALT:-172.30.80.4}/32', value)
+        self.assertNotIn('172.30.80.0/24', value)
+        self.assertEqual(deploy.merge_public_mcp_trusted_proxy('192.0.2.1,192.0.2.1').count('192.0.2.1'), 1)
+
+    def test_public_mcp_preflight_reclaims_failed_and_retained_project_peers(self):
+        for running in [True, False]:
+            with self.subTest(running=running), tempfile.TemporaryDirectory() as root:
+                obj = object.__new__(deploy.Deployment)
+                obj.root, obj.rolling = Path(root), Path(root) / 'rolling.json'
+                obj.config = {'project': 'fixture', 'public_mcp_proxy_ips': ['172.30.80.3', '172.30.80.4']}
+                obj.state = {'public_mcp_proxy_ip': '172.30.80.3', 'services': {'public-mcp': 'public-mcp_live'}}
+                entries = {name: {'Name': 'fixture-' + name + '-1', 'IPv4Address': ip + '/24'}
+                           for name, ip in [('live', '172.30.80.3'), ('failed', '172.30.80.4')]}
+                details = [{'Id': name, 'State': {'Running': running if name == 'live' else False},
+                            'Config': {'Labels': {'com.docker.compose.project': 'fixture',
+                                                 'com.docker.compose.service': 'public-mcp_' + name}}}
+                           for name in entries]
+                disconnected = []
+                def command(args):
+                    if args[:3] == ['docker', 'network', 'inspect']:
+                        return json.dumps([{'Containers': entries}])
+                    if args[:2] == ['docker', 'inspect']:
+                        return json.dumps(details)
+                    self.assertEqual(args[:4], ['docker', 'network', 'disconnect', 'fixture_proxy'])
+                    self.assertFalse(next(item for item in details if item['Id'] == args[4])['State']['Running'])
+                    disconnected.append(args[4])
+                    return ''
+                with patch.object(deploy, 'command', side_effect=command):
+                    obj.public_mcp_preflight()
+                self.assertEqual(obj.public_mcp_proxy_ip, '172.30.80.4')
+                self.assertEqual(set(disconnected), {'failed'} if running else {'live', 'failed'})
+
+    def test_public_mcp_preflight_never_reclaims_foreign_or_unlabelled_peers(self):
+        for labels in [{}, {'com.docker.compose.project': 'other', 'com.docker.compose.service': 'public-mcp_old'},
+                       {'com.docker.compose.project': 'fixture', 'com.docker.compose.service': 'redis'}]:
+            with self.subTest(labels=labels), tempfile.TemporaryDirectory() as root:
+                obj = object.__new__(deploy.Deployment)
+                obj.root = Path(root)
+                obj.config = {'project': 'fixture', 'public_mcp_proxy_ips': ['172.30.80.3', '172.30.80.4']}
+                responses = [json.dumps([{'Containers': {'foreign': {
+                    'Name': 'fixture-public-mcp-old-1', 'IPv4Address': '172.30.80.4/24'}}}]),
+                    json.dumps([{'Id': 'foreign', 'State': {'Running': False}, 'Config': {'Labels': labels}}])]
+                with patch.object(deploy, 'command', side_effect=responses) as run, \
+                        self.assertRaisesRegex(RuntimeError, 'non-public-mcp'):
+                    obj.public_mcp_preflight()
+                self.assertEqual(run.call_count, 2)
+
+    def test_public_mcp_address_change_preserves_entries_without_ownership_evidence(self):
+        value = '192.0.2.1,172.30.80.3/32,172.30.80.4/32'
+        result = deploy.merge_public_mcp_trusted_proxy(value, ['172.30.82.3', '172.30.82.4'])
+        self.assertEqual(result, value + ',172.30.82.3/32,172.30.82.4/32')
+
+    def test_compose_up_restores_reclaimed_public_mcp_proxy_idempotently(self):
+        for candidate, address_source in [(False, 'state'), (False, 'overlay'),
+                                          (False, 'compose'), (True, 'compose')]:
+            with self.subTest(candidate=candidate, address_source=address_source), tempfile.TemporaryDirectory() as root:
+                obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+                service = (obj.services if candidate else obj.state['services'])['public-mcp']
+                address = '172.30.80.4' if candidate else '172.30.80.3'
+                if address_source == 'state':
+                    obj.state['public_mcp_proxy_ip'] = address
+                    obj.config['proxy_network'] = 'custom-proxy'
+                elif address_source == 'overlay':
+                    overlay = json.loads(obj.rolling.read_text())
+                    overlay['services'][service]['networks']['proxy']['ipv4_address'] = address
+                    obj.rolling.write_text(json.dumps(overlay))
+                network = obj.config.get('proxy_network', 'fixture_proxy')
+                aliases = ['public-mcp-proxy-' + ('candidate' if candidate else 'previous')]
+                resolved = {'services': {service: {'networks': {'proxy': {
+                    # A rollback's recorded address takes precedence over a changed base file.
+                    'ipv4_address': '172.30.80.4' if address_source == 'state' else address,
+                    'aliases': aliases}}}}}
+                networks, events = {}, []
+                up = ('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240', service)
+
+                def command(args):
+                    if args[:2] == ['docker', 'compose']:
+                        action = tuple(args[args.index('automation') + 1:])
+                        events.append(action)
+                        if action == up:
+                            # Starting a retained container does not restore its endpoint.
+                            return 'started'
+                        if action == ('ps', '-q', service):
+                            return 'target-id'
+                        self.assertEqual(action, ('config', '--format', 'json'))
+                        return json.dumps(resolved)
+                    events.append(tuple(args))
+                    if args[:2] == ['docker', 'inspect']:
+                        self.assertEqual(args[2:], ['target-id'])
+                        return json.dumps([{'Id': 'target-id', 'State': {'Running': True},
+                                            'NetworkSettings': {'Networks': networks}}])
+                    self.assertEqual(args, ['docker', 'network', 'connect', '--ip', address,
+                                            '--alias', service, '--alias', *aliases, network, 'target-id'])
+                    networks[network] = {'IPAddress': address}
+                    return ''
+
+                with patch.object(deploy, 'command', side_effect=command):
+                    self.assertEqual(obj.compose(*up, candidate=candidate), 'started')
+                    self.assertEqual(obj.compose(*up, candidate=candidate), 'started')
+                connects = [event for event in events if event[:3] == ('docker', 'network', 'connect')]
+                self.assertEqual(len(connects), 1)
+                self.assertEqual(networks[network]['IPAddress'], address)
+                self.assertLess(events.index(up), events.index(connects[0]))
+
+    def test_compose_up_leaves_other_services_and_commands_alone(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {})
+            calls = [
+                (('up', '-d', '--no-deps', 'worker'), False),
+                (('up', '-d', '--no-deps', obj.state['services']['mcp']), False),
+                (('up', '-d', '--no-deps', obj.services['web']), True),
+                (('stop', obj.services['public-mcp']), True),
+            ]
+            with patch.object(deploy, 'command', return_value='unchanged') as run:
+                for args, candidate in calls:
+                    self.assertEqual(obj.compose(*args, candidate=candidate), 'unchanged')
+            self.assertEqual(run.call_count, len(calls))
+            self.assertTrue(all(call.args[0][:2] == ['docker', 'compose'] for call in run.call_args_list))
+
+    def test_public_mcp_proxy_restore_refuses_wrong_or_unrecorded_addresses(self):
+        for attached in [False, True]:
+            with self.subTest(attached=attached):
+                obj = object.__new__(deploy.Deployment)
+                obj.config = {'project': 'fixture'}
+                resolved = {'services': {'public-mcp_new': {'networks': {'proxy': {
+                    'ipv4_address': '172.30.80.4'} if attached else {}}}}}
+                obj.compose = unittest.mock.Mock(side_effect=['target-id', json.dumps(resolved)])
+                networks = {'fixture_proxy': {'IPAddress': '172.30.80.99'}} if attached else {}
+                info = [{'Id': 'target-id', 'NetworkSettings': {'Networks': networks}}]
+                message = 'unexpected fixed address' if attached else 'requires a recorded fixed address'
+                with patch.object(deploy, 'command', return_value=json.dumps(info)) as run, \
+                        self.assertRaisesRegex(RuntimeError, message):
+                    obj.restore_public_mcp_proxy('public-mcp_new', candidate=True)
+                run.assert_called_once_with(['docker', 'inspect', 'target-id'])
+
+    def test_rollback_reconnects_public_mcp_before_switching_routes_and_retiring_candidates(self):
+        for failure in [False, True]:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as root:
+                obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+                obj.state['public_mcp_proxy_ip'] = '172.30.80.3'
+                service = obj.state['services']['public-mcp']
+                obj.live_caddy.write_text('candidate route')
+                obj._switch_phase = deploy.SWITCH_CADDY_RELOADED
+                resolved = {'services': {service: {'networks': {'proxy': {
+                    'ipv4_address': '172.30.80.3', 'aliases': ['public-mcp-proxy-previous']}}}}}
+                events = []
+
+                def command(args):
+                    if args[:2] == ['docker', 'compose']:
+                        action = tuple(args[args.index('automation') + 1:])
+                        events.append(action)
+                        if action == ('ps', '-q', service):
+                            return 'old-id'
+                        if action == ('config', '--format', 'json'):
+                            return json.dumps(resolved)
+                        self.assertIn(action[0], ('up', 'stop', 'rm'))
+                        return ''
+                    if args[:2] == ['docker', 'inspect']:
+                        self.assertEqual(args[2:], ['old-id'])
+                        return json.dumps([{'Id': 'old-id', 'NetworkSettings': {'Networks': {}}}])
+                    if args[:3] == ['docker', 'network', 'connect']:
+                        self.assertEqual(args, ['docker', 'network', 'connect', '--ip', '172.30.80.3',
+                                                '--alias', service, '--alias', 'public-mcp-proxy-previous',
+                                                'fixture_proxy', 'old-id'])
+                        events.append('reconnect')
+                        self.assertEqual(obj.live_caddy.read_text(), 'candidate route')
+                        if failure:
+                            raise RuntimeError('fixture reconnect failure')
+                        return ''
+                    self.assertEqual(args[:3], ['docker', 'ps', '-q'])
+                    return 'candidate-id'
+
+                with patch.object(deploy, 'command', side_effect=command), \
+                        patch.object(obj, 'reload', side_effect=lambda: events.append('reload')) as reload, \
+                        patch.object(obj, 'verify') as verify, \
+                        patch.object(obj, 'verify_public_mcp', side_effect=lambda: events.append('handshake')) as handshake, \
+                        patch.object(obj, 'update_monitoring') as monitoring, \
+                        patch.object(obj, 'drain_retired', return_value=True), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    if failure:
+                        with self.assertRaisesRegex(RuntimeError, 'degraded rollback') as error:
+                            obj.rollback()
+                        self.assertIn('fixture reconnect failure', str(error.exception.__cause__))
+                        self.assertTrue(obj.degraded_path.is_file())
+                        self.assertEqual(obj.live_caddy.read_text(), 'candidate route')
+                        self.assertEqual(obj.env.read_bytes(), (obj.directory / 'release.env').read_bytes())
+                        self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'rolling.compose.json').read_bytes())
+                        for mock in [reload, verify, handshake, monitoring]:
+                            mock.assert_not_called()
+                        self.assertFalse(any(isinstance(event, tuple) and event[0] in ('stop', 'rm') for event in events))
+                    else:
+                        obj.rollback()
+                        self.assertLess(events.index('reconnect'), events.index('reload'))
+                        self.assertLess(events.index('reload'), events.index('handshake'))
+                        stop = ('stop', '--timeout', '90', *obj.services.values())
+                        remove = ('rm', '--force', '--stop', *obj.services.values())
+                        self.assertLess(events.index('handshake'), events.index(stop))
+                        self.assertLess(events.index(stop), events.index(remove))
+
+    def test_rollback_keeps_previous_public_mcp_address_and_removes_candidate(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            obj = object.__new__(deploy.Deployment)
+            obj.config = {'project': 'fixture', 'local_origin': 'http://127.0.0.1:80',
+                          'public_mcp_host': 'web.example.test', 'checks': []}
+            obj.state = {'sha': 'c' * 40, 'services': {'public-mcp': 'public-mcp_old'}}
+            obj.services = {'public-mcp': 'public-mcp_new'}
+            obj.directory = root
+            obj.state_path = root / 'state.json'
+            deploy.write_private(root / 'before-state.json', obj.state)
+            obj.root, obj.release, obj.payload = root, 'gh-test', payload()
+            obj.live_caddy, obj.env, obj.rolling = (root / name for name in ['live', 'env', 'rolling'])
+            obj.live_caddy.write_text('candidate')
+            (root / 'before-caddy').write_text('old')
+            (root / 'before-release.env').write_text('old-env')
+            previous_overlay = {'services': {'public-mcp_old': {'networks': {
+                'proxy': {'ipv4_address': '172.30.80.3'}}}}}
+            (root / 'before-rolling.json').write_text(json.dumps(previous_overlay))
+            events = []
+            obj.compose = lambda *args, **kwargs: events.append(args)
+            obj.reload = lambda: events.append('reload')
+            obj.verify = lambda expected=None: events.append(('verify', expected))
+            obj.update_monitoring = lambda services: events.append('monitoring')
+            obj.drain_retired = lambda *args, **kwargs: True
+            requests = []
+            urlopen = fake_public_mcp(requests)
+            with patch.object(deploy, 'command', return_value='candidate-id'), \
+                    patch.object(deploy.urllib.request, 'urlopen', side_effect=urlopen):
+                obj.rollback()
+            self.assertEqual(requests[:3], ['initialize', 'tools/list', 'tools/call'])
+            self.assertLess(events.index('reload'), events.index('monitoring'))
+            self.assertIn(('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
+                           'public-mcp_old', 'worker'), events)
+            self.assertIn(('stop', '--timeout', '90', 'public-mcp_new'), events)
+            self.assertIn(('rm', '--force', '--stop', 'public-mcp_new'), events)
+            self.assertEqual(json.loads((root / 'before-rolling.json').read_text()), previous_overlay)
+            events.clear()
+            with patch.object(deploy, 'command') as run, \
+                    patch.object(deploy.urllib.request, 'urlopen', side_effect=RuntimeError('handshake failed')), \
+                    patch.object(obj, 'mark_degraded') as marked, \
+                    self.assertRaisesRegex(RuntimeError, 'handshake failed'):
+                obj.rollback()
+            run.assert_not_called()
+            self.assertIn('verification', marked.call_args.args[0])
+            self.assertNotIn('monitoring', events)
+            self.assertFalse(any(isinstance(event, tuple) and event[0] in ('stop', 'rm') for event in events))
+
+    def test_public_mcp_route_is_inserted_idempotently_and_excludes_www(self):
+        source = ("http://{$WEB_DOMAIN} {\n"
+                  "\timport security-web\n"
+                  "\t@private path /agent-api /agent-api/*\n"
+                  "\trespond @private 404\n"
+                  "\treverse_proxy {\n\t\tdynamic a\n\t}\n"
+                  "}\n"
+                  "http://www.{$WEB_DOMAIN} {\n\treverse_proxy {\n\t}\n}\n")
+        routed = deploy.install_public_mcp_route(source, 'public-mcp-proxy-gh-test')
+        self.assertEqual(routed.count(deploy.PUBLIC_MCP_BEGIN), 1)
+        self.assertIn('reverse_proxy public-mcp-proxy-gh-test:8790', routed)
+        self.assertLess(routed.index(deploy.PUBLIC_MCP_END), routed.index('\treverse_proxy {'))
+        www = routed[routed.index('http://www.{$WEB_DOMAIN}'):]
+        self.assertNotIn(deploy.PUBLIC_MCP_BEGIN, www)
+        self.assertEqual(deploy.install_public_mcp_route(routed, 'public-mcp-proxy-gh-test'), routed)
+
+    def test_public_mcp_route_replaces_an_older_marked_block(self):
+        source = "{$WEB_DOMAIN} {\n" + deploy.public_mcp_route('public-mcp-proxy-old') + "\treverse_proxy {\n}\n}\n"
+        routed = deploy.install_public_mcp_route(source, 'public-mcp-proxy-new')
+        self.assertEqual(routed.count(deploy.PUBLIC_MCP_BEGIN), 1)
+        self.assertNotIn('public-mcp-proxy-old', routed)
+        self.assertIn('public-mcp-proxy-new:8790', routed)
+
+    def test_public_mcp_route_real_repo_and_unmarked_legacy_are_idempotent(self):
+        source = Path(__file__).with_name('caddy').joinpath('Caddyfile').read_text()
+        self.assertEqual(source.count(deploy.PUBLIC_MCP_BEGIN), 1)
+        for legacy in [False, True]:
+            with self.subTest(legacy=legacy):
+                fixture = source
+                if legacy:
+                    fixture = fixture.replace('\t' + deploy.PUBLIC_MCP_BEGIN + '\n', '').replace(
+                        '\t' + deploy.PUBLIC_MCP_END + '\n', '')
+                routed = deploy.install_public_mcp_route(fixture, 'public-mcp-proxy-new')
+                for _ in range(2):
+                    self.assertEqual(routed.count('@publicMcp path /mcp'), 1)
+                    self.assertEqual(routed.count('handle @publicMcp {'), 1)
+                    self.assertEqual(routed.count('@publicMcpOther path /mcp/*'), 1)
+                    self.assertEqual(routed.count(deploy.PUBLIC_MCP_BEGIN), 1)
+                    self.assertNotIn('reverse_proxy public-mcp-proxy:8790', routed)
+                    again = deploy.install_public_mcp_route(routed, 'public-mcp-proxy-new')
+                    self.assertEqual(again, routed)
+                    routed = again
+
+    def _caddy_obj(self, root, live=GOOD_CADDY, backup=None):
+        with contextlib.suppress(RuntimeError):
+            self.real_staged_validation()
+        obj = object.__new__(deploy.Deployment)
+        obj.root = obj.directory = Path(root)
+        (obj.root / 'deploy').mkdir(exist_ok=True)
+        obj.config = {'caddy_container': 'fixture-caddy'}
+        obj.release, obj.payload = 'fixture', {'sha': 'a' * 40}
+        obj.live_caddy = obj.root / 'Caddyfile'
+        obj.live_caddy.write_bytes(live)
+        if backup is not None:
+            (obj.root / 'Caddyfile.bak').write_bytes(backup)
+        return obj
+
+    def test_validate_live_caddy_leaves_files_when_validator_cannot_run(self):
+        for mode in ['timeout', 'daemon', 'missing']:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
+                newer = GOOD_CADDY + b'# newer\n'
+                obj = self._caddy_obj(root, live=newer, backup=GOOD_CADDY)
+                fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer), validator=mode)
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()) as output, \
+                        self.assertRaises(deploy.CaddyValidatorUnavailable):
+                    obj.validate_live_caddy()
+                self.assertEqual(obj.live_caddy.read_bytes(), newer)
+                self.assertNotIn('restoring', output.getvalue())
+
+    def test_valid_new_caddy_is_never_replaced_by_stale_backup(self):
+        with tempfile.TemporaryDirectory() as root:
+            newer = GOOD_CADDY + b'# newer\n'
+            obj = self._caddy_obj(root, live=newer, backup=GOOD_CADDY)
+            fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer))
+            with patch.object(deploy, 'command', side_effect=fake), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                obj.reload()
+            self.assertEqual(obj.live_caddy.read_bytes(), newer)
+            self.assertEqual(fake.events[-1], ('signal', newer))
+            self.assertNotIn('restoring', output.getvalue())
+
+    def test_invalid_live_caddy_restored_only_from_valid_backup(self):
+        for backup in [GOOD_CADDY, TRUNCATED_CADDY, None]:
+            with self.subTest(backup=backup), tempfile.TemporaryDirectory() as root:
+                obj = self._caddy_obj(root, live=TRUNCATED_CADDY, backup=backup)
+                inode = obj.live_caddy.stat().st_ino
+                fake = FakeCaddy(obj.live_caddy)
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    if backup == GOOD_CADDY:
+                        obj.validate_live_caddy()
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'missing' if backup is None else 'invalid too'):
+                            obj.validate_live_caddy()
+                self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY if backup == GOOD_CADDY else TRUNCATED_CADDY)
+                self.assertEqual(obj.live_caddy.stat().st_ino, inode)
+                if backup == GOOD_CADDY:
+                    self.assertIn('restoring', output.getvalue())
+                    self.assertIn('validation passed', output.getvalue())
+
+    def test_interrupted_in_place_write_is_detected_even_if_it_validates(self):
+        with tempfile.TemporaryDirectory() as root:
+            prefix = b'{$WEB_DOMAIN} {\n}\n'
+            obj = self._caddy_obj(root, live=prefix, backup=GOOD_CADDY)
+            deploy.write_atomic(deploy.caddy_intent_path(obj.live_caddy),
+                                (deploy.hashlib.sha256(GOOD_CADDY + b'# more\n').hexdigest() + '\n').encode())
+            fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, prefix))
+            with patch.object(deploy, 'command', side_effect=fake), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                obj.validate_live_caddy()
+            self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
+            self.assertIn('interrupted write', output.getvalue())
+            self.assertFalse(deploy.caddy_intent_path(obj.live_caddy).exists())
+
+    def test_completed_write_clears_intent_and_keeps_inode(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj = self._caddy_obj(root, live=b'before')
+            inode = obj.live_caddy.stat().st_ino
+            newer = GOOD_CADDY + b'# newer\n'
+            fake = FakeCaddy(obj.live_caddy, good=(newer,))
+            with patch.object(deploy, 'command', side_effect=fake):
+                obj.install_caddy(newer)
+            self.assertEqual(obj.live_caddy.read_bytes(), newer)
+            self.assertEqual(obj.live_caddy.stat().st_ino, inode)
+            self.assertEqual((obj.root / 'Caddyfile.bak').read_bytes(), b'before')
+            self.assertFalse(deploy.caddy_intent_path(obj.live_caddy).exists())
+            self.assertEqual(list(obj.root.glob('.Caddyfile-*')), [])
+
+    def test_install_caddy_invalid_or_unvalidated_candidate_never_touches_live(self):
+        for mode in ['invalid', 'timeout', 'daemon']:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
+                obj = self._caddy_obj(root, live=GOOD_CADDY)
+                before = obj.live_caddy.stat()
+                fake = FakeCaddy(obj.live_caddy, validator='ok' if mode == 'invalid' else mode)
+                with patch.object(deploy, 'command', side_effect=fake), self.assertRaises(RuntimeError):
+                    obj.install_caddy(TRUNCATED_CADDY)
+                self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
+                self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
+                self.assertEqual(list(obj.root.glob('.Caddyfile-*')), [])
+
+    def test_install_caddy_partial_write_restores_backup(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj = self._caddy_obj(root, live=GOOD_CADDY)
+            newer = GOOD_CADDY + b'# newer\n'
+            calls = []
+            real = deploy.write_caddy_in_place
+            def partial(path, content):
+                calls.append(content)
+                if len(calls) == 1:
+                    deploy.write_atomic(deploy.caddy_intent_path(path), b'0' * 64 + b'\n')
+                    path.write_bytes(b'partial')
+                    raise OSError('fixture partial write')
+                real(path, content)
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer))), \
+                    patch.object(deploy, 'write_caddy_in_place', side_effect=partial), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaisesRegex(OSError, 'fixture partial write'):
+                obj.install_caddy(newer)
+            self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
+
+    def test_reload_signal_failure_with_valid_live_never_overwrites(self):
+        for backup in [GOOD_CADDY, TRUNCATED_CADDY]:
+            with self.subTest(backup=backup), tempfile.TemporaryDirectory() as root:
+                newer = GOOD_CADDY + b'# newer\n'
+                obj = self._caddy_obj(root, live=newer, backup=backup)
+                (obj.root / 'before-caddy').write_bytes(GOOD_CADDY)
+                before = obj.live_caddy.stat()
+                fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer), signal_ok=False)
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()) as output, \
+                        self.assertRaisesRegex(RuntimeError, 'fixture reload failure'):
+                    obj.reload()
+                self.assertEqual(obj.live_caddy.read_bytes(), newer)
+                self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
+                self.assertEqual((obj.root / 'Caddyfile.bak').read_bytes(), backup)
+                self.assertIn('left unchanged', output.getvalue())
+                self.assertTrue(obj.degraded_path.exists())
+
+    def test_install_caddy_partial_write_with_invalid_backup_aborts_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj = self._caddy_obj(root, live=TRUNCATED_CADDY)
+            newer = GOOD_CADDY + b'# newer\n'
+            def partial(path, content):
+                deploy.write_atomic(deploy.caddy_intent_path(path), b'0' * 64 + b'\n')
+                path.write_bytes(b'partial')
+                raise OSError('fixture partial write')
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(newer,))), \
+                    patch.object(deploy, 'write_caddy_in_place', side_effect=partial), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaisesRegex(RuntimeError, 'invalid too'):
+                obj.install_caddy(newer)
+            self.assertEqual(obj.live_caddy.read_bytes(), b'partial')
+    def _switched(self, root, before_caddy, phase):
+        """Run apply()'s real switch steps up to `phase`, using the real install_caddy and reload.
+
+        caddy-written: install succeeded but USR1 failed (Caddy may still run the previous release).
+        caddy-reloaded: USR1 succeeded, the first verify() failed (env/rolling still previous).
+        config-promoted: env/rolling promoted, a later step failed.
+        """
+        obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+        self._staged.stop()
+        candidate_caddy = (obj.directory / 'Caddyfile.next').read_bytes()
+        self.assertNotEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+        # Aliases carry the failed candidate's release suffix.
+        self.assertIn(b'public-mcp-proxy-' + obj.release.encode(), candidate_caddy)
+        obj.degraded_marker_written = False
+        fake = FakeCaddy(obj.live_caddy, good=(obj.live_caddy.read_bytes(), candidate_caddy),
+                         signal_ok=phase != deploy.SWITCH_CADDY_WRITTEN)
+        with patch.object(deploy, 'command', side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            obj.install_caddy(candidate_caddy, before_write=lambda: obj.record_switch(deploy.SWITCH_CADDY_WRITING))
+            obj.record_switch(deploy.SWITCH_CADDY_WRITTEN)
+            try:
+                obj.reload()
+                obj.record_switch(deploy.SWITCH_CADDY_RELOADED)
+            except RuntimeError:
+                self.assertEqual(phase, deploy.SWITCH_CADDY_WRITTEN)
+        if phase == deploy.SWITCH_CONFIG_PROMOTED:
+            obj.env.write_bytes((obj.directory / 'release.env').read_bytes())
+            obj.rolling.write_bytes((obj.directory / 'rolling.compose.json').read_bytes())
+            obj.record_switch(deploy.SWITCH_CONFIG_PROMOTED)
+        self.assertEqual(obj.switch_phase(), phase)
+        self.assertEqual(json.loads(obj.state_path.read_text())['switch']['phase'], phase)
+        if before_caddy is not None:  # None keeps prepare()'s real snapshot of the previous route
+            (obj.directory / 'before-caddy').write_bytes(before_caddy)
+        obj.compose = unittest.mock.Mock()
+        return obj, candidate_caddy
+
+    def assert_retry_prepares_from(self, obj, release, services, caddy):
+        """After a manual marker removal, prepare() must derive aliases from one coherent release."""
+        obj.degraded_path.unlink()
+        retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+        self.assertEqual(retry.state['services'], services)
+        with patch.object(deploy, 'command', return_value='fixture-container'):
+            retry.prepare(archive())
+        self.assertEqual((retry.directory / 'before-caddy').read_bytes(), caddy)
+        routes = (retry.directory / 'Caddyfile.next').read_text()
+        self.assertIn('public-mcp-proxy-' + retry.release, routes)
+        self.assertNotIn(release, routes)
+        overlay = json.loads((retry.directory / 'rolling.compose.json').read_text())
+        public = overlay['services'][retry.services['public-mcp']]
+        self.assertTrue(all(alias.endswith(retry.release) for alias in public['networks']['proxy']['aliases']))
+        self.assertIn(services['public-mcp'], overlay['services'])  # kept as the rollback target
+
+    def test_rollback_abort_follows_recorded_switch_phase(self):
+        aborts = {
+            'invalid before-caddy': (TRUNCATED_CADDY, 'ok', None, RuntimeError),
+            'validator exit 125': (GOOD_CADDY, 'daemon', None, deploy.CaddyValidatorUnavailable),
+            'validator timeout': (GOOD_CADDY, 'timeout', None, deploy.CaddyValidatorUnavailable),
+            'before-caddy unreadable': (GOOD_CADDY, 'ok', 'read', OSError),
+            'docker cp failure': (GOOD_CADDY, 'ok', 'cp', RuntimeError),
+        }
+        process = {
+            deploy.SWITCH_CADDY_WRITTEN: 'may still run the previous release',
+            deploy.SWITCH_CADDY_RELOADED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
+            deploy.SWITCH_CONFIG_PROMOTED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
+        }
+        for label, (before_caddy, mode, inject, error) in aborts.items():
+            for phase, running in process.items():
+                with self.subTest(label, phase=phase), tempfile.TemporaryDirectory() as root:
+                    obj, candidate_caddy = self._switched(root, before_caddy, phase)
+                    fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY), validator=mode)
+                    def command(args):
+                        if inject == 'cp' and args[:2] == ['docker', 'cp']:
+                            raise RuntimeError('command failed: docker (exit 1); inspect privately on host')
+                        return fake(args)
+                    if inject == 'read':
+                        (obj.directory / 'before-caddy').unlink()
+                    with patch.object(deploy, 'command', side_effect=command), \
+                            contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(error) as raised:
+                        obj.rollback()
+                    # Live file, env, rolling and state all name the candidate release.
+                    self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+                    self.assertEqual(obj.env.read_bytes(), (obj.directory / 'release.env').read_bytes())
+                    self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'rolling.compose.json').read_bytes())
+                    state = json.loads(obj.state_path.read_text())
+                    self.assertEqual((state['release'], state['services'], state['unverified']),
+                                     (obj.release, obj.services, True))
+                    self.assertEqual(state['switch']['phase'], phase)
+                    reason = json.loads(obj.degraded_path.read_text())['reason']
+                    self.assertIn(running, reason)
+                    self.assertIn('all name the candidate release', reason)
+                    self.assertIn(f'switch phase {phase}', reason)
+                    if phase == deploy.SWITCH_CADDY_WRITTEN:
+                        self.assertNotIn('runs the candidate', reason)
+                    if inject == 'read':
+                        self.assertIn('before-caddy could not be read (FileNotFoundError)', reason)
+                    self.assertIn(reason, str(raised.exception) + out.getvalue())
+                    obj.compose.assert_not_called()
+                    self.assertFalse(any(event[0] == 'signal' for event in fake.events))
+                    with self.assertRaisesRegex(RuntimeError, 'blocked by persistent degraded marker'):
+                        obj.apply(None)
+                    self.assert_retry_prepares_from(obj, obj.release, obj.services, candidate_caddy)
+                    self._staged.start()
+
+    def test_rollback_abort_before_any_switch_keeps_everything_previous(self):
+        # install_caddy rejected the candidate (or failed) before the live write began.
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+            self._staged.stop()
+            obj.record_switch(deploy.SWITCH_NONE)
+            previous_caddy = obj.live_caddy.read_bytes()
+            env, rolling, services = obj.env.read_bytes(), obj.rolling.read_bytes(), dict(obj.state['services'])
+            obj.compose = unittest.mock.Mock()
+            obj.degraded_marker_written = False
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, validator='daemon')), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(deploy.CaddyValidatorUnavailable):
+                obj.rollback()
+            self.assertEqual((obj.live_caddy.read_bytes(), obj.env.read_bytes(), obj.rolling.read_bytes()),
+                             (previous_caddy, env, rolling))
+            self.assertEqual(json.loads(obj.state_path.read_text())['services'], services)
+            reason = json.loads(obj.degraded_path.read_text())['reason']
+            self.assertIn('the Caddy process runs the previous release', reason)
+            self.assertIn('all name the previous release', reason)
+            self.assert_retry_prepares_from(obj, obj.release, services, previous_caddy)
+
+    def test_rollback_abort_during_caddy_writing_reports_live_as_unknown(self):
+        # The live write completed (live really is the candidate) but the phase never advanced.
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+            self._staged.stop()
+            obj.state['sha'] = 'c' * 40
+            deploy.write_private(obj.state_path, obj.state)
+            deploy.write_private(obj.directory / 'before-state.json', obj.state)
+            candidate_caddy = (obj.directory / 'Caddyfile.next').read_bytes()
+            previous_caddy = obj.live_caddy.read_bytes()
+            deploy.write_atomic(obj.live_caddy.with_name('Caddyfile.bak'), previous_caddy)  # as install_caddy does
+            obj.record_switch(deploy.SWITCH_CADDY_WRITING)
+            deploy.write_caddy_in_place(obj.live_caddy, candidate_caddy)
+            env, rolling = obj.env.read_bytes(), obj.rolling.read_bytes()
+            obj.compose = unittest.mock.Mock()
+            obj.degraded_marker_written = False
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, validator='daemon')), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(deploy.CaddyValidatorUnavailable):
+                obj.rollback()
+            self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+            self.assertEqual((obj.env.read_bytes(), obj.rolling.read_bytes()), (env, rolling))
+            state = json.loads(obj.state_path.read_text())
+            self.assertEqual((state['sha'], state['services'], state['unverified']),
+                             ('c' * 40, obj.state['services'], True))
+            reason = json.loads(obj.degraded_path.read_text())['reason']
+            self.assertIn('live.caddy content is unknown (may be the candidate, partially written or the '
+                          'previous release) and needs manual verification', reason)
+            self.assertNotIn('all name the previous release', reason)
+            # Retrying the old sha after a manual marker removal must not take the shortcut.
+            obj.degraded_path.unlink()
+            retry = deploy.Deployment(obj.config, {**payload(), 'sha': 'c' * 40, 'run_id': '124'})
+            retry.validate_live_caddy = unittest.mock.Mock()
+            retry.verify = unittest.mock.Mock()
+            retry.cleanup = unittest.mock.Mock()
+            retry.capacity_gate = unittest.mock.Mock(side_effect=RuntimeError('full deployment path'))
+            with contextlib.redirect_stdout(io.StringIO()) as out, \
+                    patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(previous_caddy,))), \
+                    self.assertRaisesRegex(RuntimeError, 'full deployment path'):
+                retry.apply(archive())
+            self.assertNotIn('already deployed', out.getvalue())
+            self.assertEqual(obj.live_caddy.read_bytes(), previous_caddy)  # reconciled from Caddyfile.bak
+            retry.verify.assert_not_called()
+            retry.cleanup.assert_not_called()
+
+    def retry_after_interrupt(self, obj, good):
+        """A later run: reconcile, validate live, then the real prepare(); returns its Caddyfile.next."""
+        retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+        with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=good)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            retry.reconcile_interrupted_switch()
+            retry.validate_live_caddy()
+        with patch.object(deploy, 'command', return_value='fixture-container'):
+            retry.prepare(archive())
+        routes = (retry.directory / 'Caddyfile.next').read_text()
+        releases = set(re.findall(r'gh-[0-9a-f]{12}-\d+-\d+', routes))
+        self.assertEqual(releases, {retry.release})                      # only -124-1
+        self.assertNotIn(obj.release, routes)                            # no failed -123-1
+        self.assertIsNone(re.search(r'-\d+-\d+-gh-', routes))            # no spliced aliases
+        overlay = json.loads((retry.directory / 'rolling.compose.json').read_text())
+        for kind, name in retry.services.items():
+            for options in overlay['services'][name].get('networks', {}).values():
+                for alias in (options or {}).get('aliases', []):
+                    self.assertTrue(alias.endswith(retry.release), alias)
+                    self.assertNotIn(obj.release, alias)
+        return retry
+
+    def _writing_interrupted(self, root):
+        obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+        self._staged.stop()
+        previous_caddy = obj.live_caddy.read_bytes()
+        candidate_caddy = (obj.directory / 'Caddyfile.next').read_bytes()
+        obj.degraded_marker_written = False
+        fake = FakeCaddy(obj.live_caddy, good=(previous_caddy, candidate_caddy))
+        # The complete candidate reached live, then the run stopped before recording caddy-written.
+        with patch.object(deploy, 'command', side_effect=fake), \
+                patch.object(obj, 'record_switch', wraps=obj.record_switch) as record:
+            obj.install_caddy(candidate_caddy, before_write=lambda: obj.record_switch(deploy.SWITCH_CADDY_WRITING))
+        record.assert_called_once_with(deploy.SWITCH_CADDY_WRITING)
+        self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+        return obj, previous_caddy, candidate_caddy
+
+    def test_retry_after_caddy_writing_restores_backup_and_prepares_clean_aliases(self):
+        for aborted in (True, False):  # aborted rollback vs. process killed with no marker
+            with self.subTest(aborted=aborted), tempfile.TemporaryDirectory() as root:
+                obj, previous_caddy, candidate_caddy = self._writing_interrupted(root)
+                if aborted:
+                    obj.compose = unittest.mock.Mock()
+                    with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, validator='daemon')), \
+                            contextlib.redirect_stdout(io.StringIO()), self.assertRaises(deploy.CaddyValidatorUnavailable):
+                        obj.rollback()
+                    obj.degraded_path.unlink()  # manual removal
+                self.assertFalse(obj.degraded_path.exists())
+                retry = self.retry_after_interrupt(obj, good=(previous_caddy,))
+                self.assertEqual(obj.live_caddy.read_bytes(), previous_caddy)
+                self.assertEqual(retry.state['services'], json.loads(
+                    (obj.directory / 'before-state.json').read_text())['services'])
+                self.assertTrue(retry.state['unverified'])
+                self.assertNotIn('switch', retry.state)
+                self._staged.start()
+
+    def test_retry_after_caddy_writing_with_unusable_backup_marks_degraded(self):
+        for problem in ('invalid', 'unavailable'):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as root:
+                obj, _, candidate_caddy = self._writing_interrupted(root)
+                retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+                fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy,),
+                                 validator='ok' if problem == 'invalid' else 'daemon')
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(Exception):
+                    retry.apply(archive())
+                self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+                self.assertIn('could not be reconciled', json.loads(obj.degraded_path.read_text())['reason'])
+                self._staged.start()
+
+    def test_retry_after_killed_switch_adopts_candidate_and_prepares_clean_aliases(self):
+        for phase in deploy.SWITCH_ROUTED_TO_CANDIDATE:
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as root:
+                obj, candidate_caddy = self._switched(root, GOOD_CADDY, phase)
+                self.assertFalse(obj.degraded_path.exists() and phase != deploy.SWITCH_CADDY_WRITTEN)
+                obj.degraded_path.unlink(missing_ok=True)  # killed: no abort marker (or removed)
+                retry = self.retry_after_interrupt(obj, good=(candidate_caddy,))
+                self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+                self.assertEqual(obj.env.read_bytes(), (obj.directory / 'release.env').read_bytes())
+                self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'rolling.compose.json').read_bytes())
+                self.assertEqual((retry.state['release'], retry.state['services'], retry.state['unverified']),
+                                 (obj.release, obj.services, True))
+                self._staged.start()
+
+    def test_retry_after_rollback_killed_at_each_point_restores_previous(self):
+        class Killed(BaseException):
+            """SIGKILL stand-in: no except-Exception handler runs and no marker is written."""
+
+        def kill(*args, **kwargs):
+            raise Killed()
+        points = ['after rolling-back record', 'between env and rolling', 'before reload',
+                  'after reload', 'after verify']
+        for point in points:
+            with self.subTest(point=point), tempfile.TemporaryDirectory() as root:
+                obj, candidate_caddy = self._switched(root, None, deploy.SWITCH_CONFIG_PROMOTED)
+                previous_caddy = (obj.directory / 'before-caddy').read_bytes()
+                obj.verify = unittest.mock.Mock()
+                obj.verify_public_mcp = unittest.mock.Mock()
+                obj.update_monitoring = unittest.mock.Mock()
+                original = Path.write_bytes
+                def write_bytes(path, data):
+                    if point == 'between env and rolling' and path == obj.rolling:
+                        raise Killed()
+                    return original(path, data)
+                if point == 'after rolling-back record':
+                    obj.compose = unittest.mock.Mock(side_effect=kill)
+                elif point == 'before reload':
+                    obj.reload = unittest.mock.Mock(side_effect=kill)
+                elif point == 'after reload':
+                    obj.verify.side_effect = kill
+                elif point == 'after verify':
+                    obj.update_monitoring.side_effect = kill
+                with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy, previous_caddy))), \
+                        patch.object(Path, 'write_bytes', write_bytes), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(Killed):
+                    obj.rollback()
+                self.assertFalse(obj.degraded_path.exists())
+                self.assertEqual(json.loads(obj.state_path.read_text())['switch']['phase'], deploy.SWITCH_ROLLING_BACK)
+                retry = self.retry_after_interrupt(obj, good=(candidate_caddy, previous_caddy))
+                previous = json.loads((obj.directory / 'before-state.json').read_text())
+                self.assertEqual(obj.live_caddy.read_bytes(), previous_caddy)
+                self.assertEqual(obj.env.read_bytes(), (obj.directory / 'before-release.env').read_bytes())
+                self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'before-rolling.json').read_bytes())
+                self.assertEqual((retry.state['services'], retry.state['unverified']), (previous['services'], True))
+                self.assertNotIn('switch', retry.state)
+                self._staged.start()
+
+    def test_retry_after_rolling_back_with_unusable_previous_caddy_marks_degraded(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, candidate_caddy = self._switched(root, GOOD_CADDY, deploy.SWITCH_CONFIG_PROMOTED)
+            with patch.object(deploy, 'command', return_value=''):
+                obj.record_rollback()
+            (obj.directory / 'before-caddy').write_bytes(TRUNCATED_CADDY)
+            retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy,))), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                retry.apply(archive())
+            self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+            self.assertIn('before-caddy failed caddy validate', json.loads(obj.degraded_path.read_text())['reason'])
+
+    def test_private_state_write_is_atomic(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {})
+            before = obj.state_path.read_bytes()
+            with patch.object(deploy.os, 'replace', side_effect=OSError(28, 'No space left on device')), \
+                    self.assertRaises(OSError):
+                deploy.write_private(obj.state_path, {'services': {}})
+            self.assertEqual(obj.state_path.read_bytes(), before)
+            self.assertEqual(list(obj.state_path.parent.glob('.github-state.json-*')), [])
+            with patch.object(deploy.os, 'fsync', side_effect=OSError(5, 'I/O error')), self.assertRaises(OSError):
+                deploy.write_private(obj.degraded_path, {'reason': 'x'})
+            self.assertFalse(obj.degraded_path.exists())
+            again = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+            self.assertEqual(again.state, json.loads(before))
+            deploy.write_private(obj.state_path, again.state)
+            self.assertEqual(obj.state_path.stat().st_mode & 0o777, 0o600)
+
+    def test_rollback_abort_with_unrecorded_phase_reports_files_as_found(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+            self._staged.stop()
+            obj.live_caddy.write_bytes(b'partial')
+            env = obj.env.read_bytes()
+            obj.degraded_marker_written = False
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, validator='timeout')), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(deploy.CaddyValidatorUnavailable):
+                obj.rollback()
+            self.assertEqual(obj.env.read_bytes(), env)
+            reason = json.loads(obj.degraded_path.read_text())['reason']
+            self.assertIn('switch phase is unknown', reason)
+            self.assertIn('left as found', reason)
+
+    def test_rollback_alignment_write_failures_are_reported_in_the_marker(self):
+        for failing in ['env', 'rolling', 'state_path']:
+            with self.subTest(failing=failing), tempfile.TemporaryDirectory() as root:
+                obj, candidate_caddy = self._switched(root, TRUNCATED_CADDY, deploy.SWITCH_CADDY_RELOADED)
+                target = getattr(obj, failing)
+                original, original_atomic = Path.write_bytes, deploy.write_atomic
+                def write_bytes(path, data):
+                    if path == target:
+                        raise OSError(28, 'No space left on device')
+                    return original(path, data)
+                def write_atomic(path, data, mode=None):
+                    if path == target:
+                        raise OSError(28, 'No space left on device')
+                    return original_atomic(path, data, mode)
+                with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy,))), \
+                        patch.object(Path, 'write_bytes', write_bytes), \
+                        patch.object(deploy, 'write_atomic', write_atomic), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                    obj.rollback()
+                reason = json.loads(obj.degraded_path.read_text())['reason']
+                self.assertIn(f'aligning {target.name} (OSError) failed', reason)
+                self.assertIn('may hold either release', reason)
+                with self.assertRaisesRegex(RuntimeError, 'blocked by persistent degraded marker'):
+                    obj.apply(None)
+                self._staged.start()
+
+    def test_rollback_restore_write_failure_realigns_and_blocks_next_apply(self):
+        for failing in ['env', 'rolling', 'state_path']:
+            with self.subTest(failing=failing), tempfile.TemporaryDirectory() as root:
+                obj, candidate_caddy = self._switched(root, GOOD_CADDY, deploy.SWITCH_CADDY_RELOADED)
+                target = getattr(obj, failing)
+                fails = {'left': 1}
+                original_bytes, original_text, original_atomic = Path.write_bytes, Path.write_text, deploy.write_atomic
+                def failing_once(original):
+                    def write(path, data, *rest, **options):
+                        if path == target and fails['left']:
+                            fails['left'] -= 1
+                            raise OSError(28, 'No space left on device')
+                        return original(path, data, *rest, **options)
+                    return write
+                with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY))), \
+                        patch.object(Path, 'write_bytes', failing_once(original_bytes)), \
+                        patch.object(Path, 'write_text', failing_once(original_text)), \
+                        patch.object(deploy, 'write_atomic', failing_once(original_atomic)), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(OSError):
+                    obj.rollback()
+                # The restore failed part-way; alignment put everything back on the candidate.
+                self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+                self.assertEqual(obj.env.read_bytes(), (obj.directory / 'release.env').read_bytes())
+                self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'rolling.compose.json').read_bytes())
+                self.assertEqual(json.loads(obj.state_path.read_text())['services'], obj.services)
+                obj.compose.assert_not_called()
+                reason = json.loads(obj.degraded_path.read_text())['reason']
+                self.assertIn('restoring previous env/rolling/state failed', reason)
+                self.assertIn('all name the candidate release', reason)
+                with self.assertRaisesRegex(RuntimeError, 'blocked by persistent degraded marker'):
+                    obj.apply(None)
+                self._staged.start()
+
+    def test_rollback_with_real_validation_and_valid_before_caddy_succeeds(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, candidate_caddy = self._switched(root, GOOD_CADDY, deploy.SWITCH_CONFIG_PROMOTED)
+            fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY))
+            obj.verify = unittest.mock.Mock()
+            obj.verify_public_mcp = unittest.mock.Mock()
+            obj.update_monitoring = unittest.mock.Mock()
+            obj.drain_retired = lambda *args, **kwargs: True
+            with patch.object(deploy, 'command', side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+                obj.rollback()
+            self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
+            self.assertEqual(obj.env.read_bytes(), (obj.directory / 'before-release.env').read_bytes())
+            self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'before-rolling.json').read_bytes())
+            self.assertEqual(json.loads(obj.state_path.read_text()),
+                             json.loads((obj.directory / 'before-state.json').read_text()))
+            staged = [event for event in fake.events if event[0] == 'validate' and event[1] != '/etc/caddy/Caddyfile']
+            self.assertEqual(staged[-1][2], GOOD_CADDY)  # the real staged check ran, not the setUp stub
+            self.assertIn(('signal', GOOD_CADDY), fake.events)
+            self.assertFalse(obj.degraded_path.exists())
+
+    def test_public_mcp_subpath_probe_does_not_follow_redirects(self):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(301 if self.path == '/mcp/x' else 404)
+                if self.path == '/mcp/x':
+                    self.send_header('Location', '/missing')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+        server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        origin = f'http://127.0.0.1:{server.server_port}'
+        patch.stopall()  # use the real no-redirect opener
+        with self.assertRaises(deploy.urllib.error.HTTPError) as raised:
+            deploy.open_without_redirects(deploy.urllib.request.Request(origin + '/mcp/x'), timeout=5)
+        self.assertEqual(raised.exception.code, 301)
+        # Through verify_public_mcp, the 404 behind the redirect must not count as a pass.
+        obj = deploy.Deployment.__new__(deploy.Deployment)
+        obj.config = {'local_origin': origin, 'public_mcp_host': 'opennavo.com', 'checks': []}
+        with patch.object(deploy.urllib.request, 'urlopen', side_effect=fake_public_mcp()), \
+                self.assertRaisesRegex(RuntimeError, '/mcp/x returned 301'):
+            obj.verify_public_mcp()
+
+    def test_public_mcp_route_requires_one_web_block_and_catch_all_proxy(self):
+        for source in ['reverse_proxy {\n}\n', '{$WEB_DOMAIN} {\nreverse_proxy web:3000\n}\n']:
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                deploy.install_public_mcp_route(source, 'public-mcp-proxy-new')
+
+    def test_verify_public_mcp_handshake_propagates_session_and_requires_tools(self):
+        obj = object.__new__(deploy.Deployment)
+        obj.config = {'local_origin': 'http://127.0.0.1:80',
+                      'public_mcp_host': 'opennavo.com', 'checks': []}
+        responses = []
+
+        def urlopen(request, timeout):
+            responses.append(request)
+            return inner(request, timeout)
+        inner = fake_public_mcp(seen := [])
+
+        with patch.object(deploy.urllib.request, 'urlopen', side_effect=urlopen):
+            obj.verify_public_mcp()
+        self.assertEqual(seen, ['initialize', 'tools/list', 'tools/call',
+                                ('GET', 'http://127.0.0.1:80/mcp/x')])
+        self.assertEqual(json.loads(responses[2].data)['params'], {'name': 'list_categories', 'arguments': {}})
+        self.assertEqual(responses[0].get_header('Host'), 'opennavo.com')
+        self.assertEqual(responses[1].get_header('Mcp-session-id'), 'session-1')
+        self.assertEqual(responses[0].get_header('Accept'), 'application/json, text/event-stream')
+
+        class Response(io.BytesIO):
+            status, headers = 200, {}
+        with patch.object(deploy.urllib.request, 'urlopen', side_effect=[
+                Response(b'{"result":{}}'), Response(b'{"result":{"tools":[]}}')]):
+            with self.assertRaisesRegex(RuntimeError, 'no tools'):
+                obj.verify_public_mcp()
+
+    def test_verify_public_mcp_fails_when_api_base_or_trust_is_misconfigured(self):
+        obj = deploy.Deployment.__new__(deploy.Deployment)
+        obj.config = {'local_origin': 'http://127.0.0.1:80', 'public_mcp_host': 'opennavo.com', 'checks': []}
+        broken = {
+            'tool error (API base unreachable)': {'result': {'isError': True, 'content': [
+                {'type': 'text', 'text': 'fetch failed: ECONNREFUSED'}]}},
+            'JSON-RPC error (trust rejected)': {'error': {'code': -32603, 'message': 'forbidden'}},
+            'empty content': {'result': {'content': []}},
+            'blank text': {'result': {'content': [{'type': 'text', 'text': '  '}]}},
+        }
+        for label, body in broken.items():
+            with self.subTest(label), patch.object(deploy.urllib.request, 'urlopen',
+                                                   side_effect=fake_public_mcp(call_result=body)):
+                with self.assertRaises(RuntimeError):
+                    obj.verify_public_mcp()
+        for status in (200, 301, 502):
+            with self.subTest(subpath=status), patch.object(
+                    deploy.urllib.request, 'urlopen', side_effect=fake_public_mcp(subpath_status=status)):
+                with self.assertRaisesRegex(RuntimeError, f'/mcp/x returned {status}'):
+                    obj.verify_public_mcp()
 
     def test_monitoring_targets_preserves_other_jobs_and_follows_release_and_rollback(self):
         source = """global:
@@ -432,6 +1584,9 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 obj.state['sha'] = sha
             obj.services = {k: k + '_new' for k in ['api', 'web', 'admin', 'mcp']}
             obj.directory = directory
+            obj.state_path = directory / 'state.json'
+            deploy.write_private(directory / 'before-state.json', obj.state)
+            obj.root, obj.release, obj.payload = directory, 'gh-test', payload()
             obj.live_caddy = directory / 'live'
             obj.env = directory / 'env'
             obj.rolling = directory / 'rolling'
@@ -459,7 +1614,8 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                     obj.env.write_bytes(candidate_env)
                     obj.rolling.write_bytes(candidate_rolling)
                 obj.live_caddy.write_text('candidate route')
-                before_state = obj.state_path.read_bytes()
+                # Not promoted: USR1 failed after the live write. Promoted: a later step failed.
+                obj.record_switch(deploy.SWITCH_CONFIG_PROMOTED if promoted else deploy.SWITCH_CADDY_WRITTEN)
 
                 def fail_old_start(*args, **kwargs):
                     self.assertEqual(obj.env.read_bytes(), (obj.directory / 'before-release.env').read_bytes())
@@ -480,10 +1636,13 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 self.assertEqual(obj.env.read_bytes(), candidate_env)
                 self.assertEqual(obj.rolling.read_bytes(), candidate_rolling)
                 self.assertEqual(obj.live_caddy.read_text(), 'candidate route')
-                self.assertEqual(obj.state_path.read_bytes(), before_state)
+                state = json.loads(obj.state_path.read_text())
+                self.assertEqual((state['services'], state['release'], state['unverified']),
+                                 (obj.services, obj.release, True))
                 self.assertIn('DEGRADED', output.getvalue())
-                self.assertIn('routing unconfirmed', output.getvalue())
-                self.assertNotIn('Caddy still routes to the candidate', output.getvalue())
+                self.assertIn('all name the candidate release', output.getvalue())
+                self.assertIn('may still run the previous release' if not promoted
+                              else 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified', output.getvalue())
                 marker = json.loads(obj.degraded_path.read_text())
                 self.assertEqual(marker['release'], obj.release)
                 self.assertEqual(marker['sha'], obj.payload['sha'])
@@ -496,7 +1655,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                     mock.assert_not_called()
 
                 # A new receiver process must reject the next deployment without touching Docker.
-                retry = deploy.Deployment(obj.config, payload())
+                retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
                 with patch.object(deploy, 'command') as run, \
                         self.assertRaisesRegex(RuntimeError, 'Manual intervention required') as failure:
                     retry.apply(archive())
@@ -512,7 +1671,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                         obj.state['sha'] = obj.payload['sha']
                         deploy.write_private(obj.state_path, obj.state)
                     obj.degraded_path.write_text(content)
-                    retry = deploy.Deployment(obj.config, payload())
+                    retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
                     with patch.object(retry, 'capacity_gate', side_effect=RuntimeError('deployment resumed')) as capacity, \
                             patch.object(retry, 'verify', side_effect=RuntimeError('deployment resumed')) as verify, \
                             patch.object(retry, 'prepare') as prepare, \
@@ -535,17 +1694,20 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 obj, _ = prepare_on_host(root, {})
                 obj.config['caddy_container'] = 'fixture-caddy'
                 error = RuntimeError('fixture Caddy failure')
-                commands = [error] if fail_validation else ['', error]
+                # Invalid live file (caddy exit 1, caddy runnable) with no backup, or a failed signal.
+                commands = ([RuntimeError('command failed: docker (exit 1); inspect privately on host'), '']
+                            if fail_validation else ['', error])
                 with patch.object(deploy, 'command', side_effect=commands), \
                         contextlib.redirect_stdout(io.StringIO()) as output, \
-                        self.assertRaisesRegex(RuntimeError, 'fixture Caddy failure'):
+                        self.assertRaisesRegex(RuntimeError, 'Live Caddyfile validation failed'
+                                               if fail_validation else 'fixture Caddy failure'):
                     obj.reload()
                 self.assertIn('routing unconfirmed', output.getvalue())
                 self.assertNotIn('Caddy still routes to the candidate', output.getvalue())
                 self.assertFalse(hasattr(obj, 'switch_at'))
                 self.assertEqual(json.loads(obj.degraded_path.read_text())['reason'],
                                  'Caddy reload failed; routing unconfirmed')
-                retry = deploy.Deployment(obj.config, payload())
+                retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
                 with patch.object(deploy, 'command') as run, \
                         self.assertRaisesRegex(RuntimeError, 'Manual intervention required'):
                     retry.apply(archive())
@@ -588,6 +1750,8 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             obj.config['caddy_container'] = 'fixture-caddy'
             obj.state['sha'] = 'c' * 40
             deploy.write_private(obj.state_path, obj.state)
+            # prepare() snapshots the live state; keep the snapshot in step with the edit above.
+            deploy.write_private(obj.directory / 'before-state.json', obj.state)
             before_state = obj.state_path.read_bytes()
             before_caddy = (obj.directory / 'before-caddy').read_bytes()
             (obj.directory / 'Caddyfile.next').write_text('candidate route')
@@ -597,6 +1761,9 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                              'update_monitoring', 'cleanup', 'prune']:
                     setattr(target, name, unittest.mock.Mock())
                 target.drain_retired = unittest.mock.Mock(return_value=True)
+                # This test injects failures into reload, after staged validation succeeds.
+                target.install_caddy = lambda content, before_write=None: (before_write and before_write(), deploy.write_caddy_in_place(target.live_caddy, content))
+                target.verify_public_mcp = unittest.mock.Mock()
 
             stub_host_steps(obj)
             # The fixture has already prepared this run's release and rollback snapshots.
@@ -611,15 +1778,21 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
 
             obj.verify.side_effect = verify_rollback
             reload_attempt = 0
+            starting_deploy = True
 
             def command(args):
-                nonlocal reload_attempt
+                nonlocal reload_attempt, starting_deploy
+                if args[:3] == ['docker', 'network', 'inspect']:
+                    return json.dumps([{'Containers': {}}])
                 if args[:3] == ['docker', 'image', 'inspect']:
                     return json.dumps({'org.opencontainers.image.revision': obj.payload['sha']})
                 if args[:2] == ['docker', 'create']:
                     return 'fixture-container'
                 step = None
                 if 'validate' in args:
+                    if starting_deploy:
+                        starting_deploy = False
+                        return ''
                     reload_attempt += 1
                     step = 'validate'
                     if reload_attempt == 2:
@@ -639,10 +1812,15 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             with patch.object(deploy, 'command', side_effect=command), \
                     contextlib.redirect_stdout(io.StringIO()):
                 failure = 'rollback ' + rollback_failure if rollback_failure else 'forward ' + forward_failure
-                with self.assertRaisesRegex(RuntimeError, failure + ' failed'):
+                error = 'Live Caddyfile validation failed' if failure.endswith('validate') else failure + ' failed'
+                with self.assertRaisesRegex(RuntimeError, error):
                     obj.apply(archive())
                 self.assertEqual(reload_attempt, 2)
-                self.assertEqual(obj.state_path.read_bytes(), before_state)
+                state = json.loads(obj.state_path.read_text())
+                if rollback_failure:
+                    # Unverified switch back: previous state plus the rolling-back record for reconcile.
+                    self.assertEqual(state.pop('switch')['phase'], deploy.SWITCH_ROLLING_BACK)
+                self.assertEqual(state, json.loads(before_state))
                 self.assertEqual(obj.live_caddy.read_bytes(), before_caddy)
                 obj.cleanup.assert_not_called()
                 obj.prune.assert_not_called()
@@ -661,6 +1839,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                     self.assertFalse(obj.degraded_path.exists())
                     obj.verify.assert_called_once_with(expected=obj.state['sha'][:12])
                     obj.update_monitoring.assert_called_once_with(obj.state['services'])
+                    starting_deploy = True
                     retry.apply(archive())
                     self.assertEqual(reload_attempt, 3)
                     self.assertEqual(json.loads(retry.state_path.read_text())['release'], retry.release)
@@ -696,13 +1875,14 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
         obj.payload = payload()
         obj.state = {'sha': obj.payload['sha'], 'services': {'api': 'api_live', 'web': 'web_live'}}
         events = []
+        obj.validate_live_caddy = lambda: events.append('validate live Caddy')
         obj.verify = lambda: events.append('verify')
         obj.update_monitoring = lambda services: events.append('monitoring')
         obj.cleanup = lambda previous: events.append('cleanup')
         obj.prune = lambda previous: events.append('prune')
         obj.capacity_gate = lambda: (_ for _ in ()).throw(AssertionError('short circuit must skip capacity'))
         obj.apply(archive())
-        self.assertEqual(events, ['verify', 'monitoring', 'cleanup', 'prune'])
+        self.assertEqual(events, ['validate live Caddy', 'verify', 'monitoring', 'cleanup', 'prune'])
 
     def test_drain_timeout_warns_and_reports_failure(self):
         obj = object.__new__(deploy.Deployment)
@@ -726,13 +1906,14 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
         previous = {'services': {'api': 'api_previous'}}
         obj.state = {'sha': obj.payload['sha'], 'services': {'api': 'api_live'}, 'previous': previous}
         events = []
+        obj.validate_live_caddy = lambda: events.append('validate live Caddy')
         obj.verify = lambda: events.append('verify')
         obj.update_monitoring = lambda services: events.append('monitoring')
         obj.cleanup = lambda state: events.append(('cleanup', state))
         obj.prune = lambda state: events.append(('prune', state))
         obj.apply(archive())
         self.assertEqual(obj.services, obj.state['services'])
-        self.assertEqual(events, ['verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
+        self.assertEqual(events, ['validate live Caddy', 'verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
 
     def test_retry_continues_when_live_release_directory_is_missing(self):
         with tempfile.TemporaryDirectory() as root:
@@ -747,6 +1928,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 'previous': previous,
             }
             events = []
+            obj.validate_live_caddy = lambda: events.append('validate live Caddy')
             obj.verify = lambda: events.append('verify')
             obj.update_monitoring = lambda services: events.append('monitoring')
             obj.cleanup = lambda state: events.append(('cleanup', state))
@@ -754,7 +1936,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             with patch('builtins.print') as output:
                 obj.apply(archive())
 
-            self.assertEqual(events, ['verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
+            self.assertEqual(events, ['validate live Caddy', 'verify', 'monitoring', ('cleanup', previous), ('prune', previous)])
             output.assert_any_call('Live release manifest repair skipped; continuing deployment.', flush=True)
 
     def test_retry_rebuilds_a_missing_live_manifest_without_sensitive_fields(self):
@@ -767,6 +1949,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             obj.root = root
             obj.payload = {**payload(), 'registry_token': 'secret-token', 'admin_archive': 'secret-archive'}
             obj.state = {'sha': obj.payload['sha'], 'release': 'live', 'services': {'api': 'api_live'}}
+            obj.validate_live_caddy = unittest.mock.Mock()
             obj.verify = lambda: None
             obj.update_monitoring = lambda services: None
             obj.cleanup = lambda state: None
@@ -774,6 +1957,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
 
             obj.apply(archive())
 
+            obj.validate_live_caddy.assert_called_once_with()
             manifest = json.loads((release / 'manifest.json').read_text())
             self.assertEqual(manifest['web_assets'], ['live.js'])
             self.assertNotIn('registry_token', manifest)
@@ -895,6 +2079,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             with self.subTest(revision=revision), tempfile.TemporaryDirectory() as root:
                 obj = object.__new__(deploy.Deployment)
                 obj.root = Path(root)
+                obj.validate_live_caddy = unittest.mock.Mock()
                 obj.payload, obj.state = payload(), {}
                 events = []
                 def stop(_):
@@ -948,13 +2133,13 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             directory = Path(root)
             obj = object.__new__(deploy.Deployment)
             obj.root = directory
-            obj.config = {'project': 'fixture'}
-            obj.state = {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'admin', 'mcp']}}
+            obj.config = {'project': 'fixture', 'caddy_container': 'fixture-caddy'}
+            obj.state = {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'mcp', 'public-mcp', 'admin']}}
             obj.payload = payload()
             obj.directory = directory
             obj.state_path = directory / 'state.json'
             obj.release = 'test'
-            obj.services = {k: k + '_new' for k in ['api', 'web', 'admin', 'mcp']}
+            obj.services = {k: k + '_new' for k in ['api', 'web', 'mcp', 'public-mcp', 'admin']}
             obj.current_web_assets = ['legacy.js']
             obj.live_caddy = directory / 'live'
             obj.env = directory / 'env'
@@ -962,12 +2147,18 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             for name in ['before-caddy', 'before-release.env', 'before-rolling.json']:
                 (directory / name).write_text('old')
             (directory / 'Caddyfile.next').write_text('new')
+            deploy.write_private(directory / 'before-state.json', obj.state)
+            deploy.write_private(obj.state_path, obj.state)
+            obj.config['root'] = str(directory)
+            (directory / 'deploy').mkdir()
             obj.live_caddy.write_text('old')
             events = []
             obj.prepare = lambda _: events.append('prepare')
             obj.backup = lambda: events.append('backup')
             obj.compose = lambda *args, **kwargs: events.append(args)
             obj.reload = lambda: events.append('reload')
+            obj.install_caddy = lambda content, before_write=None: (before_write and before_write(), deploy.write_caddy_in_place(obj.live_caddy, content))
+            obj.verify_public_mcp = lambda: events.append('public-mcp handshake')
             obj.capacity_gate = lambda: None
             obj.warm_candidates = lambda: events.append('warm')
             obj.update_monitoring = lambda services: events.append(('monitoring', services))
@@ -991,10 +2182,11 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             self.assertEqual(obj.rolling.read_text(), 'old')
             self.assertLess(events.index('backup'), events.index(('run', '--rm', '--no-deps', 'migrate', 'up')))
             old_up = ('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
-                      'api_previous', 'web_previous', 'admin_previous', 'mcp_previous', 'worker')
+                      'api_previous', 'web_previous', 'mcp_previous', 'public-mcp_previous', 'admin_previous', 'worker')
             self.assertIn(old_up, events)
             self.assertLess(events.index(old_up), len(events) - 1 - events[::-1].index('reload'))
-            self.assertFalse(obj.state_path.exists())
+            # Verified rollback restores prepare()'s state snapshot exactly (no candidate, no switch record).
+            self.assertEqual(json.loads(obj.state_path.read_text()), obj.state)
             self.assertNotIn('down', str(events))
             self.assertNotIn('cleanup', events)
             self.assertNotIn('prune', events)
@@ -1003,8 +2195,10 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             events.clear()
             def fail_monitoring(_): raise RuntimeError('monitoring unavailable')
             obj.update_monitoring = fail_monitoring
-            with self.assertRaisesRegex(RuntimeError, 'monitoring unavailable'):
+            with patch.object(obj, 'mark_degraded') as marked, \
+                    self.assertRaisesRegex(RuntimeError, 'monitoring unavailable'):
                 obj.rollback()
+            marked.assert_called_once()
             self.assertFalse(any(event and event[0] == 'stop' for event in events if isinstance(event, tuple)))
             self.assertEqual(obj.live_caddy.read_text(), 'old')
 
@@ -1019,7 +2213,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             def cleanup(previous):
                 state = json.loads(obj.state_path.read_text())
                 self.assertEqual(state['sha'], obj.payload['sha'])
-                self.assertEqual(state['previous'], {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'admin', 'mcp']}})
+                self.assertEqual(state['previous'], {'sha': 'c' * 40, 'services': {k: k + '_previous' for k in ['api', 'web', 'mcp', 'public-mcp', 'admin']}})
                 self.assertEqual(previous, state['previous'])
                 events.append('cleanup')
             obj.cleanup = cleanup

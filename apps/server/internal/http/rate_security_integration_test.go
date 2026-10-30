@@ -97,3 +97,34 @@ func TestClientsBehindCaddyHaveIndependentRateQuotas(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicMCPClientsHaveIndependentRateQuotas(t *testing.T) {
+	st := testutil.NewStore(t)
+	engine := gin.New()
+	require.NoError(t, engine.SetTrustedProxies([]string{"172.30.80.3"}))
+	engine.Use(middleware.RateLimit(middleware.RateLimiter{Client: st.Redis}))
+	engine.GET("/api/v1/search", func(c *gin.Context) { respond.OK(c, gin.H{}) })
+
+	require.NoError(t, st.Redis.Set(context.Background(), "rate:search:203.0.113.1", time.Now().Add(time.Hour).UnixMicro(), time.Hour).Err())
+	for _, sample := range []struct {
+		remote, forwarded string
+		wantLimited       bool
+	}{
+		{remote: "172.30.80.3:1234", forwarded: "203.0.113.1", wantLimited: true},
+		{remote: "172.30.80.3:1234", forwarded: "203.0.113.2", wantLimited: false},
+		{remote: "203.0.113.1:1234", forwarded: "203.0.113.2", wantLimited: true},
+	} {
+		r := httptest.NewRequest("GET", "/api/v1/search?q=vscode", nil)
+		r.RemoteAddr = sample.remote
+		r.Header.Set("X-Forwarded-For", sample.forwarded)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, r)
+		var envelope struct{ Code string }
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+		if sample.wantLimited {
+			require.Equal(t, domain.CodeRateLimited, envelope.Code)
+		} else {
+			require.NotEqual(t, domain.CodeRateLimited, envelope.Code)
+		}
+	}
+}

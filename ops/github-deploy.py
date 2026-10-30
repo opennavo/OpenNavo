@@ -11,6 +11,7 @@ import copy
 import fcntl
 import hashlib
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -60,6 +61,18 @@ MIN_MEM_AVAILABLE_PER_EXTRA_REPLICA = 2 * GIB
 DRAIN_GRACE_SECONDS = 300
 DRAIN_POLL_TIMEOUT_SECONDS = 90
 ROLLBACK_DRAIN_TIMEOUT_SECONDS = 30
+PUBLIC_MCP_BEGIN = '# BEGIN opennavo public-mcp'
+PUBLIC_MCP_END = '# END opennavo public-mcp'
+PUBLIC_MCP_PROXY_IP = '172.30.80.3'
+PUBLIC_MCP_PROXY_IP_ALT = '172.30.80.4'
+PUBLIC_MCP_PROXY_IP_TOKEN = '${PUBLIC_MCP_PROXY_IP:-' + PUBLIC_MCP_PROXY_IP + '}/32'
+PUBLIC_MCP_PROXY_IP_ALT_TOKEN = '${PUBLIC_MCP_PROXY_IP_ALT:-' + PUBLIC_MCP_PROXY_IP_ALT + '}/32'
+PUBLIC_MCP_PROXY_TOKENS = (PUBLIC_MCP_PROXY_IP_TOKEN, PUBLIC_MCP_PROXY_IP_ALT_TOKEN)
+DEFAULT_TRUSTED_PROXIES = ('${CADDY_PROXY_IP:-172.30.80.2},' +
+                           PUBLIC_MCP_PROXY_IP_TOKEN + ',' + PUBLIC_MCP_PROXY_IP_ALT_TOKEN +
+                           ',${SSR_PROXY_SUBNET:-172.30.81.0/24}')
+APPLICATION_SERVICES = ('api', 'web', 'mcp', 'public-mcp', 'admin')
+APPLICATION_SERVICE_PATTERN = r'(?:api|web|mcp|public-mcp|admin)(?:_[A-Za-z0-9_]+)?'
 WARM_HOST = 'opennavo.com'
 WARM_ORIGIN = 'http://127.0.0.1:3000'
 WARM_INTERNAL_ORIGIN = 'http://127.0.0.1:9091'
@@ -303,8 +316,8 @@ def phase(name):
 
 
 def write_private(path, value):
-    path.write_text(json.dumps(value, indent=2) + '\n')
-    path.chmod(0o600)
+    """Atomically replace a private JSON file (state, degraded marker); a failed write keeps the old file."""
+    write_atomic(path, (json.dumps(value, indent=2) + '\n').encode(), mode=0o600)
 
 
 def update_env(source, updates):
@@ -317,6 +330,239 @@ def update_env(source, updates):
         lines.append(line)
     lines.extend(key + '=' + value for key, value in remaining.items())
     return '\n'.join(lines) + '\n'
+
+
+def merge_public_mcp_trusted_proxy(value, proxy_ips=None):
+    """Keep the existing proxy list and add both reserved public-MCP peers once."""
+    # No ownership ledger exists for old entries: even stale /32s may be operator-owned.
+    # Preserve them rather than infer ownership from their address or position.
+    proxy_ips = tuple(proxy_ips or (PUBLIC_MCP_PROXY_IP, PUBLIC_MCP_PROXY_IP_ALT))
+    if len(proxy_ips) != 2:
+        raise ValueError('two public-MCP proxy addresses are required')
+    tokens = (PUBLIC_MCP_PROXY_IP_TOKEN, PUBLIC_MCP_PROXY_IP_ALT_TOKEN) if proxy_ips == (PUBLIC_MCP_PROXY_IP, PUBLIC_MCP_PROXY_IP_ALT) else tuple(ip + '/32' for ip in proxy_ips)
+    if value is None:
+        return ('${CADDY_PROXY_IP:-172.30.80.2},' + ','.join(tokens) +
+                ',${SSR_PROXY_SUBNET:-172.30.81.0/24}')
+    if not isinstance(value, str):
+        raise ValueError('TRUSTED_PROXIES must be a string')
+    entries = []
+    seen = set()
+    for raw in value.split(','):
+        entry = raw.strip()
+        if entry and entry not in seen:
+            entries.append(entry)
+            seen.add(entry)
+    variables = ('PUBLIC_MCP_PROXY_IP', 'PUBLIC_MCP_PROXY_IP_ALT')
+    for index, (ip, token) in enumerate(zip(proxy_ips, tokens)):
+        # Preserve an already configured literal or token. Older hosts used the literal .3
+        # without /32; retaining it avoids rewriting operator configuration while the new
+        # default always emits explicit host routes.
+        variable = variables[index] if proxy_ips == (PUBLIC_MCP_PROXY_IP, PUBLIC_MCP_PROXY_IP_ALT) else None
+        if not any(entry in {ip, ip + '/32', token} or
+                   (variable and entry.startswith('${' + variable + ':-') and entry.endswith('}/32'))
+                   for entry in entries):
+            entries.append(token)
+    return ','.join(entries)
+
+
+def write_caddy_in_place(path, content):
+    """Keep the inode of the single-file Caddy bind mount and durably write its contents.
+
+    docker-compose.prod.yml bind-mounts ./caddy/Caddyfile as a single file, so a rename would
+    swap the host inode and the container would keep reading the old one. The write is therefore
+    in place, bracketed by an atomically written intent record (expected SHA-256) that lets the
+    next run detect an interrupted write, and verified by reading the file back.
+    """
+    intent = caddy_intent_path(path)
+    digest = hashlib.sha256(content).hexdigest()
+    write_atomic(intent, (digest + '\n').encode())
+    with path.open('wb') as target:
+        target.write(content)
+        target.flush()
+        os.fsync(target.fileno())
+    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        raise OSError(f'{path} does not match the content just written; intent kept for recovery')
+    intent.unlink(missing_ok=True)
+    fsync_directory(path.parent)
+
+
+def caddy_intent_path(path):
+    return path.with_name('.' + path.name + '.intent')
+
+
+def fsync_directory(directory):
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_atomic(path, content, mode=None):
+    """Write a non-mounted sidecar file: same-directory temp, fsync, rename, fsync directory."""
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.' + path.name + '-', delete=False) as staged:
+        try:
+            if mode is not None:
+                os.chmod(staged.name, mode)
+            staged.write(content)
+            staged.flush()
+            os.fsync(staged.fileno())
+        except BaseException:
+            Path(staged.name).unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(staged.name, path)
+    except BaseException:
+        Path(staged.name).unlink(missing_ok=True)
+        raise
+    fsync_directory(path.parent)
+
+
+def interrupted_caddy_write(path):
+    """True when an intent record exists and the live file does not hold its expected content."""
+    intent = caddy_intent_path(path)
+    if not intent.is_file():
+        return False
+    expected = intent.read_text().strip()
+    if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == expected:
+        intent.unlink(missing_ok=True)
+        return False
+    return True
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # surface the 3xx as HTTPError instead of following it
+
+
+def open_without_redirects(request, timeout):
+    return urllib.request.build_opener(_NoRedirect).open(request, timeout=timeout)
+
+
+class CaddyValidatorUnavailable(RuntimeError):
+    """caddy validate could not run, so the configuration's validity is unknown."""
+
+
+def caddy_validate(container, config_path):
+    """Return True/False for a valid/invalid Caddyfile; raise CaddyValidatorUnavailable otherwise.
+
+    Only a clean exit 1 from caddy itself counts as "invalid". Timeouts, OS errors, other exit
+    codes, or an exit 1 while the container cannot run caddy at all are "unknown".
+    """
+    try:
+        command(['docker', 'exec', container, 'caddy', 'validate', '--config', config_path,
+                 '--adapter', 'caddyfile'])
+        return True
+    except RuntimeError as error:
+        text = str(error)
+        if '(exit ' in text and '(exit 1)' not in text:
+            raise CaddyValidatorUnavailable(f'caddy validate could not run: {text}') from error
+    except (OSError, subprocess.SubprocessError) as error:
+        raise CaddyValidatorUnavailable(f'caddy validate could not run: {type(error).__name__}') from error
+    try:
+        command(['docker', 'exec', container, 'caddy', 'version'])
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        raise CaddyValidatorUnavailable('caddy validate failed and caddy is not runnable in the container') from error
+    return False
+
+
+def public_mcp_route(alias):
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', alias):
+        raise ValueError('invalid public-MCP proxy alias')
+    return (f'{PUBLIC_MCP_BEGIN}\n'
+            '\t@publicMcp path /mcp\n'
+            '\thandle @publicMcp {\n'
+            '\t\trequest_body {\n'
+            '\t\t\tmax_size 2MB\n'
+            '\t\t}\n'
+            f'\t\treverse_proxy {alias}:8790 {{\n'
+            '\t\t\tflush_interval -1\n'
+            '\t\t}\n'
+            '\t}\n'
+            '\t@publicMcpOther path /mcp/*\n'
+            '\thandle @publicMcpOther {\n'
+            '\t\trespond 404\n'
+            '\t}\n'
+            f'{PUBLIC_MCP_END}\n')
+
+
+def _caddy_site_block(source, site_pattern):
+    """Return the unique Caddy site block matching site_pattern, or fail closed."""
+    starts = list(re.finditer(site_pattern, source, re.M))
+    if len(starts) != 1:
+        raise ValueError('WEB_DOMAIN Caddy site block is missing or ambiguous')
+    start = starts[0]
+    depth = 1
+    position = start.end()
+    for line in source[position:].splitlines(keepends=True):
+        # {$VAR} is a Caddy placeholder, not a block delimiter.
+        syntax = re.sub(r'\{\$[A-Za-z_][A-Za-z0-9_]*\}', '', line)
+        depth += syntax.count('{') - syntax.count('}')
+        position += len(line)
+        if depth == 0:
+            return start.start(), position
+        if depth < 0:
+            break
+    raise ValueError('WEB_DOMAIN Caddy site block has unbalanced braces')
+
+
+def install_public_mcp_route(source, alias):
+    """Install the public MCP route in the WEB_DOMAIN block before its catch-all proxy."""
+    block_start, block_end = _caddy_site_block(
+        source, r'^[ \t]*(?:(?:https?://)?\{\$WEB_DOMAIN\})[ \t]*\{[ \t]*$')
+    block = source[block_start:block_end]
+    if block.count(PUBLIC_MCP_BEGIN) != block.count(PUBLIC_MCP_END):
+        raise ValueError('public-MCP Caddy route markers are unbalanced')
+    markers = list(re.finditer(
+        re.escape(PUBLIC_MCP_BEGIN) + r'.*?' + re.escape(PUBLIC_MCP_END) + r'\n?',
+        block, re.S))
+    if len(markers) > 1:
+        raise ValueError('public-MCP Caddy route is ambiguous')
+    if markers:
+        block_without_route = block[:markers[0].start()] + block[markers[0].end():]
+    else:
+        block_without_route = block
+        # Older repository installations shipped these two routes without markers.
+        spans = []
+        for matcher, path in [('publicMcp', '/mcp'), ('publicMcpOther', '/mcp/*')]:
+            matches = list(re.finditer(
+                r'^[ \t]*@' + matcher + r'[ \t]+path[ \t]+' + re.escape(path) +
+                r'[ \t]*\n[ \t]*handle[ \t]+@' + matcher + r'[ \t]*\{[ \t]*\n', block, re.M))
+            if len(matches) > 1:
+                raise ValueError('legacy public-MCP Caddy route is ambiguous')
+            if not matches:
+                continue
+            match = matches[0]
+            depth, end = 1, match.end()
+            for line in block[end:].splitlines(keepends=True):
+                syntax = re.sub(r'\{\$[^}]+\}', '', line)
+                depth += syntax.count('{') - syntax.count('}')
+                end += len(line)
+                if depth == 0:
+                    break
+            if depth != 0:
+                raise ValueError('legacy public-MCP Caddy route has unbalanced braces')
+            spans.append((match.start(), end))
+        if spans and len(spans) != 2:
+            raise ValueError('legacy public-MCP Caddy route is incomplete')
+        for start, end in sorted(spans, reverse=True):
+            block_without_route = block_without_route[:start] + block_without_route[end:]
+    proxies = []
+    depth = 0
+    position = 0
+    for line in block_without_route.splitlines(keepends=True):
+        syntax = re.sub(r'\{\$[A-Za-z_][A-Za-z0-9_]*\}', '', line)
+        if depth == 1 and re.fullmatch(r'[ \t]*reverse_proxy[ \t]*\{[ \t]*(?:#.*)?(?:\r?\n)?', line):
+            proxies.append(position)
+        depth += syntax.count('{') - syntax.count('}')
+        position += len(line)
+    if len(proxies) != 1:
+        raise ValueError('WEB_DOMAIN Caddy catch-all reverse_proxy is missing or ambiguous')
+    route = public_mcp_route(alias)
+    insertion = proxies[0]
+    # Keep the route at the same indentation as the surrounding site directives.
+    block_with_route = block_without_route[:insertion] + route + block_without_route[insertion:]
+    return source[:block_start] + block_with_route + source[block_end:]
 
 
 def monitoring_targets(source, services):
@@ -383,6 +629,28 @@ def monitoring_targets(source, services):
     return source[:start.end()] + ''.join(blocks) + source[finish:]
 
 
+# Explicit forward-switch phases, recorded in deploy/github-state.json under "switch" before and
+# after each step of apply(). rollback() decides every abort from this record, never from file
+# contents.
+SWITCH_NONE = 'not-switched'              # live Caddyfile, env, rolling and state are all previous
+SWITCH_CADDY_WRITING = 'caddy-writing'    # candidate validated; in-place write of live started
+SWITCH_CADDY_WRITTEN = 'caddy-written'    # live file is the candidate; USR1 not yet confirmed
+SWITCH_CADDY_RELOADED = 'caddy-reloaded'  # USR1 sent to Caddy; routing not verified
+SWITCH_CONFIG_PROMOTED = 'config-promoted'  # env and rolling overlay promoted to the candidate
+SWITCH_ROLLING_BACK = 'rolling-back'      # rollback started; cleared only after previous is reloaded and verified
+SWITCH_ROUTED_TO_CANDIDATE = (SWITCH_CADDY_WRITTEN, SWITCH_CADDY_RELOADED, SWITCH_CONFIG_PROMOTED)
+SWITCH_PROCESS = {
+    SWITCH_NONE: 'the Caddy process runs the previous release',
+    SWITCH_CADDY_WRITING: ('the live Caddyfile write was interrupted (contents unknown; install recovery may '
+                           'have restored the backup) and Caddy was never reloaded, so the process runs the '
+                           'previous release'),
+    SWITCH_CADDY_WRITTEN: ('the live Caddyfile file is the candidate but Caddy reload (USR1) was not confirmed, '
+                           'so the Caddy process may still run the previous release'),
+    SWITCH_CADDY_RELOADED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
+    SWITCH_CONFIG_PROMOTED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
+}
+
+
 class Deployment:
     def __init__(self, config, payload):
         self.config, self.payload = config, payload
@@ -394,7 +662,7 @@ class Deployment:
         self.live_caddy = self.root / config['caddy_file']
         self.rolling = self.root / 'deploy/rolling.compose.json'
         self.env = self.root / 'current-release.env'
-        self.services = {kind: kind + '_' + self.release.replace('-', '_') for kind in ['api', 'web', 'mcp', 'admin']}
+        self.services = {kind: kind + '_' + self.release.replace('-', '_') for kind in APPLICATION_SERVICES}
         self.aliases = {}
         self.current_web_assets = []
         self.web_replicas = configured_web_replicas(config)
@@ -419,16 +687,178 @@ class Deployment:
 
     def compose(self, *args, candidate=True):
         directory = self.directory if candidate else self.root
-        return command(['docker', 'compose', '--project-directory', str(self.root), '-p', self.config['project'],
-                        '--env-file', str(self.root / '.env'), '--env-file', str(directory / ('release.env' if candidate else 'current-release.env')),
-                        '-f', str(self.root / self.config['compose_file']),
-                        '-f', str(self.directory / 'rolling.compose.json' if candidate else self.rolling),
-                        '--profile', 'ops', '--profile', 'automation', *args])
+        result = command(['docker', 'compose', '--project-directory', str(self.root), '-p', self.config['project'],
+                          '--env-file', str(self.root / '.env'), '--env-file', str(directory / ('release.env' if candidate else 'current-release.env')),
+                          '-f', str(self.root / self.config['compose_file']),
+                          '-f', str(self.directory / 'rolling.compose.json' if candidate else self.rolling),
+                          '--profile', 'ops', '--profile', 'automation', *args])
+        if args and args[0] == 'up':
+            services = self.services if candidate else self.state['services']
+            public_mcp = services.get('public-mcp')
+            if public_mcp and public_mcp in args[1:]:
+                self.restore_public_mcp_proxy(public_mcp, candidate=candidate)
+        return result
+
+    def restore_public_mcp_proxy(self, service, *, candidate):
+        """Restore an endpoint reclaimed by preflight before the caller can switch routes."""
+        ids = self.compose('ps', '-q', service, candidate=candidate).splitlines()
+        if not ids:
+            raise RuntimeError('public-MCP proxy restore found no running service container')
+        # Use Compose's resolved configuration so inherited addresses and DNS aliases survive
+        # a reconnect, including hosts whose base Compose file supplies the fixed address.
+        resolved = json.loads(self.compose('config', '--format', 'json', candidate=candidate))
+        options = resolved['services'][service]['networks']['proxy'] or {}
+        address = None if candidate else self.public_mcp_overlay_ip()
+        address = address or options.get('ipv4_address')
+        if address:
+            address = str(ipaddress.ip_address(address))
+        network = self.config.get('proxy_network') or self.config['project'] + '_proxy'
+        containers = json.loads(command(['docker', 'inspect', *ids]))
+        for container in containers:
+            endpoint = (container.get('NetworkSettings') or {}).get('Networks', {}).get(network)
+            if endpoint is not None:
+                if address and endpoint.get('IPAddress') != address:
+                    raise RuntimeError('public-MCP proxy restore found an unexpected fixed address')
+                continue
+            if not address:
+                raise RuntimeError('public-MCP proxy restore requires a recorded fixed address')
+            # Compose up can restart a retained container without restoring disconnected
+            # networks. Reconnect only the missing endpoint; healthy peers stay untouched.
+            connect = ['docker', 'network', 'connect', '--ip', address]
+            for alias in dict.fromkeys([service, *(options.get('aliases') or [])]):
+                connect.extend(['--alias', alias])
+            command([*connect, network, container['Id']])
 
     def write_manifest(self, directory=None):
         target = self.directory if directory is None else Path(directory)
         write_private(target / 'manifest.json', release_manifest(
             self.payload, getattr(self, 'current_web_assets', [])))
+
+    def public_mcp_proxy_ips(self):
+        """Resolve the two reserved proxy addresses without asking Compose to recreate a network."""
+        configured = getattr(self, 'config', {})
+        values = configured.get('public_mcp_proxy_ips')
+        if values is not None:
+            if isinstance(values, str):
+                values = [item.strip() for item in values.split(',')]
+            if not isinstance(values, (list, tuple)) or len(values) != 2:
+                raise RuntimeError('public-MCP proxy preflight requires exactly two proxy addresses')
+            raw = list(values)
+        else:
+            env = {}
+            try:
+                for line in (self.root / '.env').read_text().splitlines():
+                    if '=' in line and not line.lstrip().startswith('#'):
+                        key, value = line.split('=', 1)
+                        env[key.strip()] = value.strip()
+            except OSError:
+                pass
+            raw = [configured.get('public_mcp_proxy_ip') or env.get('PUBLIC_MCP_PROXY_IP') or
+                   os.environ.get('PUBLIC_MCP_PROXY_IP') or PUBLIC_MCP_PROXY_IP,
+                   configured.get('public_mcp_proxy_ip_alt') or env.get('PUBLIC_MCP_PROXY_IP_ALT') or
+                   os.environ.get('PUBLIC_MCP_PROXY_IP_ALT') or PUBLIC_MCP_PROXY_IP_ALT]
+        try:
+            addresses = tuple(str(ipaddress.ip_address(value)) for value in raw)
+        except ValueError as error:
+            raise RuntimeError('public-MCP proxy preflight found an invalid reserved address') from error
+        if len(set(addresses)) != 2:
+            raise RuntimeError('public-MCP proxy preflight requires two distinct reserved addresses')
+        return addresses
+
+    def public_mcp_overlay_ip(self, overlay=None):
+        """Read the live public-MCP address from the previous overlay when available."""
+        try:
+            for key in ('public_mcp_proxy_ip', 'public_mcp_ip'):
+                value = self.state.get(key)
+                if value:
+                    return str(ipaddress.ip_address(value))
+            state_service = self.state.get('public-mcp')
+            if isinstance(state_service, dict) and state_service.get('ipv4_address'):
+                return str(ipaddress.ip_address(state_service['ipv4_address']))
+            overlay = json.loads(self.rolling.read_text()) if overlay is None else overlay
+            old = self.state.get('services', {}).get('public-mcp')
+            options = overlay.get('services', {}).get(old, {}).get('networks', {}).get('proxy', {})
+            value = options.get('ipv4_address') if isinstance(options, dict) else None
+            return str(ipaddress.ip_address(value)) if value else None
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _container_is_public_mcp(container, network_entry, project):
+        labels = (container.get('Config') or {}).get('Labels') or {}
+        if labels:
+            return (labels.get('com.docker.compose.project') == project and
+                    ((labels.get('com.docker.compose.service') or '') == 'public-mcp' or
+                     (labels.get('com.docker.compose.service') or '').startswith('public-mcp_')))
+        return False
+
+    def public_mcp_preflight(self):
+        """Check reserved proxy addresses before any pull, migration, or candidate start."""
+        if not hasattr(self, 'config'):
+            return
+        project = self.config.get('project')
+        if not project:
+            raise RuntimeError('public-MCP proxy preflight requires the Compose project name')
+        addresses = self.public_mcp_proxy_ips()
+        network = self.config.get('proxy_network') or project + '_proxy'
+        try:
+            inspected = json.loads(command(['docker', 'network', 'inspect', network]))
+            network_info = inspected[0]
+            entries = network_info.get('Containers') or {}
+        except (RuntimeError, OSError, TypeError, ValueError, IndexError, KeyError) as error:
+            raise RuntimeError(f'public-MCP proxy preflight could not inspect network {network}') from error
+
+        occupied = {address: [] for address in addresses}
+        for container_id, entry in entries.items():
+            raw_ip = (entry or {}).get('IPv4Address', '').split('/', 1)[0]
+            if raw_ip in occupied:
+                occupied[raw_ip].append((container_id, entry or {}))
+        details = {}
+        ids = [container_id for holders in occupied.values() for container_id, _ in holders]
+        if ids:
+            try:
+                inspected_containers = json.loads(command(['docker', 'inspect', *ids]))
+                details = {item.get('Id'): item for item in inspected_containers if isinstance(item, dict)}
+            except (RuntimeError, OSError, TypeError, ValueError):
+                # Missing inspect labels cannot prove ownership; refuse the occupied address.
+                details = {}
+        public_holders = {}
+        reclaim = []
+        for address, holders in occupied.items():
+            for container_id, entry in holders:
+                container = details.get(container_id, {})
+                if not self._container_is_public_mcp(container, entry, project):
+                    name = (entry.get('Name') or container_id).lstrip('/')
+                    raise RuntimeError(
+                        f'public-MCP proxy preflight refused: reserved address {address} is occupied '
+                        f'by non-public-mcp container {name}')
+                state = container.get('State') or {}
+                if state.get('Running') is False and not state.get('Restarting') and not state.get('Paused'):
+                    reclaim.append((address, container_id, entry))
+                else:
+                    public_holders[address] = container_id
+
+        # Check every holder before changing anything. Disconnect only stopped, label-proven
+        # project services; retained containers remain available to Compose for rollback.
+        for address, container_id, entry in reclaim:
+            command(['docker', 'network', 'disconnect', network, container_id])
+            occupied[address].remove((container_id, entry))
+
+        free = [address for address in addresses if not occupied[address]]
+        if not free:
+            raise RuntimeError('public-MCP proxy preflight refused: both reserved addresses are occupied')
+        old_ip = self.public_mcp_overlay_ip()
+        if old_ip in addresses:
+            choices = [address for address in addresses if address != old_ip and address in free]
+        else:
+            current = next((address for address in addresses if address in public_holders), None)
+            if current:
+                self.public_mcp_live_ip = current
+            choices = [address for address in addresses if address != current and address in free]
+        if not choices:
+            raise RuntimeError('public-MCP proxy preflight refused: no alternate reserved address is free')
+        self.public_mcp_proxy_ip = choices[0]
+        print(f'Public MCP proxy preflight passed: candidate address {self.public_mcp_proxy_ip}.', flush=True)
 
     def ensure_live_manifest(self):
         release = self.state.get('release')
@@ -456,12 +886,56 @@ class Deployment:
         overlay = json.loads(self.rolling.read_text())
         # Keep only the live release as the rollback candidate in the next overlay.
         live_services = set(self.state['services'].values())
+        # Capture a base public-MCP definition before filtering the previous overlay. Hosts
+        # deployed before public-MCP was introduced have no state entry to clone.
+        base_public_mcp = copy.deepcopy(overlay['services'].get('public-mcp'))
+        proxy_ips = self.public_mcp_proxy_ips()
+        old_public_mcp = self.state['services'].get('public-mcp')
+        old_public_mcp_ip = self.public_mcp_overlay_ip(overlay) if old_public_mcp else None
+        if old_public_mcp and not old_public_mcp_ip and getattr(self, 'public_mcp_live_ip', None):
+            old_options = overlay['services'].setdefault(old_public_mcp, {}).setdefault('networks', {}).setdefault('proxy', {})
+            old_options['ipv4_address'] = self.public_mcp_live_ip
+            # Preserve the live address in the rollback snapshot as well, so a restart during
+            # recovery cannot move the previous container to a dynamic address.
+            before_overlay_path = self.directory / 'before-rolling.json'
+            before_overlay = json.loads(before_overlay_path.read_text())
+            before_options = before_overlay['services'].setdefault(old_public_mcp, {}).setdefault('networks', {}).setdefault('proxy', {})
+            before_options['ipv4_address'] = self.public_mcp_live_ip
+            write_private(before_overlay_path, before_overlay)
+        candidate_public_mcp_ip = getattr(self, 'public_mcp_proxy_ip', None)
+        if candidate_public_mcp_ip is None:
+            candidate_public_mcp_ip = next((ip for ip in proxy_ips if ip != old_public_mcp_ip), proxy_ips[0])
         overlay['services'] = {name: service for name, service in overlay['services'].items()
-                               if not re.match(r'^(api|web|mcp|admin)(?:_|$)', name) or name in live_services}
+                               if not re.match(r'^(?:api|web|mcp|public-mcp|admin)(?:_|$)', name) or name in live_services}
         routes = self.live_caddy.read_text()
         for kind, new in self.services.items():
-            old = self.state['services'][kind]
-            service = copy.deepcopy(overlay['services'][old])
+            old = self.state['services'].get(kind)
+            if old is None and kind == 'public-mcp':
+                service = base_public_mcp or {
+                    'image': '${MCP_IMAGE:?Build or pull MCP_IMAGE}',
+                    'restart': 'unless-stopped',
+                    'user': '10001:10001',
+                    'read_only': True,
+                    'tmpfs': ['/tmp:rw,noexec,nosuid,size=64m'],
+                    'security_opt': ['no-new-privileges:true'],
+                    'cap_drop': ['ALL'],
+                    'entrypoint': ['opennavo-public-mcp'],
+                    'environment': {
+                        'OPENNAVO_PUBLIC_API_BASE': 'http://api-proxy:8080/api/v1',
+                        'OPENNAVO_PUBLIC_MCP_HOST': '0.0.0.0',
+                        'OPENNAVO_PUBLIC_MCP_PORT': '8790',
+                        'OPENNAVO_PUBLIC_MCP_PATH': '/mcp',
+                        'OPENNAVO_PUBLIC_MCP_TRUSTED_PROXIES': '["${CADDY_PROXY_IP:-172.30.80.2}/32"]',
+                        'OPENNAVO_PUBLIC_MCP_RATE_LIMIT': '60',
+                        'OPENNAVO_PUBLIC_MCP_RATE_WINDOW_SECONDS': '60',
+                    },
+                    'networks': {'proxy': {'aliases': ['public-mcp-proxy'],
+                                           'ipv4_address': candidate_public_mcp_ip}},
+                    'deploy': {'resources': {'limits': {'memory': '256M'}}},
+                    'depends_on': {'api': {'condition': 'service_healthy'}},
+                }
+            else:
+                service = copy.deepcopy(overlay['services'][old])
             for network, options in service.get('networks', {}).items():
                 if not options:
                     continue
@@ -473,7 +947,8 @@ class Deployment:
                     self.aliases[alias] = replacement
                     aliases[index] = replacement
             if kind != 'admin':
-                service['image'] = self.payload['images']['server' if kind == 'api' else kind]
+                image_kind = 'server' if kind == 'api' else 'mcp' if kind == 'public-mcp' else kind
+                service['image'] = self.payload['images'][image_kind]
             for mount in service.get('volumes', []):
                 if isinstance(mount, dict) and '/releases/' in mount.get('source', ''):
                     mount['source'] = str(self.directory / Path(mount['source']).name)
@@ -488,15 +963,28 @@ class Deployment:
                              "const signal=AbortSignal.timeout(2500);Promise.all([fetch('http://127.0.0.1:9091/healthz',{signal}),fetch('http://127.0.0.1:3000/robots.txt',{signal})]).then(async ([health,robots])=>{await Promise.all([health.arrayBuffer(),robots.arrayBuffer()]);process.exit(health.status===200&&robots.status===200?0:1)}).catch(()=>process.exit(1))"],
                     'interval': '30s', 'timeout': '3s', 'retries': 3,
                     'start_period': '60s', 'start_interval': '2s'}
+            elif kind == 'public-mcp':
+                service.setdefault('entrypoint', ['opennavo-public-mcp'])
+                proxy = service.setdefault('networks', {}).setdefault('proxy', {})
+                proxy['ipv4_address'] = candidate_public_mcp_ip
+                # Compose --wait uses this liveness endpoint to reject a bad candidate before
+                # Caddy is switched. Keep it explicit for overlays from before public-MCP existed.
+                service['healthcheck'] = {
+                    'test': ['CMD', 'python', '-I', '-c',
+                             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/healthz', timeout=2).close()"],
+                    'interval': '30s', 'timeout': '3s', 'retries': 3,
+                    'start_period': '60s', 'start_interval': '2s'}
             overlay['services'][new] = service
         for kind, new in self.services.items():
             service = overlay['services'][new]
-            for key in ['NUXT_API_BASE_INTERNAL', 'OPENNAVO_AGENT_API_BASE']:
+            for key in ['NUXT_API_BASE_INTERNAL', 'OPENNAVO_AGENT_API_BASE', 'OPENNAVO_PUBLIC_API_BASE']:
                 if key in service.get('environment', {}):
                     for old, replacement in self.aliases.items():
                         service['environment'][key] = service['environment'][key].replace(old, replacement)
         for old, replacement in self.aliases.items():
             routes = routes.replace(old, replacement)
+        routes = install_public_mcp_route(
+            routes, self.aliases.get('public-mcp-proxy', 'public-mcp-proxy-' + self.release))
         routes = re.sub(r'X-OpenNavo-Release "[^"]+"', f'X-OpenNavo-Release "{self.payload["sha"][:12]}"', routes)
         overlay['services'].setdefault('worker', {})['image'] = self.payload['images']['server']
         # The cache notifier must follow the new web service when the previous release retires.
@@ -516,8 +1004,10 @@ class Deployment:
         # Usage stats read CF-IPCountry only from these peers. The new API copies the previous release's
         # service, so an overlay that predates the setting gets the base compose value; a host value, even
         # an empty one, is kept.
-        overlay['services'][self.services['api']].setdefault('environment', {}).setdefault(
-            'USAGE_COUNTRY_TRUSTED_PROXIES', '${CADDY_PROXY_IP:-172.30.80.2}')
+        api_environment = overlay['services'][self.services['api']].setdefault('environment', {})
+        api_environment.setdefault('USAGE_COUNTRY_TRUSTED_PROXIES', '${CADDY_PROXY_IP:-172.30.80.2}')
+        api_environment['TRUSTED_PROXIES'] = merge_public_mcp_trusted_proxy(
+            api_environment.get('TRUSTED_PROXIES'), proxy_ips)
         write_private(self.directory / 'rolling.compose.json', overlay)
         (self.directory / 'release.env').write_text(update_env(self.env.read_text(), {
             'SERVER_IMAGE': self.payload['images']['server'], 'WEB_IMAGE': self.payload['images']['web'],
@@ -719,17 +1209,178 @@ class Deployment:
             raise
         print('API and web monitoring targets updated and healthy.', flush=True)
 
+    def _validate_staged(self, content):
+        """Validate content as a staged copy inside the Caddy container; never touches the live file."""
+        container = self.config['caddy_container']
+        with tempfile.NamedTemporaryFile(dir=self.live_caddy.parent, prefix='.Caddyfile-', delete=False) as staged:
+            path = Path(staged.name)
+            remote = '/tmp/' + path.name
+            try:
+                staged.write(content)
+                staged.flush()
+                os.fsync(staged.fileno())
+                command(['docker', 'cp', str(path), container + ':' + remote])
+                return caddy_validate(container, remote)
+            finally:
+                path.unlink(missing_ok=True)
+                with contextlib.suppress(RuntimeError, OSError):
+                    command(['docker', 'exec', container, 'rm', '-f', remote])
+
+    def install_caddy(self, content, before_write=None):
+        """Back up the live file and validate a staged copy before updating its inode."""
+        backup = self.live_caddy.with_name('Caddyfile.bak')
+        write_atomic(backup, self.live_caddy.read_bytes())
+        if not self._validate_staged(content):
+            raise RuntimeError('invalid staged Caddyfile; live configuration left untouched')
+        if before_write:
+            before_write()
+        try:
+            write_caddy_in_place(self.live_caddy, content)
+        except Exception:
+            print(f'WARNING: writing {self.live_caddy} failed; checking whether it needs recovery.', flush=True)
+            # The failed write leaves its intent record, so this restores the backup only when the
+            # live file is incomplete/invalid and the backup validates (same rule everywhere).
+            self.validate_live_caddy()
+            raise
+
+    def validate_live_caddy(self):
+        """Recover an interrupted or invalid in-place write before trusting the live configuration.
+
+        The backup is restored only when caddy definitively rejects the live file (or an intent
+        record shows the last write never completed) and the backup itself validates. If the
+        validator cannot run, nothing is touched and the deployment aborts.
+        """
+        container = self.config['caddy_container']
+        backup = self.live_caddy.with_name('Caddyfile.bak')
+        interrupted = interrupted_caddy_write(self.live_caddy)
+        if not interrupted and caddy_validate(container, '/etc/caddy/Caddyfile'):
+            return
+        reason = 'an interrupted write' if interrupted else 'live Caddyfile validation failed'
+        self._restore_live_caddy(backup, reason)
+
+    def _restore_live_caddy(self, backup, reason):
+        """The single recovery path: restore backup in place only if it validates as a staged copy."""
+        container = self.config['caddy_container']
+        if not backup.is_file():
+            raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}); '
+                               f'backup {backup} is missing. The live file is left as found (interrupted or failing validation) and needs manual '
+                               f'recovery. Aborting deployment.')
+        if not self._validate_staged(backup.read_bytes()):
+            raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}) and '
+                               f'backup {backup} is invalid too. The backup was not restored; the live file is left as found '
+                               f'(interrupted or failing validation) and needs manual recovery. Aborting deployment.')
+        print(f'WARNING: {reason}; restoring {self.live_caddy} in place from {backup}.', flush=True)
+        write_caddy_in_place(self.live_caddy, backup.read_bytes())
+        if not caddy_validate(container, '/etc/caddy/Caddyfile'):
+            raise RuntimeError(f'Restored {self.live_caddy} from {backup} but it still fails validation.')
+        print(f'Restored live Caddyfile from {backup}; validation passed.', flush=True)
+
     def reload(self):
         try:
-            command(['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'])
+            self.validate_live_caddy()
+        except Exception:
+            # validate_live_caddy already restored a good backup when that was provably safe;
+            # never overwrite a file whose validity is unknown.
+            self.mark_degraded('Caddy reload failed; routing unconfirmed')
+            raise
+        try:
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
+            # The live file was just validated, so a failed signal is not a reason to overwrite it
+            # with a backup. Leave every file as is and require manual confirmation.
+            print(f'WARNING: Caddy reload signal failed; {self.live_caddy} validated and was left unchanged.', flush=True)
             self.mark_degraded('Caddy reload failed; routing unconfirmed')
             raise
         self.switch_at = time.monotonic()
 
+    @staticmethod
+    def _mcp_payload(body):
+        try:
+            return json.loads(body)
+        except (TypeError, ValueError):
+            # Streamable HTTP may return one or more SSE data events.
+            events = []
+            for line in body.decode('utf-8', 'replace').splitlines():
+                if line.startswith('data:'):
+                    try:
+                        events.append(json.loads(line[5:].strip()))
+                    except (TypeError, ValueError):
+                        continue
+            if not events:
+                raise RuntimeError('public MCP returned an invalid response')
+            return events[-1]
+
+    def verify_public_mcp(self):
+        checks = self.config.get('checks', [])
+        host = self.config.get('public_mcp_host') or next(
+            (check.get('host') for check in checks if check.get('path') == '/'), None)
+        if not host:
+            raise RuntimeError('public MCP verification requires WEB_DOMAIN host')
+        endpoint = self.config['local_origin'].rstrip('/') + '/mcp'
+        session = None
+
+        def post(request_id, method, call_params=None):
+            nonlocal session
+            params = ({
+                'protocolVersion': '2025-06-18',
+                'capabilities': {},
+                'clientInfo': {'name': 'opennavo-deploy', 'version': '1'},
+            } if method == 'initialize' else (call_params or {}))
+            request = urllib.request.Request(
+                endpoint,
+                data=json.dumps({'jsonrpc': '2.0', 'id': request_id, 'method': method,
+                                 'params': params}).encode(),
+                method='POST',
+                headers={
+                    'Host': host,
+                    'Accept': 'application/json, text/event-stream',
+                    'Content-Type': 'application/json',
+                    'MCP-Protocol-Version': '2025-06-18',
+                    **({'Mcp-Session-Id': session} if session else {}),
+                })
+            with urllib.request.urlopen(request, timeout=15) as response:
+                status = getattr(response, 'status', None)
+                if status is None:
+                    status = response.getcode()
+                if status != 200:
+                    raise RuntimeError('public MCP route returned an unexpected status')
+                body = response.read(2 * 1024 * 1024 + 1)
+                headers = getattr(response, 'headers', {})
+            for name in ('Mcp-Session-Id', 'MCP-Session-Id', 'mcp-session-id'):
+                value = headers.get(name)
+                if value:
+                    session = value
+                    break
+            payload = self._mcp_payload(body)
+            if not isinstance(payload, dict) or 'result' not in payload or 'error' in payload:
+                raise RuntimeError('public MCP JSON-RPC request failed')
+            return payload['result']
+
+        post(1, 'initialize')
+        result = post(2, 'tools/list')
+        if not isinstance(result, dict) or not isinstance(result.get('tools'), list) or not result['tools']:
+            raise RuntimeError('public MCP tools/list returned no tools')
+        # initialize/tools/list never reach the API; a real tool call proves API base and trust work.
+        called = post(3, 'tools/call', {'name': 'list_categories', 'arguments': {}})
+        content = called.get('content') if isinstance(called, dict) else None
+        if (not isinstance(content, list) or not content or called.get('isError')
+                or not any(isinstance(item, dict) and str(item.get('text') or '').strip() for item in content)):
+            raise RuntimeError('public MCP tools/call list_categories returned an error or no content')
+        # Only the exact /mcp path is public; sub-paths must not reach the MCP service.
+        # A redirect must not count: a 404 at the redirect target says nothing about /mcp/x.
+        probe = urllib.request.Request(endpoint + '/x', method='GET', headers={'Host': host})
+        try:
+            with open_without_redirects(probe, timeout=15) as response:
+                status = getattr(response, 'status', None) or response.getcode()
+        except urllib.error.HTTPError as error:
+            status = error.code
+        if status != 404:
+            raise RuntimeError(f'public MCP sub-path /mcp/x returned {status}, expected 404')
+        print(f'Public MCP route verified ({len(result["tools"])} tools).', flush=True)
+
     def verify(self, expected=None):
         # A legacy deployment may have no recorded SHA; still check its routes without a header match.
+        checking_current = expected is None
         expected = self.payload['sha'][:12] if expected is None else expected
         last_error = None
         for _ in range(30):
@@ -741,37 +1392,246 @@ class Deployment:
                             raise RuntimeError('route is not serving the new release')
                         while response.read(65536):
                             pass
+                if checking_current and 'public-mcp' in getattr(self, 'services', {}):
+                    self.verify_public_mcp()
                 return
             except Exception as error:
                 last_error = type(error).__name__
                 time.sleep(2)
         raise RuntimeError('post-deployment route checks failed: ' + str(last_error))
 
+    def switch_phase(self):
+        phase = getattr(self, '_switch_phase', None)
+        if phase:
+            return phase
+        recorded = self.state.get('switch') if isinstance(getattr(self, 'state', None), dict) else None
+        if isinstance(recorded, dict) and recorded.get('release') == self.release:
+            if recorded.get('phase') == SWITCH_ROLLING_BACK:
+                return recorded.get('forward_phase')
+            return recorded.get('phase')
+        return None
+
+    def record_switch(self, phase):
+        """Record the forward-switch phase in memory first, then durably in github-state.json."""
+        self._switch_phase = phase
+        try:
+            write_private(self.state_path, {**self.state, 'switch': self._switch_record(phase)})
+        except Exception:
+            self.mark_degraded(f'could not record switch phase {phase} in {self.state_path.name}; '
+                               f'{SWITCH_PROCESS.get(phase, "")}')
+            raise
+
+    def _switch_record(self, phase, **extra):
+        return {'release': self.release, 'phase': phase, 'sha': self.payload['sha'],
+                'services': self.services, **extra}
+
+    def record_rollback(self):
+        """Atomically record that rollback has begun, together with the previous state it restores.
+
+        The record survives until the previous Caddyfile is reloaded and verified, so a run killed at
+        any point of the switch back is recognised by reconcile_interrupted_switch().
+        """
+        previous = self._previous_state()
+        self._switch_phase = self.switch_phase()  # keep the forward phase for abort decisions
+        write_private(self.state_path, {**previous, 'switch': self._switch_record(
+            SWITCH_ROLLING_BACK, forward_phase=self._switch_phase,
+            previous_sha=previous.get('sha'), previous_services=previous.get('services'))})
+
+    def reconcile_interrupted_switch(self):
+        """Make live Caddy, env, rolling and state agree before a deployment trusts any of them.
+
+        A recorded switch phase means an earlier run stopped mid-switch (aborted rollback, or the
+        process was killed with no marker). caddy-writing: the live file may be the complete
+        candidate, partial or previous, so restore the validated Caddyfile.bak and the previous
+        env/rolling/state. Later phases: Caddy was given the candidate file, so adopt the candidate
+        for env/rolling/state. Otherwise prepare() would rewrite candidate aliases using the
+        previous state and route to retired containers.
+        """
+        record = self.state.get('switch')
+        if not isinstance(record, dict):
+            return
+        phase, release = record.get('phase'), str(record.get('release'))
+        previous_dir = self.root / 'releases' / release
+        try:
+            before_state = json.loads((previous_dir / 'before-state.json').read_text())
+            base = {key: value for key, value in before_state.items() if key not in ('switch', 'unverified')}
+            if phase in (SWITCH_NONE, SWITCH_CADDY_WRITING, SWITCH_ROLLING_BACK):
+                if phase != SWITCH_NONE:
+                    # rolling-back: the previous Caddyfile of that release; caddy-writing: the backup
+                    # install_caddy took of the previous live file just before writing.
+                    source = (previous_dir / 'before-caddy' if phase == SWITCH_ROLLING_BACK
+                              else self.live_caddy.with_name('Caddyfile.bak'))
+                    backup = source.read_bytes()
+                    if not self._validate_staged(backup):
+                        raise RuntimeError(f'{source.name} failed caddy validate')
+                    if self.live_caddy.read_bytes() != backup:
+                        write_caddy_in_place(self.live_caddy, backup)
+                sources, route = ('before-release.env', 'before-rolling.json'), 'previous'
+                # Still unverified: the live file was replaced or restored after the last verification.
+                state = {**base, 'unverified': True}
+            elif phase in SWITCH_ROUTED_TO_CANDIDATE and record.get('sha') and record.get('services'):
+                sources, route = ('release.env', 'rolling.compose.json'), 'candidate'
+                state = {'sha': record['sha'], 'release': release, 'services': record['services'],
+                         'previous': {key: value for key, value in base.items() if key != 'previous'},
+                         'unverified': True}
+            else:
+                raise RuntimeError('unknown or incomplete switch record')
+            write_atomic(self.env, (previous_dir / sources[0]).read_bytes())
+            write_atomic(self.rolling, (previous_dir / sources[1]).read_bytes())
+            write_private(self.state_path, state)
+        except Exception as error:
+            self.mark_degraded(f'interrupted switch of {release} (phase {phase}) could not be reconciled '
+                               f'({type(error).__name__}: {error}); live Caddyfile, env, rolling and state were '
+                               'not all aligned; verify them manually')
+            raise
+        self.state = state
+        print(f'Reconciled interrupted switch of {release} (phase {phase}): live Caddyfile, env, rolling and '
+              f'state now all name the {route} release (unverified).', flush=True)
+
+    def _previous_state(self):
+        return json.loads((self.directory / 'before-state.json').read_text())
+
+    def _candidate_state(self):
+        previous = {key: value for key, value in self._previous_state().items()
+                    if key not in ('previous', 'switch', 'unverified')}
+        # Not verified: the "already deployed" shortcut must not trust it, but prepare() derives
+        # the next release's aliases from these candidate services, matching the live Caddyfile.
+        return {'sha': self.payload['sha'], 'release': self.release, 'services': self.services,
+                'previous': previous, 'unverified': True}
+
+    def _abort_rollback(self, cause):
+        """Abort before Caddy is switched back, aligning env, rolling and state with the switch phase.
+
+        The recorded phase (not file contents) says which release the live Caddyfile belongs to.
+        Env, rolling and github-state.json are made to match it so that prepare() after a manual
+        marker removal derives aliases from the same release the live Caddyfile names. The marker
+        records what the Caddy process may actually be running and every file that failed to align.
+        """
+        phase = self.switch_phase()
+        failed = []
+        target = None
+        try:
+            if phase in SWITCH_ROUTED_TO_CANDIDATE:
+                target = 'candidate'
+                plan = [(self.env, lambda: (self.directory / 'release.env').read_bytes()),
+                        (self.rolling, lambda: (self.directory / 'rolling.compose.json').read_bytes()),
+                        (self.state_path, lambda: self._state_bytes(self._candidate_state(), phase))]
+            elif phase in (SWITCH_NONE, SWITCH_CADDY_WRITING):
+                target = 'previous'
+                plan = [(self.env, lambda: (self.directory / 'before-release.env').read_bytes()),
+                        (self.rolling, lambda: (self.directory / 'before-rolling.json').read_bytes()),
+                        (self.state_path, lambda: self._state_bytes(
+                            {**self._previous_state(), **({'unverified': True} if phase == SWITCH_CADDY_WRITING else {})},
+                            phase))]
+            else:
+                plan = []
+            for path, source in plan:
+                try:
+                    content = source()
+                    if not path.exists() or path.read_bytes() != content:
+                        if path == self.state_path:
+                            write_atomic(path, content, mode=0o600)
+                        else:
+                            path.write_bytes(content)
+                except Exception as error:
+                    failed.append(f'{path.name} ({type(error).__name__})')
+        except Exception as error:  # defensive: the marker must still be written truthfully
+            failed.append(f'alignment ({type(error).__name__})')
+        names = f'{self.env.name}, {self.rolling.name} and {self.state_path.name}'
+        if target is None:
+            files = (f'switch phase is unknown, so {self.live_caddy.name}, {names} were left as found '
+                     'and may name different releases')
+        elif failed:
+            files = (f'{self.live_caddy.name} belongs to the {target} release; aligning {", ".join(failed)} '
+                     f'failed, so those files may hold either release')
+        else:
+            files = f'{self.live_caddy.name} file, {names} all name the {target} release'
+            if target == 'candidate':
+                files += ('; if this marker is removed manually, the next deployment treats this unverified '
+                          'candidate as its rollback target')
+            if phase == SWITCH_CADDY_WRITING:
+                # The in-place write may have completed, stopped part-way or been undone by recovery.
+                files = (f'{self.live_caddy.name} content is unknown (may be the candidate, partially written '
+                         f'or the previous release) and needs manual verification; {names} name the previous '
+                         'release (state marked unverified)')
+        process = SWITCH_PROCESS.get(phase, 'the Caddy process state is unknown')
+        message = (f'rollback aborted: {cause}; switch phase {phase or "unknown"}: {process}; {files}; '
+                   'Caddy was not switched back by rollback; candidate containers retained')
+        self.mark_degraded(message)
+        return 'degraded rollback: ' + message
+
+    def _state_bytes(self, state, phase):
+        state = {**state, 'switch': self._switch_record(phase, rollback='aborted')}
+        return (json.dumps(state, indent=2) + '\n').encode()
+
     def rollback(self):
-        self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
-        self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
+        # Read and validate the previous Caddyfile before touching anything. Every abort goes
+        # through _abort_rollback, which follows the recorded switch phase.
+        try:
+            previous = (self.directory / 'before-caddy').read_bytes()
+        except Exception as error:
+            print('WARNING: ' + self._abort_rollback(
+                f'previous Caddyfile {self.directory.name}/before-caddy could not be read '
+                f'({type(error).__name__})'), flush=True)
+            raise
+        try:
+            valid = self._validate_staged(previous)
+        except Exception as error:
+            print('WARNING: ' + self._abort_rollback(
+                f'previous Caddyfile could not be validated ({type(error).__name__})'), flush=True)
+            raise
+        if not valid:
+            raise RuntimeError(self._abort_rollback(f'{self.directory / "before-caddy"} failed caddy validate'))
+        try:
+            self.record_rollback()  # previous state + rolling-back record, in one atomic write
+            self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
+            self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
+        except Exception as error:
+            # Re-align env, rolling and state with the recorded forward phase before raising.
+            print('WARNING: ' + self._abort_rollback(
+                f'restoring previous env/rolling/state failed ({type(error).__name__})'), flush=True)
+            raise
         # Restore and verify the old services before changing the public route. This keeps a failed
-        # candidate from being the only service available during rollback.
+        # candidate from being the only service available during rollback. compose() also restores
+        # any reclaimed public-MCP proxy endpoint before returning.
         try:
             self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
                          *self.state['services'].values(), 'worker', candidate=False)
         except Exception as error:
-            # Retain candidate configuration for recovery. The route is unconfirmed: the initial
-            # Caddy reload may have failed before these files were promoted.
-            self.mark_degraded('previous services failed to start; routing unconfirmed; '
-                               'candidate containers retained')
-            self.env.write_bytes((self.directory / 'release.env').read_bytes())
-            self.rolling.write_bytes((self.directory / 'rolling.compose.json').read_bytes())
-            print('Candidate env and rolling configuration restored for manual recovery.', flush=True)
-            raise RuntimeError('degraded rollback: previous services failed to start; routing unconfirmed') from error
+            # Caddy has not been switched back; re-align env/rolling/state with the forward phase.
+            raise RuntimeError(self._abort_rollback('previous services failed to start')) from error
         print('Previous release services are healthy; switching Caddy back.', flush=True)
-        self.live_caddy.write_bytes((self.directory / 'before-caddy').read_bytes())
-        self.reload()
+        restored = f'{self.env.name}, {self.rolling.name} and {self.state_path.name} hold the previous release'
+        try:
+            write_caddy_in_place(self.live_caddy, previous)
+        except Exception:
+            self.mark_degraded(f'rollback Caddyfile write failed; {self.live_caddy.name} may be partially written '
+                               f'({caddy_intent_path(self.live_caddy).name} records the expected content); '
+                               f'{SWITCH_PROCESS.get(self.switch_phase(), "the Caddy process state is unknown")}; '
+                               f'{restored}; candidate containers retained')
+            raise
+        try:
+            self.reload()
+        except Exception:
+            self.mark_degraded(f'rollback reload failed; {self.live_caddy.name} is the previous Caddyfile but '
+                               f'the Caddy process may still run the candidate; {restored}; '
+                               'candidate containers retained')
+            raise
         try:
             self.verify(expected=self.state.get('sha', '')[:12])
+            if 'public-mcp' in self.state['services']:
+                self.verify_public_mcp()
             self.update_monitoring(self.state['services'])
         except Exception:
+            self.mark_degraded(f'rollback verification or monitoring failed; Caddy was reloaded with the previous '
+                               f'Caddyfile; {restored}; candidate containers retained')
             print('WARNING: rollback verification or monitoring failed; candidate containers retained.', flush=True)
+            raise
+        try:
+            write_private(self.state_path, self._previous_state())  # verified: clear the rolling-back record
+        except Exception:
+            self.mark_degraded(f'rollback verified but clearing the rolling-back record in {self.state_path.name} '
+                               f'failed; {restored}; candidate containers retained')
             raise
         candidates = []
         for service in self.services.values():
@@ -789,6 +1649,9 @@ class Deployment:
             if not drained:
                 print('WARNING: rollback drain failed; stopping candidates with a 90s grace period.', flush=True)
             self.compose('stop', '--timeout', '90', *self.services.values())
+            # The previous release remains on its original fixed address; remove only the
+            # candidate service containers after the old route has been verified.
+            self.compose('rm', '--force', '--stop', *self.services.values())
         print('Previous routes and worker restored; database was not rolled back.', flush=True)
 
     def cleanup(self, previous):
@@ -805,7 +1668,7 @@ class Deployment:
             labels = container['Config'].get('Labels') or {}
             service = labels.get('com.docker.compose.service', '')
             if (labels.get('com.docker.compose.project') != self.config['project']
-                    or not re.fullmatch(r'(api|web|mcp|admin)(?:_[A-Za-z0-9_]+)?', service)
+                    or not re.fullmatch(APPLICATION_SERVICE_PATTERN, service)
                     or service in current):
                 continue
             retired.append((container, service))
@@ -879,7 +1742,9 @@ class Deployment:
         if self.degraded_path.exists():
             raise RuntimeError('deployment blocked by persistent degraded marker. ' + self.recovery_instructions())
         self.degraded_marker_written = False
-        if self.state.get('sha') == self.payload['sha']:
+        self.reconcile_interrupted_switch()
+        self.validate_live_caddy()
+        if self.state.get('sha') == self.payload['sha'] and not self.state.get('unverified'):
             self.services = self.state['services']
             self.ensure_live_manifest()
             self.verify()
@@ -890,6 +1755,10 @@ class Deployment:
         # This read-only gate runs before image pulls, release directories, migrations or Caddy
         # changes. A second web replica therefore fails cleanly when the host cannot overlap it.
         self.capacity_gate()
+        # The production receiver always has a host .env. Lightweight unit-test doubles may
+        # omit the host installation files and exercise the rest of the rollout in isolation.
+        if (self.root / '.env').is_file():
+            self.public_mcp_preflight()
         with tempfile.TemporaryDirectory() as auth:
             token = self.payload.get('registry_token', '')
             if token:
@@ -929,12 +1798,17 @@ class Deployment:
         print('All candidates healthy and warmed; switching routes.', flush=True)
         try:
             with phase('Switching routes and worker'):
+                self.record_switch(SWITCH_NONE)
                 # Preserve the inode because Caddy bind-mounts this file.
-                self.live_caddy.write_bytes((self.directory / 'Caddyfile.next').read_bytes())
+                self.install_caddy((self.directory / 'Caddyfile.next').read_bytes(),
+                                   before_write=lambda: self.record_switch(SWITCH_CADDY_WRITING))
+                self.record_switch(SWITCH_CADDY_WRITTEN)
                 self.reload()
+                self.record_switch(SWITCH_CADDY_RELOADED)
                 self.verify()
                 self.env.write_bytes((self.directory / 'release.env').read_bytes())
                 self.rolling.write_bytes((self.directory / 'rolling.compose.json').read_bytes())
+                self.record_switch(SWITCH_CONFIG_PROMOTED)
                 self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180', 'worker', candidate=False)
                 self.verify()
                 self.update_monitoring(self.services)

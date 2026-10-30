@@ -329,6 +329,7 @@ func TestClientIPOnlyTrustsConfiguredProxy(t *testing.T) {
 		{"direct ignores headers", "192.0.2.1:1234", "203.0.113.1", "203.0.113.2", "192.0.2.1", nil},
 		{"proxy forwards first client", "172.30.80.2:1234", "203.0.113.1", "", "203.0.113.1", []string{"172.30.80.2"}},
 		{"proxy forwards second client", "172.30.80.2:1234", "203.0.113.2", "", "203.0.113.2", []string{"172.30.80.2"}},
+		{"public MCP forwards client", "172.30.80.3:1234", "203.0.113.3", "", "203.0.113.3", []string{"172.30.80.3"}},
 		{"untrusted peer ignores headers", "172.30.80.3:1234", "203.0.113.1", "", "172.30.80.3", []string{"172.30.80.2"}},
 		{"spoofed prefix ignored", "172.30.80.2:1234", "198.51.100.5, 203.0.113.1", "", "203.0.113.1", []string{"172.30.80.2"}},
 		{"malformed forwarded ignored", "172.30.80.2:1234", "bad-address", "203.0.113.2", "172.30.80.2", []string{"172.30.80.2"}},
