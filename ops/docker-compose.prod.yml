@@ -59,7 +59,7 @@ services:
       <<: *backend-env
       CACHE_REDIS_URL: redis://web-cache:6379/1
       AGENT_GATEWAY_SECRET: ${AGENT_GATEWAY_SECRET:?Configure shared API/MCP gateway secret}
-      TRUSTED_PROXIES: ${CADDY_PROXY_IP:-172.30.80.2},${SSR_PROXY_SUBNET:-172.30.81.0/24}
+      TRUSTED_PROXIES: ${CADDY_PROXY_IP:-172.30.80.2},${PUBLIC_MCP_PROXY_IP:-172.30.80.3}/32,${PUBLIC_MCP_PROXY_IP_ALT:-172.30.80.4}/32,${SSR_PROXY_SUBNET:-172.30.81.0/24}
       # Usage stats take the country from CF-IPCountry only on requests Caddy forwarded (Caddy drops it from
       # peers outside Cloudflare). Without this every country is unknown.
       USAGE_COUNTRY_TRUSTED_PROXIES: ${CADDY_PROXY_IP:-172.30.80.2}
@@ -107,6 +107,40 @@ services:
     deploy:
       resources:
         limits: {memory: 512M}
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ['CMD', 'python', '-I', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/healthz', timeout=2).close()"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+  public-mcp:
+    image: ${MCP_IMAGE:?Build or pull MCP_IMAGE}
+    restart: unless-stopped
+    user: '10001:10001'
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=64m']
+    security_opt: ['no-new-privileges:true']
+    cap_drop: [ALL]
+    entrypoint: ['opennavo-public-mcp']
+    environment:
+      # The public MCP process has no gateway secret, token, OAuth issuer or agent API setting.
+      OPENNAVO_PUBLIC_API_BASE: http://api-proxy:8080/api/v1
+      OPENNAVO_PUBLIC_MCP_HOST: 0.0.0.0
+      OPENNAVO_PUBLIC_MCP_PORT: '8790'
+      OPENNAVO_PUBLIC_MCP_PATH: /mcp
+      OPENNAVO_PUBLIC_MCP_TRUSTED_PROXIES: '["${CADDY_PROXY_IP:-172.30.80.2}/32"]'
+      OPENNAVO_PUBLIC_MCP_RATE_LIMIT: '60'
+      OPENNAVO_PUBLIC_MCP_RATE_WINDOW_SECONDS: '60'
+    networks:
+      proxy:
+        aliases: [public-mcp-proxy]
+        ipv4_address: ${PUBLIC_MCP_PROXY_IP:-172.30.80.3}
+    deploy:
+      resources:
+        limits: {memory: 256M}
     depends_on:
       api: {condition: service_healthy}
     healthcheck:
@@ -225,6 +259,7 @@ services:
       api: {condition: service_healthy}
       web: {condition: service_started}
       mcp: {condition: service_healthy}
+      public-mcp: {condition: service_healthy}
   redis:
     image: ${REDIS_IMAGE:-opennavo-redis:local}
     command: ['redis-server', '--appendonly', 'yes', '--maxmemory', '1024mb', '--maxmemory-policy', 'noeviction']

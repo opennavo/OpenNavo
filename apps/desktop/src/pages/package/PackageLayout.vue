@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { disabledByHomebrew, recentReturnPath, withRecentReturn } from '@opennavo/shared';
+import { packageInstallState, recentReturnPath, withRecentReturn } from '@opennavo/shared';
 import { computed } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { OnBreadcrumb, OnPackageNotice, OnSkeleton, OnTabs } from '@opennavo/ui';
+import { OnBreadcrumb, OnEmpty, OnPackageNotice, OnSkeleton, OnTabs } from '@opennavo/ui';
 import RequestError from '@/components/common/RequestError.vue';
 import DetailHeader from '@/components/package/DetailHeader.vue';
 import DetailStats from '@/components/package/DetailStats.vue';
@@ -18,7 +18,7 @@ const { t } = useI18n();
 const { pick } = useAppLocale();
 const route = useRoute();
 const context = providePackage(props);
-const { detail, local, releaseStats, error } = context;
+const { detail, local, releaseStats, error, loading } = context;
 
 type Tab = 'overview' | 'versions' | 'dependencies' | 'details';
 const tab = computed<Tab>(() => {
@@ -77,7 +77,7 @@ const breadcrumb = computed(() =>
 );
 
 const notice = computed(() => {
-  const value = detail.value;
+  const value = detail.value ?? local.value;
   // A link app Homebrew later added: point to the one-click install page.
   const adopted = (value?.link ?? local.value?.link)?.adoptedByCask;
   if (props.kind === 'link' && adopted)
@@ -87,27 +87,27 @@ const notice = computed(() => {
       replacement: { kind: 'cask' as const, token: adopted }
     };
   if (!value) return null;
-  if (value.disable && disabledByHomebrew(value))
-    return {
-      tone: 'danger' as const,
-      text: t('package.disabledNotice', { reason: value.disable.reason ?? t('package.noReason') }),
-      replacement: value.disable.replacement
-    };
-  if (value.deprecation)
-    return {
-      tone: 'warning' as const,
-      text: t('package.deprecatedNotice', {
-        reason: value.deprecation.reason ?? t('package.noReason')
-      }),
-      replacement: value.deprecation.replacement
-    };
-  // Paused only by OpenNavo's 90-day rule: Homebrew still offers and installs the app.
-  if (value.disable)
-    return { tone: 'warning' as const, text: t('package.staleNotice'), replacement: value.disable.replacement };
-  return null;
+  const state = packageInstallState(value);
+  if (state === 'active') return null;
+  const lifecycle = state === 'deprecated' ? detail.value?.deprecation : detail.value?.disable;
+  const reason = lifecycle?.reason ?? detail.value?.homebrewStatus?.reason ?? t('package.noReason');
+  return {
+    tone: state === 'disabled' ? ('danger' as const) : ('warning' as const),
+    text: t(
+      state === 'disabled'
+        ? 'package.disabledNotice'
+        : state === 'deprecated'
+          ? 'package.deprecatedNotice'
+          : 'package.staleNotice',
+      { reason }
+    ),
+    replacement: lifecycle?.replacement
+  };
 });
 
 const offline = computed(() => Boolean(error.value) && !detail.value);
+// A private package that is gone from the public catalog and not installed has no header to show.
+const unavailable = computed(() => !loading.value && !detail.value && !local.value && !error.value);
 </script>
 
 <template>
@@ -118,6 +118,7 @@ const offline = computed(() => Boolean(error.value) && !detail.value);
       <!-- Only apps have details pages; command-line alternatives show names only (ADR-018). -->
       <OnPackageNotice
         v-if="notice"
+        data-testid="package-lifecycle-banner"
         :tone="notice.tone"
         :text="notice.text"
         :replacement-label="
@@ -140,6 +141,12 @@ const offline = computed(() => Boolean(error.value) && !detail.value);
       <RouterView />
     </template>
     <RequestError v-else-if="error" :error="error" />
+    <OnEmpty
+      v-else-if="unavailable"
+      data-testid="package-unavailable"
+      :title="t('package.notFound')"
+      icon="lucide:package"
+    />
     <div v-else class="flex flex-col gap-14px" aria-hidden="true">
       <OnSkeleton height="146px" radius="huge" />
       <OnSkeleton height="86px" radius="big" />

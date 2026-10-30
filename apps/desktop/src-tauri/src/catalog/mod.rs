@@ -496,6 +496,23 @@ pub fn search(
     query: &SearchQuery,
     now: i64,
 ) -> Result<Page<SearchHit>, AppError> {
+    search_inner(database, query, Some(now))
+}
+
+/// Same ranking as [`search`] but never records the query in `search_history`.
+/// Used by read-only callers such as local MCP.
+pub fn search_without_history(
+    database: &Database,
+    query: &SearchQuery,
+) -> Result<Page<SearchHit>, AppError> {
+    search_inner(database, query, None)
+}
+
+fn search_inner(
+    database: &Database,
+    query: &SearchQuery,
+    now: Option<i64>,
+) -> Result<Page<SearchHit>, AppError> {
     let q = query.q.trim().to_lowercase();
     if q.chars().count() > 64 || query.limit > 200 || q.chars().any(char::is_control) {
         return Err(AppError::new("E_INVALID_ARG", "search_query"));
@@ -521,8 +538,10 @@ pub fn search(
             hits.push(SearchHit{item,score,matched_name});
         }
         hits.sort_by(|a,b|b.score.total_cmp(&a.score).then_with(||a.item.token.cmp(&b.item.token)));let total=hits.len() as u32;
+        if let Some(now)=now{
         connection.execute("INSERT INTO search_history(q,last_used_at,count) VALUES(?1,?2,1) ON CONFLICT(q) DO UPDATE SET last_used_at=excluded.last_used_at,count=count+1",params![query.q.trim(),now])?;
         connection.execute("DELETE FROM search_history WHERE q NOT IN(SELECT q FROM search_history ORDER BY last_used_at DESC,q LIMIT 20)",[])?;
+        }
         Ok(Page{total,items:hits.into_iter().skip(query.offset as usize).take(query.limit as usize).collect()})
     })
 }

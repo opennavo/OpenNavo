@@ -1,9 +1,11 @@
 pub mod app;
 pub mod catalog;
+pub mod deeplink;
 pub mod env;
 pub mod firewall;
 pub mod library;
 pub mod maintenance;
+pub mod mcp;
 pub mod mirror;
 pub mod permissions;
 pub mod security;

@@ -95,7 +95,7 @@ sh ops/migrate.sh
 docker compose -f ops/docker-compose.prod.yml --profile ops run --rm storage-init
 docker compose -f ops/docker-compose.prod.yml --profile ops run --rm seed
 
-docker compose -f ops/docker-compose.prod.yml up -d --wait api worker web mcp caddy
+docker compose -f ops/docker-compose.prod.yml up -d --wait api worker web mcp public-mcp caddy
 docker compose -f ops/docker-compose.prod.yml ps
 ```
 
@@ -226,7 +226,7 @@ export COMPOSE_ENV_FILES="$HOME/.config/opennavo/production.env"
 sh ops/backup.sh
 python3 ops/rollout.py
 python3 ops/rollout.py --apply
-docker compose -f ops/docker-compose.prod.yml up -d --wait --no-deps web mcp caddy
+docker compose -f ops/docker-compose.prod.yml up -d --wait --no-deps web mcp public-mcp caddy
 ```
 
 The rollout requires two healthy API replicas, applies migrations/permissions, replaces APIs one at a time using a temporary third replica, then updates the worker. Install the matching admin bundle separately. A failed migration or incompatible schema may require a planned database restore, not merely an old image. Do not automatically run down migrations on production. For image-only rollback with a compatible schema, restore the previous tags and admin bundle, then repeat the rollout and frontend/MCP update. Keep the old backup until post-upgrade checks pass.
@@ -234,6 +234,24 @@ The rollout requires two healthy API replicas, applies migrations/permissions, r
 ## Verification limits
 
 `python3 ops/lint.py` and the deployment unit tests validate configuration without deploying. `ops/verify-production.py` creates a fixed isolated verification stack; it is not a command for an existing production deployment. Browser verification must use browser-use CLI. Run restore and full-stack checks on a disposable host before relying on this configuration in production.
+
+The deployment configuration tests require the Docker CLI and its Compose v2 plugin because they run `docker compose config`; when Docker is unavailable, `ops/test_mcp_deployment.py` skips with that prerequisite in its reason. Install Docker Engine or Docker Desktop with Compose before expecting those tests to execute.
+
+The H1 public-MCP reclaim integration test runs separately from the fast
+`test_*.py` suite:
+
+```sh
+python3 -m unittest discover -s ops -p 'integration_test_*.py' -v
+```
+
+It requires a reachable Docker daemon and Compose, and skips cleanly when either
+is unavailable. It uses `busybox:1.37.0` (pulled if necessary), a temporary bridge
+with an unused subnet, and uniquely labelled containers with no published host
+ports. It disconnects a stopped rollback target exactly as the receiver's reclaim
+step does, starts a candidate, invokes the receiver's real rollback/Compose path,
+and checks the restored fixed IP and HTTP reachability from another container.
+Caddy reload, MCP JSON-RPC and monitoring are stubbed in this network fixture.
+Test containers, the bridge and temporary files are removed even on failure.
 
 ## GitHub production and desktop releases
 
@@ -265,6 +283,19 @@ paths/checksum, preserves old hashed assets, takes and validates a PostgreSQL
 backup, applies migrations and grants, starts healthy candidates, and switches
 Caddy routes. It then updates the worker and verifies routes again. A failed
 switch restores old routes and the worker; it never runs down migrations.
+The Caddy bind mount is the host file named by `caddy_file`, so the receiver
+copies that live file into each release and rewrites only release aliases. Before
+switching, it writes a durable `Caddyfile.bak` next to the live file and validates
+a staged copy of `Caddyfile.next`. It then writes the live file in place and
+validates/reloads Caddy. A validation, write or reload failure restores the live
+file from `Caddyfile.bak`; the release's `before-caddy` snapshot is also retained.
+For public MCP it maintains a marker-delimited route in the unique
+`WEB_DOMAIN` site block, immediately before the catch-all web proxy; a missing
+or ambiguous block aborts preparation before any switch. The post-switch check
+then sends streamable HTTP JSON-RPC `initialize` and `tools/list` requests
+through Caddy and requires at least one tool. Keep `public_mcp_host` (the
+`WEB_DOMAIN` host used with `local_origin`) in the receiver configuration when
+the homepage check does not identify it automatically.
 Schema changes must remain compatible with the previous application during the
 rollout. After both route checks and the worker update succeed, the receiver stops
 all retired application containers, retains at most one stopped previous release

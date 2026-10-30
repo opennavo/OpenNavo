@@ -43,14 +43,12 @@ test('English details have English UI/body and complete SEO/hreflang', async ({ 
   await expect(install).toContainText('brew install --cask');
   await expect(install).toContainText('visual-studio-code');
 
-  // Quick facts keep aliases in their original languages; the rest of the English body (summary,
-  // notes, install stats, similar apps) must not contain Chinese.
-  const body = await page.locator('main').evaluate(element => {
-    const copy = element.cloneNode(true) as HTMLElement;
-    copy.querySelector('[data-fact="names"]')?.remove();
-    return copy.textContent ?? '';
-  });
-  expect(body).not.toMatch(CJK);
+  // The redesigned spec card filters aliases by page locale: English pages keep only Latin aliases,
+  // while the rest of the English body stays English (checked by the regression below).
+  const spec = page.getByTestId('package-spec-card');
+  await expect(spec).toContainText('Also known as');
+  await expect(spec).toContainText('vscode');
+  await expect(spec).not.toContainText('VS Code 编辑器');
 
   const head = await headInfo(page);
   expect(head.description).toContain('Visual Studio Code');
@@ -69,6 +67,29 @@ test('English details have English UI/body and complete SEO/hreflang', async ({ 
     'pt-BR': '/pt/apps/visual-studio-code',
     ru: '/ru/apps/visual-studio-code'
   });
+});
+
+test('English spec card hides non-Latin aliases without leaking them elsewhere', async ({ page }) => {
+  await gotoReady(page, '/apps/visual-studio-code');
+
+  const spec = page.getByTestId('package-spec-card');
+  await expect(spec).toContainText('Also known as');
+  await expect(spec).toContainText('vscode');
+  await expect(spec).not.toContainText('VS Code 编辑器');
+
+  // Quick facts still keep aliases in their original script, so drop their rows before checking that
+  // nothing else on the English page carries them.
+  const body = await page.locator('main').evaluate(element => {
+    const copy = element.cloneNode(true) as HTMLElement;
+    for (const label of Array.from(copy.querySelectorAll('dt'))) {
+      if (label.textContent?.trim() === 'Also known as') {
+        label.nextElementSibling?.remove();
+        label.remove();
+      }
+    }
+    return copy.textContent ?? '';
+  });
+  expect(body).not.toMatch(CJK);
 });
 
 test('Every English detail tab has an English title', async ({ page }) => {

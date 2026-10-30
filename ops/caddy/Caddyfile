@@ -46,6 +46,21 @@
 	handle @internalAgent {
 		respond 404
 	}
+	# BEGIN opennavo public-mcp
+	@publicMcp path /mcp
+	handle @publicMcp {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy public-mcp-proxy:8790 {
+			flush_interval -1
+		}
+	}
+	@publicMcpOther path /mcp/*
+	handle @publicMcpOther {
+		respond 404
+	}
+	# END opennavo public-mcp
 	import security-web
 	encode zstd gzip
 	reverse_proxy {
