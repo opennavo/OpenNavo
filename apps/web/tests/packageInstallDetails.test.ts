@@ -111,24 +111,23 @@ it.each([
   expect(page.querySelector('[data-testid="package-install-notice"]')).not.toBeNull();
 });
 
-it('hides install, uninstall and Deep clean when Homebrew disabled the package', async () => {
+// On mobile (#69) the install command + lifecycle notice live in PackageHeader, not PackageInstall.
+// These cases still cover the #66 product fix: disabled packages must not mount uninstall / Deep clean.
+it('hides uninstall and Deep clean on the overview when Homebrew disabled the package', async () => {
   const value = {
     ...pkg(),
     homebrewStatus: { state: 'disabled', reason: 'discontinued', date: null },
     disabled: true
   } as PackagePage;
   const page = await render(PackageInstall, { pkg: value });
-  expect(page.textContent?.includes('brew install --cask iterm2')).toBe(false);
   expect(page.querySelector('[data-testid="package-uninstall"]')).toBeNull();
   expect(page.querySelector('[data-testid="package-zap"]')).toBeNull();
   expect(page.textContent?.includes('brew uninstall')).toBe(false);
-  expect(page.textContent).toContain('Homebrew has disabled this package: discontinued');
+  expect(page.textContent?.includes('brew install --cask iterm2')).toBe(false);
 });
 
 it('keeps uninstall and Deep clean on the overview for an active package', async () => {
   const page = await render(PackageInstall, { pkg: pkg() });
-  expect(page.querySelector('[data-testid="package-install-command"]')).not.toBeNull();
-  expect(page.textContent).toContain('brew install --cask iterm2');
   expect(page.querySelector('[data-testid="package-uninstall"]')).not.toBeNull();
   expect(page.querySelector('[data-testid="package-zap"]')).not.toBeNull();
   expect(page.textContent).toContain('brew uninstall --cask iterm2');
