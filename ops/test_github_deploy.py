@@ -807,8 +807,8 @@ class DeployTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             obj = self._caddy_obj(root, live=GOOD_CADDY)
             newer = GOOD_CADDY + b'# newer\n'
-            real = deploy.write_caddy_in_place
             calls = []
+            real = deploy.write_caddy_in_place
             def partial(path, content):
                 calls.append(content)
                 if len(calls) == 1:
@@ -845,7 +845,6 @@ class DeployTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             obj = self._caddy_obj(root, live=TRUNCATED_CADDY)
             newer = GOOD_CADDY + b'# newer\n'
-            real = deploy.write_caddy_in_place
             def partial(path, content):
                 deploy.write_atomic(deploy.caddy_intent_path(path), b'0' * 64 + b'\n')
                 path.write_bytes(b'partial')
@@ -856,56 +855,103 @@ class DeployTests(unittest.TestCase):
                     self.assertRaisesRegex(RuntimeError, 'invalid too'):
                 obj.install_caddy(newer)
             self.assertEqual(obj.live_caddy.read_bytes(), b'partial')
-            del real
-    def _promoted_candidate(self, root, before_caddy):
-        """A deployment whose forward switch promoted candidate env, rolling and Caddy, then failed."""
+    def _promoted_candidate(self, root, before_caddy, promote_env=True):
+        """A deployment whose forward switch really installed Caddyfile.next on live and then failed.
+
+        apply() promotes env/rolling only after the first verify(); promote_env=False models a
+        failure in reload() or that first verify(), where env/rolling still hold the previous release.
+        """
         obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
         self._staged.stop()
-        candidate_caddy = obj.live_caddy.read_bytes()
-        obj.env.write_bytes((obj.directory / 'release.env').read_bytes())
-        obj.rolling.write_bytes((obj.directory / 'rolling.compose.json').read_bytes())
+        candidate_caddy = (obj.directory / 'Caddyfile.next').read_bytes()
+        self.assertNotEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+        deploy.write_caddy_in_place(obj.live_caddy, candidate_caddy)
+        if promote_env:
+            obj.env.write_bytes((obj.directory / 'release.env').read_bytes())
+            obj.rolling.write_bytes((obj.directory / 'rolling.compose.json').read_bytes())
         (obj.directory / 'before-caddy').write_bytes(before_caddy)
         obj.compose = unittest.mock.Mock()
         obj.degraded_marker_written = False
-        snapshot = {path: path.read_bytes() for path in (obj.live_caddy, obj.env, obj.rolling)}
-        return obj, candidate_caddy, snapshot
+        return obj, candidate_caddy
 
-    def test_rollback_aborts_before_any_change_when_before_caddy_cannot_be_trusted(self):
-        # Forward verify() failed; rollback then finds before-caddy invalid, or docker exec exits
-        # 125 / times out while validating it.
-        for mode, before_caddy, error in [('ok', TRUNCATED_CADDY, RuntimeError),
-                                          ('daemon', GOOD_CADDY, deploy.CaddyValidatorUnavailable),
-                                          ('timeout', GOOD_CADDY, deploy.CaddyValidatorUnavailable)]:
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
-                obj, candidate_caddy, snapshot = self._promoted_candidate(root, before_caddy)
-                fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY), validator=mode)
-                with patch.object(deploy, 'command', side_effect=fake), \
-                        contextlib.redirect_stdout(io.StringIO()) as out:
-                    with self.assertRaises(error) as raised:
+    def test_rollback_abort_aligns_env_and_rolling_with_actual_route(self):
+        # Every pre-switch abort path, with env/rolling promoted or not yet promoted.
+        good = GOOD_CADDY
+        aborts = {
+            'invalid before-caddy': (TRUNCATED_CADDY, 'ok', None, RuntimeError),
+            'validator exit 125': (good, 'daemon', None, deploy.CaddyValidatorUnavailable),
+            'validator timeout': (good, 'timeout', None, deploy.CaddyValidatorUnavailable),
+            'before-caddy unreadable': (good, 'ok', 'read', OSError),
+            'docker cp failure': (good, 'ok', 'cp', RuntimeError),
+        }
+        for label, (before_caddy, mode, inject, error) in aborts.items():
+            for promoted in (True, False):
+                with self.subTest(label, promoted=promoted), tempfile.TemporaryDirectory() as root:
+                    obj, candidate_caddy = self._promoted_candidate(root, before_caddy, promote_env=promoted)
+                    fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY), validator=mode)
+                    def command(args):
+                        if inject == 'cp' and args[:2] == ['docker', 'cp']:
+                            raise RuntimeError('command failed: docker (exit 1); inspect privately on host')
+                        return fake(args)
+                    if inject == 'read':
+                        (obj.directory / 'before-caddy').unlink()
+                    with patch.object(deploy, 'command', side_effect=command), \
+                            contextlib.redirect_stdout(io.StringIO()) as out, self.assertRaises(error) as raised:
                         obj.rollback()
-                # env, rolling overlay and Caddy all remain on the candidate: a consistent state.
-                self.assertEqual({path: path.read_bytes() for path in snapshot}, snapshot)
-                self.assertIn('were not changed by rollback', str(raised.exception) + out.getvalue())
-                obj.compose.assert_not_called()
-                self.assertFalse(any(event[0] == 'signal' for event in fake.events))
-                self.assertTrue(obj.degraded_path.exists())
-                with self.assertRaisesRegex(RuntimeError, 'blocked by persistent degraded marker'):
-                    obj.apply(None)
-                # Even if an operator deletes the marker, the next prepare() starts from the
-                # candidate overlay that Caddy really routes to, not a previous/candidate mix.
-                obj.degraded_path.unlink()
-                live_overlay = obj.rolling.read_bytes()
-                retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
-                with patch.object(deploy, 'command', return_value='fixture-container'):
-                    retry.prepare(archive())
-                self.assertEqual((retry.directory / 'before-rolling.json').read_bytes(), live_overlay)
-                self.assertEqual((retry.directory / 'before-caddy').read_bytes(), candidate_caddy)
-                self._staged.start()
+                    # Route unchanged (still the candidate), and env/rolling now agree with it.
+                    self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+                    self.assertEqual(obj.env.read_bytes(), (obj.directory / 'release.env').read_bytes())
+                    self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'rolling.compose.json').read_bytes())
+                    reason = json.loads(obj.degraded_path.read_text())['reason']
+                    self.assertIn('all point at the candidate release', reason)
+                    self.assertIn('all point at the candidate release', str(raised.exception) + out.getvalue())
+                    obj.compose.assert_not_called()
+                    self.assertFalse(any(event[0] == 'signal' for event in fake.events))
+                    with self.assertRaisesRegex(RuntimeError, 'blocked by persistent degraded marker'):
+                        obj.apply(None)
+                    # After a manual marker removal, prepare() clones the overlay Caddy routes to.
+                    obj.degraded_path.unlink()
+                    retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+                    with patch.object(deploy, 'command', return_value='fixture-container'):
+                        retry.prepare(archive())
+                    self.assertEqual((retry.directory / 'before-rolling.json').read_bytes(),
+                                     (obj.directory / 'rolling.compose.json').read_bytes())
+                    self.assertEqual((retry.directory / 'before-caddy').read_bytes(), candidate_caddy)
+                    self._staged.start()
+
+    def test_rollback_abort_with_route_still_previous_keeps_previous_env(self):
+        # install_caddy failed before changing live: route, env and rolling are all previous.
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+            self._staged.stop()
+            previous_caddy = obj.live_caddy.read_bytes()
+            env, rolling = obj.env.read_bytes(), obj.rolling.read_bytes()
+            obj.compose = unittest.mock.Mock()
+            obj.degraded_marker_written = False
+            fake = FakeCaddy(obj.live_caddy, validator='daemon')
+            with patch.object(deploy, 'command', side_effect=fake), contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaises(deploy.CaddyValidatorUnavailable):
+                obj.rollback()
+            self.assertEqual((obj.live_caddy.read_bytes(), obj.env.read_bytes(), obj.rolling.read_bytes()),
+                             (previous_caddy, env, rolling))
+            self.assertIn('all point at the previous release', json.loads(obj.degraded_path.read_text())['reason'])
+
+    def test_rollback_abort_with_unknown_route_reports_files_as_found(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = self._promoted_candidate(root, GOOD_CADDY, promote_env=False)
+            obj.live_caddy.write_bytes(b'partial')
+            env = obj.env.read_bytes()
+            fake = FakeCaddy(obj.live_caddy, validator='timeout')
+            with patch.object(deploy, 'command', side_effect=fake), contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaises(deploy.CaddyValidatorUnavailable):
+                obj.rollback()
+            self.assertEqual(obj.env.read_bytes(), env)
+            self.assertIn('matches neither', json.loads(obj.degraded_path.read_text())['reason'])
 
     def test_rollback_env_or_rolling_write_failure_marks_degraded_and_blocks_next_apply(self):
         for failing in ['env', 'rolling']:
             with self.subTest(failing=failing), tempfile.TemporaryDirectory() as root:
-                obj, candidate_caddy, _ = self._promoted_candidate(root, GOOD_CADDY)
+                obj, candidate_caddy = self._promoted_candidate(root, GOOD_CADDY)
                 fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY))
                 target = getattr(obj, failing)
                 original = Path.write_bytes
@@ -926,7 +972,7 @@ class DeployTests(unittest.TestCase):
 
     def test_rollback_with_real_validation_and_valid_before_caddy_succeeds(self):
         with tempfile.TemporaryDirectory() as root:
-            obj, candidate_caddy, _ = self._promoted_candidate(root, GOOD_CADDY)
+            obj, candidate_caddy = self._promoted_candidate(root, GOOD_CADDY)
             fake = FakeCaddy(obj.live_caddy, good=(candidate_caddy, GOOD_CADDY))
             obj.verify = unittest.mock.Mock()
             obj.verify_public_mcp = unittest.mock.Mock()
@@ -982,12 +1028,6 @@ class DeployTests(unittest.TestCase):
         obj.config = {'local_origin': 'http://127.0.0.1:80',
                       'public_mcp_host': 'opennavo.com', 'checks': []}
         responses = []
-
-        class Response(io.BytesIO):
-            status = 200
-            def __init__(self, body, session=None):
-                super().__init__(body)
-                self.headers = {'Mcp-Session-Id': session} if session else {}
 
         def urlopen(request, timeout):
             responses.append(request)

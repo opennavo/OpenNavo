@@ -1370,30 +1370,64 @@ class Deployment:
                 time.sleep(2)
         raise RuntimeError('post-deployment route checks failed: ' + str(last_error))
 
+    def _abort_rollback_consistently(self, cause, before_caddy=None):
+        """Abort before switching Caddy back: align env/rolling with where Caddy actually routes.
+
+        apply() installs Caddy, reloads and verifies before promoting env/rolling, so on a forward
+        failure the live route and env/rolling may point at different releases. Make them agree
+        with the route (so prepare() after a manual marker removal clones the right overlay), and
+        record exactly which release each file holds.
+        """
+        live = self.live_caddy.read_bytes()
+        if live == (self.directory / 'Caddyfile.next').read_bytes():
+            route, env_source, rolling_source = 'candidate', 'release.env', 'rolling.compose.json'
+        elif before_caddy is not None and live == before_caddy:
+            route, env_source, rolling_source = 'previous', 'before-release.env', 'before-rolling.json'
+        else:
+            route = env_source = rolling_source = None
+        if route:
+            try:
+                for target, source in ((self.env, env_source), (self.rolling, rolling_source)):
+                    content = (self.directory / source).read_bytes()
+                    if target.read_bytes() != content:
+                        target.write_bytes(content)
+                state = (f'{self.live_caddy.name}, {self.env.name} and {self.rolling.name} '
+                         f'all point at the {route} release')
+            except Exception as error:
+                state = (f'{self.live_caddy.name} points at the {route} release but aligning '
+                         f'{self.env.name}/{self.rolling.name} failed ({type(error).__name__}); '
+                         f'they may hold either release')
+        else:
+            state = (f'{self.live_caddy.name} matches neither the candidate nor the previous Caddyfile; '
+                     f'{self.env.name}/{self.rolling.name} were left as found')
+        self.mark_degraded(f'rollback aborted: {cause}; {state}; Caddy was not switched by rollback; '
+                           'candidate containers retained')
+        return f'degraded rollback: {cause}; {state}; Caddy was not switched by rollback.'
+
     def rollback(self):
-        # Read and validate the previous Caddyfile before touching anything. If that fails, env,
-        # rolling overlay and Caddy all stay on the candidate (consistent), so even a manually
-        # removed marker cannot make prepare() mix previous env with candidate routing.
-        untouched = f'{self.live_caddy}, {self.env.name} and {self.rolling.name} were not changed by rollback'
+        # Read and validate the previous Caddyfile before touching anything; on failure make
+        # env/rolling agree with the actual route instead of assuming where each file points.
         try:
             previous = (self.directory / 'before-caddy').read_bytes()
+        except Exception as error:
+            print('WARNING: ' + self._abort_rollback_consistently(
+                f'previous Caddyfile could not be read ({type(error).__name__})'), flush=True)
+            raise
+        try:
             valid = self._validate_staged(previous)
-        except Exception:
-            self.mark_degraded('previous Caddyfile could not be validated; env, rolling and routing '
-                               'left on candidate; candidate containers retained')
-            print(f'WARNING: rollback aborted before any change; {untouched}.', flush=True)
+        except Exception as error:
+            print('WARNING: ' + self._abort_rollback_consistently(
+                f'previous Caddyfile could not be validated ({type(error).__name__})', previous), flush=True)
             raise
         if not valid:
-            self.mark_degraded('previous Caddyfile is invalid; env, rolling and routing left on candidate; '
-                               'candidate containers retained')
-            raise RuntimeError(f'degraded rollback: {self.directory / "before-caddy"} failed caddy validate; '
-                               f'{untouched}.')
+            raise RuntimeError(self._abort_rollback_consistently(
+                f'{self.directory / "before-caddy"} failed caddy validate', previous))
         try:
             self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
             self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
         except Exception:
             self.mark_degraded('rollback could not restore previous env or rolling overlay; '
-                               'routing still on candidate; candidate containers retained')
+                               'Caddy not switched by rollback; candidate containers retained')
             print(f'WARNING: rollback failed writing {self.env.name}/{self.rolling.name}; they may be partially '
                   f'restored; {self.live_caddy} was not changed by rollback.', flush=True)
             raise
