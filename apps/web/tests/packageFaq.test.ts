@@ -216,6 +216,9 @@ describe('App questions', () => {
       code
     );
     expect(disabled[0]!.answer).not.toContain('desktop.docker.com');
+    // Disabled packages get no brew command answers, matching the hidden install/uninstall blocks.
+    expect(disabled.some(item => item.key === 'uninstall')).toBe(false);
+    for (const item of disabled) expect(item.answer).not.toMatch(/\bbrew (uninstall|upgrade|install)\b|--zap/);
     const deprecated = faqItems(
       pageOf(docker({ homebrewStatus: { state: 'deprecated', reason: 'something custom', date: null } })),
       translator(code),

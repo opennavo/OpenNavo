@@ -8,7 +8,7 @@ import { formatDate } from './packageDate';
 // a stale or disputed fact stays in its block with its date and gets no answer here. A question
 // without a page-specific fact is left out, so no two apps share a boilerplate answer. Link apps
 // (T3) never get a Homebrew command.
-import { formatVersion } from '@opennavo/shared';
+import { formatVersion, packageInstallState } from '@opennavo/shared';
 import type { SiteLocale as Locale } from '@opennavo/shared';
 import { evidenceLine, joinSentences } from './appAnswer';
 import {
@@ -205,6 +205,8 @@ export function faqItems(pkg: PackagePage, t: FaqTranslate, locale: Locale): Faq
   const facts = pkg.facts;
   const artifacts = facts.overview.artifacts;
   const can = capabilities(pkg);
+  // Same lifecycle guard as the install/uninstall blocks: Homebrew-disabled packages get no brew commands.
+  const commands = can.homebrew && packageInstallState(pkg) !== 'disabled';
   const code = (value: string) => `\`${value}\``;
   const list = (values: string[]) => new Intl.ListFormat(locale, { type: 'conjunction' }).format(values);
   // Steps read better in Chinese as a plain enumeration than with 和 before the last one.
@@ -335,7 +337,7 @@ export function faqItems(pkg: PackagePage, t: FaqTranslate, locale: Locale): Faq
   const steps = uninstallSteps(pkg);
   const zap = zapPaths(pkg);
   const locations = dataLocations(pkg);
-  if (can.homebrew) {
+  if (commands) {
     const actions = [
       steps.quits && t('package.faq.actions.quit'),
       steps.services && t('package.faq.actions.services', { count: steps.services }, steps.services),
@@ -431,7 +433,7 @@ export function faqItems(pkg: PackagePage, t: FaqTranslate, locale: Locale): Faq
         pkg.versionCommittedAt
           ? t('package.faq.versionDated', { version, date: date(pkg.versionCommittedAt) })
           : t('package.faq.versionA', { version }),
-        can.homebrew &&
+        commands &&
           (pkg.autoUpdates ? t('package.faq.versionAuto', { name, token }) : t('package.faq.versionBrew', { token })),
         can.homebrew && channels.length > 0 && t('package.faq.versionChannels', { list: list(channels.map(code)) })
       ])
