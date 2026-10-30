@@ -1,10 +1,10 @@
 import { mount } from '@vue/test-utils';
-import { createSSRApp, nextTick } from 'vue';
+import { createSSRApp, h, nextTick } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 import { describe, expect, it } from 'vitest';
 import OnPackageSpecCard from '../src/components/OnPackageSpecCard.vue';
 import OnPackageOverview from '../src/components/OnPackageOverview.vue';
-import { withLocale } from './helpers';
+import { RouterLinkStub, withLocale } from './helpers';
 
 describe('Package detail product decisions', () => {
   it('includes the repository aria-describedby association in SSR output', async () => {
@@ -173,7 +173,6 @@ describe('Package detail product decisions', () => {
   it('replaces disabled installation with the explanation and no copy control', () => {
     const wrapper = mount(OnPackageOverview, {
       props: {
-        info: [],
         command: 'brew install --cask example',
         installNotice: { text: 'Homebrew disabled this app: discontinued.', disabled: true }
       },
@@ -188,7 +187,6 @@ describe('Package detail product decisions', () => {
   it('places the warning before a copyable command and keeps it available at mobile widths', () => {
     const wrapper = mount(OnPackageOverview, {
       props: {
-        info: [],
         command: 'brew install --cask example',
         installNotice: { text: 'Recommendations paused; Homebrew still offers this app.', disabled: false }
       },
@@ -203,5 +201,60 @@ describe('Package detail product decisions', () => {
     expect(card.get('code').text()).toBe('brew install --cask example');
     expect(card.find('button').exists()).toBe(true);
     wrapper.unmount();
+  });
+
+  it('stacks the top slot and the gallery in one lead row instead of overlapping', () => {
+    const wrapper = mount(OnPackageOverview, {
+      props: { hasAbout: true, screenshots: [{ src: '/shots/1.png' }] },
+      slots: {
+        top: () => h('p', { id: 'top-slot' }, 'Facts'),
+        about: () => h('p', 'About'),
+        main: () => h('p', 'Main')
+      },
+      global: withLocale('en-US')
+    });
+    try {
+      const lead = wrapper.get('[data-testid="package-overview-lead"]');
+      expect(lead.find('#top-slot').exists()).toBe(true);
+      expect(lead.find('img').exists()).toBe(true);
+      expect(lead.classes()).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-start-1']));
+      expect(wrapper.get('[data-testid="package-overview-about"]').classes()).toContain('lg:row-start-2');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('starts the introduction in the first row when there is no lead', () => {
+    const wrapper = mount(OnPackageOverview, {
+      props: { hasAbout: true },
+      slots: { about: () => h('p', 'About'), main: () => h('p', 'Main') },
+      global: withLocale('en-US')
+    });
+    try {
+      expect(wrapper.find('[data-testid="package-overview-lead"]').exists()).toBe(false);
+      expect(wrapper.get('[data-testid="package-overview-about"]').classes()).toContain('lg:row-start-1');
+      expect(wrapper.get('[data-testid="package-overview-main"]').classes()).toContain('lg:row-start-2');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('renders See more through linkAs on the overview', () => {
+    const wrapper = mount(OnPackageOverview, {
+      props: {
+        related: [{ key: 'cask/a', kind: 'cask', token: 'a', name: 'A', href: '/apps/a' }],
+        relatedTitle: 'Related',
+        relatedMoreHref: '/apps',
+        relatedMoreLabel: 'See more',
+        linkAs: RouterLinkStub
+      },
+      global: withLocale('en-US')
+    });
+    try {
+      expect(wrapper.get('a[href="#/apps"]').text()).toBe('See more');
+      expect(wrapper.get('a[href="#/apps/a"]').text()).toBe('A');
+    } finally {
+      wrapper.unmount();
+    }
   });
 });

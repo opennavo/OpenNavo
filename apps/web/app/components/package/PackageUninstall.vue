@@ -68,6 +68,10 @@ const guidePath = computed(() =>
 function onCopied(command: string) {
   toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
 }
+
+function onCopyFailed() {
+  toasts.push({ tone: 'warning', title: t('toast.copyFailed'), duration: 0 });
+}
 </script>
 
 <template>
@@ -91,6 +95,7 @@ function onCopied(command: string) {
         :copy-label="t('package.copy.uninstall')"
         :title="t('package.guide.uninstallTitle')"
         @copied="onCopied"
+        @copy-failed="onCopyFailed"
       />
       <p class="m-0 text-12px leading-[1.6] text-ink-tertiary">
         {{ t('package.guide.uninstall') }}
@@ -122,6 +127,7 @@ function onCopied(command: string) {
         :copy-label="t('package.copy.cleanup')"
         :title="t('package.guide.uninstallTitle')"
         @copied="onCopied"
+        @copy-failed="onCopyFailed"
       />
       <p class="m-0 text-12px leading-[1.6] text-ink-tertiary">
         <template v-for="(part, index) in zapWarning" :key="index">

@@ -129,6 +129,7 @@
     "more": "Mais ações",
     "copy": "Copiar",
     "copied": "Copiado",
+    "copyFailed": "Área de transferência indisponível. Copie o valor manualmente.",
     "cancel": "Cancelar",
     "close": "Fechar",
     "count": "{count} app | {count} apps"
@@ -282,7 +283,9 @@
         "paid": "Pago",
         "freemium": "Grátis com recursos pagos",
         "subscription": "Assinatura",
-        "open_source": "Grátis e de código aberto"
+        "open_source": "Grátis e de código aberto",
+        "free_with_iap": "Grátis com compras no App",
+        "trial": "Com teste grátis"
       },
       "verdict": {
         "verifying": "Verificando {file}…",

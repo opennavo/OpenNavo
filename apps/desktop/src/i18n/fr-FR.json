@@ -129,6 +129,7 @@
     "more": "Plus d’actions",
     "copy": "Copier",
     "copied": "Copié",
+    "copyFailed": "Presse-papiers indisponible. Copiez la valeur manuellement.",
     "cancel": "Annuler",
     "close": "Fermer",
     "count": "{count} app | {count} apps"
@@ -282,7 +283,9 @@
         "paid": "Payant",
         "freemium": "Gratuit avec fonctionnalités payantes",
         "subscription": "Abonnement",
-        "open_source": "Gratuit et open source"
+        "open_source": "Gratuit et open source",
+        "free_with_iap": "Gratuit avec achats intégrés",
+        "trial": "Essai gratuit disponible"
       },
       "verdict": {
         "verifying": "Vérification de {file}…",

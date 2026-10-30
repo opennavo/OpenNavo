@@ -15,6 +15,8 @@ import {
   withVariantNames
 } from '~/utils/seoTitles';
 import { packageSpec } from '~/utils/packageSpec';
+import PackageLead from './PackageLead.vue';
+import PackagePrice from './PackagePrice.vue';
 import PackageRequirements from './PackageRequirements.vue';
 import PackageSources from './PackageSources.vue';
 
@@ -165,7 +167,6 @@ usePageSeo({
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
       related-in-main
-      :info="[]"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
       :related-more-href="localePath('/apps')"
@@ -173,6 +174,8 @@ usePageSeo({
       :link-as="NuxtLink"
     >
       <template #about>
+        <!-- Link apps have no Install Details tab, so their lead, price and requirements stay on the overview. -->
+        <PackageLead v-if="pkg.kind === 'link'" class="mb-10px" :pkg="pkg" />
         <MarkdownContent class="package-overview-description" size="md" :heading-level="3" :source="description" />
       </template>
       <template #main>
@@ -184,6 +187,7 @@ usePageSeo({
         />
         <PackageSafety v-if="can.safety && pkg.kind === 'link'" :pkg="pkg" :show-checked="false" />
         <PackageRequirements v-if="pkg.kind === 'link'" :pkg="pkg" />
+        <PackagePrice v-if="pkg.kind === 'link'" :pkg="pkg" />
         <PackageIssues :pkg="pkg" />
         <PackageIntegrations :pkg="pkg" />
         <PackageInstall v-if="can.homebrew" :pkg="pkg" />

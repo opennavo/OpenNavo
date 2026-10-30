@@ -139,7 +139,6 @@ function onCopied(text: string) {
     :caveats-title="t('package.caveats')"
     :command="command"
     :install-notice="installNotice"
-    :info="[]"
     :related="relatedItems"
     :related-title="t('package.related')"
     related-more-href="/discover"

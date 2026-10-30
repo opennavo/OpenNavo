@@ -56,13 +56,13 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale, 
       .map(row => ({ key: row.key, label: row.label, value: row.value, mono: row.code }));
   rows.push(...originalRows(['version', 'source', 'files', 'location']));
   const prices = verifiedPrices(pkg);
-  const price = prices.length
-    ? [
-        ...new Set(prices.map(item => [priceUsage(item, t), priceAmount(item, t, locale)].filter(Boolean).join(' · ')))
-      ].join(' / ')
-    : pkg.link && pkg.link.pricing !== 'unknown'
-      ? t(`package.link.pricing.${pkg.link.pricing}`)
-      : '';
+  let price = '';
+  if (prices.length) {
+    const values = prices.map(item => [priceUsage(item, t), priceAmount(item, t, locale)].filter(Boolean).join(' · '));
+    price = [...new Set(values)].join(' / ');
+  } else if (pkg.link && pkg.link.pricing !== 'unknown') {
+    price = t(`package.link.pricing.${pkg.link.pricing}`);
+  }
   if (price) rows.push({ key: 'price', label: t('package.spec.price'), value: price });
 
   const range = macosText(macosRange(pkg), t);

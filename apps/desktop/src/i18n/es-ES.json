@@ -129,6 +129,7 @@
     "more": "Más acciones",
     "copy": "Copiar",
     "copied": "Copiado",
+    "copyFailed": "Portapapeles no disponible. Copia el valor manualmente.",
     "cancel": "Cancelar",
     "close": "Cerrar",
     "count": "{count} aplicación | {count} aplicaciones"
@@ -282,7 +283,9 @@
         "paid": "De pago",
         "freemium": "Gratis con funciones de pago",
         "subscription": "Suscripción",
-        "open_source": "Gratis y de código abierto"
+        "open_source": "Gratis y de código abierto",
+        "free_with_iap": "Gratis con compras dentro de la App",
+        "trial": "Con prueba gratuita"
       },
       "verdict": {
         "verifying": "Comprobando {file}…",

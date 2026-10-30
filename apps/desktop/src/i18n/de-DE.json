@@ -129,6 +129,7 @@
     "more": "Weitere Aktionen",
     "copy": "Kopieren",
     "copied": "Kopiert",
+    "copyFailed": "Zwischenablage nicht verfügbar. Kopieren Sie den Wert manuell.",
     "cancel": "Abbrechen",
     "close": "Schließen",
     "count": "{count} App | {count} Apps"
@@ -282,7 +283,9 @@
         "paid": "Kostenpflichtig",
         "freemium": "Kostenlos mit kostenpflichtigen Funktionen",
         "subscription": "Abonnement",
-        "open_source": "Kostenlos und Open Source"
+        "open_source": "Kostenlos und Open Source",
+        "free_with_iap": "Kostenlos mit In-App-Käufen",
+        "trial": "Kostenlose Testversion verfügbar"
       },
       "verdict": {
         "verifying": "{file} wird geprüft…",

@@ -129,6 +129,7 @@
     "more": "その他の操作",
     "copy": "コピー",
     "copied": "コピーしました",
+    "copyFailed": "クリップボードを利用できません。値を手動でコピーしてください。",
     "cancel": "キャンセル",
     "close": "閉じる",
     "count": "{count} 件"
@@ -282,7 +283,9 @@
         "paid": "有料",
         "freemium": "無料（有料機能あり）",
         "subscription": "サブスクリプション",
-        "open_source": "無料のオープンソース"
+        "open_source": "無料のオープンソース",
+        "free_with_iap": "無料（アプリ内課金あり）",
+        "trial": "無料トライアルあり"
       },
       "verdict": {
         "verifying": "{file} を確認しています…",

@@ -7,6 +7,7 @@ import { httpsUrl, linkDownloadUrl, linkSource } from '~/utils/linkApp';
 import { officialSource } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
 import PackageSourceBadge from './PackageSourceBadge.vue';
+import { useToasts } from '~/composables/useToasts';
 
 // Detail header (08 §10.5, 03-detail): shared OnPackageHeader (ADR-017), web Get menu/homepage right.
 // Link apps (store/security plan §4) swap the Get menu for Download, which opens the developer's own address.
@@ -63,6 +64,10 @@ const actionCount = computed(() => {
   return 1 + Number(Boolean(homepage.value));
 });
 const stretchActions = computed(() => actionCount.value === 2);
+
+function onCopyFailed() {
+  useToasts().push({ tone: 'warning', title: t('toast.copyFailed'), duration: 0 });
+}
 
 const chips = computed<OnPackageHeaderChip[]>(() => {
   const kind = isLink.value
@@ -158,10 +163,10 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
       </OnButton>
     </template>
     <template #command>
-      <!-- The mobile install card: one command, or a lifecycle warning (and no command when disabled). -->
+      <!-- The install card: one command at every width, or a lifecycle warning (and no command when disabled). -->
       <div
         v-if="!isLink && (installNotice || !unavailable)"
-        class="on-mobile-install-command flex-col gap-10px basis-full col-span-2"
+        class="on-detail-install-command flex flex-col gap-10px basis-full col-span-2"
         data-testid="package-install-command"
       >
         <p
@@ -181,22 +186,10 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
           v-if="!unavailable"
           :command="pkg.installCommand"
           :copy-label="t('package.copy.install')"
-          :title="t('package.install.run')"
           @copied="trackEvent('copy_install_command')"
+          @copy-failed="onCopyFailed"
         />
       </div>
     </template>
   </OnPackageHeader>
 </template>
-
-<style>
-.on-mobile-install-command {
-  display: none;
-}
-
-@media (max-width: 640px) {
-  .on-mobile-install-command {
-    display: flex;
-  }
-}
-</style>

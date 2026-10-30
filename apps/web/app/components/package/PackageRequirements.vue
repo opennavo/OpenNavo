@@ -2,6 +2,7 @@
 import { displayUrl, OnButton, OnChip } from '@opennavo/ui';
 import { shownRequirements, macosText } from '~/utils/packageFacts';
 import type { PackagePage, RequirementFact } from '~/utils/packageFacts';
+import { requirementMobileCards } from '~/utils/packageRequirements';
 
 // System requirements (T2): facts.requirements as a table, one row per distinct declaration (Homebrew's per
 // chip and macOS release, the developer's statements, per-version compatibility). Every row names its source
@@ -44,6 +45,8 @@ const rows = computed(() =>
     const homebrew = Boolean(props.pkg.sourceUrl) && evidence.sourceUrl === props.pkg.sourceUrl;
     return {
       key: `${index}:${row.versions.join(',')}:${row.architectures.join(',')}`,
+      architectures: row.architectures,
+      appleSilicon: row.appleSilicon,
       macos: macos(row),
       versions: row.versions.join(', '),
       chips: chips(row),
@@ -57,19 +60,22 @@ const rows = computed(() =>
 );
 
 const mobileRows = computed(() =>
-  rows.value.flatMap(row => {
-    const architectures = row.chips.split(' · ').filter(Boolean);
-    return (architectures.length ? architectures : [t('package.requirements.allChips')]).map((chip, index) => ({
-      ...row,
-      key: `${row.key}:${index}`,
-      chips: chip
-    }));
+  requirementMobileCards(rows.value, {
+    allChips: t('package.requirements.allChips'),
+    native: t('package.facts.support.native'),
+    notNative: t('package.requirements.notNative'),
+    arch: archLabel
   })
 );
 
 async function copySha(sha: string) {
-  if (typeof navigator === 'undefined' || !navigator.clipboard) return;
-  await navigator.clipboard.writeText(sha).catch(() => undefined);
+  if (typeof navigator === 'undefined') return;
+  try {
+    await navigator.clipboard.writeText(sha);
+    toasts.push({ tone: 'success', title: t('toast.copied'), description: 'SHA-256' });
+  } catch {
+    toasts.push({ tone: 'warning', title: t('toast.copyFailed'), description: sha, duration: 0 });
+  }
 }
 
 const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? []);
@@ -147,7 +153,10 @@ const conflicts = computed(() => props.pkg.facts.macosSupplement?.conflicts ?? [
         <div class="flex items-start justify-between gap-10px">
           <div>
             <h3 class="m-0 text-12.5px font-600 text-ink-primary">{{ row.chips }}</h3>
-            <p class="m-0 mt-2px text-11.5px text-ink-tertiary">{{ row.macos || '—' }} · {{ row.versions || '—' }}</p>
+            <p class="m-0 mt-2px text-11.5px text-ink-tertiary">
+              {{ row.macos || '—' }} · {{ row.versions || '—'
+              }}<template v-if="row.native"> · {{ row.native }}</template>
+            </p>
           </div>
           <OnChip v-if="row.stale" tone="warning">{{ t('package.facts.stale') }}</OnChip>
         </div>
