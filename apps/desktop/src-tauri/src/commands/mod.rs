@@ -5,6 +5,7 @@ pub mod env;
 pub mod firewall;
 pub mod library;
 pub mod maintenance;
+pub mod mcp;
 pub mod mirror;
 pub mod permissions;
 pub mod security;
