@@ -16,15 +16,18 @@ Production Compose runs this process as `public-mcp` and Caddy routes the exact
 continues to use `/mcp` on `ADMIN_DOMAIN`; the two services have separate
 containers and aliases.
 
-The MCP process uses a separate per-IP GCRA quota of **60 requests per 60
-seconds** (burst 60). That matches the public search quota (60/minute) and is
+The MCP process uses a separate GCRA quota of **60 requests per 60 seconds**
+(burst 60), per IPv4 address or IPv6 /64 prefix. IPv4-mapped IPv6 addresses
+share their IPv4 address's quota. That matches the public search quota (60/minute) and is
 below the 300/minute quota on the ordinary GET endpoints used by the other
 tools; this server does not expose package lookup, whose API quota is
 30/minute. Forwarded client IPs are accepted only when the direct peer is in
 `OPENNAVO_PUBLIC_MCP_TRUSTED_PROXIES`; otherwise the connection peer is used.
 The limiter retains up to 10,000 identity buckets and evicts only expired
-buckets. If all slots are active, new identities share one overflow bucket
-with the same quota; identity churn cannot reset existing clients' limits.
+buckets. If all slots are active, a stable hash with a per-process random key
+maps new identities into 64 overflow buckets, each with the same quota. Flooding
+one shard does not consume another shard's quota, and identity churn cannot
+reset existing clients' limits.
 The public API package lookup is intentionally `POST /packages/lookup` with a
 JSON body; `GET /packages/lookup?tokens=...` is outside the OpenAPI route and
 returns 404.

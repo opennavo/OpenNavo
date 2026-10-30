@@ -572,11 +572,47 @@ class Deployment:
 
     def compose(self, *args, candidate=True):
         directory = self.directory if candidate else self.root
-        return command(['docker', 'compose', '--project-directory', str(self.root), '-p', self.config['project'],
-                        '--env-file', str(self.root / '.env'), '--env-file', str(directory / ('release.env' if candidate else 'current-release.env')),
-                        '-f', str(self.root / self.config['compose_file']),
-                        '-f', str(self.directory / 'rolling.compose.json' if candidate else self.rolling),
-                        '--profile', 'ops', '--profile', 'automation', *args])
+        result = command(['docker', 'compose', '--project-directory', str(self.root), '-p', self.config['project'],
+                          '--env-file', str(self.root / '.env'), '--env-file', str(directory / ('release.env' if candidate else 'current-release.env')),
+                          '-f', str(self.root / self.config['compose_file']),
+                          '-f', str(self.directory / 'rolling.compose.json' if candidate else self.rolling),
+                          '--profile', 'ops', '--profile', 'automation', *args])
+        if args and args[0] == 'up':
+            services = self.services if candidate else self.state['services']
+            public_mcp = services.get('public-mcp')
+            if public_mcp and public_mcp in args[1:]:
+                self.restore_public_mcp_proxy(public_mcp, candidate=candidate)
+        return result
+
+    def restore_public_mcp_proxy(self, service, *, candidate):
+        """Restore an endpoint reclaimed by preflight before the caller can switch routes."""
+        ids = self.compose('ps', '-q', service, candidate=candidate).splitlines()
+        if not ids:
+            raise RuntimeError('public-MCP proxy restore found no running service container')
+        # Use Compose's resolved configuration so inherited addresses and DNS aliases survive
+        # a reconnect, including hosts whose base Compose file supplies the fixed address.
+        resolved = json.loads(self.compose('config', '--format', 'json', candidate=candidate))
+        options = resolved['services'][service]['networks']['proxy'] or {}
+        address = None if candidate else self.public_mcp_overlay_ip()
+        address = address or options.get('ipv4_address')
+        if address:
+            address = str(ipaddress.ip_address(address))
+        network = self.config.get('proxy_network') or self.config['project'] + '_proxy'
+        containers = json.loads(command(['docker', 'inspect', *ids]))
+        for container in containers:
+            endpoint = (container.get('NetworkSettings') or {}).get('Networks', {}).get(network)
+            if endpoint is not None:
+                if address and endpoint.get('IPAddress') != address:
+                    raise RuntimeError('public-MCP proxy restore found an unexpected fixed address')
+                continue
+            if not address:
+                raise RuntimeError('public-MCP proxy restore requires a recorded fixed address')
+            # Compose up can restart a retained container without restoring disconnected
+            # networks. Reconnect only the missing endpoint; healthy peers stay untouched.
+            connect = ['docker', 'network', 'connect', '--ip', address]
+            for alias in dict.fromkeys([service, *(options.get('aliases') or [])]):
+                connect.extend(['--alias', alias])
+            command([*connect, network, container['Id']])
 
     def write_manifest(self, directory=None):
         target = self.directory if directory is None else Path(directory)
@@ -1059,32 +1095,41 @@ class Deployment:
         print('API and web monitoring targets updated and healthy.', flush=True)
 
     def install_caddy(self, content):
-        """Validate a durable staged copy before updating the bind-mounted inode."""
+        """Back up the live file and validate a staged copy before updating its inode."""
         container = self.config['caddy_container']
-        with tempfile.NamedTemporaryFile(dir=self.live_caddy.parent, prefix='.Caddyfile-', delete=False) as staged:
-            path = Path(staged.name)
-            remote = '/tmp/' + path.name
-            try:
-                staged.write(content)
-                staged.flush()
-                os.fsync(staged.fileno())
-                command(['docker', 'cp', str(path), container + ':' + remote])
-                command(['docker', 'exec', container, 'caddy', 'validate', '--config', remote, '--adapter', 'caddyfile'])
-                write_caddy_in_place(self.live_caddy, content)
-            finally:
-                path.unlink(missing_ok=True)
-                with contextlib.suppress(RuntimeError, OSError):
-                    command(['docker', 'exec', container, 'rm', '-f', remote])
+        backup = self.live_caddy.with_name('Caddyfile.bak')
+        write_caddy_in_place(backup, self.live_caddy.read_bytes())
+        try:
+            with tempfile.NamedTemporaryFile(dir=self.live_caddy.parent, prefix='.Caddyfile-', delete=False) as staged:
+                path = Path(staged.name)
+                remote = '/tmp/' + path.name
+                try:
+                    staged.write(content)
+                    staged.flush()
+                    os.fsync(staged.fileno())
+                    command(['docker', 'cp', str(path), container + ':' + remote])
+                    command(['docker', 'exec', container, 'caddy', 'validate', '--config', remote, '--adapter', 'caddyfile'])
+                    write_caddy_in_place(self.live_caddy, content)
+                finally:
+                    path.unlink(missing_ok=True)
+                    with contextlib.suppress(RuntimeError, OSError):
+                        command(['docker', 'exec', container, 'rm', '-f', remote])
+        except Exception:
+            write_caddy_in_place(self.live_caddy, backup.read_bytes())
+            raise
 
     def reload(self):
         try:
             command(['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'])
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
-            # Restore the snapshot before the caller attempts service rollback.
+            # Prefer the adjacent backup of the actual live file at this switch.
+            # Keep the release snapshot fallback for rollback without a prior install.
             directory = getattr(self, 'directory', None)
-            before = directory / 'before-caddy' if directory is not None else None
+            before = self.live_caddy.with_name('Caddyfile.bak')
             try:
+                if not before.is_file():
+                    before = directory / 'before-caddy' if directory is not None else None
                 if before is not None and before.is_file():
                     write_caddy_in_place(self.live_caddy, before.read_bytes())
             except OSError:
@@ -1188,7 +1233,8 @@ class Deployment:
         self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
         self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
         # Restore and verify the old services before changing the public route. This keeps a failed
-        # candidate from being the only service available during rollback.
+        # candidate from being the only service available during rollback. compose() also restores
+        # any reclaimed public-MCP proxy endpoint before returning.
         try:
             self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
                          *self.state['services'].values(), 'worker', candidate=False)

@@ -8,10 +8,12 @@ and is safe to expose at ``https://opennavo.com/mcp``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
 import logging
 import re
+import secrets
 import sys
 import time
 from collections import OrderedDict
@@ -40,6 +42,8 @@ MAX_OUTPUT_BYTES = 24 * 1024
 MAX_TEXT = 900
 MAX_LIST = 12
 PUBLIC_GCRA_MAX_ENTRIES = 10_000
+PUBLIC_GCRA_OVERFLOW_SHARDS = 64
+_PUBLIC_GCRA_HASH_KEY = secrets.token_bytes(32)
 _TOKEN = re.compile(r"^[a-z0-9][a-z0-9+_.@-]{0,127}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 _KIND = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
@@ -246,7 +250,7 @@ def _category(value: Any) -> dict[str, Any] | None:
     return out or None
 
 
-def app_summary(value: Any) -> dict[str, Any]:
+def app_summary(value: Any, *, include_status_defaults: bool = True) -> dict[str, Any]:
     source = _map(value)
     kind = str(source.get("kind", "cask"))
     token = str(source.get("token", ""))
@@ -266,7 +270,13 @@ def app_summary(value: Any) -> dict[str, Any]:
         "iconUrl",
         "accentColor",
     )
-    out.update(_package_status(source))
+    out.update(
+        {
+            key: status
+            for key, status in _package_status(source).items()
+            if include_status_defaults or key in source
+        }
+    )
     if "summary" in source:
         out["summary"] = _text(source["summary"], 450)
     category = _category(source.get("primaryCategory"))
@@ -676,7 +686,8 @@ def register_public_tools(server: FastMCP[Any], api: PublicAPIClient) -> None:
                 if isinstance(item_source.get("slug"), str):
                     collection["link"] = f"{PUBLIC_SITE}/collections/{item_source['slug']}"
                 collection["apps"] = [
-                    app_summary(app) for app in _list(item_source.get("previewItems"), 5)
+                    app_summary(app, include_status_defaults=False)
+                    for app in _list(item_source.get("previewItems"), 5)
                 ]
                 records.append(collection)
         return fit_public_output(
@@ -829,13 +840,27 @@ class _Bucket:
     expires: float
 
 
+def _rate_limit_identity(key: str) -> str:
+    try:
+        address = ipaddress.ip_address(key)
+    except ValueError:
+        return key
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
+
+
 class PublicGCRALimiter:
     """In-process GCRA matching the API's count/window/burst semantics.
 
     Client keys are untrusted, so the LRU has a hard identity cap. Only expired
     buckets are removed, never active quota state. When all slots are active,
-    new identities share one overflow bucket with the same count/window/burst
-    quota. Memory is bounded by max_entries plus that single overflow bucket.
+    new identities hash into a fixed set of overflow buckets, each with the same
+    count/window/burst quota. A process-random key prevents predictable shard
+    selection. IPv4 addresses (including mapped IPv6) and IPv6 /64s are identities.
+    Memory is bounded by max_entries plus PUBLIC_GCRA_OVERFLOW_SHARDS buckets.
     """
 
     def __init__(
@@ -851,18 +876,23 @@ class PublicGCRALimiter:
         self.interval = window_seconds / count
         self.max_entries = max_entries
         self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
-        self._overflow: _Bucket | None = None
+        self._overflow: list[_Bucket | None] = [None] * PUBLIC_GCRA_OVERFLOW_SHARDS
         self._lock = asyncio.Lock()
+
+    def _overflow_index(self, key: str) -> int:
+        digest = hashlib.blake2b(key.encode(), key=_PUBLIC_GCRA_HASH_KEY, digest_size=8).digest()
+        return int.from_bytes(digest, "big") % PUBLIC_GCRA_OVERFLOW_SHARDS
 
     @property
     def description(self) -> str:
-        return f"per IP {self.count} requests / {self.window_seconds:g} s"
+        return f"per IPv4 address or IPv6 /64 {self.count} requests / {self.window_seconds:g} s"
 
     async def check(
         self, key: str, cost: int = 1, now: float | None = None
     ) -> tuple[bool, int, int]:
         if cost <= 0 or cost > self.count:
             raise ValueError("invalid rate limit cost")
+        key = _rate_limit_identity(key)
         current = time.monotonic() if now is None else now
         async with self._lock:
             for bucket_key, bucket in list(self._buckets.items()):
@@ -871,16 +901,20 @@ class PublicGCRALimiter:
             old = self._buckets.get(key)
             if old is not None:
                 self._buckets.move_to_end(key)
-            overflow = old is None and len(self._buckets) >= self.max_entries
-            if overflow:
-                old = self._overflow
+            overflow_index = (
+                self._overflow_index(key)
+                if old is None and len(self._buckets) >= self.max_entries
+                else None
+            )
+            if overflow_index is not None:
+                old = self._overflow[overflow_index]
             tat = old.tat if old and old.expires > current else current
             allow_at = tat - (self.count - cost) * self.interval
             if current < allow_at:
                 return False, max(1, int(allow_at - current + 0.999)), 0
             next_tat = max(tat, current) + cost * self.interval
-            if overflow:
-                self._overflow = _Bucket(next_tat, next_tat)
+            if overflow_index is not None:
+                self._overflow[overflow_index] = _Bucket(next_tat, next_tat)
             else:
                 self._buckets[key] = _Bucket(next_tat, next_tat)
                 self._buckets.move_to_end(key)

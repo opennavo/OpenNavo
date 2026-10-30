@@ -9,6 +9,7 @@ from starlette.types import Receive, Scope, Send
 
 from opennavo_mcp.public_server import (
     MAX_OUTPUT_BYTES,
+    PUBLIC_GCRA_OVERFLOW_SHARDS,
     PublicAPIClient,
     PublicGCRALimiter,
     PublicMCPError,
@@ -204,7 +205,6 @@ async def test_get_app_returns_disabled_package_with_lifecycle_notices() -> None
         ("search_apps", {"q": "demo"}),
         ("similar_apps", {"token": "demo"}),
         ("rankings", {}),
-        ("collections", {}),
         ("collections", {"slug": "demo"}),
     ],
 )
@@ -239,8 +239,6 @@ async def test_package_lists_preserve_packages_and_explicit_status(
         data = cast(dict[str, Any], result.data)
         if tool == "rankings":
             apps = [row["app"] for row in data["rankings"]]
-        elif tool == "collections" and not arguments:
-            apps = data["collections"][0]["apps"]
         else:
             apps = data["apps"]
         assert [app["token"] for app in apps] == [package["token"] for package in packages]
@@ -251,6 +249,41 @@ async def test_package_lists_preserve_packages_and_explicit_status(
             (False, False),
         ]
         assert all(type(app[key]) is bool for app in apps for key in ("deprecated", "disabled"))
+
+
+async def test_collection_previews_only_include_upstream_lifecycle_flags() -> None:
+    packages = [
+        {"token": "unknown-app"},
+        {"token": "deprecated-app", "deprecated": True},
+        {"token": "disabled-app", "disabled": True},
+        {"token": "active-app", "deprecated": False, "disabled": False},
+        {"token": "partially-known-app", "disabled": False},
+    ]
+
+    def handle(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            json={
+                "code": "0000",
+                "data": {"records": [{"slug": "demo", "previewItems": packages}]},
+            },
+        )
+
+    api = PublicAPIClient(settings(), httpx2.AsyncClient(transport=httpx2.MockTransport(handle)))
+    async with Client(create_public_server(settings(), api)) as client:
+        result = await client.call_tool("collections", {})
+        assert result.is_error is False
+        previews = cast(dict[str, Any], result.data)["collections"][0]["apps"]
+        assert [preview["token"] for preview in previews] == [item["token"] for item in packages]
+        assert [
+            {key: app[key] for key in ("deprecated", "disabled") if key in app} for app in previews
+        ] == [
+            {},
+            {"deprecated": True},
+            {"disabled": True},
+            {"deprecated": False, "disabled": False},
+            {"disabled": False},
+        ]
 
 
 async def test_dependency_packages_only_include_status_when_present_recursively() -> None:
@@ -306,7 +339,7 @@ def test_selected_outputs_have_links_and_size_caps() -> None:
     assert result["link"] == "https://opennavo.com/apps/demo"
 
 
-async def test_public_gcra_is_per_ip_and_bounded() -> None:
+async def test_public_gcra_ipv4_addresses_have_independent_quotas() -> None:
     limiter = PublicGCRALimiter(2, 60)
     assert (await limiter.check("203.0.113.1", now=0.0))[0] is True
     assert (await limiter.check("203.0.113.1", now=0.0))[0] is True
@@ -315,7 +348,46 @@ async def test_public_gcra_is_per_ip_and_bounded() -> None:
     assert (await limiter.check("203.0.113.2", now=0.0))[0] is True
 
 
-async def test_public_gcra_caps_buckets_and_shares_overflow_quota() -> None:
+@pytest.mark.parametrize("overflow", [False, True])
+async def test_public_gcra_ipv6_addresses_in_same_64_share_quota(overflow: bool) -> None:
+    limiter = PublicGCRALimiter(2, 60, max_entries=1)
+    if overflow:
+        await limiter.check("203.0.113.1", now=0.0)
+    assert (await limiter.check("2001:db8:abcd:1234::1", now=0.0))[0] is True
+    assert (await limiter.check("2001:db8:abcd:1234:ffff::abcd", now=0.0))[0] is True
+    assert (await limiter.check("2001:0db8:abcd:1234::2", now=0.0)) == (False, 30, 0)
+
+
+async def test_public_gcra_different_ipv6_64s_have_independent_quotas() -> None:
+    limiter = PublicGCRALimiter(1, 60)
+    assert (await limiter.check("2001:db8:abcd:1::1", now=0.0))[0] is True
+    assert (await limiter.check("2001:db8:abcd:1::2", now=0.0))[0] is False
+    assert (await limiter.check("2001:db8:abcd:2::1", now=0.0))[0] is True
+    assert (await limiter.check("2001:db8:abcd:2::2", now=0.0))[0] is False
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("203.0.113.1", "::ffff:203.0.113.1"),
+        ("::ffff:cb00:7101", "203.0.113.1"),
+    ],
+)
+async def test_public_gcra_ipv4_mapped_ipv6_shares_ipv4_quota(
+    first: str, second: str, overflow: bool
+) -> None:
+    limiter = PublicGCRALimiter(1, 60, max_entries=1)
+    if overflow:
+        await limiter.check("198.51.100.1", now=0.0)
+    assert (await limiter.check(first, now=0.0))[0] is True
+    assert (await limiter.check(second, now=0.0)) == (False, 60, 0)
+
+
+async def test_public_gcra_caps_buckets_and_isolates_flooded_overflow_shards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("opennavo_mcp.public_server._PUBLIC_GCRA_HASH_KEY", b"overflow-test-key")
     limiter = PublicGCRALimiter(1, 60, max_entries=3)
     for key in ("a", "b", "c"):
         assert (await limiter.check(key, now=0.0))[0] is True
@@ -325,13 +397,31 @@ async def test_public_gcra_caps_buckets_and_shares_overflow_quota() -> None:
     allowed, _, _ = await limiter.check("a", now=0.0)
     assert allowed is False
     assert list(limiter._buckets) == ["b", "c", "a"]  # pyright: ignore[reportPrivateUsage]
-    assert (await limiter.check("d", now=1.0))[0] is True
-    assert (await limiter.check("e", now=1.0)) == (False, 60, 0)
+    flooder = "203.0.113.1"
+    shard = limiter._overflow_index(flooder)  # pyright: ignore[reportPrivateUsage]
+    peers = [f"203.0.113.{index}" for index in range(2, 256)]
+    same_shard = next(
+        peer
+        for peer in peers
+        if limiter._overflow_index(peer) == shard  # pyright: ignore[reportPrivateUsage]
+    )
+    other_shard = next(
+        peer
+        for peer in peers
+        if limiter._overflow_index(peer) != shard  # pyright: ignore[reportPrivateUsage]
+    )
+    assert (await limiter.check(flooder, now=1.0))[0] is True
+    for _ in range(100):
+        assert (await limiter.check(flooder, now=1.0)) == (False, 60, 0)
+        assert (await limiter.check(same_shard, now=1.0)) == (False, 60, 0)
+    assert (await limiter.check(other_shard, now=1.0))[0] is True
+    assert (await limiter.check(other_shard, now=1.0)) == (False, 60, 0)
     assert list(limiter._buckets) == ["b", "c", "a"]  # pyright: ignore[reportPrivateUsage]
     assert len(limiter._buckets) == 3  # pyright: ignore[reportPrivateUsage]
+    assert len(limiter._overflow) == PUBLIC_GCRA_OVERFLOW_SHARDS == 64  # pyright: ignore[reportPrivateUsage]
     for key in ("a", "b", "c"):
         assert (await limiter.check(key, now=1.0))[0] is False
-    assert (await limiter.check("e", now=61.0))[0] is True
+    assert (await limiter.check(same_shard, now=61.0))[0] is True
 
 
 async def test_public_gcra_preserves_victim_quota_after_ten_thousand_new_identities() -> None:
@@ -400,7 +490,10 @@ async def test_public_rate_middleware_returns_clean_429() -> None:
     assert limited.headers["Retry-After"] == "1"
     assert limited.json() == {
         "error": "rate_limited",
-        "message": "Public MCP rate limit exceeded: per IP 60 requests / 60 s; retry after 1 s",
+        "message": (
+            "Public MCP rate limit exceeded: per IPv4 address or IPv6 /64 "
+            "60 requests / 60 s; retry after 1 s"
+        ),
     }
 
 

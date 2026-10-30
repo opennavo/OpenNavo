@@ -237,6 +237,22 @@ The rollout requires two healthy API replicas, applies migrations/permissions, r
 
 The deployment configuration tests require the Docker CLI and its Compose v2 plugin because they run `docker compose config`; when Docker is unavailable, `ops/test_mcp_deployment.py` skips with that prerequisite in its reason. Install Docker Engine or Docker Desktop with Compose before expecting those tests to execute.
 
+The H1 public-MCP reclaim integration test runs separately from the fast
+`test_*.py` suite:
+
+```sh
+python3 -m unittest discover -s ops -p 'integration_test_*.py' -v
+```
+
+It requires a reachable Docker daemon and Compose, and skips cleanly when either
+is unavailable. It uses `busybox:1.37.0` (pulled if necessary), a temporary bridge
+with an unused subnet, and uniquely labelled containers with no published host
+ports. It disconnects a stopped rollback target exactly as the receiver's reclaim
+step does, starts a candidate, invokes the receiver's real rollback/Compose path,
+and checks the restored fixed IP and HTTP reachability from another container.
+Caddy reload, MCP JSON-RPC and monitoring are stubbed in this network fixture.
+Test containers, the bridge and temporary files are removed even on failure.
+
 ## GitHub production and desktop releases
 
 `Deploy production` is a manual workflow. Select a commit on `main`; backend,
@@ -268,8 +284,11 @@ backup, applies migrations and grants, starts healthy candidates, and switches
 Caddy routes. It then updates the worker and verifies routes again. A failed
 switch restores old routes and the worker; it never runs down migrations.
 The Caddy bind mount is the host file named by `caddy_file`, so the receiver
-copies that live file into each release, rewrites only release aliases, and
-promotes `Caddyfile.next` in place before `caddy validate` and a graceful reload.
+copies that live file into each release and rewrites only release aliases. Before
+switching, it writes a durable `Caddyfile.bak` next to the live file and validates
+a staged copy of `Caddyfile.next`. It then writes the live file in place and
+validates/reloads Caddy. A validation, write or reload failure restores the live
+file from `Caddyfile.bak`; the release's `before-caddy` snapshot is also retained.
 For public MCP it maintains a marker-delimited route in the unique
 `WEB_DOMAIN` site block, immediately before the catch-all web proxy; a missing
 or ambiguous block aborts preparation before any switch. The post-switch check
