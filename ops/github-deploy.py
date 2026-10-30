@@ -623,6 +623,27 @@ def monitoring_targets(source, services):
     return source[:start.end()] + ''.join(blocks) + source[finish:]
 
 
+# Explicit forward-switch phases, recorded in deploy/github-state.json under "switch" before and
+# after each step of apply(). rollback() decides every abort from this record, never from file
+# contents.
+SWITCH_NONE = 'not-switched'              # live Caddyfile, env, rolling and state are all previous
+SWITCH_CADDY_WRITING = 'caddy-writing'    # candidate validated; in-place write of live started
+SWITCH_CADDY_WRITTEN = 'caddy-written'    # live file is the candidate; USR1 not yet confirmed
+SWITCH_CADDY_RELOADED = 'caddy-reloaded'  # USR1 succeeded; Caddy process routes to the candidate
+SWITCH_CONFIG_PROMOTED = 'config-promoted'  # env and rolling overlay promoted to the candidate
+SWITCH_ROUTED_TO_CANDIDATE = (SWITCH_CADDY_WRITTEN, SWITCH_CADDY_RELOADED, SWITCH_CONFIG_PROMOTED)
+SWITCH_PROCESS = {
+    SWITCH_NONE: 'the Caddy process runs the previous release',
+    SWITCH_CADDY_WRITING: ('the live Caddyfile write was interrupted (contents unknown; install recovery may '
+                           'have restored the backup) and Caddy was never reloaded, so the process runs the '
+                           'previous release'),
+    SWITCH_CADDY_WRITTEN: ('the live Caddyfile file is the candidate but Caddy reload (USR1) was not confirmed, '
+                           'so the Caddy process may still run the previous release'),
+    SWITCH_CADDY_RELOADED: 'the Caddy process runs the candidate release',
+    SWITCH_CONFIG_PROMOTED: 'the Caddy process runs the candidate release',
+}
+
+
 class Deployment:
     def __init__(self, config, payload):
         self.config, self.payload = config, payload
@@ -1198,12 +1219,14 @@ class Deployment:
                 with contextlib.suppress(RuntimeError, OSError):
                     command(['docker', 'exec', container, 'rm', '-f', remote])
 
-    def install_caddy(self, content):
+    def install_caddy(self, content, before_write=None):
         """Back up the live file and validate a staged copy before updating its inode."""
         backup = self.live_caddy.with_name('Caddyfile.bak')
         write_atomic(backup, self.live_caddy.read_bytes())
         if not self._validate_staged(content):
             raise RuntimeError('invalid staged Caddyfile; live configuration left untouched')
+        if before_write:
+            before_write()
         try:
             write_caddy_in_place(self.live_caddy, content)
         except Exception:
@@ -1370,66 +1393,116 @@ class Deployment:
                 time.sleep(2)
         raise RuntimeError('post-deployment route checks failed: ' + str(last_error))
 
-    def _abort_rollback_consistently(self, cause, before_caddy=None):
-        """Abort before switching Caddy back: align env/rolling with where Caddy actually routes.
+    def switch_phase(self):
+        phase = getattr(self, '_switch_phase', None)
+        if phase:
+            return phase
+        recorded = self.state.get('switch') if isinstance(getattr(self, 'state', None), dict) else None
+        if isinstance(recorded, dict) and recorded.get('release') == self.release:
+            return recorded.get('phase')
+        return None
 
-        apply() installs Caddy, reloads and verifies before promoting env/rolling, so on a forward
-        failure the live route and env/rolling may point at different releases. Make them agree
-        with the route (so prepare() after a manual marker removal clones the right overlay), and
-        record exactly which release each file holds.
+    def record_switch(self, phase):
+        """Record the forward-switch phase in memory first, then durably in github-state.json."""
+        self._switch_phase = phase
+        try:
+            write_private(self.state_path, {**self.state, 'switch': {'release': self.release, 'phase': phase}})
+        except Exception:
+            self.mark_degraded(f'could not record switch phase {phase} in {self.state_path.name}; '
+                               f'{SWITCH_PROCESS.get(phase, "")}')
+            raise
+
+    def _previous_state(self):
+        return json.loads((self.directory / 'before-state.json').read_text())
+
+    def _candidate_state(self):
+        previous = {key: value for key, value in self._previous_state().items()
+                    if key not in ('previous', 'switch', 'unverified')}
+        # Not verified: the "already deployed" shortcut must not trust it, but prepare() derives
+        # the next release's aliases from these candidate services, matching the live Caddyfile.
+        return {'sha': self.payload['sha'], 'release': self.release, 'services': self.services,
+                'previous': previous, 'unverified': True}
+
+    def _abort_rollback(self, cause):
+        """Abort before Caddy is switched back, aligning env, rolling and state with the switch phase.
+
+        The recorded phase (not file contents) says which release the live Caddyfile belongs to.
+        Env, rolling and github-state.json are made to match it so that prepare() after a manual
+        marker removal derives aliases from the same release the live Caddyfile names. The marker
+        records what the Caddy process may actually be running and every file that failed to align.
         """
-        live = self.live_caddy.read_bytes()
-        if live == (self.directory / 'Caddyfile.next').read_bytes():
-            route, env_source, rolling_source = 'candidate', 'release.env', 'rolling.compose.json'
-        elif before_caddy is not None and live == before_caddy:
-            route, env_source, rolling_source = 'previous', 'before-release.env', 'before-rolling.json'
+        phase = self.switch_phase()
+        failed = []
+        target = None
+        try:
+            if phase in SWITCH_ROUTED_TO_CANDIDATE:
+                target = 'candidate'
+                plan = [(self.env, lambda: (self.directory / 'release.env').read_bytes()),
+                        (self.rolling, lambda: (self.directory / 'rolling.compose.json').read_bytes()),
+                        (self.state_path, lambda: self._state_bytes(self._candidate_state(), phase))]
+            elif phase in (SWITCH_NONE, SWITCH_CADDY_WRITING):
+                target = 'previous'
+                plan = [(self.env, lambda: (self.directory / 'before-release.env').read_bytes()),
+                        (self.rolling, lambda: (self.directory / 'before-rolling.json').read_bytes()),
+                        (self.state_path, lambda: self._state_bytes(self._previous_state(), phase))]
+            else:
+                plan = []
+            for path, source in plan:
+                try:
+                    content = source()
+                    if not path.exists() or path.read_bytes() != content:
+                        path.write_bytes(content)
+                        if path == self.state_path:
+                            path.chmod(0o600)
+                except Exception as error:
+                    failed.append(f'{path.name} ({type(error).__name__})')
+        except Exception as error:  # defensive: the marker must still be written truthfully
+            failed.append(f'alignment ({type(error).__name__})')
+        names = f'{self.env.name}, {self.rolling.name} and {self.state_path.name}'
+        if target is None:
+            files = (f'switch phase is unknown, so {self.live_caddy.name}, {names} were left as found '
+                     'and may name different releases')
+        elif failed:
+            files = (f'{self.live_caddy.name} belongs to the {target} release; aligning {", ".join(failed)} '
+                     f'failed, so those files may hold either release')
         else:
-            route = env_source = rolling_source = None
-        if route:
-            try:
-                for target, source in ((self.env, env_source), (self.rolling, rolling_source)):
-                    content = (self.directory / source).read_bytes()
-                    if target.read_bytes() != content:
-                        target.write_bytes(content)
-                state = (f'{self.live_caddy.name}, {self.env.name} and {self.rolling.name} '
-                         f'all point at the {route} release')
-            except Exception as error:
-                state = (f'{self.live_caddy.name} points at the {route} release but aligning '
-                         f'{self.env.name}/{self.rolling.name} failed ({type(error).__name__}); '
-                         f'they may hold either release')
-        else:
-            state = (f'{self.live_caddy.name} matches neither the candidate nor the previous Caddyfile; '
-                     f'{self.env.name}/{self.rolling.name} were left as found')
-        self.mark_degraded(f'rollback aborted: {cause}; {state}; Caddy was not switched by rollback; '
-                           'candidate containers retained')
-        return f'degraded rollback: {cause}; {state}; Caddy was not switched by rollback.'
+            files = f'{self.live_caddy.name} file, {names} all name the {target} release'
+        process = SWITCH_PROCESS.get(phase, 'the Caddy process state is unknown')
+        message = (f'rollback aborted: {cause}; switch phase {phase or "unknown"}: {process}; {files}; '
+                   'Caddy was not switched back by rollback; candidate containers retained')
+        self.mark_degraded(message)
+        return 'degraded rollback: ' + message
+
+    def _state_bytes(self, state, phase):
+        state = {**state, 'switch': {'release': self.release, 'phase': phase, 'rollback': 'aborted'}}
+        return (json.dumps(state, indent=2) + '\n').encode()
 
     def rollback(self):
-        # Read and validate the previous Caddyfile before touching anything; on failure make
-        # env/rolling agree with the actual route instead of assuming where each file points.
+        # Read and validate the previous Caddyfile before touching anything. Every abort goes
+        # through _abort_rollback, which follows the recorded switch phase.
         try:
             previous = (self.directory / 'before-caddy').read_bytes()
         except Exception as error:
-            print('WARNING: ' + self._abort_rollback_consistently(
-                f'previous Caddyfile could not be read ({type(error).__name__})'), flush=True)
+            print('WARNING: ' + self._abort_rollback(
+                f'previous Caddyfile {self.directory.name}/before-caddy could not be read '
+                f'({type(error).__name__})'), flush=True)
             raise
         try:
             valid = self._validate_staged(previous)
         except Exception as error:
-            print('WARNING: ' + self._abort_rollback_consistently(
-                f'previous Caddyfile could not be validated ({type(error).__name__})', previous), flush=True)
+            print('WARNING: ' + self._abort_rollback(
+                f'previous Caddyfile could not be validated ({type(error).__name__})'), flush=True)
             raise
         if not valid:
-            raise RuntimeError(self._abort_rollback_consistently(
-                f'{self.directory / "before-caddy"} failed caddy validate', previous))
+            raise RuntimeError(self._abort_rollback(f'{self.directory / "before-caddy"} failed caddy validate'))
         try:
             self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
             self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
-        except Exception:
-            self.mark_degraded('rollback could not restore previous env or rolling overlay; '
-                               'Caddy not switched by rollback; candidate containers retained')
-            print(f'WARNING: rollback failed writing {self.env.name}/{self.rolling.name}; they may be partially '
-                  f'restored; {self.live_caddy} was not changed by rollback.', flush=True)
+            write_private(self.state_path, self._previous_state())
+        except Exception as error:
+            # Re-align env, rolling and state with the recorded forward phase before raising.
+            print('WARNING: ' + self._abort_rollback(
+                f'restoring previous env/rolling/state failed ({type(error).__name__})'), flush=True)
             raise
         # Restore and verify the old services before changing the public route. This keeps a failed
         # candidate from being the only service available during rollback. compose() also restores
@@ -1438,30 +1511,33 @@ class Deployment:
             self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
                          *self.state['services'].values(), 'worker', candidate=False)
         except Exception as error:
-            # Retain candidate configuration for recovery. The route is unconfirmed: the initial
-            # Caddy reload may have failed before these files were promoted.
-            self.mark_degraded('previous services failed to start; routing unconfirmed; '
-                               'candidate containers retained')
-            self.env.write_bytes((self.directory / 'release.env').read_bytes())
-            self.rolling.write_bytes((self.directory / 'rolling.compose.json').read_bytes())
-            print('Candidate env and rolling configuration restored for manual recovery.', flush=True)
-            raise RuntimeError('degraded rollback: previous services failed to start; routing unconfirmed') from error
+            # Caddy has not been switched back; re-align env/rolling/state with the forward phase.
+            raise RuntimeError(self._abort_rollback('previous services failed to start')) from error
         print('Previous release services are healthy; switching Caddy back.', flush=True)
+        restored = f'{self.env.name}, {self.rolling.name} and {self.state_path.name} hold the previous release'
         try:
             write_caddy_in_place(self.live_caddy, previous)
         except Exception:
-            self.mark_degraded('rollback Caddyfile write failed; routing unconfirmed; candidate containers retained')
-            print(f'WARNING: rollback write to {self.live_caddy} failed; the file may be partially written '
-                  f'({caddy_intent_path(self.live_caddy).name} records the expected content).', flush=True)
+            self.mark_degraded(f'rollback Caddyfile write failed; {self.live_caddy.name} may be partially written '
+                               f'({caddy_intent_path(self.live_caddy).name} records the expected content); '
+                               f'{SWITCH_PROCESS.get(self.switch_phase(), "the Caddy process state is unknown")}; '
+                               f'{restored}; candidate containers retained')
             raise
-        self.reload()  # marks degraded itself on every failure
+        try:
+            self.reload()
+        except Exception:
+            self.mark_degraded(f'rollback reload failed; {self.live_caddy.name} is the previous Caddyfile but '
+                               f'the Caddy process may still run the candidate; {restored}; '
+                               'candidate containers retained')
+            raise
         try:
             self.verify(expected=self.state.get('sha', '')[:12])
             if 'public-mcp' in self.state['services']:
                 self.verify_public_mcp()
             self.update_monitoring(self.state['services'])
         except Exception:
-            self.mark_degraded('rollback verification or monitoring failed; candidate containers retained')
+            self.mark_degraded(f'rollback verification or monitoring failed; Caddy was reloaded with the previous '
+                               f'Caddyfile; {restored}; candidate containers retained')
             print('WARNING: rollback verification or monitoring failed; candidate containers retained.', flush=True)
             raise
         candidates = []
@@ -1574,7 +1650,7 @@ class Deployment:
             raise RuntimeError('deployment blocked by persistent degraded marker. ' + self.recovery_instructions())
         self.degraded_marker_written = False
         self.validate_live_caddy()
-        if self.state.get('sha') == self.payload['sha']:
+        if self.state.get('sha') == self.payload['sha'] and not self.state.get('unverified'):
             self.services = self.state['services']
             self.ensure_live_manifest()
             self.verify()
@@ -1628,12 +1704,17 @@ class Deployment:
         print('All candidates healthy and warmed; switching routes.', flush=True)
         try:
             with phase('Switching routes and worker'):
+                self.record_switch(SWITCH_NONE)
                 # Preserve the inode because Caddy bind-mounts this file.
-                self.install_caddy((self.directory / 'Caddyfile.next').read_bytes())
+                self.install_caddy((self.directory / 'Caddyfile.next').read_bytes(),
+                                   before_write=lambda: self.record_switch(SWITCH_CADDY_WRITING))
+                self.record_switch(SWITCH_CADDY_WRITTEN)
                 self.reload()
+                self.record_switch(SWITCH_CADDY_RELOADED)
                 self.verify()
                 self.env.write_bytes((self.directory / 'release.env').read_bytes())
                 self.rolling.write_bytes((self.directory / 'rolling.compose.json').read_bytes())
+                self.record_switch(SWITCH_CONFIG_PROMOTED)
                 self.compose('up', '-d', '--no-deps', '--wait', '--wait-timeout', '180', 'worker', candidate=False)
                 self.verify()
                 self.update_monitoring(self.services)
