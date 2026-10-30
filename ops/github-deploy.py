@@ -424,6 +424,15 @@ def interrupted_caddy_write(path):
     return True
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # surface the 3xx as HTTPError instead of following it
+
+
+def open_without_redirects(request, timeout):
+    return urllib.request.build_opener(_NoRedirect).open(request, timeout=timeout)
+
+
 class CaddyValidatorUnavailable(RuntimeError):
     """caddy validate could not run, so the configuration's validity is unknown."""
 
@@ -1328,9 +1337,10 @@ class Deployment:
                 or not any(isinstance(item, dict) and str(item.get('text') or '').strip() for item in content)):
             raise RuntimeError('public MCP tools/call list_categories returned an error or no content')
         # Only the exact /mcp path is public; sub-paths must not reach the MCP service.
+        # A redirect must not count: a 404 at the redirect target says nothing about /mcp/x.
         probe = urllib.request.Request(endpoint + '/x', method='GET', headers={'Host': host})
         try:
-            with urllib.request.urlopen(probe, timeout=15) as response:
+            with open_without_redirects(probe, timeout=15) as response:
                 status = getattr(response, 'status', None) or response.getcode()
         except urllib.error.HTTPError as error:
             status = error.code
@@ -1361,8 +1371,32 @@ class Deployment:
         raise RuntimeError('post-deployment route checks failed: ' + str(last_error))
 
     def rollback(self):
-        self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
-        self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
+        # Read and validate the previous Caddyfile before touching anything. If that fails, env,
+        # rolling overlay and Caddy all stay on the candidate (consistent), so even a manually
+        # removed marker cannot make prepare() mix previous env with candidate routing.
+        untouched = f'{self.live_caddy}, {self.env.name} and {self.rolling.name} were not changed by rollback'
+        try:
+            previous = (self.directory / 'before-caddy').read_bytes()
+            valid = self._validate_staged(previous)
+        except Exception:
+            self.mark_degraded('previous Caddyfile could not be validated; env, rolling and routing '
+                               'left on candidate; candidate containers retained')
+            print(f'WARNING: rollback aborted before any change; {untouched}.', flush=True)
+            raise
+        if not valid:
+            self.mark_degraded('previous Caddyfile is invalid; env, rolling and routing left on candidate; '
+                               'candidate containers retained')
+            raise RuntimeError(f'degraded rollback: {self.directory / "before-caddy"} failed caddy validate; '
+                               f'{untouched}.')
+        try:
+            self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
+            self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
+        except Exception:
+            self.mark_degraded('rollback could not restore previous env or rolling overlay; '
+                               'routing still on candidate; candidate containers retained')
+            print(f'WARNING: rollback failed writing {self.env.name}/{self.rolling.name}; they may be partially '
+                  f'restored; {self.live_caddy} was not changed by rollback.', flush=True)
+            raise
         # Restore and verify the old services before changing the public route. This keeps a failed
         # candidate from being the only service available during rollback. compose() also restores
         # any reclaimed public-MCP proxy endpoint before returning.
@@ -1379,24 +1413,6 @@ class Deployment:
             print('Candidate env and rolling configuration restored for manual recovery.', flush=True)
             raise RuntimeError('degraded rollback: previous services failed to start; routing unconfirmed') from error
         print('Previous release services are healthy; switching Caddy back.', flush=True)
-        # Deliberate switch back to the previous release's config (not a backup recovery);
-        # reload() validates it before signalling and recovers only under the shared rule.
-        # Every abort from here on leaves env/rolling on the previous release while Caddy may still
-        # route to the candidate, so each one records the persistent degraded marker that blocks
-        # the next deployment until an operator confirms recovery.
-        live_note = f'{self.live_caddy} was not changed and still routes to the candidate'
-        try:
-            previous = (self.directory / 'before-caddy').read_bytes()
-            valid = self._validate_staged(previous)
-        except Exception:
-            self.mark_degraded('previous Caddyfile could not be validated; routing still on candidate; '
-                               'candidate containers retained')
-            print(f'WARNING: rollback aborted before writing Caddy; {live_note}.', flush=True)
-            raise
-        if not valid:
-            self.mark_degraded('previous Caddyfile is invalid; routing still on candidate; candidate containers retained')
-            raise RuntimeError(f'degraded rollback: {self.directory / "before-caddy"} failed caddy validate; '
-                               f'{live_note}.')
         try:
             write_caddy_in_place(self.live_caddy, previous)
         except Exception:
