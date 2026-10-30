@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Component } from 'vue';
 import OnChip from './OnChip.vue';
+import OnIcon from './OnIcon.vue';
+import OnTooltip from './OnTooltip.vue';
 
 export interface OnPackageSpecRow {
   key: string;
@@ -8,6 +10,7 @@ export interface OnPackageSpecRow {
   value?: string | null;
   href?: string;
   mono?: boolean;
+  stars?: { label: string; href?: string; checked?: string };
   badge?: { label: string; tone?: 'neutral' | 'info' | 'success' | 'warning' | 'danger' };
 }
 
@@ -26,7 +29,13 @@ const props = withDefaults(defineProps<OnPackageSpecCardProps>(), {
   linkAs: 'a'
 });
 
-const linkAttrs = (href: string) => (props.linkAs === 'a' ? { href } : { to: href });
+const external = (href: string) => /^https?:\/\//i.test(href);
+const linkAttrs = (href: string) =>
+  external(href)
+    ? { href, target: '_blank', rel: 'noopener noreferrer' }
+    : props.linkAs === 'a'
+      ? { href }
+      : { to: href };
 </script>
 
 <template>
@@ -48,14 +57,37 @@ const linkAttrs = (href: string) => (props.linkAs === 'a' ? { href } : { to: hre
           :class="row.mono ? 'font-mono text-12px' : ''"
         >
           <component
-            :is="linkAs"
+            :is="external(row.href) ? 'a' : linkAs"
             v-if="row.href"
             v-bind="linkAttrs(row.href)"
-            class="text-ink-primary underline-offset-2 hover:underline"
+            class="inline-flex max-w-full items-center gap-4px text-ink-primary no-underline hover:underline"
           >
-            {{ row.value }}
+            <span class="min-w-0">{{ row.value }}</span>
+            <OnIcon v-if="external(row.href)" name="lucide:arrow-up-right" :size="13" />
           </component>
           <template v-else>{{ row.value }}</template>
+          <span v-if="row.stars" class="inline-flex items-center gap-4px">
+            <span aria-hidden="true"> · </span>
+            <a
+              v-if="row.stars.href"
+              :href="row.stars.href"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex max-w-full items-center gap-4px text-ink-primary no-underline hover:underline"
+              >{{ row.stars.label }}<OnIcon name="lucide:arrow-up-right" :size="13"
+            /></a>
+            <span v-else>{{ row.stars.label }}</span>
+            <OnTooltip v-if="row.stars.checked" v-slot="{ describedBy }" :content="row.stars.checked" toggle-on-click>
+              <button
+                type="button"
+                :aria-label="checkedLabel"
+                :aria-describedby="describedBy"
+                class="inline-flex min-h-24px min-w-24px cursor-pointer items-center justify-center rounded-tiny border-none bg-transparent p-2px text-ink-tertiary outline-none hover:text-ink-primary focus-visible:shadow-focus-ring"
+              >
+                <OnIcon name="info" :size="13" />
+              </button>
+            </OnTooltip>
+          </span>
           <OnChip v-if="row.badge" class="ml-6px align-middle" size="sm" :tone="row.badge.tone">
             {{ row.badge.label }}
           </OnChip>

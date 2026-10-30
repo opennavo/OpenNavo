@@ -11,23 +11,29 @@ const props = defineProps<{ pkg: PackagePage }>();
 const { t, locale } = useI18n();
 const appLocale = computed(() => toAppLocale(locale.value));
 
+const sources = computed(() => factSources(props.pkg));
 const items = computed(() =>
-  factSources(props.pkg).map(source => ({
+  sources.value.map(source => ({
     key: `${source.kind}:${source.url}`,
-    // The colon is in the page language; Chinese and Japanese put no space after it.
-    label: `${t('package.facts.labelled', { label: t(`package.sources.kinds.${source.kind}`) })}${
-      ['zh-CN', 'zh-Hant', 'ja-JP'].includes(appLocale.value) ? '' : ' '
-    }`,
+    label: `${t('package.facts.labelled', { label: t(`package.sources.kinds.${source.kind}`) })}${['zh-CN', 'zh-Hant', 'ja-JP'].includes(appLocale.value) ? '' : ' '}`,
     url: source.url,
-    checked: source.checkedAt
-      ? {
-          iso: isoDate(source.checkedAt),
-          date: formatDate(source.checkedAt, { locale: appLocale.value }),
-          ...aroundDate(t, source.stale ? 'package.facts.asOf' : 'package.facts.checkedOn')
-        }
-      : null
+    tap: source.kind === 'homebrew' ? props.pkg.tap : null
   }))
 );
+// A conservative overall date: the oldest dated source, never a fabricated current check.
+const checked = computed(() => {
+  const dated = sources.value
+    .filter(source => source.checkedAt)
+    .sort((a, b) => Date.parse(a.checkedAt!) - Date.parse(b.checkedAt!));
+  const date = dated[0]?.checkedAt;
+  return date
+    ? {
+        iso: isoDate(date),
+        date: formatDate(date, { locale: appLocale.value }),
+        ...aroundDate(t, dated.some(source => source.stale) ? 'package.facts.asOf' : 'package.facts.checkedOn')
+      }
+    : null;
+});
 </script>
 
 <template>
@@ -38,8 +44,12 @@ const items = computed(() =>
     aria-labelledby="sources-title"
     data-testid="package-sources"
   >
-    <h2 id="sources-title" class="m-0 text-13.5px font-600 text-ink-primary">{{ t('package.sources.title') }}</h2>
-    <p class="m-0 mt-4px text-12px leading-[1.6] text-ink-tertiary">{{ t('package.sources.hint') }}</p>
+    <h2 id="sources-title" class="m-0 text-13.5px font-600 text-ink-primary">
+      {{ t('package.sources.title') }}
+    </h2>
+    <p class="m-0 mt-4px text-12px leading-[1.6] text-ink-tertiary">
+      {{ t('package.sources.hint') }}
+    </p>
     <ul class="m-0 mt-8px flex list-none flex-col gap-6px p-0 text-12.5px leading-[1.6]">
       <li v-for="item in items" :key="item.key" class="text-ink-tertiary">
         <span class="text-ink-secondary">{{ item.label }}</span
@@ -49,11 +59,12 @@ const items = computed(() =>
           rel="nofollow noopener noreferrer"
           class="text-ink-primary underline-offset-2 [overflow-wrap:anywhere] hover:underline"
           >{{ displayUrl(item.url) }}</a
-        ><template v-if="item.checked"
-          >{{ ` · ${item.checked.before}` }}<time :datetime="item.checked.iso">{{ item.checked.date }}</time
-          >{{ item.checked.after }}</template
-        >
+        ><code v-if="item.tap" class="ml-6px font-mono text-11.5px">{{ item.tap }}</code>
       </li>
     </ul>
+    <p v-if="checked" class="m-0 mt-10px text-11.5px text-ink-tertiary">
+      {{ checked.before }}<time :datetime="checked.iso">{{ checked.date }}</time
+      >{{ checked.after }}
+    </p>
   </section>
 </template>

@@ -9,7 +9,6 @@ import { formatDate } from './packageDate';
 // without a page-specific fact is left out, so no two apps share a boilerplate answer. Link apps
 // (T3) never get a Homebrew command.
 import { formatVersion } from '@opennavo/shared';
-import { formatRepoStars, toPackageRepoSignals } from '@opennavo/ui';
 import type { SiteLocale as Locale } from '@opennavo/shared';
 import { evidenceLine, joinSentences } from './appAnswer';
 import {
@@ -21,6 +20,7 @@ import {
   priceAmount,
   priceEdition,
   priceRegionName,
+  verifiedIdentities,
   verifiedPrices
 } from './packageFacts';
 import type { PackagePage } from './packageFacts';
@@ -304,39 +304,32 @@ export function faqItems(pkg: PackagePage, t: FaqTranslate, locale: Locale): Faq
     );
   }
 
-  // Is it open source? OSI facts remain separate from the optional repository signals.
+  // An OSI record must match a verified identity before the FAQ calls an app open source.
   const repository = pkg.repository;
   const openSource = pkg.openSource;
-  const repoSignals = toPackageRepoSignals(pkg, {
-    repoUrl: repository?.url ?? openSource?.url,
-    archived: openSource?.archived
-  });
-  if (openSource)
+  const repositoryPosition = items.length;
+  let repositoryQuestion: FaqItem | undefined;
+  const openIdentity = verifiedIdentities(pkg).some(
+    identity => identity.openSource === 'yes' && identity.repositoryUrl === openSource?.url
+  );
+  if (openSource && openIdentity)
     add(
       'openSource',
       t('package.faq.openSourceQ', { name }),
       sentences([
         t('package.faq.openSourceA', { name, repo: openSource.repo, license: openSource.license }),
-        repoSignals?.stars === undefined
-          ? undefined
-          : t('package.faq.openSourceStars', { stars: `★${formatRepoStars(repoSignals.stars)}` }),
-        repoSignals?.checkedAt ? t('package.faq.openSourceChecked', { date: date(repoSignals.checkedAt) }) : undefined,
-        (repoSignals?.archived ?? openSource.archived) && t('package.faq.openSourceArchived')
+        openSource.archived && t('package.faq.openSourceArchived')
       ])
     );
-  else if (repository)
-    add(
-      'openSource',
-      t('package.faq.openSourceQ', { name }),
-      sentences([
+  else if (!openSource && repository?.url)
+    repositoryQuestion = {
+      key: 'openSource',
+      question: t('package.faq.repositoryQ', { name }),
+      answer: sentences([
         t('package.faq.openSourceNoLicenseA', { name, repo: repository.url ?? '' }),
-        repoSignals?.stars === undefined
-          ? undefined
-          : t('package.faq.openSourceStars', { stars: `★${formatRepoStars(repoSignals.stars)}` }),
-        repoSignals?.checkedAt ? t('package.faq.openSourceChecked', { date: date(repoSignals.checkedAt) }) : undefined,
-        repoSignals?.archived && t('package.faq.openSourceArchived')
+        repository.archived && t('package.faq.openSourceArchived')
       ])
-    );
+    };
 
   // How to remove it completely: what uninstall does, then --zap with how much it clears.
   const steps = uninstallSteps(pkg);
@@ -479,7 +472,10 @@ export function faqItems(pkg: PackagePage, t: FaqTranslate, locale: Locale): Faq
       t('package.faq.alternativesA', { list: list(alternatives) })
     );
 
-  return items.slice(0, FAQ_LIMIT);
+  const result = items.slice(0, FAQ_LIMIT);
+  // The optional new question must not displace any of main's existing answers.
+  if (repositoryQuestion && result.length < FAQ_LIMIT) result.splice(repositoryPosition, 0, repositoryQuestion);
+  return result;
 }
 
 function hostOf(url: string): string {

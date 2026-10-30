@@ -31,6 +31,7 @@ vi.mock('@opennavo/ui', async () => {
     displayUrl,
     parseInline,
     OnChip: slot,
+    OnButton: slot,
     OnIcon: slot,
     OnAppIcon: slot,
     OnCodeText: { props: ['text'], setup: (props: { text: string }) => () => vnode('span', props.text) },

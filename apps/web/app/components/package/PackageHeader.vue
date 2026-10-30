@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { disabledByHomebrew } from '@opennavo/shared';
+import { packageInstallState } from '@opennavo/shared';
 import { OnButton, OnIcon, OnPackageHeader, toPackageRepoSignals, useUiMessages } from '@opennavo/ui';
 import type { OnPackageHeaderChip } from '@opennavo/ui';
 import { trackEvent } from '~/utils/analytics';
 import { httpsUrl, linkDownloadUrl, linkSource } from '~/utils/linkApp';
-import { pausedByOpenNavo } from '~/utils/packageFacts';
+import { officialSource } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
+import PackageSourceBadge from './PackageSourceBadge.vue';
 
 // Detail header (08 §10.5, 03-detail): shared OnPackageHeader (ADR-017), web Get menu/homepage right.
 // Link apps (store/security plan §4) swap the Get menu for Download, which opens the developer's own address.
 // T1: the categories are real links, and an app OpenNavo paused (no new version for 90 days, still offered by
 // Homebrew) reads "paused", never "disabled", which only Homebrew's own disable earns.
-const props = defineProps<{ pkg: PackagePage; headingSuffix?: string; showOfficialDownload?: boolean }>();
+const props = defineProps<{ pkg: PackagePage; headingSuffix?: string }>();
 
 const { t } = useI18n();
 const messages = useUiMessages();
@@ -25,19 +26,16 @@ const homepage = computed(() =>
   isLink.value ? httpsUrl(link.value?.homepage ?? props.pkg.homepage) : props.pkg.homepage
 );
 const meta = computed(() => {
-  if (!isLink.value) return `${t('package.fromTap')} ${props.pkg.tap}`;
+  if (!isLink.value) return '';
   const source = link.value ? linkSource(link.value) : undefined;
   return source ? t('package.link.meta', { source }) : t('package.link.notHosted');
 });
 
 const subtitle = computed(() => [props.pkg.developer, props.pkg.summary].filter(Boolean).join(' · '));
-const repoSignals = computed(() =>
-  toPackageRepoSignals(props.pkg, {
-    repoUrl: props.pkg.openSource?.url ?? props.pkg.repoUrl,
-    archived: props.pkg.openSource?.archived
-  })
-);
-const unavailable = computed(() => Boolean(props.pkg.disable));
+const repoSignals = computed(() => toPackageRepoSignals(props.pkg));
+const installState = computed(() => packageInstallState(props.pkg));
+const unavailable = computed(() => installState.value === 'disabled');
+const source = computed(() => officialSource(props.pkg));
 
 const chips = computed<OnPackageHeaderChip[]>(() => {
   const kind = isLink.value
@@ -61,14 +59,15 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
   if (link.value && link.value.pricing !== 'unknown')
     list.push({ key: 'pricing', label: t(`package.link.pricing.${link.value.pricing}`) });
   if (props.pkg.autoUpdates) list.push({ key: 'auto', label: t('package.autoUpdates'), tone: 'info' });
-  if (props.pkg.openSource?.archived || repoSignals.value?.archived)
+  if (repoSignals.value?.archived)
     list.push({ key: 'archived', label: t('package.repo.archived'), tone: 'danger', outline: true });
-  if (disabledByHomebrew(props.pkg))
-    list.push({ key: 'disabled', label: t('package.disabled'), tone: 'danger', outline: true });
-  else if (pausedByOpenNavo(props.pkg))
-    list.push({ key: 'paused', label: t('package.paused'), tone: 'warning', outline: true });
-  else if (props.pkg.deprecation)
-    list.push({ key: 'deprecated', label: t('package.deprecated'), tone: 'warning', outline: true });
+  if (installState.value !== 'active' && !source.value)
+    list.push({
+      key: installState.value,
+      label: t(`package.${installState.value}`),
+      tone: unavailable.value ? 'danger' : 'warning',
+      outline: true
+    });
   return list;
 });
 </script>
@@ -86,8 +85,12 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
     :chips="chips"
     :meta="meta"
     :link-as="NuxtLink"
+    :stretch-actions="Boolean(homepage && (!isLink || downloadUrl))"
     priority
   >
+    <template #tags>
+      <PackageSourceBadge v-if="source" :pkg="pkg" />
+    </template>
     <template #actions>
       <template v-if="isLink">
         <OnButton
@@ -103,26 +106,25 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
           <OnIcon name="arrow-up-right" :size="15" />
         </OnButton>
       </template>
-      <OnButton v-else-if="unavailable" variant="primary" shape="round" icon="download" disabled>
+      <OnButton
+        v-else-if="unavailable"
+        :aria-label="t('get.label', { name: pkg.displayName })"
+        variant="primary"
+        shape="round"
+        icon="download"
+        disabled
+      >
         {{ messages.getButton.get }}
       </OnButton>
       <GetMenu
         v-else
         variant="primary"
+        block
         :kind="pkg.kind"
         :token="pkg.token"
         :name="pkg.displayName"
         :command="pkg.installCommand"
       />
-      <PackageCommand
-        v-if="!isLink && !unavailable"
-        class="on-mobile-install-command hidden basis-full max-[640px]:block"
-        :command="pkg.installCommand"
-        :copy-label="t('package.copy.install')"
-        :title="t('package.install.run')"
-        @copied="trackEvent('copy_install_command')"
-      />
-      <PackageOfficialDownload v-if="showOfficialDownload" :pkg="pkg" />
       <OnButton v-if="homepage" shape="round" :href="homepage" target="_blank" rel="noopener noreferrer">
         {{ t('package.homepage') }}
         <OnIcon name="arrow-up-right" :size="15" />
@@ -130,15 +132,3 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
     </template>
   </OnPackageHeader>
 </template>
-
-<style>
-.on-mobile-install-command {
-  display: none;
-}
-
-@media (max-width: 640px) {
-  .on-mobile-install-command {
-    display: flex;
-  }
-}
-</style>

@@ -322,7 +322,21 @@ const messages: MessageSchema = {
     autoUpdates: 'Auto-updates',
     disabled: 'Disabled',
     deprecated: 'Deprecated',
+    paused: 'Paused by OpenNavo',
     homepage: 'Homepage',
+    sourceBadge: {
+      label: 'Official source',
+      verified: 'Official source · Verified',
+      disabled: 'Official source · Disabled',
+      deprecated: 'Official source · Deprecated',
+      paused: 'Official source · Paused by OpenNavo',
+      domain: 'Source: {domain}',
+      checksum: 'SHA-256: {sha256}',
+      checksumUnknown: 'SHA-256 not recorded',
+      checked: 'Checked: {date}',
+      unchecked: 'No check date recorded',
+      active: 'Not disabled by Homebrew'
+    },
     fromTap: 'From',
     thirdPartyTap: 'Third-party tap',
     stats: {
@@ -462,6 +476,8 @@ const messages: MessageSchema = {
       license: 'License'
     },
     spec: {
+      downloadSource: 'Download source',
+      fontFiles: 'Font files',
       title: 'At a glance',
       price: 'Price',
       system: 'System',
@@ -470,6 +486,7 @@ const messages: MessageSchema = {
       openSource: 'Open source',
       repository: 'Repository',
       githubRepository: 'GitHub repository',
+      checked: 'Checked',
       developer: 'Developer',
       homepage: 'Homepage',
       token: 'Token',
@@ -481,6 +498,7 @@ const messages: MessageSchema = {
     },
     repo: {
       stars: 'Stars',
+      checked: 'Repository data checked {date}.',
       updated: 'Updated {days} days ago',
       unmaintained: 'May no longer be maintained',
       archived: 'Archived'

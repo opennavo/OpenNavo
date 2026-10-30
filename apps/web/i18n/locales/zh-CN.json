@@ -326,9 +326,9 @@
       }
     },
     "related": "相似应用",
-    "relatedMore": "See more",
-    "verified": "Verified",
-    "verifiedDetails": "Verified download details",
+    "relatedMore": "查看更多",
+    "verified": "已核实",
+    "verifiedDetails": "已核实的下载详情",
     "screenshots": "截图",
     "caveats": "注意事项",
     "info": {
@@ -584,10 +584,8 @@
       "priceStoreNote": "Homebrew 安装的是开发者网站提供的版本，价格和功能可能与 App Store 版不同。",
       "openSourceQ": "{name} 是开源软件吗？",
       "openSourceA": "{name} 的源代码公开在 GitHub 上（{repo}），使用 {license} 许可证。",
-      "openSourceNoLicenseA": "{name} has a public GitHub repository ({repo}), but OpenNavo has not verified an OSI license.",
+      "openSourceNoLicenseA": "{name} 有公开的 GitHub 仓库（{repo}），但 OpenNavo 尚未核实其 OSI 许可证。",
       "openSourceArchived": "这个仓库已经归档，不再更新。",
-      "openSourceStars": "Repository stars: {stars}.",
-      "openSourceChecked": "Repository data checked {date}.",
       "uninstallQ": "怎样在 Mac 上彻底卸载 {name}？",
       "uninstallRun": "运行 `brew uninstall --cask {token}`。",
       "uninstallDoes": "它会{actions}。",
@@ -649,7 +647,8 @@
       },
       "alternativesQ": "{name} 有哪些替代品？",
       "alternativesA": "可以考虑 {list}。",
-      "titleFor": "关于 {name} 的常见问题"
+      "titleFor": "关于 {name} 的常见问题",
+      "repositoryQ": "{name} 有公开的 GitHub 仓库吗？"
     },
     "securityPromo": {
       "title": "OpenNavo：病毒扫描与应用防火墙",
@@ -666,25 +665,27 @@
       "source": "安装包从 {source} 下载。"
     },
     "spec": {
-      "title": "At a glance",
-      "price": "Price",
-      "system": "System",
-      "chip": "Chip",
-      "autoUpdates": "Auto-updates",
-      "openSource": "Open source",
-      "repository": "Repository",
-      "githubRepository": "GitHub repository",
-      "developer": "Developer",
-      "homepage": "Homepage",
-      "token": "Token",
-      "yes": "Yes",
-      "no": "No"
+      "title": "基本信息",
+      "price": "价格",
+      "system": "系统要求",
+      "chip": "芯片",
+      "autoUpdates": "自动更新",
+      "openSource": "开源",
+      "repository": "仓库",
+      "githubRepository": "GitHub 仓库",
+      "developer": "开发者",
+      "homepage": "主页",
+      "token": "软件包标识符",
+      "yes": "是",
+      "no": "否",
+      "checked": "核查日期"
     },
     "repo": {
       "stars": "★",
-      "updated": "Updated {days} days ago",
-      "unmaintained": "May no longer be maintained",
-      "archived": "Archived"
+      "checked": "仓库数据核查于 {date}。",
+      "updated": "{days} 天前更新",
+      "unmaintained": "可能已不再维护",
+      "archived": "已归档"
     },
     "quick": {
       "title": "基本信息",
@@ -845,6 +846,18 @@
       "label": "官方下载 · {host}",
       "checksum": "Homebrew 已记录 SHA-256",
       "active": "未被 Homebrew 禁用"
+    },
+    "sourceBadge": {
+      "label": "官方来源",
+      "verified": "官方来源 · 已核查",
+      "disabled": "官方来源 · 已停用",
+      "deprecated": "官方来源 · 已弃用",
+      "paused": "官方来源 · 暂停推荐",
+      "domain": "来源域名：{domain}",
+      "checksum": "SHA-256：{sha256}",
+      "checksumUnknown": "未记录 SHA-256",
+      "checked": "核查日期：{date}",
+      "unchecked": "暂无核查日期"
     }
   },
   "collections": {

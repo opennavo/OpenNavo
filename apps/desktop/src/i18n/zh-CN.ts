@@ -315,7 +315,21 @@ export default {
     autoUpdates: '自带更新',
     disabled: '已停用',
     deprecated: '已弃用',
+    paused: '暂停更新',
     homepage: '主页',
+    sourceBadge: {
+      label: '官方来源',
+      verified: '官方来源 · 已核查',
+      disabled: '官方来源 · 已停用',
+      deprecated: '官方来源 · 已弃用',
+      paused: '官方来源 · 暂停推荐',
+      domain: '来源域名：{domain}',
+      checksum: 'SHA-256：{sha256}',
+      checksumUnknown: '未记录 SHA-256',
+      checked: '核查日期：{date}',
+      unchecked: '暂无核查日期',
+      active: '未被 Homebrew 禁用'
+    },
     fromTap: '来自',
     thirdPartyTap: '第三方仓库',
     stats: {
@@ -448,6 +462,8 @@ export default {
       license: '许可证'
     },
     spec: {
+      downloadSource: '下载来源',
+      fontFiles: '字体文件',
       title: '基本信息',
       price: '价格',
       system: '系统',
@@ -456,9 +472,10 @@ export default {
       openSource: '开源',
       repository: '仓库',
       githubRepository: 'GitHub 仓库',
+      checked: '核查日期',
       developer: '开发者',
       homepage: '主页',
-      token: 'Token',
+      token: '软件包标识符',
       installedVersion: '已安装版本',
       installLocation: '安装位置',
       checked: '已检查',
@@ -466,7 +483,8 @@ export default {
       no: '否'
     },
     repo: {
-      stars: 'Stars',
+      stars: '星标数',
+      checked: '仓库数据核查于 {date}。',
       updated: '{days} 天前更新',
       unmaintained: '可能已停止维护',
       archived: '已归档'

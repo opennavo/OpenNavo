@@ -10,6 +10,7 @@ import {
   oldestCheck,
   priceAmount,
   priceUsage,
+  quickFacts,
   verifiedIdentities,
   verifiedPrices
 } from './packageFacts';
@@ -24,33 +25,19 @@ export interface PackageSpecModel {
   repoSignals: PackageRepoSignals | null;
 }
 
-function mergeRepoSignals(pkg: PackagePage): PackageRepoSignals | null {
-  const fallback = pkg.repository?.url ?? pkg.openSource?.url ?? pkg.repoUrl;
-  const adapted = toPackageRepoSignals(pkg, { repoUrl: fallback, archived: pkg.openSource?.archived });
-  if (!adapted && pkg.openSource) {
-    return {
-      repoUrl: fallback ?? undefined,
-      archived: pkg.openSource.archived,
-      checkedAt: pkg.openSource.checkedAt
-    };
-  }
-  if (!adapted) return null;
-  return adapted;
-}
-
 function repoText(
   signals: PackageRepoSignals | null,
   labels: {
-    stars: string;
     updated: (days: number) => string;
     unmaintained: string;
     archived: string;
-  }
+  },
+  now: number
 ): { value: string; badge?: OnPackageSpecRow['badge'] } {
   if (!signals) return { value: '' };
-  const parts = [signals.stars === undefined ? '' : `${labels.stars}${formatRepoStars(signals.stars)}`];
-  const age = repoSignalDays(signals);
-  const maintenance = repoMaintenanceStatus(signals);
+  const parts: string[] = [];
+  const age = repoSignalDays(signals, now);
+  const maintenance = repoMaintenanceStatus(signals, now);
   if (age !== null && maintenance !== 'archived') parts.push(labels.updated(age));
   if (maintenance === 'unmaintained')
     return { value: parts.filter(Boolean).join(' · '), badge: { label: labels.unmaintained, tone: 'warning' } };
@@ -59,9 +46,15 @@ function repoText(
   return { value: parts.filter(Boolean).join(' · ') };
 }
 
-export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale): PackageSpecModel {
-  const signals = mergeRepoSignals(pkg);
+export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale, now: number): PackageSpecModel {
+  const signals = toPackageRepoSignals(pkg);
   const rows: OnPackageSpecRow[] = [];
+  const quick = quickFacts(pkg, t, locale);
+  const originalRows = (keys: string[]) =>
+    quick.rows
+      .filter(row => keys.includes(row.key))
+      .map(row => ({ key: row.key, label: row.label, value: row.value, mono: row.code }));
+  rows.push(...originalRows(['version', 'source', 'files', 'location']));
   const prices = verifiedPrices(pkg);
   const price = prices.length
     ? [
@@ -73,7 +66,7 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale):
   if (price) rows.push({ key: 'price', label: t('package.spec.price'), value: price });
 
   const range = macosText(macosRange(pkg), t);
-  if (range) rows.push({ key: 'macos', label: t('package.spec.system'), value: range });
+  if (!pkg.isFont && range) rows.push({ key: 'macos', label: t('package.spec.system'), value: range });
 
   const chipValues = chipsOf(pkg);
   const chips = chipValues.length
@@ -81,7 +74,7 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale):
     : architectures(pkg.supports)
         .map(arch => t(`package.arch.${arch}`))
         .join(' · ');
-  if (chips) rows.push({ key: 'chip', label: t('package.spec.chip'), value: chips });
+  if (!pkg.isFont && chips) rows.push({ key: 'chip', label: t('package.spec.chip'), value: chips });
 
   if (pkg.kind === 'cask')
     rows.push({
@@ -92,26 +85,43 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale):
 
   const repository = pkg.repository;
   const osi = pkg.openSource;
-  if (osi || repository) {
-    const repo = repoText(signals, {
-      stars: t('package.repo.stars'),
-      updated: days => t('package.repo.updated', { days }),
-      unmaintained: t('package.repo.unmaintained'),
-      archived: t('package.repo.archived')
-    });
+  const github = pkg.kind === 'link' && pkg.link?.github;
+  const repositoryUrl = repository?.url ?? osi?.url ?? (github ? `https://github.com/${github.repo}` : undefined);
+  if (osi || repository || github) {
+    const repo = repoText(
+      signals,
+      {
+        updated: days => t('package.repo.updated', { days }),
+        unmaintained: t('package.repo.unmaintained'),
+        archived: t('package.repo.archived')
+      },
+      now
+    );
     rows.push({
       key: 'openSource',
       label: t('package.spec.repository'),
       value: [osi ? t('package.spec.openSource') : t('package.spec.githubRepository'), osi?.license, repo.value]
         .filter(Boolean)
         .join(' · '),
-      href: repository?.url ?? osi?.url,
+      href: repositoryUrl,
+      stars:
+        signals?.stars === undefined
+          ? undefined
+          : {
+              label: `★${formatRepoStars(signals.stars, locale)}`,
+              href: repository?.url ?? undefined,
+              checked: signals.checkedAt
+                ? t('package.repo.checked', { date: formatDate(signals.checkedAt, { locale }) })
+                : undefined
+            },
       badge: repo.badge
     });
   }
 
-  if (pkg.developer) rows.push({ key: 'developer', label: t('package.spec.developer'), value: pkg.developer });
-  const homepage = httpsUrl(pkg.homepage);
+  rows.push(...originalRows(['developer', 'teamId', 'license', 'homebrew', 'names']));
+  if (pkg.kind === 'link' && pkg.bundleIds?.length)
+    rows.push({ key: 'bundle', label: 'Bundle ID', value: pkg.bundleIds.join(' '), mono: true });
+  const homepage = httpsUrl(pkg.kind === 'link' ? pkg.link?.homepage : pkg.homepage) ?? httpsUrl(pkg.homepage);
   if (homepage)
     rows.push({ key: 'homepage', label: t('package.spec.homepage'), value: displayUrl(homepage), href: homepage });
   rows.push({ key: 'token', label: t('package.spec.token'), value: pkg.token, mono: true });
@@ -121,9 +131,7 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale):
     ...prices.map(item => item.evidence),
     ...verifiedIdentities(pkg).map(item => item.evidence)
   ];
-  const checkedAt = [oldestCheck(factCheckDates), osi?.checkedAt, signals?.checkedAt]
-    .filter((value): value is string => Boolean(value))
-    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  const checkedAt = oldestCheck(factCheckDates);
   return {
     rows,
     checkedAt: checkedAt ? { iso: checkedAt.slice(0, 10), label: formatDate(checkedAt, { locale }) } : null,

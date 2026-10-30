@@ -315,7 +315,21 @@
     "autoUpdates": "Aggiornamento automatico",
     "disabled": "Disattivato",
     "deprecated": "Deprecato",
+    "paused": "Sospesa da OpenNavo",
     "homepage": "Sito web",
+    "sourceBadge": {
+      "label": "Fonte ufficiale",
+      "verified": "Fonte ufficiale · Verificata",
+      "disabled": "Fonte ufficiale · App disattivata",
+      "deprecated": "Fonte ufficiale · App deprecata",
+      "paused": "Fonte ufficiale · In pausa",
+      "domain": "Origine: {domain}",
+      "checksum": "SHA-256: {sha256}",
+      "checksumUnknown": "SHA-256 non registrato",
+      "checked": "Data verifica: {date}",
+      "unchecked": "Data di verifica non registrata",
+      "active": "Non disabilitato da Homebrew"
+    },
     "fromTap": "Da",
     "thirdPartyTap": "Repository di terze parti",
     "stats": {
@@ -440,7 +454,7 @@
       }
     },
     "related": "App simili",
-    "relatedMore": "See more",
+    "relatedMore": "Mostra altro",
     "screenshots": "Screenshot",
     "caveats": "Avvertenze",
     "info": {
@@ -454,28 +468,31 @@
       "license": "Licenza"
     },
     "spec": {
-      "title": "At a glance",
-      "price": "Price",
-      "system": "System",
+      "title": "A colpo d’occhio",
+      "price": "Prezzo",
+      "system": "Sistema",
       "chip": "Chip",
-      "autoUpdates": "Auto-updates",
+      "autoUpdates": "Aggiornamenti automatici",
       "openSource": "Open source",
       "repository": "Repository",
-      "githubRepository": "GitHub repository",
-      "developer": "Developer",
-      "homepage": "Homepage",
-      "token": "Token",
-      "installedVersion": "Installed version",
-      "installLocation": "Install location",
-      "checked": "Checked",
-      "yes": "Yes",
-      "no": "No"
+      "githubRepository": "Repository GitHub",
+      "developer": "Sviluppatore",
+      "homepage": "Sito web",
+      "token": "Identificatore",
+      "installedVersion": "Versione installata",
+      "installLocation": "Percorso di installazione",
+      "yes": "Sì",
+      "no": "No",
+      "checked": "Verificato",
+      "downloadSource": "Fonte del download",
+      "fontFiles": "File dei font"
     },
     "repo": {
-      "stars": "Stars",
-      "updated": "Updated {days} days ago",
-      "unmaintained": "May no longer be maintained",
-      "archived": "Archived"
+      "stars": "★",
+      "updated": "Aggiornato {days} giorni fa",
+      "unmaintained": "La manutenzione potrebbe essere terminata",
+      "archived": "Archiviato",
+      "checked": "Dati del repository verificati il {date}."
     },
     "deps": {
       "macos": "Requisiti",
