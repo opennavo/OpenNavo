@@ -391,3 +391,33 @@ describe('QA spec card regressions', () => {
     );
   });
 });
+
+describe('product star formatting', () => {
+  it.each([
+    ['en-US', 1_000, '1K'],
+    ['en-US', 12_345, '12.3K'],
+    ['en-US', 184_400, '184.4K'],
+    ['en-US', 999_949, '999.9K'],
+    ['en-US', 999_950, '1M'],
+    ['en-US', 1_200_000, '1.2M'],
+    ['zh-CN', 1_000, '1,000'],
+    ['zh-CN', 12_345, '1.2万'],
+    ['zh-CN', 999_950, '100万'],
+    ['ja-JP', 1_000, '1,000'],
+    ['ja-JP', 12_345, '1.2万'],
+    ['ja-JP', 999_950, '100万'],
+    ['de-DE', 1_000, '1.000'],
+    ['de-DE', 12_345, '12.345'],
+    ['de-DE', 999_950, '1\u00a0Mio.']
+  ] as const)('%s formats %s stars on the web detail page', (locale, stars, expected) => {
+    const spec = packageSpec(
+      page({ repository: { url: 'https://github.com/acme/stars', stars, archived: false } }),
+      t,
+      locale,
+      SPEC_NOW
+    );
+    const label = spec.rows.find(row => row.key === 'openSource')?.stars?.label;
+    expect(label).toBe(`★${expected}`);
+    expect(label).not.toMatch(/1000[.,]0/);
+  });
+});
