@@ -123,6 +123,9 @@ const relatedItems = computed<OnRelatedPackage[]>(() =>
   }))
 );
 
+function onCopyFailed() {
+  toasts.push({ tone: 'warning', title: t('common.copyFailed'), description: command.value, duration: 0 });
+}
 function onCopied(text: string) {
   toasts.push({ tone: 'success', title: t('common.copied'), description: text });
 }
@@ -145,6 +148,7 @@ function onCopied(text: string) {
     :related-more-label="t('package.relatedMore')"
     :link-as="RouterLink"
     @copied="onCopied"
+    @copy-failed="onCopyFailed"
   >
     <template #about>
       <OnMarkdown size="md" :heading-level="3" :source="description" />

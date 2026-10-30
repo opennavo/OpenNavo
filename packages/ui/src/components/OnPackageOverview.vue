@@ -54,7 +54,7 @@ const props = withDefaults(defineProps<OnPackageOverviewProps>(), {
   linkAs: 'a'
 });
 
-const emit = defineEmits<{ copied: [command: string] }>();
+const emit = defineEmits<{ copied: [command: string]; copyFailed: [error: unknown] }>();
 const slots = useSlots();
 
 // The lead (host top slot and the gallery) shares the first row and stacks, so the two cannot overlap.
@@ -85,7 +85,9 @@ defineSlots<{
 </script>
 
 <template>
-  <div class="grid grid-cols-1 gap-20px pt-4px lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+  <div
+    class="grid grid-cols-1 gap-20px pt-4px lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[auto_auto_auto_1fr] lg:items-start"
+  >
     <div
       v-if="hasLead"
       class="flex min-w-0 flex-col gap-14px lg:col-start-1 lg:row-start-1"
@@ -136,10 +138,16 @@ defineSlots<{
           v-if="command && !installNotice?.disabled"
           :command="command"
           @copied="emit('copied', $event)"
+          @copy-failed="emit('copyFailed', $event)"
         />
       </section>
     </div>
-    <div class="flex min-w-0 flex-col gap-16px lg:col-start-1" :class="mainRow" data-testid="package-overview-main">
+    <!-- The main column spans to the last row so the side column stacks independently beside it (no empty sidebar). -->
+    <div
+      class="flex min-w-0 flex-col gap-16px lg:col-start-1 lg:row-end-5"
+      :class="mainRow"
+      data-testid="package-overview-main"
+    >
       <slot name="main" />
       <OnRelatedPackages
         v-if="relatedInMain"
@@ -159,20 +167,22 @@ defineSlots<{
         /></pre>
       </section>
     </div>
-    <div v-if="$slots.aside" class="flex min-w-0 flex-col gap-14px lg:col-start-2 lg:row-start-4">
-      <slot name="aside" />
-    </div>
-    <div v-if="!relatedInMain" class="min-w-0 lg:col-start-2 lg:row-start-5">
-      <OnRelatedPackages
-        :related="related"
-        :related-title="relatedTitle"
-        :related-more-href="relatedMoreHref"
-        :related-more-label="relatedMoreLabel"
-        :link-as="linkAs"
-      />
-    </div>
-    <div v-if="$slots.asideEnd" class="min-w-0 lg:col-start-2 lg:row-start-6">
-      <slot name="asideEnd" />
+    <div class="flex min-w-0 flex-col gap-14px lg:col-start-2 lg:row-start-3">
+      <div v-if="$slots.aside" class="flex min-w-0 flex-col gap-14px">
+        <slot name="aside" />
+      </div>
+      <div v-if="!relatedInMain" class="min-w-0">
+        <OnRelatedPackages
+          :related="related"
+          :related-title="relatedTitle"
+          :related-more-href="relatedMoreHref"
+          :related-more-label="relatedMoreLabel"
+          :link-as="linkAs"
+        />
+      </div>
+      <div v-if="$slots.asideEnd" class="min-w-0">
+        <slot name="asideEnd" />
+      </div>
     </div>
   </div>
 </template>

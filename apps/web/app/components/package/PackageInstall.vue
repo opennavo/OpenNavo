@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { packageInstallState } from '@opennavo/shared';
 import { installNote } from '~/utils/appAnswer';
 import { downloadChoice } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
+import { installLifecycle } from '~/utils/packageInstall';
 import { packagePath } from '~/utils/packageView';
 
 // One overview guide; the install command and lifecycle notice live in the shared header, while download
@@ -12,7 +12,13 @@ const { t } = useI18n();
 const localePath = useLocalePath();
 const note = computed(() => installNote(props.pkg));
 const download = computed(() => downloadChoice(props.pkg));
-const state = computed(() => packageInstallState(props.pkg));
+const state = computed(() => installLifecycle(props.pkg, t).state);
+// H9: when the server consolidates Install details into the overview, the layout 301s the details
+// page here. Link the same-page body instead (rendered by the overview), never the redirected tab.
+const detailsRedirect = computed(() => Boolean(props.pkg.indexing?.detailsRedirect));
+const detailsHref = computed(() =>
+  detailsRedirect.value ? '#install-details' : `${localePath(packagePath(props.pkg.token, 'details'))}#requirements`
+);
 </script>
 
 <template>
@@ -52,14 +58,11 @@ const state = computed(() => packageInstallState(props.pkg));
                   : 'package.guide.downloadOfficial'
           )
         }}
-        <NuxtLink
-          :to="localePath(packagePath(pkg.token, 'details')) + '#requirements'"
-          class="text-ink-primary underline-offset-2 hover:underline"
-        >
+        <NuxtLink :to="detailsHref" class="text-ink-primary underline-offset-2 hover:underline">
           {{ t('package.tabs.details') }}
         </NuxtLink>
       </p>
     </details>
-    <PackageUninstall :pkg="pkg" :homebrew="true" compact />
+    <PackageUninstall v-if="!detailsRedirect" :pkg="pkg" :homebrew="true" compact />
   </section>
 </template>

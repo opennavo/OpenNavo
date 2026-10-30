@@ -257,4 +257,45 @@ describe('Package detail product decisions', () => {
       wrapper.unmount();
     }
   });
+  it('stacks the side column beside the main column instead of below it', () => {
+    const wrapper = mount(OnPackageOverview, {
+      props: { hasAbout: true, command: 'brew install --cask example' },
+      slots: {
+        about: () => h('p', 'About'),
+        main: () => h('p', 'Main'),
+        aside: () => h('p', { id: 'aside' }, 'Installs')
+      },
+      global: withLocale('en-US')
+    });
+    try {
+      const main = wrapper.get('[data-testid="package-overview-main"]');
+      expect(main.classes()).toEqual(expect.arrayContaining(['lg:row-start-2', 'lg:row-end-5']));
+      const side = wrapper.get('#aside').element.parentElement!.parentElement!;
+      expect(side.className).toContain('lg:row-start-3');
+      expect(side.className).not.toMatch(/row-start-[4-9]/);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('forwards a failed install-command copy', async () => {
+    const original = navigator.clipboard;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('denied')) }
+    });
+    const wrapper = mount(OnPackageOverview, {
+      props: { command: 'brew install --cask example' },
+      global: withLocale('en-US')
+    });
+    try {
+      await wrapper.get('[data-testid="package-install-command"] button').trigger('click');
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(wrapper.emitted('copyFailed')).toHaveLength(1);
+      expect(wrapper.emitted('copied')).toBeUndefined();
+    } finally {
+      wrapper.unmount();
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: original });
+    }
+  });
 });
