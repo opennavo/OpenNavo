@@ -1198,9 +1198,10 @@ class Deployment:
         try:
             write_caddy_in_place(self.live_caddy, content)
         except Exception:
-            print(f'WARNING: writing {self.live_caddy} failed; restoring it in place from {backup}.', flush=True)
-            write_caddy_in_place(self.live_caddy, backup.read_bytes())
-            print(f'Restored {self.live_caddy} from {backup}.', flush=True)
+            print(f'WARNING: writing {self.live_caddy} failed; checking whether it needs recovery.', flush=True)
+            # The failed write leaves its intent record, so this restores the backup only when the
+            # live file is incomplete/invalid and the backup validates (same rule everywhere).
+            self.validate_live_caddy()
             raise
 
     def validate_live_caddy(self):
@@ -1216,6 +1217,11 @@ class Deployment:
         if not interrupted and caddy_validate(container, '/etc/caddy/Caddyfile'):
             return
         reason = 'an interrupted write' if interrupted else 'live Caddyfile validation failed'
+        self._restore_live_caddy(backup, reason)
+
+    def _restore_live_caddy(self, backup, reason):
+        """The single recovery path: restore backup in place only if it validates as a staged copy."""
+        container = self.config['caddy_container']
         if not backup.is_file():
             raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}); '
                                f'backup {backup} is missing. Aborting deployment.')
@@ -1239,17 +1245,9 @@ class Deployment:
         try:
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
-            # Prefer the adjacent backup of the actual live file at this switch.
-            # Keep the release snapshot fallback for rollback without a prior install.
-            directory = getattr(self, 'directory', None)
-            before = self.live_caddy.with_name('Caddyfile.bak')
-            try:
-                if not before.is_file():
-                    before = directory / 'before-caddy' if directory is not None else None
-                if before is not None and before.is_file():
-                    write_caddy_in_place(self.live_caddy, before.read_bytes())
-            except OSError:
-                pass
+            # The live file was just validated, so a failed signal is not a reason to overwrite it
+            # with a backup. Leave every file as is and require manual confirmation.
+            print(f'WARNING: Caddy reload signal failed; {self.live_caddy} validated and was left unchanged.', flush=True)
             self.mark_degraded('Caddy reload failed; routing unconfirmed')
             raise
         self.switch_at = time.monotonic()
@@ -1364,6 +1362,8 @@ class Deployment:
             print('Candidate env and rolling configuration restored for manual recovery.', flush=True)
             raise RuntimeError('degraded rollback: previous services failed to start; routing unconfirmed') from error
         print('Previous release services are healthy; switching Caddy back.', flush=True)
+        # Deliberate switch back to the previous release's config (not a backup recovery);
+        # reload() validates it before signalling and recovers only under the shared rule.
         write_caddy_in_place(self.live_caddy, (self.directory / 'before-caddy').read_bytes())
         self.reload()
         try:

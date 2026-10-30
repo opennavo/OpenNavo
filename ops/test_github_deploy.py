@@ -770,28 +770,51 @@ class DeployTests(unittest.TestCase):
             def partial(path, content):
                 calls.append(content)
                 if len(calls) == 1:
+                    deploy.write_atomic(deploy.caddy_intent_path(path), b'0' * 64 + b'\n')
                     path.write_bytes(b'partial')
                     raise OSError('fixture partial write')
                 real(path, content)
-            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(newer,))), \
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer))), \
                     patch.object(deploy, 'write_caddy_in_place', side_effect=partial), \
                     contextlib.redirect_stdout(io.StringIO()), \
                     self.assertRaisesRegex(OSError, 'fixture partial write'):
                 obj.install_caddy(newer)
             self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
 
-    def test_reload_signal_failure_restores_validated_backup_and_marks_degraded(self):
-        with tempfile.TemporaryDirectory() as root:
-            newer = GOOD_CADDY + b'# newer\n'
-            obj = self._caddy_obj(root, live=newer, backup=GOOD_CADDY)
-            fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer), signal_ok=False)
-            with patch.object(deploy, 'command', side_effect=fake), \
-                    contextlib.redirect_stdout(io.StringIO()), \
-                    self.assertRaisesRegex(RuntimeError, 'fixture reload failure'):
-                obj.reload()
-            self.assertEqual(obj.live_caddy.read_bytes(), GOOD_CADDY)
-            self.assertTrue(obj.degraded_path.exists())
+    def test_reload_signal_failure_with_valid_live_never_overwrites(self):
+        for backup in [GOOD_CADDY, TRUNCATED_CADDY]:
+            with self.subTest(backup=backup), tempfile.TemporaryDirectory() as root:
+                newer = GOOD_CADDY + b'# newer\n'
+                obj = self._caddy_obj(root, live=newer, backup=backup)
+                (obj.root / 'before-caddy').write_bytes(GOOD_CADDY)
+                before = obj.live_caddy.stat()
+                fake = FakeCaddy(obj.live_caddy, good=(GOOD_CADDY, newer), signal_ok=False)
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()) as output, \
+                        self.assertRaisesRegex(RuntimeError, 'fixture reload failure'):
+                    obj.reload()
+                self.assertEqual(obj.live_caddy.read_bytes(), newer)
+                self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
+                self.assertEqual((obj.root / 'Caddyfile.bak').read_bytes(), backup)
+                self.assertIn('left unchanged', output.getvalue())
+                self.assertTrue(obj.degraded_path.exists())
 
+    def test_install_caddy_partial_write_with_invalid_backup_aborts_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj = self._caddy_obj(root, live=TRUNCATED_CADDY)
+            newer = GOOD_CADDY + b'# newer\n'
+            real = deploy.write_caddy_in_place
+            def partial(path, content):
+                deploy.write_atomic(deploy.caddy_intent_path(path), b'0' * 64 + b'\n')
+                path.write_bytes(b'partial')
+                raise OSError('fixture partial write')
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(newer,))), \
+                    patch.object(deploy, 'write_caddy_in_place', side_effect=partial), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaisesRegex(RuntimeError, 'invalid too'):
+                obj.install_caddy(newer)
+            self.assertEqual(obj.live_caddy.read_bytes(), b'partial')
+            del real
     def test_public_mcp_route_requires_one_web_block_and_catch_all_proxy(self):
         for source in ['reverse_proxy {\n}\n', '{$WEB_DOMAIN} {\nreverse_proxy web:3000\n}\n']:
             with self.subTest(source=source), self.assertRaises(ValueError):
