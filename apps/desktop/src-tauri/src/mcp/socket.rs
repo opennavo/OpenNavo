@@ -46,10 +46,57 @@ pub fn path(data_dir: &Path) -> SocketPath {
         };
     }
 
-    let fallback = PathBuf::from("/tmp").join(format!("opennavo-mcp-{}", current_uid()));
+    let name = format!("opennavo-mcp-{}", current_uid());
+    if let Some(temp) = user_temp_dir() {
+        let directory = temp.join(&name);
+        let socket = directory.join("mcp.sock");
+        if socket.as_os_str().as_bytes().len() <= MAX_SOCKET_PATH_BYTES {
+            return SocketPath {
+                directory,
+                path: socket,
+            };
+        }
+    }
+
+    // Last resort. The directory is shared and predictable, so both sides
+    // refuse it unless it is a real `0700` directory owned by this uid, and
+    // the CLI additionally verifies the broker's peer uid.
+    let fallback = PathBuf::from("/tmp").join(name);
     SocketPath {
         directory: fallback.clone(),
         path: fallback.join("mcp.sock"),
+    }
+}
+
+/// Per-user temporary directory. On macOS this is the private
+/// `DARWIN_USER_TEMP_DIR` (`/var/folders/.../T/`), resolved through
+/// `confstr` so the GUI and a CLI launched with a different environment
+/// agree. Elsewhere `$TMPDIR` is used when it is an absolute path.
+fn user_temp_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut buffer = vec![0u8; 1024];
+        let length = unsafe {
+            nix::libc::confstr(
+                nix::libc::_CS_DARWIN_USER_TEMP_DIR,
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+            )
+        };
+        if length > 1 && length <= buffer.len() {
+            buffer.truncate(length - 1);
+            let path = PathBuf::from(std::ffi::OsStr::from_bytes(&buffer));
+            if path.is_absolute() {
+                return Some(path);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
     }
 }
 
@@ -249,6 +296,22 @@ pub fn verify_peer(stream: &UnixStream) -> io::Result<Peer> {
         ));
     }
     Ok(peer)
+}
+
+/// Client side: verify that the socket's directory is private and that the
+/// listening peer runs as the current user before any request is written.
+pub fn verify_server(resolved: &SocketPath, stream: &UnixStream) -> io::Result<Peer> {
+    state::verify_private_dir(&resolved.directory)?;
+    verify_peer(stream).map_err(|error| {
+        if error.kind() == ErrorKind::PermissionDenied {
+            io::Error::new(
+                ErrorKind::PermissionDenied,
+                "MCP socket is served by another user",
+            )
+        } else {
+            error
+        }
+    })
 }
 
 /// Current effective uid.
@@ -510,6 +573,34 @@ mod tests {
         assert_eq!(peer.uid, current_uid());
         drop(server);
         drop(client);
+    }
+
+    #[test]
+    fn long_data_dir_uses_the_user_temp_dir_first() {
+        let dir = tempdir();
+        let long = dir.path().join("x".repeat(120));
+        let resolved = path(&long);
+        let name = format!("opennavo-mcp-{}", current_uid());
+        assert!(resolved.directory.ends_with(&name));
+        if let Some(temp) = user_temp_dir() {
+            let candidate = temp.join(&name).join("mcp.sock");
+            if candidate.as_os_str().as_bytes().len() <= MAX_SOCKET_PATH_BYTES {
+                assert_eq!(resolved.path, candidate);
+            }
+        }
+    }
+
+    #[test]
+    fn client_refuses_a_socket_directory_with_broad_permissions() {
+        let dir = tempdir();
+        let resolved = prepare(dir.path()).expect("prepare");
+        let listener = bind(&resolved).expect("bind");
+        let client = connect_timeout(&resolved.path, Duration::from_millis(500)).expect("connect");
+        verify_server(&resolved, &client).expect("private dir accepted");
+        fs::set_permissions(&resolved.directory, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let error = verify_server(&resolved, &client).expect_err("broad dir");
+        assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+        drop(listener);
     }
 
     #[test]

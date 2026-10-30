@@ -229,6 +229,15 @@ impl Broker {
     }
 
     fn disable(&self) -> Result<(), BrokerError> {
+        // Persist "off" before stopping anything. If the write fails, the
+        // broker keeps running and reports the error, so the runtime and the
+        // persisted switch never disagree and the next launch cannot silently
+        // turn Local MCP back on.
+        if let Err(error) = state::save(&self.data_dir, false) {
+            let failure = BrokerError::io(error);
+            self.lock().error = Some(failure.to_string());
+            return Err(failure);
+        }
         let thread = {
             let mut inner = self.lock();
             inner.enabled = false;
@@ -236,11 +245,6 @@ impl Broker {
             self.stop_runtime(&mut inner)
         };
         join(thread);
-        if let Err(error) = state::save(&self.data_dir, false) {
-            let failure = BrokerError::io(error);
-            self.lock().error = Some(failure.to_string());
-            return Err(failure);
-        }
         Ok(())
     }
 
@@ -777,6 +781,37 @@ mod tests {
         broker.start_if_enabled().expect("start");
         assert!(!broker.status().running);
         assert!(!socket::path(dir.path()).path.exists());
+    }
+
+    #[test]
+    fn failed_disable_persist_keeps_running_and_never_reenables_on_restart() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir();
+        let broker = Arc::new(Broker::new(dir.path().to_path_buf()));
+        broker.set_enabled(true).expect("enable");
+        wait_running(&broker);
+        let mcp = state::mcp_dir(dir.path());
+        std::fs::set_permissions(&mcp, std::fs::Permissions::from_mode(0o500)).expect("chmod");
+
+        broker.set_enabled(false).expect_err("persist must fail");
+        let status = broker.status();
+        // Runtime and persisted switch agree: still on, error reported.
+        assert!(status.enabled && status.running, "{status:?}");
+        assert!(status.error.is_some());
+        assert!(state::load(dir.path()).enabled);
+
+        std::fs::set_permissions(&mcp, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+        broker.set_enabled(false).expect("disable");
+        assert!(!broker.status().running);
+        assert!(!state::load(dir.path()).enabled);
+        broker.shutdown();
+
+        // A fresh broker (next launch) stays off.
+        let restarted = Arc::new(Broker::new(dir.path().to_path_buf()));
+        restarted.start_if_enabled().expect("start");
+        assert!(!restarted.status().enabled);
+        assert!(!restarted.status().running);
     }
 
     #[test]

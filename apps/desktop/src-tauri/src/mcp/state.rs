@@ -123,30 +123,39 @@ pub fn save(data_dir: &Path, enabled: bool) -> io::Result<()> {
     result
 }
 
-/// Create or harden a directory that contains private state and the socket.
+/// Create or verify a directory that contains private state and the socket.
 ///
-/// The final path component is created with `mkdir(0700)` (never recursive),
-/// then opened with `O_DIRECTORY | O_NOFOLLOW`. Ownership and mode are checked
-/// and fixed through that descriptor (`fstat`/`fchmod`), so a symlink or other
-/// object swapped in at the path is refused instead of followed.
+/// Ancestors are walked one component at a time instead of `create_dir_all`:
+/// a missing component is created with `mkdir(0700)`, and every existing one
+/// must be a directory owned by root or the current user that is not writable
+/// by group/others (unless sticky, like `/tmp`). A symlink ancestor is only
+/// followed when root owns it (macOS `/tmp`, `/var`); any other symlink is
+/// refused. The final component is created with `mkdir(0700)`, opened with
+/// `O_DIRECTORY | O_NOFOLLOW` and checked through that descriptor: it must be
+/// owned by the current user with mode exactly `0700`. A symlink, another
+/// user's directory, or a directory with broader permissions is refused
+/// rather than repaired.
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        fs::create_dir_all(parent)?;
+        ensure_trusted_ancestors(parent)?;
     }
-    let raw = std::ffi::CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "MCP directory path"))?;
-
+    let raw = c_path(path)?;
     if unsafe { nix::libc::mkdir(raw.as_ptr(), 0o700) } != 0 {
         let error = io::Error::last_os_error();
         if error.raw_os_error() != Some(nix::libc::EEXIST) {
             return Err(error);
         }
     }
+    verify_private_dir(path)
+}
 
+/// Verify, without creating or repairing anything, that `path` is a real
+/// directory (not a symlink) owned by the current effective uid with mode
+/// `0700`. Used by the CLI before it connects to the broker socket.
+pub fn verify_private_dir(path: &Path) -> io::Result<()> {
+    let raw = c_path(path)?;
     let fd = unsafe {
         nix::libc::open(
             raw.as_ptr(),
@@ -159,10 +168,9 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     if fd < 0 {
         let error = io::Error::last_os_error();
         return Err(match error.raw_os_error() {
-            Some(code) if code == nix::libc::ELOOP || code == nix::libc::ENOTDIR => io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "MCP directory is not a directory",
-            ),
+            Some(code) if code == nix::libc::ELOOP || code == nix::libc::ENOTDIR => {
+                denied("MCP directory is not a directory")
+            }
             _ => error,
         });
     }
@@ -172,26 +180,72 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
         if (stat.st_mode & nix::libc::S_IFMT) != nix::libc::S_IFDIR {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "MCP directory is not a directory",
-            ));
+            return Err(denied("MCP directory is not a directory"));
         }
         if stat.st_uid != unsafe { nix::libc::geteuid() } {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "MCP directory is owned by another user",
-            ));
+            return Err(denied("MCP directory is owned by another user"));
         }
         #[allow(clippy::unnecessary_cast)]
         let mode = stat.st_mode as u32;
-        if mode & 0o777 != 0o700 && unsafe { nix::libc::fchmod(fd, 0o700) } != 0 {
-            return Err(io::Error::last_os_error());
+        if mode & 0o777 != 0o700 {
+            return Err(denied("MCP directory permissions are too broad"));
         }
         Ok(())
     })();
     unsafe { nix::libc::close(fd) };
     result
+}
+
+fn ensure_trusted_ancestors(parent: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let uid = unsafe { nix::libc::geteuid() };
+    let mut current = PathBuf::new();
+    for component in parent.components() {
+        current.push(component);
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let raw = c_path(&current)?;
+                if unsafe { nix::libc::mkdir(raw.as_ptr(), 0o700) } != 0 {
+                    let error = io::Error::last_os_error();
+                    if error.raw_os_error() != Some(nix::libc::EEXIST) {
+                        return Err(error);
+                    }
+                }
+                fs::symlink_metadata(&current)?
+            }
+            Err(error) => return Err(error),
+        };
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            if metadata.uid() != 0 {
+                return Err(denied("MCP directory ancestor is a symlink"));
+            }
+            continue;
+        }
+        if !file_type.is_dir() || file_type.is_socket() {
+            return Err(denied("MCP directory ancestor is not a directory"));
+        }
+        if metadata.uid() != 0 && metadata.uid() != uid {
+            return Err(denied("MCP directory ancestor is owned by another user"));
+        }
+        let mode = metadata.mode();
+        if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+            return Err(denied("MCP directory ancestor is writable by others"));
+        }
+    }
+    Ok(())
+}
+
+fn c_path(path: &Path) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+    std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "MCP directory path"))
+}
+
+fn denied(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, message.to_owned())
 }
 
 #[cfg(test)]
@@ -243,5 +297,85 @@ mod tests {
         assert_eq!(directory.permissions().mode() & 0o777, 0o700);
         assert_eq!(file.permissions().mode() & 0o777, 0o600);
         assert_eq!(directory.uid(), unsafe { nix::libc::geteuid() });
+    }
+
+    #[test]
+    fn symlinked_directory_is_refused() {
+        let dir = tempdir();
+        let target = dir.path().join("target");
+        fs::create_dir(&target).expect("target");
+        std::os::unix::fs::symlink(&target, mcp_dir(dir.path())).expect("symlink");
+        let error = ensure_private_dir(&mcp_dir(dir.path())).expect_err("symlink leaf");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(save(dir.path(), true).is_err());
+        assert!(!target.join("state.json").exists());
+    }
+
+    #[test]
+    fn symlinked_ancestor_owned_by_user_is_refused() {
+        let dir = tempdir();
+        let target = dir.path().join("target");
+        fs::create_dir(&target).expect("target");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        let error = ensure_private_dir(&link.join("mcp")).expect_err("symlink ancestor");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!target.join("mcp").exists());
+    }
+
+    #[test]
+    fn broad_permissions_are_refused_not_repaired() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir();
+        let mcp = mcp_dir(dir.path());
+        fs::create_dir(&mcp).expect("mcp");
+        fs::set_permissions(&mcp, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let error = ensure_private_dir(&mcp).expect_err("broad mode");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            fs::metadata(&mcp).expect("meta").permissions().mode() & 0o777,
+            0o755
+        );
+        assert!(verify_private_dir(&mcp).is_err());
+    }
+
+    #[test]
+    fn group_writable_ancestor_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir();
+        let shared = dir.path().join("shared");
+        fs::create_dir(&shared).expect("shared");
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).expect("chmod");
+        let error = ensure_private_dir(&shared.join("mcp")).expect_err("writable ancestor");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!shared.join("mcp").exists());
+    }
+
+    #[test]
+    fn foreign_owned_directory_is_refused() {
+        // Root owns `/` on every supported platform; when tests run as root
+        // there is no foreign owner to check.
+        if unsafe { nix::libc::geteuid() } == 0 {
+            return;
+        }
+        let error = verify_private_dir(Path::new("/")).expect_err("root-owned");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn missing_ancestors_are_created_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir();
+        let nested = dir.path().join("a/b/mcp");
+        ensure_private_dir(&nested).expect("nested");
+        for path in [dir.path().join("a"), dir.path().join("a/b"), nested] {
+            assert_eq!(
+                fs::metadata(&path).expect("meta").permissions().mode() & 0o777,
+                0o700
+            );
+        }
     }
 }

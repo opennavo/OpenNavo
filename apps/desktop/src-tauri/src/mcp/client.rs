@@ -19,6 +19,13 @@ use super::{socket, state};
 
 /// Connect deadline required by the local MCP design.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+/// Deadline for writing one request to the broker.
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Deadline for the broker's answer to one request. Every Local MCP tool is a
+/// read-only lookup that never waits for user interaction (there is no
+/// confirmation dialog on this path); the slowest, `list_updatable_apps`,
+/// may scan installed apps, so the budget is generous but finite.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// Maximum accepted broker response line (the app may return catalog pages).
 pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// Internal RPC version.
@@ -37,6 +44,11 @@ pub enum CallError {
     Disconnected,
     /// Internal protocol or transport response was unusable.
     Protocol(String),
+    /// The socket is not served by the current user, or its directory is not
+    /// private. The CLI refuses to talk to it.
+    UntrustedPeer(String),
+    /// The broker accepted the request but did not answer in time.
+    Timeout,
     /// Broker returned a structured error.
     Broker { code: String, message: String },
 }
@@ -48,6 +60,8 @@ impl CallError {
             Self::Disabled => -32001,
             Self::AppNotRunning => -32002,
             Self::Disconnected => -32003,
+            Self::UntrustedPeer(_) => -32004,
+            Self::Timeout => -32005,
             Self::Broker { code, .. } if code == "E_TOOL_NOT_FOUND" => -32602,
             Self::Broker { .. } => -32603,
             Self::Protocol(_) => -32603,
@@ -60,6 +74,8 @@ impl CallError {
             Self::Disabled => "E_MCP_DISABLED",
             Self::AppNotRunning => "E_APP_NOT_RUNNING",
             Self::Disconnected => "E_APP_DISCONNECTED",
+            Self::UntrustedPeer(_) => "E_MCP_UNTRUSTED_PEER",
+            Self::Timeout => "E_APP_TIMEOUT",
             Self::Broker { code, .. } => code,
             Self::Protocol(_) => "E_MCP_PROTOCOL",
         }
@@ -78,6 +94,10 @@ impl CallError {
             Self::Disconnected => {
                 "OpenNavo disconnected before answering. Please retry the call.".to_owned()
             }
+            Self::UntrustedPeer(reason) => format!(
+                "Refusing to use the Local MCP socket because it is not private to this user ({reason}). Quit any other OpenNavo instance and reopen OpenNavo."
+            ),
+            Self::Timeout => "OpenNavo did not answer in time. Please retry the call.".to_owned(),
             Self::Broker { message, .. } => message.clone(),
             Self::Protocol(message) => {
                 format!("OpenNavo returned an invalid MCP response: {message}")
@@ -90,6 +110,7 @@ impl CallError {
 pub struct Client {
     data_dir: PathBuf,
     stream: Option<BufReader<UnixStream>>,
+    read_timeout: Duration,
 }
 
 impl Client {
@@ -97,7 +118,14 @@ impl Client {
         Self {
             data_dir,
             stream: None,
+            read_timeout: READ_TIMEOUT,
         }
+    }
+
+    /// Override the response deadline (tests).
+    pub fn with_read_timeout(mut self, timeout: Duration) -> Self {
+        self.read_timeout = timeout;
+        self
     }
 
     /// Directory whose `mcp/state.json` controls this client.
@@ -162,9 +190,15 @@ impl Client {
 
     fn ensure_stream(&mut self) -> Result<&mut BufReader<UnixStream>, CallError> {
         if self.stream.is_none() {
-            let path = socket::path(&self.data_dir).path;
-            let stream =
-                socket::connect_timeout(&path, CONNECT_TIMEOUT).map_err(map_connect_error)?;
+            let resolved = socket::path(&self.data_dir);
+            let stream = socket::connect_timeout(&resolved.path, CONNECT_TIMEOUT)
+                .map_err(map_connect_error)?;
+            socket::verify_server(&resolved, &stream)
+                .map_err(|error| CallError::UntrustedPeer(error.to_string()))?;
+            stream
+                .set_write_timeout(Some(WRITE_TIMEOUT))
+                .and_then(|_| stream.set_read_timeout(Some(self.read_timeout)))
+                .map_err(|error| CallError::Protocol(error.to_string()))?;
             self.stream = Some(BufReader::new(stream));
         }
         Ok(self.stream.as_mut().expect("stream was just installed"))
@@ -188,6 +222,9 @@ fn map_connect_error(error: io::Error) -> CallError {
 }
 
 fn map_stream_error(error: io::Error) -> CallError {
+    if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) {
+        return CallError::Timeout;
+    }
     match error.raw_os_error() {
         Some(code)
             if code == nix::libc::ECONNRESET
@@ -355,6 +392,48 @@ mod tests {
                 message: "Unknown tool".into()
             })
         );
+    }
+
+    #[test]
+    fn broker_that_never_answers_times_out_and_drops_the_stream() {
+        let dir = tempdir();
+        state::prepare_enabled_for_test(dir.path());
+        let listener = UnixListener::bind(&socket::path(dir.path()).path).expect("bind");
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept");
+            // Accept the request but never answer.
+            let _ = wait.recv();
+            drop(stream);
+        });
+        let mut client =
+            Client::new(dir.path().into()).with_read_timeout(Duration::from_millis(200));
+        let started = std::time::Instant::now();
+        assert_eq!(
+            client.call("tools/call", json!({})),
+            Err(CallError::Timeout)
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(client.stream.is_none());
+        assert_eq!(CallError::Timeout.data_code(), "E_APP_TIMEOUT");
+        release.send(()).expect("release");
+        handle.join().expect("join");
+    }
+
+    #[test]
+    fn socket_directory_with_broad_permissions_is_untrusted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir();
+        state::prepare_enabled_for_test(dir.path());
+        let resolved = socket::path(dir.path());
+        let _listener = UnixListener::bind(&resolved.path).expect("bind");
+        std::fs::set_permissions(&resolved.directory, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+        let mut client = Client::new(dir.path().into());
+        let error = client.call("tools/call", json!({})).expect_err("untrusted");
+        assert!(matches!(error, CallError::UntrustedPeer(_)), "{error:?}");
+        assert_eq!(error.data_code(), "E_MCP_UNTRUSTED_PEER");
     }
 
     #[test]
