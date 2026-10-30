@@ -49,7 +49,17 @@ SELECTORS: dict[str, dict[str, Any]] = {
         "limit": {"type": "integer", "minimum": 1, "maximum": 16000, "default": 8000},
     },
     "package_refresh": {"mode": {"type": "string", "enum": ["resync"], "default": "resync"}},
-    "package_set_enabled": {"enabled": {"type": "boolean"}},
+    "package_set_enabled": {
+        "enabled": {"type": "boolean"},
+        "clear_disabled": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+                "Explicitly clear Homebrew or stale-version disabled state and preserve the"
+                " upstream disable signature for future syncs."
+            ),
+        },
+    },
     "package_set_icon": {"remove": {"type": "boolean", "default": False}},
     "collection_publish": {
         "action": {"type": "string", "enum": ["publish", "unpublish"], "default": "publish"}
@@ -151,10 +161,15 @@ def normalize_arguments(spec: ToolSpec, args: dict[str, Any]) -> None:
 USAGE = {
     "package_set_enabled": (
         " Set catalog visibility, matching the admin UI: enabled=true clears hidden;"
-        " enabled=false sets hidden. Homebrew and stale-version disabled flags and removed"
-        " state remain in effect. dry_run returns the before/after hidden state without"
-        " persisting changes. Uses the same audit, revisions and cache/sitemap invalidation"
-        " as package_update_meta."
+        " enabled=false sets hidden and requires visibility_reason, recorded in the audit log."
+        " Hidden packages remain reachable by direct link with noindex. Use package_update_meta"
+        " with private=true and visibility_reason to remove a package from every public read."
+        " Homebrew and stale-version disabled flags and removed"
+        " state remain in effect unless clear_disabled=true. clear_disabled defaults to false;"
+        " when true it also clears the disabled state and records a manual override."
+        " dry_run returns the before/after hidden and disabled state, including the previous"
+        " disabled reason, without persisting changes. Uses the same audit, revisions and"
+        " cache/sitemap invalidation as package_update_meta."
     ),
     "listing_gaps": (
         " Defaults to visible, enabled, current non-font apps: hidden=false, disabled=false,"
@@ -336,7 +351,16 @@ def tool_schema(spec: ToolSpec) -> dict[str, Any]:
         properties = {
             key: value
             for key, value in properties.items()
-            if key in {"package", "enabled", "dry_run", "expected_revision", "idempotency_key"}
+            if key
+            in {
+                "package",
+                "enabled",
+                "visibility_reason",
+                "clear_disabled",
+                "dry_run",
+                "expected_revision",
+                "idempotency_key",
+            }
         }
         required = ["package", "enabled"]
     if spec.name in {"revision_restore", "package_set_icon", "feature_upsert"}:
@@ -584,6 +608,16 @@ class AdapterTool(Tool):
         unused = args.keys() - operation_keys(self._spec, choose(self._spec, deepcopy(args)))
         if unused:
             raise AgentError("1001", validation=f"field {sorted(unused)[0]}: unsupported_parameter")
+        if (
+            self.name == "package_set_enabled"
+            and args.get("enabled") is False
+            or self.name == "package_update_meta"
+            and (args.get("hidden") is True or args.get("private") is True)
+        ):
+            reason = args.get("visibility_reason", "").strip()
+            if not reason:
+                raise AgentError("1001", validation="field visibility_reason: reason_required")
+            args["visibility_reason"] = reason
         operation = choose(self._spec, args)
         token = None
         if "package" in args:

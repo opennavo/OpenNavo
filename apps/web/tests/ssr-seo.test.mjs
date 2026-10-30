@@ -13,6 +13,15 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { LOCALE_METADATA, SITE_LOCALES } from '@opennavo/shared/locales';
 
+const lifecycleCases = JSON.parse(
+  await readFile(new URL('../../../packages/shared/tests/fixtures/packageInstallStates.json', import.meta.url), 'utf8')
+);
+const qaTokens = [
+  ...lifecycleCases.map((_, index) => `qa-lifecycle-${index}`),
+  'qa-spec-metadata',
+  'qa-invalid-repository'
+];
+
 // Former public labels, retained only as regression assertions.
 const translationProvenanceLabels = {
   'en-US': ['AI translation', 'View original', 'AI translated'],
@@ -571,6 +580,8 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
   let articleSitemapState = 'ok';
   // Changes what ordinary-app's description says, to see whether a page came from the cache.
   let revision = 1;
+  // Lets the share-image test make ordinary-app private without disturbing the other fixtures.
+  let shareImagePrivate = false;
   let collectionState = 'empty';
   let collectionRequests = 0;
   const packageQueries = [];
@@ -889,13 +900,18 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
           }
         ]
       };
+    } else if (shareImagePrivate && match?.[1] === 'ordinary-app' && !match[2]) {
+      status = 404;
+      data = null;
     } else if (
       match &&
       [
         ...seoApps,
+        ...qaTokens,
         'versioned-app@11',
         'plus-app++',
         'ordinary-app',
+        'unlisted-sample',
         'image-alt-app',
         'dependency-content-app',
         'reverse-dependency-app',
@@ -907,6 +923,8 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
         'cleanmymac',
         'repair-empty',
         'repair-disabled',
+        'install-paused',
+        'install-deprecated',
         'guard-app',
         'variant-app@beta',
         'opennavo'
@@ -1001,6 +1019,48 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
                 }
               : {}),
             ...(token === 'ordinary-app' ? { articles: [roundupCard(false)] } : {}),
+            ...(token === 'install-paused'
+              ? {
+                  disabled: true,
+                  recommendationPaused: true,
+                  homebrewStatus: { state: 'active' },
+                  disable: { reason: 'stale' }
+                }
+              : {}),
+            ...(token === 'install-deprecated'
+              ? {
+                  deprecated: true,
+                  homebrewStatus: { state: 'deprecated', reason: 'unmaintained' },
+                  deprecation: { reason: 'unmaintained' }
+                }
+              : {}),
+            ...(token === 'qa-spec-metadata'
+              ? {
+                  version: '2.0.0',
+                  license: 'Apache-2.0',
+                  supports: { status: 'known', arm64: true, x86_64: true, requiresRosetta: true },
+                  platforms: [
+                    { tag: 'arm64_sonoma', arch: 'arm64', macos: '14', version: '2.0.0', minMacos: '14' },
+                    { tag: 'ventura', arch: 'x86_64', macos: '13', version: '1.0.0', minMacos: '12' }
+                  ],
+                  repository: {
+                    url: 'https://github.com/acme/example',
+                    stars: 999950,
+                    pushedAt: '2025-10-30T00:00:00Z',
+                    signalsCheckedAt: '2026-10-02T00:00:00Z'
+                  }
+                }
+              : {}),
+            ...(token === 'qa-invalid-repository'
+              ? {
+                  repository: {
+                    url: 'https://github.com/acme/example',
+                    stars: 12345,
+                    signalsCheckedAt: 'not-a-date',
+                    pushedAt: 'not-a-date'
+                  }
+                }
+              : {}),
             ...(token === 'facts-app' || token === 'seo-uninstall' ? factsApp : {}),
             ...(token.startsWith('seo-') ? { displayName: 'SEO App', names: ['SEO App'] } : {}),
             ...(token === 'seo-disabled'
@@ -1323,8 +1383,18 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     }
     if (data?.token && data.artifacts) {
       data.facts = factsFrom(data);
+      if (data.token === 'qa-spec-metadata')
+        data.facts.security.identities.push({
+          developer: 'Verified Developer',
+          teamId: 'EXAMPLE123',
+          channels: [],
+          openSource: 'unknown',
+          evidence: evidence('https://example.test/identity')
+        });
       data.collections = [];
-      data.recommendationPaused = false;
+      data.recommendationPaused ??= false;
+      if (data.token.startsWith('qa-lifecycle-'))
+        Object.assign(data, lifecycleCases[Number(data.token.slice('qa-lifecycle-'.length))].fields);
       // L1: current entity decisions can open all ten locales; keep the explicit legacy fixture.
       if (!data.indexing && data.token !== 'versioned-app@11')
         data.indexing = { locales: Object.keys(localePrefixes), notesCount: data.releaseCount };
@@ -1338,6 +1408,19 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
           data.isFont,
           siteSettings.pages.fontsSitemap
         );
+      if (data.token === 'unlisted-sample') {
+        data.indexing.reason = 'hidden';
+        data.indexing.locales = [];
+        for (const page of Object.values(data.indexing.pages)) {
+          Object.assign(page, {
+            indexable: false,
+            robots: 'noindex, follow',
+            inSitemap: false,
+            announce: false,
+            hreflang: []
+          });
+        }
+      }
       if (data.token === 'variant-app@beta') {
         // Three verified known issues open the troubleshooting page; the other intent pages follow the overview.
         data.facts.issues = ['Sync stalls', 'The window opens off-screen', 'Sign-in loops'].map(title => ({
@@ -1435,6 +1518,10 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     NUXT_PUBLIC_CDN_BASE: 'https://example.test/assets',
     NUXT_METRICS_PORT: internalPort,
     NUXT_INTERNAL_SECRET: internalSecret,
+    // A cold share-image render can stall the event loop past the extreme lag limit; the next request
+    // would then be shed with 503 before any route sees it. Keep that availability layer out of this
+    // SEO/visibility fixture (loadShed.test.ts and the image-admission subtest below cover it).
+    NUXT_LOAD_SHED_ENABLED: 'false',
     OPENNAVO_SITEMAP_WARMUP: 'false'
   };
   const child = spawn(process.execPath, ['--import', clock, entry], {
@@ -1608,6 +1695,97 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const result = await invalidatePaths(['/', '/apps/font-sample', '/sitemap_index.xml', fontBucketPath], true);
     assert.equal(result.settingsCleared, true);
   };
+  await t.test('Nitro route cache keeps negotiated Markdown out of the HTML cache', async () => {
+    const path = '/apps/ordinary-app';
+    const detailPath = '/api/v1/packages/cask/ordinary-app';
+    const request = accept => fetch(`${origin}${path}`, { headers: { accept } });
+    const markdown = async () => {
+      const response = await request('text/markdown');
+      const body = await response.text();
+      assert.equal(response.status, 200, body.slice(0, 300));
+      assert.match(response.headers.get('content-type') ?? '', /text\/markdown/);
+      assert.equal(response.headers.get('cache-control'), 'private, no-store');
+      assert.equal(response.headers.get('cdn-cache-control'), 'no-store');
+      assert.equal(response.headers.get('cloudflare-cdn-cache-control'), 'no-store');
+      assert.match(response.headers.get('vary') ?? '', /\bAccept\b/i);
+      assert.equal(response.headers.get('x-robots-tag'), 'noindex');
+      assert.equal(response.headers.get('link'), `<https://example.test${path}>; rel="canonical"`);
+      assert.match(body, /^# Example App @11\n/);
+      assert.ok(!body.includes('<html'), 'Markdown response must not contain the HTML document');
+      return body;
+    };
+    const html = async () => {
+      const response = await request('text/html');
+      const body = await response.text();
+      assert.equal(response.status, 200, body.slice(0, 300));
+      assert.match(response.headers.get('content-type') ?? '', /text\/html/);
+      assert.match(response.headers.get('vary') ?? '', /\bAccept\b/i);
+      assert.match(response.headers.get('cache-control') ?? '', /s-maxage=21600/);
+      assert.match(response.headers.get('link') ?? '', /<\/llms\.txt>; rel="describedby"/);
+      assert.match(body, /<html\b/);
+      assert.ok(!body.startsWith('# Example App @11\n'), 'HTML response must not be Markdown');
+      return body;
+    };
+
+    await invalidatePaths([path]);
+    await markdown();
+    const afterFirstMarkdown = hotReads.get(detailPath) ?? 0;
+    await markdown();
+    assert.ok((hotReads.get(detailPath) ?? 0) > afterFirstMarkdown, 'each Markdown request reaches the API handler');
+    await html();
+
+    await invalidatePaths([path]);
+    await html();
+    const afterHtml = hotReads.get(detailPath) ?? 0;
+    await markdown();
+    assert.ok((hotReads.get(detailPath) ?? 0) > afterHtml, 'Markdown after cached HTML still reaches the API handler');
+    await html();
+  });
+  await t.test('Markdown canonical and noindex headers follow the five open locales for GET and HEAD', async () => {
+    const openLocales = ['en-US', 'zh-CN', 'ja-JP', 'es-ES', 'ru-RU'];
+    try {
+      siteSettings.pages.openLocales = openLocales;
+      await invalidatePaths(['/'], true);
+      for (const locale of SITE_LOCALES) {
+        const prefix = LOCALE_METADATA[locale].prefix;
+        for (const method of ['GET', 'HEAD'])
+          for (const path of [prefix || '/', `${prefix}/apps/versioned-app@11`, `${prefix}/apps/versioned-app@11.md`]) {
+            const explicit = path.endsWith('.md');
+            const response = await fetch(`${origin}${path}?tracking=fixture`, {
+              method,
+              headers: { accept: explicit ? 'text/html' : 'text/markdown' }
+            });
+            const body = await response.text();
+            if (!openLocales.includes(locale)) {
+              if (explicit) assert.equal(response.status, 404, path);
+              assert.doesNotMatch(response.headers.get('content-type') ?? '', /text\/markdown/, path);
+              continue;
+            }
+            assert.equal(response.status, 200, `${method} ${path}: ${body.slice(0, 200)}\n${logs}`);
+            assert.match(response.headers.get('content-type') ?? '', /text\/markdown/, path);
+            assert.equal(response.headers.get('x-robots-tag'), 'noindex', path);
+            assert.equal(
+              response.headers.get('link'),
+              `<https://example.test${explicit ? path.slice(0, -3) : path}>; rel="canonical"`,
+              path
+            );
+            if (method === 'HEAD') assert.equal(body, '', path);
+          }
+      }
+    } finally {
+      delete siteSettings.pages.openLocales;
+      await invalidatePaths(['/'], true);
+    }
+  });
+  await t.test('404 HTML responses omit agent discovery and Markdown negotiation headers', async () => {
+    for (let request = 0; request < 2; request++) {
+      const response = await fetch(`${origin}/apps/missing-app@0`, { headers: { accept: 'text/html' } });
+      await response.text();
+      assert.equal(response.status, 404, logs);
+      assert.doesNotMatch(response.headers.get('link') ?? '', /llms\.txt|text\/markdown/);
+      assert.doesNotMatch(response.headers.get('vary') ?? '', /(?:^|,)\s*Accept\s*(?:,|$)/i);
+    }
+  });
   await t.test(
     'SSR images keep descriptive alternatives and explicitly decorative empty alt in both languages',
     async () => {
@@ -1653,6 +1831,29 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       assert.ok(decorations > 0, 'app icons and repeated brand images are exercised');
     }
   );
+  await t.test(
+    'disabled installation has an explanation; deprecated and paused commands retain a warning',
+    async () => {
+      const disabled = JSDOM.fragment(await (await fetch(`${origin}/apps/repair-disabled`)).text());
+      const blocked = disabled.querySelector('[data-testid="package-install-command"]');
+      assert.ok(blocked?.textContent.includes('Homebrew has disabled this package: discontinued'));
+      assert.equal(blocked.querySelector('code, button'), null, 'no command or copy control for a disabled app');
+      for (const token of ['install-paused', 'install-deprecated']) {
+        const doc = JSDOM.fragment(await (await fetch(`${origin}/apps/${token}`)).text());
+        const card = doc.querySelector('[data-testid="package-install-command"]');
+        const warning = card?.querySelector('[role="note"]');
+        const command = card?.querySelector('code');
+        assert.ok(
+          warning?.textContent.includes(
+            token === 'install-paused' ? 'Homebrew still offers this app' : 'Homebrew has deprecated'
+          )
+        );
+        assert.equal(command?.textContent.trim(), `brew install --cask ${token}`);
+        assert.ok(warning.compareDocumentPosition(command) & 4, 'warning precedes command');
+        assert.ok(!card.className.includes('hidden'), 'same command is available at mobile widths');
+      }
+    }
+  );
   for (const prefix of ['', '/zh', '/ja', '/es', '/pt', '/ru']) {
     await t.test(`${prefix || '/en (root)'} versioned detail`, async () => {
       const path = `${prefix}/apps/versioned-app@11`;
@@ -1662,8 +1863,17 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       assert.match(html, /<title>[^<]*Example App @11[^<]*OpenNavo<\/title>/);
       // S1/C3: an absent subtitle leaves a Vue conditional comment after the exact heading.
       assert.match(html, /<h1\b[^>]*>Example App @11(?:<!--(?:v-if)?-->)?<\/h1>/);
-      // T2: the facts/install blocks render the complete copyable command in a single code element.
-      assert.match(html, /<code\b[^>]*>brew install --cask versioned-app@11<\/code>/);
+      // The shared command card can include an empty CSS wrap marker. Its command still appears once,
+      // in one text node, preserving the literal @ and the complete text copied to Terminal.
+      const commands = [...JSDOM.fragment(html).querySelectorAll('main pre code')].filter(
+        code => code.textContent.trim() === 'brew install --cask versioned-app@11'
+      );
+      assert.equal(commands.length, 1, `${path}: one complete install command in the overview`);
+      assert.deepEqual(
+        [...commands[0].childNodes].filter(node => node.nodeType === 3).map(node => node.textContent.trim()),
+        ['brew install --cask versioned-app@11'],
+        `${path}: the command remains one copyable text node`
+      );
       assert.ok(html.includes(`https://example.test${path}`), 'canonical URL retains the version suffix');
       // WP1: the description says what the page answers instead of stacking the install command.
       const description = /<meta name="description" content="([^"]*)"/.exec(html)?.[1] ?? '';
@@ -1755,12 +1965,144 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       assert.ok(!/Variant App(?! Beta)/.test(title(text) + description(text)), `${page} never says the bare name`);
     }
   });
+  await t.test(
+    'lifecycle banners, commands, spec rows and header chips share disabled > deprecated > paused priority',
+    async () => {
+      for (const [index, { name, expected }] of lifecycleCases.entries()) {
+        const response = await fetch(`${origin}/apps/qa-lifecycle-${index}`);
+        const html = await response.text();
+        assert.equal(response.status, 200, name + logs);
+        const page = JSDOM.fragment(html);
+        const banner = page.querySelector('[data-testid="package-lifecycle-banner"]');
+        const command = page.querySelector('[data-testid="package-install-command"]');
+        const header = page.querySelector('h1').parentElement;
+        for (const [state, label] of Object.entries({
+          disabled: 'Disabled',
+          deprecated: 'Deprecated',
+          paused: 'Paused by OpenNavo'
+        }))
+          assert.equal(header.textContent.includes(label), expected === state, `${name}: ${state} chip`);
+        const card = page.querySelector('[data-testid="package-spec-card"]');
+        const homebrew = [...card.querySelectorAll('dt')].find(row => row.textContent === 'Homebrew');
+        const status = {
+          active: 'Available; updated by Homebrew',
+          disabled: 'Disabled by Homebrew',
+          deprecated: 'Deprecated',
+          paused: 'Still offered by Homebrew; paused by OpenNavo'
+        };
+        assert.equal(homebrew?.nextElementSibling?.textContent.trim(), status[expected], `${name}: Homebrew row`);
+        assert.equal(Boolean(banner), expected !== 'active', name);
+        assert.equal(Boolean(command?.querySelector('code')), expected !== 'disabled', name);
+        assert.equal(Boolean(command?.querySelector('button')), expected !== 'disabled', name);
+        if (banner) {
+          const notices = {
+            disabled: 'Homebrew has disabled this package:',
+            deprecated: 'Homebrew has deprecated this package:',
+            paused: 'No new version for more than 90 days'
+          };
+          assert.ok(banner.textContent.trim().startsWith(notices[expected]), `${name}: lifecycle banner`);
+          assert.ok(
+            banner.classList.contains(expected === 'disabled' ? 'text-status-danger' : 'text-status-warning'),
+            name
+          );
+          assert.equal(command.querySelector('[role="note"]').textContent.trim(), banner.textContent.trim(), name);
+        }
+      }
+    }
+  );
+
+  await t.test('source badge tooltip lines are in server HTML before hydration', async () => {
+    for (const [prefix, label, domain, checked] of [
+      ['', '✓ Official source · Verified', 'Source: vendor.example', 'Checked:'],
+      ['/zh', '✓ 官方来源 · 已核查', '来源域名：vendor.example', '核查日期：']
+    ]) {
+      const response = await fetch(`${origin}${prefix}/apps/facts-app`);
+      assert.equal(response.status, 200, logs);
+      const page = JSDOM.fragment(await response.text());
+      const badge = page.querySelector('[data-testid="package-source-badge"]');
+      assert.equal(badge?.textContent.trim(), label);
+      assert.equal(badge?.getAttribute('aria-label'), label);
+      assert.equal(badge.tagName, 'BUTTON');
+      assert.equal(badge.getAttribute('type'), 'button');
+      assert.ok(badge.closest('[data-testid="package-header-tags"]'));
+      const id = badge.getAttribute('aria-describedby');
+      assert.ok(id);
+      const tooltip = page.querySelector(`[role="tooltip"][id="${id}"]`);
+      assert.ok(tooltip, 'aria-describedby refers to a description in server HTML');
+      for (const text of [domain, 'b'.repeat(64), checked, '2025']) assert.ok(tooltip.textContent.includes(text), text);
+      const actions = page.querySelector('[data-testid="package-header-actions"]');
+      assert.equal(actions.children.length, 2);
+      assert.ok(!actions.contains(badge));
+      assert.ok(!actions.closest('section').textContent.includes('homebrew/cask'));
+      assert.ok(page.querySelector('[data-testid="package-sources"]').textContent.includes('homebrew/cask'));
+    }
+    const disabled = JSDOM.fragment(await (await fetch(`${origin}/apps/repair-disabled`)).text());
+    assert.equal(disabled.querySelector('[data-testid="package-source-badge"]').getAttribute('data-state'), 'disabled');
+    assert.ok(disabled.querySelector('[data-testid="package-header-actions"] button[disabled]'));
+  });
+
+  await t.test(
+    'deduplicated metadata keeps architectures, non-native status, older builds and identity IDs',
+    async () => {
+      const response = await fetch(`${origin}/apps/qa-spec-metadata`);
+      const html = await response.text();
+      assert.equal(response.status, 200, logs);
+      const page = JSDOM.fragment(html);
+      const card = page.querySelector('[data-testid="package-spec-card"]');
+      for (const text of ['Apple silicon', 'Apache-2.0', 'Verified Developer', 'EXAMPLE123'])
+        assert.ok(card.textContent.includes(text), text);
+      const requirements = page.querySelector('[data-testid="package-requirements"]');
+      for (const text of ['Apple silicon', 'Intel', '2.0.0', '1.0.0', 'macOS 12'])
+        assert.ok(requirements.textContent.includes(text), text);
+      assert.ok(requirements.textContent.includes('Not native on Apple silicon'), requirements.textContent);
+      // Bundle IDs and link signatures are checked on the existing Lumen link fixture below.
+    }
+  );
+
+  await t.test('repository SSR links and descriptions are complete and malformed dates stay hidden', async () => {
+    const response = await fetch(`${origin}/apps/qa-spec-metadata`);
+    const html = await response.text();
+    assert.equal(response.status, 200, logs);
+    const page = JSDOM.fragment(html);
+    const card = page.querySelector('[data-testid="package-spec-card"]');
+    assert.ok(card.textContent.includes('★1M'), card.textContent);
+    const trigger = card.querySelector('button[aria-describedby]');
+    assert.ok(trigger, 'repository tooltip trigger is associated in SSR');
+    const description = page.querySelector(`[id="${trigger.getAttribute('aria-describedby')}"]`);
+    assert.equal(description?.getAttribute('role'), 'tooltip');
+    assert.ok(description.textContent.includes('Oct 2, 2026'), description.textContent);
+    for (const link of card.querySelectorAll('a[href^="https://"]')) {
+      assert.equal(link.getAttribute('target'), '_blank');
+      assert.equal(link.getAttribute('rel'), 'noopener noreferrer');
+      assert.ok(link.querySelector('svg'), 'external-link indicator');
+    }
+    const invalid = await fetch(`${origin}/apps/qa-invalid-repository`);
+    const invalidPage = JSDOM.fragment(await invalid.text());
+    assert.equal(invalid.status, 200, logs);
+    const invalidCard = invalidPage.querySelector('[data-testid="package-spec-card"]');
+    assert.ok(invalidCard.textContent.includes('★12.3K'));
+    assert.equal(invalidCard.querySelector('button[aria-describedby]'), null);
+  });
+
   await t.test('link apps share /apps and download from the developer instead of installing', async () => {
     const response = await fetch(`${origin}/apps/lumen-notes`, {
       headers: { accept: 'text/html' }
     });
     const html = await response.text();
     assert.equal(response.status, 200, logs);
+    const spec = JSDOM.fragment(html).querySelector('[data-testid="package-spec-card"]');
+    const valueOf = label =>
+      [...spec.querySelectorAll('dt')]
+        .find(term => term.textContent.trim() === label)
+        ?.nextElementSibling?.textContent.trim();
+    assert.equal(valueOf('Latest version'), '2.4.1', 'link quick-info version survives in the SSR spec card');
+    assert.equal(
+      valueOf('Download source'),
+      'lumen.app',
+      'link quick-info download source survives in the SSR spec card'
+    );
+    assert.equal(valueOf('Developer signature'), '7Q2XK4M9PL');
+    assert.equal(valueOf('Bundle ID'), 'app.lumen.notes');
     // S1/C3: preserve the exact name while allowing the absent subtitle's Vue comment.
     assert.match(html, /<h1\b[^>]*>Lumen Notes(?:<!--(?:v-if)?-->)?<\/h1>/);
     assert.doesNotMatch(html, /brew install/, 'no install command');
@@ -2279,6 +2621,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const apps = (
       await Promise.all(appsUrls.map(async url => (await fetch(url.replace('https://example.test', origin))).text()))
     ).join('');
+    assert.doesNotMatch(apps, /\.md[<"?]/, 'Markdown URLs never appear in sitemap loc or hreflang');
     const urlEntry = loc => new RegExp(`<url>\\s*<loc>${loc}</loc>([\\s\\S]*?)</url>`).exec(apps)?.[1];
     assert.match(urlEntry('https://example.test/apps/ordinary-app') ?? '', /<lastmod>2025-03-18T10:00:00Z<\/lastmod>/);
     assert.ok(!/<lastmod>/.test(urlEntry('https://example.test/zh/apps/ordinary-app') ?? 'missing <lastmod>'));
@@ -2292,6 +2635,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
         versionsUrls.map(async url => (await fetch(url.replace('https://example.test', origin))).text())
       )
     ).join('');
+    assert.doesNotMatch(versions, /\.md[<"?]/, 'Markdown URLs never appear in versions sitemaps');
     assert.ok(!versions.includes('/apps/font-sample'), 'font versions are excluded');
     assert.ok(versions.includes('https://example.test/apps/ordinary-app/versions'));
     const undatedVersion =
@@ -3151,7 +3495,12 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const text = await response.text();
     assert.equal(response.status, 200, logs);
     assert.match(response.headers.get('content-type') ?? '', /^text\/plain/);
-    assert.ok(text.startsWith('User-agent: *\nDisallow: /search\nDisallow: /brewfile\n'), text);
+    assert.ok(
+      text.startsWith(
+        'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\nDisallow: /search\nDisallow: /brewfile\n'
+      ),
+      text
+    );
     assert.ok(text.includes('\n\nUser-agent: AhrefsBot\nCrawl-delay: 20\nDisallow: /search\n'), text);
     assert.ok(text.includes('\n\nUser-agent: GPTBot\nUser-agent: ClaudeBot\nDisallow: /\n'), text);
     assert.ok(text.endsWith('\nSitemap: https://example.test/sitemap_index.xml\n'), text);
@@ -3173,6 +3522,23 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       delete siteSettings.pages.openLocales;
       await invalidatePaths(['/robots.txt'], true);
     }
+  });
+  await t.test('Markdown URLs stay out of every sitemap and HTML hreflang', async () => {
+    const index = await (await fetch(`${origin}/sitemap_index.xml`)).text();
+    const maps = [...index.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
+    assert.ok(maps.length > 0, index);
+    for (const map of maps) {
+      const response = await fetch(map.replace('https://example.test', origin));
+      assert.equal(response.status, 200, map);
+      assert.doesNotMatch(await response.text(), /\.md[<"?]/, map);
+    }
+    for (const prefix of ['', '/zh', '/ja', '/es', '/ru'])
+      for (const path of [prefix || '/', `${prefix}/apps/versioned-app@11`]) {
+        const html = await (await fetch(`${origin}${path}`, { headers: { accept: 'text/html' } })).text();
+        const alternates = html.match(/<link\b[^>]*\bhreflang="[^"]+"[^>]*>/g) ?? [];
+        assert.ok(alternates.length > 0, path);
+        for (const alternate of alternates) assert.doesNotMatch(alternate, /\.md["?]/, path);
+      }
   });
   await t.test('G6 llms is plain English text with public HTML links and a fixed origin metric', async () => {
     const response = await fetch(`${origin}/llms.txt?locale=de&tracking=fixture`, {
@@ -3240,15 +3606,34 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const graphOf = page =>
       JSON.parse(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/.exec(page)?.[1] ?? '{}')['@graph'];
     const page = await html('/apps/facts-app');
-    const lead = /data-testid="app-answer"[^>]*>([^<]*)</.exec(page)?.[1];
-    // T2 (appAnswer.ts): the lead identifies the app; sourced price and requirements live in their blocks.
-    assert.equal(lead, 'Facts App is a Developer Tools app for Mac.');
+    const document = JSDOM.fragment(page);
+    // PR1 removes the templated lead. The title, authored description and shared spec card retain facts.
+    assert.equal(document.querySelector('[data-testid="app-answer"]'), null);
+    assert.equal(document.querySelector('main h1')?.textContent.trim(), 'Facts App');
+    assert.equal(
+      document.querySelector('main a[href="/categories/developer-tools"]')?.textContent.trim(),
+      'Developer Tools'
+    );
+    assert.equal(
+      document.querySelector('main .on-about-collapsed .on-markdown')?.textContent.trim(),
+      'A synthetic package for SSR regression tests.'
+    );
+    const specs = document.querySelectorAll('[data-testid="package-spec-card"]');
+    assert.equal(specs.length, 1, 'one shared specification card');
+    assert.ok(specs[0].textContent.includes('$9.99 per month'), 'verified price remains in the spec card');
+    assert.ok(specs[0].textContent.includes('macOS 13 or later'), 'verified requirement remains in the spec card');
     const section = id => new RegExp(`data-testid="${id}"[\\s\\S]*?</section>`).exec(page)?.[0] ?? '';
     // T2 splits the former guide/facts cards into install, uninstall, price and requirements sections.
     const guide = section('package-install');
     assert.ok(guide.includes('Homebrew installs the app in your Applications folder.'), guide);
     assert.ok(guide.includes('href="https://vendor.example/FactsApp.dmg"'));
-    assert.ok(guide.includes('it is not a security certification'));
+    const checksumDisclaimer = 'SHA-256 only checks that the download is complete; it is not a security certification.';
+    assert.ok(guide.includes(checksumDisclaimer), 'download instructions retain the checksum limitation');
+    assert.equal(document.querySelector('main')?.textContent.split(checksumDisclaimer).length - 1, 1);
+    assert.ok(
+      section('package-safety').includes('This is not a safety certification.'),
+      'the safety section retains its broader security-facts disclaimer'
+    );
     assert.ok(
       section('package-uninstall').includes('data-testid="package-zap"'),
       'zap only because the definition lists files'
@@ -3269,6 +3654,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     assert.match(faq, /<details[\s\S]*?<summary[^>]*><h3[^>]*>Is Facts App safe\?<\/h3>/);
     // Inline code renders each word in its own element (OnCodeText), so compare the text without tags.
     const faqText = faq.replace(/<[^>]*>/g, '');
+    assert.ok(faqText.includes('checked Dec 1, 2025'), 'existing FAQ source attribution retains evidence check dates');
     assert.ok(faqText.includes('Is Facts App free?') && faqText.includes('requires a subscription'), faqText);
     assert.ok(faqText.includes('brew uninstall --zap --cask facts-app'), 'collapsed answers are in the HTML');
     assert.ok(faqText.includes('Its settings are in ~/Library/Preferences/facts.plist.'), faqText);
@@ -3283,12 +3669,20 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     assert.equal(app.softwareRequirements, 'macOS 13 or later');
     assert.equal(app.downloadUrl, 'https://vendor.example/FactsApp.dmg');
     assert.ok(!('aggregateRating' in app), 'no invented ratings');
-    // Other languages render the same answer in their own words.
-    assert.match(
-      await html('/ja/apps/facts-app'),
-      /data-testid="app-answer"[^>]*>Facts App は「Developer Tools」カテゴリ/
+    // Other languages retain the same authored description and localize the shared spec card.
+    const japanese = JSDOM.fragment(await html('/ja/apps/facts-app'));
+    assert.equal(japanese.querySelector('[data-testid="app-answer"]'), null);
+    assert.equal(japanese.querySelector('main h1')?.textContent.trim(), 'Facts App');
+    assert.equal(
+      japanese.querySelector('main a[href="/ja/categories/developer-tools"]')?.textContent.trim(),
+      'Developer Tools'
     );
-    // Apps without evidence keep a plain lead and no offer; fonts are not SoftwareApplication.
+    assert.equal(
+      japanese.querySelector('main .on-about-collapsed .on-markdown')?.textContent.trim(),
+      'A synthetic package for SSR regression tests.'
+    );
+    assert.equal(japanese.querySelector('[data-testid="package-spec-card"] h2')?.textContent, '基本情報');
+    // Apps without price evidence have no offer; fonts are not SoftwareApplication.
     const ordinary = await html('/apps/ordinary-app');
     const [plain] = graphOf(ordinary).filter(node => node['@type'] === 'SoftwareApplication');
     assert.ok(!('offers' in plain));
@@ -3319,7 +3713,15 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const visible = html =>
       html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/g, '');
     const notion = visible(await page('/apps/notion'));
-    assert.ok(notion.includes('It is made by Notion Labs, Inc.'));
+    const notionDocument = JSDOM.fragment(notion);
+    const developer = [...notionDocument.querySelectorAll('[data-testid="package-spec-card"] dt')].find(
+      term => term.textContent.trim() === 'Developer'
+    );
+    assert.equal(developer?.nextElementSibling?.textContent.trim(), 'Notion Labs, Inc.');
+    assert.ok(
+      notionDocument.querySelector('main h1')?.parentElement?.textContent.includes('Notion Labs, Inc.'),
+      'the title area still names the developer after removing the templated lead'
+    );
     assert.ok(!notion.includes('Inc..'));
     const empty = visible(await page('/apps/repair-empty'));
     assert.ok(!empty.includes('id="whats-new"'));
@@ -3328,13 +3730,10 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     const facts = visible(await page('/apps/facts-app'));
     const header =
       /<section\b[^>]*class="[^"]*bg-component-detail-header-bg[^"]*"[\s\S]*?<\/section>/.exec(facts)?.[0] ?? '';
-    assert.match(
-      header,
-      /<a\b[^>]*href="https:\/\/vendor\.example\/FactsApp\.dmg"[^>]*>\s*Official download · vendor\.example\s*<\/a>/
-    );
+    assert.match(header, /data-testid="package-source-badge"/);
+    assert.ok(header.includes('Official source · Verified'));
     assert.match(header, /aria-label="Get Facts App"/);
-    assert.ok(header.includes('SHA-256 recorded by Homebrew'));
-    assert.match(header, /<time[^>]*datetime="2025-12-01T08:00:00Z"[^>]*>[^<]*2025[^<]*<\/time>/);
+    assert.ok(!header.includes('From homebrew/cask'));
     for (const path of ['/apps/ordinary-app', '/apps/repair-disabled', '/apps/lumen-notes'])
       assert.ok(!visible(await page(path)).includes('Official download ·'), path);
     const details = visible(await page('/apps/facts-app/details'));
@@ -3407,6 +3806,41 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     for (const query of ['?utm_source=newsletter', '?returnTo=%2Frecent', '?nocache=1'])
       assert.equal(await shareImage(`/apps/ordinary-app${query}`), plain, query);
   });
+  await t.test('a private app share image is not served from the old signed URL', async () => {
+    const response = await fetch(`${origin}/apps/ordinary-app`, { headers: { accept: 'text/html' } });
+    const page = await response.text();
+    assert.equal(response.status, 200, logs);
+    const signed = /<meta property="og:image" content="([^"]+)"/.exec(page)?.[1]?.replaceAll('&amp;', '&');
+    assert.ok(signed?.startsWith('https://example.test/_og/'), `${signed} ${page.slice(0, 300)}\n${logs}`);
+    const imageUrl = signed.replace('https://example.test', origin);
+    const first = await fetch(imageUrl);
+    assert.equal(first.status, 200, logs);
+    assert.equal(first.headers.get('content-type'), 'image/png');
+    await first.arrayBuffer();
+    try {
+      shareImagePrivate = true;
+      const invalidated = await fetch(`${internal}/cache/invalidate`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${internalSecret}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ paths: ['/apps/ordinary-app'], og: true })
+      });
+      assert.equal(invalidated.status, 200, logs);
+      assert.ok((await invalidated.json()).ogRemoved >= 1, logs);
+      const rejected = await fetch(imageUrl);
+      const rejectedBody = await rejected.text();
+      assert.equal(
+        rejected.status,
+        404,
+        `${rejected.status} ${JSON.stringify([...rejected.headers])} ${rejectedBody.slice(0, 300)}\n${logs}`
+      );
+      assert.equal(rejected.headers.get('cache-control'), 'no-store');
+    } finally {
+      shareImagePrivate = false;
+    }
+    const restored = await fetch(imageUrl);
+    assert.equal(restored.status, 200, logs);
+    await restored.arrayBuffer();
+  });
   await t.test('every shared page type has a 1200×630 share image', async () => {
     const image = async path => {
       const html = await (await fetch(`${origin}${path}`, { headers: { accept: 'text/html' } })).text();
@@ -3467,6 +3901,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
         PORT: imagePort,
         NITRO_PORT: imagePort,
         NUXT_METRICS_PORT: metricsPort,
+        NUXT_LOAD_SHED_ENABLED: 'true',
         NUXT_LOAD_SHED_IMAGE_IN_FLIGHT: '1',
         NUXT_LOAD_SHED_LOW_IN_FLIGHT: '1',
         NUXT_LOAD_SHED_MEDIUM_IN_FLIGHT: '1',
@@ -4049,17 +4484,54 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       }
     }
   );
+  await t.test(
+    'visibility: private pages are 404; unlisted pages are 200 with noindex and absent from Markdown and discovery',
+    async () => {
+      for (const prefix of ['', '/zh']) {
+        for (const suffix of ['', '/versions', '/details', '/dependencies']) {
+          assert.equal((await fetch(`${origin}${prefix}/apps/private-sample${suffix}`)).status, 404);
+        }
+        const response = await fetch(`${origin}${prefix}/apps/unlisted-sample`);
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get('x-robots-tag') ?? '', /noindex/);
+        const document = JSDOM.fragment(await response.text());
+        assert.match(document.querySelector('meta[name="robots"]')?.getAttribute('content') ?? '', /noindex/);
+        for (const token of ['private-sample', 'unlisted-sample']) {
+          assert.equal((await fetch(`${origin}${prefix}/apps/${token}.md`)).status, 404);
+          assert.equal(
+            (await fetch(`${origin}${prefix}/apps/${token}`, { headers: { accept: 'text/markdown' } })).status,
+            404
+          );
+        }
+      }
+      const llms = await (await fetch(`${origin}/llms.txt`)).text();
+      const sitemap = await (await fetch(`${origin}/sitemap_index.xml`)).text();
+      for (const token of ['private-sample', 'unlisted-sample']) {
+        assert.ok(!llms.includes(token));
+        assert.ok(!sitemap.includes(token));
+        for (const group of ['apps', 'versions', 'fonts']) {
+          const shard = await fetch(`${origin}/__sitemap__/${packageSitemapName(group, token)}.xml`);
+          assert.ok([200, 404, 410].includes(shard.status));
+          assert.ok(!(await shard.text()).includes(`/apps/${token}`));
+        }
+      }
+    }
+  );
   assert.deepEqual(seoApiRequests, []);
   assert.deepEqual(
     [...requestedTokens].sort(),
     [
       ...seoApps,
+      ...qaTokens,
       'dependency-content-app',
       'facts-app',
       'font-sample',
       'guard-app',
       'image-alt-app',
+      'install-deprecated',
+      'install-paused',
       'ordinary-app',
+      'unlisted-sample',
       'plus-app++',
       'reverse-dependency-app',
       'opennavo',

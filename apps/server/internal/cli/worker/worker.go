@@ -84,7 +84,9 @@ func run(ctx context.Context) error {
 	}
 	cleanup := &maintenance.Service{Store: st, Objects: maintenance.S3Objects{Client: objects}}
 	handlers["cleanup"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return cleanup.Run(ctx) }
-	snapshots := &snapshot.Service{Store: st, Objects: assets.S3Objects{Client: objects}}
+	snapshots := &snapshot.Service{Store: st, Objects: assets.S3Objects{Client: objects}, Purge: func(ctx context.Context, prefixes []string) error {
+		return (&urlnotify.Notifier{Store: st, Config: cfg, Logger: logger}).PurgeSnapshots(ctx, prefixes)
+	}}
 	handlers["snapshot:build"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return snapshots.Build(ctx) }
 	githubReleases := &githubreleases.Service{Store: st, Config: cfg, ObserveQuota: st.ObserveGitHubQuota}
 	handlers["github-release:snapshot"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return githubReleases.Run(ctx) }
@@ -106,7 +108,7 @@ func run(ctx context.Context) error {
 	githubFacts.ObserveQuota = st.ObserveGitHubQuota
 	githubFacts.TokenProvider = releaseService.Fetcher.HTTP.TokenProvider
 	factSources := &sourcefacts.Service{Store: st, NVD: &sources.NVD{Client: fetch.NewClient(20 * time.Second), UserAgent: cfg.FetchUserAgent}, GitHub: &sources.GitHub{HTTP: githubFacts},
-		AppStore:    &sources.AppStore{Client: fetch.NewClient(15 * time.Second), UserAgent: cfg.FetchUserAgent},
+		AppStore: &sources.AppStore{Client: fetch.NewClient(15 * time.Second), UserAgent: cfg.FetchUserAgent}, Logger: logger,
 		GitHubPause: 200 * time.Millisecond, AppStorePause: 3500 * time.Millisecond}
 	handlers["facts:sources"] = func(ctx context.Context, _ jobs.Payload) (map[string]any, error) { return factSources.Run(ctx) }
 	updateFeeds := &updatefeeds.Service{Store: st, UserAgent: cfg.FetchUserAgent, GitHub: githubFacts, SeedRules: true}

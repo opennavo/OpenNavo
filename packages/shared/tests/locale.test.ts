@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchLocale } from '../src/locale';
+import { allPackageAliases, matchLocale, packageAliases } from '../src/locale';
 import { DESKTOP_LOCALES, SITE_LOCALES } from '../src/locales.gen';
 import { readFileSync } from 'node:fs';
 
@@ -54,5 +54,76 @@ describe('Locale matching', () => {
 
   it('moves on to the next preference when no Chinese locale is supported', () => {
     expect(matchLocale(['zh-TW', 'ja-JP'], ['en-US', 'ja-JP'])).toBe('ja-JP');
+  });
+});
+
+describe('Package alternate names', () => {
+  const names = [
+    'Visual Studio Code',
+    'vscode',
+    'VS Code',
+    'VS Code 编辑器',
+    'VS Code エディター',
+    'コード',
+    '編集',
+    'Редактор VS Code',
+    'VS Code 편집기'
+  ];
+  const allAliases = [
+    'vscode',
+    'VS Code',
+    'VS Code 编辑器',
+    'VS Code エディター',
+    'コード',
+    '編集',
+    'Редактор VS Code',
+    'VS Code 편집기'
+  ];
+  const latinAliases = ['vscode', 'VS Code'];
+  const japaneseAliases = ['vscode', 'VS Code', 'VS Code エディター', 'コード'];
+
+  it.each([
+    ['en-US', latinAliases],
+    ['de-DE', latinAliases],
+    ['ja-JP', japaneseAliases],
+    ['zh-CN', allAliases],
+    ['zh-Hant', allAliases]
+  ] as const)('filters spec-card aliases for %s', (locale, expected) => {
+    expect(packageAliases(names, 'Visual Studio Code', locale)).toEqual(expected);
+  });
+  it('hides a kanji-only alias on Japanese pages', () => {
+    expect(packageAliases(['Visual Studio Code', '編集'], 'Visual Studio Code', 'ja-JP')).toEqual([]);
+  });
+  it('shows a kana-only alias on Japanese pages', () => {
+    expect(packageAliases(['Visual Studio Code', 'コード'], 'Visual Studio Code', 'ja-JP')).toEqual(['コード']);
+  });
+  it('defaults to Latin aliases when no locale is given', () => {
+    expect(packageAliases(names, 'Visual Studio Code')).toEqual(latinAliases);
+  });
+  it('keeps every alias for Quick facts and structured data', () => {
+    expect(allPackageAliases(names, 'Visual Studio Code')).toEqual(allAliases);
+  });
+  it('handles empty input and preserves Latin aliases with accents', () => {
+    expect(packageAliases([], 'Example', 'en-US')).toEqual([]);
+    expect(packageAliases(['Example', 'Éditeur'], 'Example', 'en-US')).toEqual(['Éditeur']);
+  });
+  it.each(['C++', 'Notepad++', 'Ｃ＋＋', '$', '®™'])('shows the symbol alias %s on en, de and ja pages', alias => {
+    for (const locale of ['en-US', 'de-DE', 'ja-JP'] as const) {
+      expect(packageAliases(['Editor', alias], 'Editor', locale)).toEqual([alias]);
+    }
+  });
+  it('shows fullwidth Latin on en, de and ja pages', () => {
+    for (const locale of ['en-US', 'de-DE', 'ja-JP'] as const) {
+      expect(packageAliases(['Editor', 'ＶＳ Ｃｏｄｅ'], 'Editor', locale)).toEqual(['ＶＳ Ｃｏｄｅ']);
+    }
+  });
+  it('shows halfwidth katakana on Japanese pages only', () => {
+    expect(packageAliases(['Editor', 'ｺｰﾄﾞ'], 'Editor', 'ja-JP')).toEqual(['ｺｰﾄﾞ']);
+    expect(packageAliases(['Editor', 'ｺｰﾄﾞ'], 'Editor', 'en-US')).toEqual([]);
+    expect(packageAliases(['Editor', 'ｺｰﾄﾞ'], 'Editor', 'de-DE')).toEqual([]);
+  });
+  it('returns no aliases when every one is filtered out', () => {
+    expect(packageAliases(['Editor', '編集', 'Редактор'], 'Editor', 'en-US')).toEqual([]);
+    expect(packageAliases(['Editor', '編集', 'Редактор'], 'Editor', 'ja-JP')).toEqual([]);
   });
 });

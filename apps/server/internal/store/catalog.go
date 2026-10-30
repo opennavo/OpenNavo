@@ -19,6 +19,11 @@ type CatalogRow struct {
 	Kind, Token, Tap, RawHash, Version, DescEn, I18nStatus string
 	RemovedAt                                              *time.Time
 	NormalizationVersion                                   string
+	Disabled                                               bool
+	DisabledOverrideAt                                     *time.Time
+	DisabledOverrideDate                                   *string
+	DisabledOverrideReason                                 *string
+	DisabledOverrideReplacement                            *string
 }
 type CatalogMutation struct {
 	Package     homebrew.Package
@@ -29,6 +34,16 @@ type CatalogMutation struct {
 }
 
 func (s *Store) WithAdvisoryLock(ctx context.Context, key string, fn func(context.Context) error) (result error) {
+	return s.withAdvisoryLock(ctx, key, false, fn)
+}
+
+// WithBlockingAdvisoryLock joins an in-flight publisher before revoking its
+// output. The caller's context bounds both the lock wait and the work.
+func (s *Store) WithBlockingAdvisoryLock(ctx context.Context, key string, fn func(context.Context) error) error {
+	return s.withAdvisoryLock(ctx, key, true, fn)
+}
+
+func (s *Store) withAdvisoryLock(ctx context.Context, key string, blocking bool, fn func(context.Context) error) (result error) {
 	db, err := s.DB.DB()
 	if err != nil {
 		return fmt.Errorf("get database: %w", err)
@@ -39,7 +54,11 @@ func (s *Store) WithAdvisoryLock(ctx context.Context, key string, fn func(contex
 	}
 	defer func() { result = errors.Join(result, connection.Close()) }()
 	var locked bool
-	if err := connection.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(hashtextextended($1,0))", key).Scan(&locked); err != nil {
+	query := "SELECT pg_try_advisory_lock(hashtextextended($1,0))"
+	if blocking {
+		query = "SELECT true FROM pg_advisory_lock(hashtextextended($1,0))"
+	}
+	if err := connection.QueryRowContext(ctx, query, key).Scan(&locked); err != nil {
 		return fmt.Errorf("acquire job lock: %w", err)
 	}
 	if !locked {
@@ -58,7 +77,7 @@ func (s *Store) CatalogRows(ctx context.Context, kind string) (map[string]*Catal
 	var rows []CatalogRow
 	// The kind/token unique index locates the type; read only hashes and change-detection fields instead of loading all raw JSON into memory.
 	// Casks from third-party taps belong to the tap sync, so the official feed never removes or renames them.
-	err := s.DB.WithContext(ctx).Raw("SELECT p.id,p.kind,p.token,p.tap,p.raw_hash,p.version,coalesce(p.desc_en,'') AS desc_en,p.removed_at,coalesce(i.status,'') AS i18n_status,coalesce(p.dependencies->>'normalizationVersion','') AS normalization_version FROM packages p LEFT JOIN package_i18n i ON i.package_id=p.id AND i.locale='zh-CN' WHERE p.kind=? AND "+OfficialTapSQL, kind).Scan(&rows).Error
+	err := s.DB.WithContext(ctx).Raw("SELECT p.id,p.kind,p.token,p.tap,p.raw_hash,p.version,coalesce(p.desc_en,'') AS desc_en,p.removed_at,coalesce(i.status,'') AS i18n_status,coalesce(p.dependencies->>'normalizationVersion','') AS normalization_version,p.disabled,p.disabled_override_at,p.disabled_override_date::text AS disabled_override_date,p.disabled_override_reason,p.disabled_override_replacement FROM packages p LEFT JOIN package_i18n i ON i.package_id=p.id AND i.locale='zh-CN' WHERE p.kind=? AND "+OfficialTapSQL, kind).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("load catalog rows: %w", err)
 	}
@@ -72,7 +91,7 @@ func (s *Store) CatalogRows(ctx context.Context, kind string) (map[string]*Catal
 // CatalogRow loads the change-detection fields of one package whatever its tap; nil when the token is unused.
 func (s *Store) CatalogRow(ctx context.Context, kind, token string) (*CatalogRow, error) {
 	var rows []CatalogRow
-	err := s.DB.WithContext(ctx).Raw("SELECT p.id,p.kind,p.token,p.tap,p.raw_hash,p.version,coalesce(p.desc_en,'') AS desc_en,p.removed_at,'' AS i18n_status,coalesce(p.dependencies->>'normalizationVersion','') AS normalization_version FROM packages p WHERE p.kind=? AND p.token=?", kind, token).Scan(&rows).Error
+	err := s.DB.WithContext(ctx).Raw("SELECT p.id,p.kind,p.token,p.tap,p.raw_hash,p.version,coalesce(p.desc_en,'') AS desc_en,p.removed_at,'' AS i18n_status,coalesce(p.dependencies->>'normalizationVersion','') AS normalization_version,p.disabled,p.disabled_override_at,p.disabled_override_date::text AS disabled_override_date,p.disabled_override_reason,p.disabled_override_replacement FROM packages p WHERE p.kind=? AND p.token=?", kind, token).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("load catalog row: %w", err)
 	}
@@ -103,6 +122,24 @@ func (s *Store) VisitOutdatedCasks(ctx context.Context, version string, consume 
 
 // OfficialTapSQL matches packages owned by the official Homebrew sync (alias p); third-party taps are tracked in tap_casks.
 const OfficialTapSQL = "p.tap LIKE 'homebrew/%'"
+
+// A manual disabled clear applies only to the upstream definition it cleared.
+// A later definition with a different disable signature is authoritative again.
+const disabledOverrideMatchSQL = `(packages.disabled_override_at IS NOT NULL
+ AND EXCLUDED.disabled
+ AND packages.disabled_override_date IS NOT DISTINCT FROM EXCLUDED.disable_date
+ AND packages.disabled_override_reason IS NOT DISTINCT FROM EXCLUDED.disable_reason
+ AND packages.disabled_override_replacement IS NOT DISTINCT FROM EXCLUDED.disable_replacement)`
+
+const staleDisabledOverrideMatchSQL = `(packages.disabled_override_at IS NOT NULL
+ AND packages.disabled_override_stale
+ AND packages.disabled_override_version = EXCLUDED.version
+ AND NOT EXCLUDED.disabled
+ AND packages.disabled_override_date IS NOT DISTINCT FROM EXCLUDED.disable_date
+ AND packages.disabled_override_reason IS NOT DISTINCT FROM EXCLUDED.disable_reason
+ AND packages.disabled_override_replacement IS NOT DISTINCT FROM EXCLUDED.disable_replacement)`
+
+const disabledOverrideKeepSQL = "(" + disabledOverrideMatchSQL + " OR " + staleDisabledOverrideMatchSQL + ")"
 
 var catalogColumns = []string{"kind", "token", "full_token", "tap", "name", "names", "desc_en", "homepage", "version", "version_base", "license", "auto_updates", "deprecated", "deprecation_date", "deprecation_reason", "deprecation_replacement", "disabled", "disable_date", "disable_reason", "disable_replacement", "download_url", "artifacts", "dependencies", "conflicts_with", "caveats", "min_macos", "supports_arm64", "supports_x86_64", "keg_only", "ruby_source_path", "tap_git_head", "generated_date", "is_font", "raw", "raw_hash"}
 
@@ -169,11 +206,28 @@ func (s *Store) ApplyCatalogBatchWithLifecycle(ctx context.Context, mutations []
 			case "raw", "artifacts", "dependencies", "conflicts_with":
 				placeholders[i] = "?::jsonb"
 			}
-			if column != "kind" && column != "token" {
-				updates = append(updates, column+"=EXCLUDED."+column)
+			if column == "kind" || column == "token" {
+				continue
 			}
+			update := column + "=EXCLUDED." + column
+			switch column {
+			case "disabled":
+				update = "disabled=CASE WHEN " + disabledOverrideMatchSQL + " THEN false ELSE EXCLUDED.disabled END"
+			case "disable_date", "disable_reason", "disable_replacement":
+				update = column + "=CASE WHEN " + disabledOverrideKeepSQL + " THEN packages." + column + " ELSE EXCLUDED." + column + " END"
+			}
+			updates = append(updates, update)
 		}
-		updates = append(updates, "version_changed_at=CASE WHEN packages.version IS DISTINCT FROM EXCLUDED.version THEN now() ELSE packages.version_changed_at END", "download_size=CASE WHEN packages.version IS DISTINCT FROM EXCLUDED.version THEN NULL ELSE packages.download_size END", "removed_at=NULL", "updated_at=now()")
+		updates = append(updates,
+			"disabled_override_at=CASE WHEN "+disabledOverrideKeepSQL+" THEN packages.disabled_override_at ELSE NULL END",
+			"disabled_override_date=CASE WHEN "+disabledOverrideKeepSQL+" THEN packages.disabled_override_date ELSE NULL END",
+			"disabled_override_reason=CASE WHEN "+disabledOverrideKeepSQL+" THEN packages.disabled_override_reason ELSE NULL END",
+			"disabled_override_replacement=CASE WHEN "+disabledOverrideKeepSQL+" THEN packages.disabled_override_replacement ELSE NULL END",
+			"disabled_override_stale=CASE WHEN "+staleDisabledOverrideMatchSQL+" THEN packages.disabled_override_stale ELSE false END",
+			"disabled_override_version=CASE WHEN "+disabledOverrideKeepSQL+" THEN packages.disabled_override_version ELSE NULL END",
+			"version_changed_at=CASE WHEN packages.version IS DISTINCT FROM EXCLUDED.version THEN now() ELSE packages.version_changed_at END",
+			"download_size=CASE WHEN packages.version IS DISTINCT FROM EXCLUDED.version THEN NULL ELSE packages.download_size END",
+			"removed_at=NULL", "updated_at=now()")
 		groups := make([]string, 0, len(mutations))
 		arguments := make([]any, 0, len(mutations)*len(catalogColumns))
 		for _, mutation := range mutations {

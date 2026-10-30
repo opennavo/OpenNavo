@@ -23,7 +23,10 @@ type historyTable struct {
 	Args                 []any
 }
 
-func historyTables(ref content.Ref) []historyTable {
+var packageLifecycleFields = [...]string{"disabled", "stale_disabled", "disable_date", "disable_reason", "disable_replacement", "disabled_override_at", "disabled_override_date", "disabled_override_reason", "disabled_override_replacement", "disabled_override_stale", "disabled_override_version"}
+var packageDisabledOverrideFields = [...]string{"disabled_override_at", "disabled_override_date", "disabled_override_reason", "disabled_override_replacement", "disabled_override_stale", "disabled_override_version"}
+
+func historyTables(ref content.Ref, includePackageLifecycle bool) []historyTable {
 	spec, ok := content.Registry[ref.Entity]
 	if !ok {
 		table := map[string]string{"synonym": "search_synonyms", "glossary": "i18n_glossary", "feedback": "feedback", "asset": "assets"}[ref.Entity]
@@ -36,6 +39,9 @@ func historyTables(ref content.Ref) []historyTable {
 	cols := ""
 	if ref.Entity == "package" {
 		cols = "id,source_locale,download_size"
+		if includePackageLifecycle {
+			cols += ",disabled,stale_disabled,disable_date,disable_reason,disable_replacement,disabled_override_at,disabled_override_date,disabled_override_reason,disabled_override_replacement,disabled_override_stale,disabled_override_version"
+		}
 	}
 	if ref.Entity == "desktop_release" {
 		cols = "id,source_locale"
@@ -59,7 +65,56 @@ func historyTables(ref content.Ref) []historyTable {
 	return out
 }
 func (s *Store) HistorySnapshot(ctx context.Context, ref content.Ref) (HistoryState, error) {
-	tables := historyTables(ref)
+	return s.historySnapshot(ctx, ref, false)
+}
+
+// HistorySnapshotWithPackageLifecycle includes upstream disabled state for the
+// explicit clear-disabled operation. Normal package history remains unchanged.
+func (s *Store) HistorySnapshotWithPackageLifecycle(ctx context.Context, ref content.Ref) (HistoryState, error) {
+	return s.historySnapshot(ctx, ref, true)
+}
+
+// HistoryStateIncludesPackageLifecycle identifies snapshots captured for an
+// explicit clear-disabled operation. Normal package history intentionally omits
+// upstream lifecycle fields so catalog synchronization remains authoritative.
+func HistoryStateIncludesPackageLifecycle(state HistoryState) bool {
+	for _, row := range state["packages"] {
+		for _, field := range packageLifecycleFields {
+			if _, ok := row[field]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// HistoryMergeBefore preserves the earlier snapshot while carrying lifecycle
+// fields from the earliest later revision that captured them. Missing fields
+// mean uncaptured, so only explicit values (including false and null) are copied.
+func HistoryMergeBefore(earlier, later HistoryState) HistoryState {
+	laterRows := historyRows(later["packages"])
+	for key, row := range historyRows(earlier["packages"]) {
+		for _, field := range packageLifecycleFields {
+			if _, exists := row[field]; exists {
+				continue
+			}
+			if value, exists := laterRows[key][field]; exists {
+				row[field] = value
+			}
+		}
+	}
+	return earlier
+}
+
+// HistoryMergeAfter preserves the latest snapshot while carrying lifecycle
+// fields from the latest earlier revision that captured them. Explicit values,
+// including null, take precedence over fallback values just as for before.
+func HistoryMergeAfter(earlier, later HistoryState) HistoryState {
+	return HistoryMergeBefore(later, earlier)
+}
+
+func (s *Store) historySnapshot(ctx context.Context, ref content.Ref, includePackageLifecycle bool) (HistoryState, error) {
+	tables := historyTables(ref, includePackageLifecycle)
 	if len(tables) == 0 {
 		return nil, nil
 	}
@@ -86,6 +141,9 @@ func (s *Store) HistorySnapshot(ctx context.Context, ref content.Ref) (HistorySt
 			if err := json.Unmarshal(raw, &row); err != nil {
 				return nil, err
 			}
+			if includePackageLifecycle && ref.Entity == "package" && i == 0 && row["stale_disabled"] == true && row["disable_reason"] == nil {
+				row["disable_reason"] = "stale_version"
+			}
 			out[t.Name] = append(out[t.Name], row)
 		}
 	}
@@ -97,26 +155,50 @@ func HistoryHash(state HistoryState) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// HistoryHashMatches accepts snapshots from before build-specific release notes.
-// Only the new column's migration default may be omitted: a real build binding
-// or any other edit must still cause a conflict. Never mutate the snapshot.
+// HistoryHashMatches accepts snapshots from before build-specific notes and private visibility.
+// Only migration defaults/backfills may be omitted; real visibility, reason or build edits conflict.
+// Never mutate the snapshot.
 func HistoryHashMatches(state HistoryState, expected string) bool {
 	if HistoryHash(state) == expected {
 		return true
 	}
-	rows := state["releases"]
-	if len(rows) == 0 {
-		return false
+	candidates := []HistoryState{state}
+	if rows := state["package_meta"]; len(rows) > 0 {
+		legacy := maps.Clone(state)
+		legacy["package_meta"] = make([]map[string]any, len(rows))
+		for i, row := range rows {
+			copy := maps.Clone(row)
+			if row["private"] == false {
+				delete(copy, "private")
+			}
+			if row["visibility_reason"] == "" || row["hidden"] == true && row["visibility_reason"] == "Legacy setting; reason not recorded." {
+				delete(copy, "visibility_reason")
+			}
+			legacy["package_meta"][i] = copy
+		}
+		if HistoryHash(legacy) == expected {
+			return true
+		}
+		candidates = append(candidates, legacy)
 	}
-	legacy := maps.Clone(state)
-	legacy["releases"] = make([]map[string]any, len(rows))
-	for i, row := range rows {
-		legacy["releases"][i] = maps.Clone(row)
-		if row["package_version_id"] == nil {
-			delete(legacy["releases"][i], "package_version_id")
+	for _, candidate := range candidates {
+		rows := candidate["releases"]
+		if len(rows) == 0 {
+			continue
+		}
+		legacy := maps.Clone(candidate)
+		legacy["releases"] = make([]map[string]any, len(rows))
+		for i, row := range rows {
+			legacy["releases"][i] = maps.Clone(row)
+			if row["package_version_id"] == nil {
+				delete(legacy["releases"][i], "package_version_id")
+			}
+		}
+		if HistoryHash(legacy) == expected {
+			return true
 		}
 	}
-	return HistoryHash(legacy) == expected
+	return false
 }
 func historyAssets(states ...HistoryState) []int64 {
 	ids := []int64{}
@@ -231,7 +313,7 @@ func HistoryRef(entity, key string) (content.Ref, error) {
 			return r, domain.Rejected("object_key_invalid")
 		}
 	}
-	if len(historyTables(r)) == 0 {
+	if len(historyTables(r, false)) == 0 {
 		return r, domain.RejectedDetail("history_entity_invalid", entity)
 	}
 	return r, nil
@@ -239,7 +321,7 @@ func HistoryRef(entity, key string) (content.Ref, error) {
 
 // Restore snapshots only for the server's fixed table list; never use request-provided SQL identifiers.
 func (s *Store) RestoreHistoryState(ctx context.Context, ref content.Ref, state HistoryState) error {
-	tables := historyTables(ref)
+	tables := historyTables(ref, false)
 	if len(tables) == 0 {
 		return domain.RejectedDetail("history_entity_invalid", ref.Entity)
 	}
@@ -250,6 +332,15 @@ func (s *Store) RestoreHistoryState(ctx context.Context, ref content.Ref, state 
 	if ref.Entity == "release" && state != nil {
 		if err := validateReleaseNotesHistory(current, state); err != nil {
 			return err
+		}
+	}
+	if ref.Entity == "package" && state != nil && len(state["package_meta"]) == 0 && len(current["package_meta"]) > 0 {
+		private, reason := historyVisibility(current["package_meta"][0])
+		if private || reason != "" {
+			// A pre-migration snapshot may predate the metadata row itself.
+			// Recreate its defaults while retaining the later visibility group.
+			state = maps.Clone(state)
+			state["package_meta"] = []map[string]any{{"package_id": ref.ID, "private": private, "visibility_reason": reason}}
 		}
 	}
 	for i := len(tables) - 1; i >= 1; i-- {
@@ -268,6 +359,18 @@ func (s *Store) RestoreHistoryState(ctx context.Context, ref content.Ref, state 
 			return domain.Rejected("history_snapshot_invalid")
 		}
 		for _, row := range rows {
+			if ref.Entity == "package" && t.Name == "package_meta" {
+				// Full snapshots from before 00126 have no visibility group. Keep
+				// the live decision when recreating this child row instead of using
+				// INSERT defaults, which would silently make a private app public.
+				if _, exists := row["private"]; !exists {
+					row = maps.Clone(row)
+					live := historyRows(current["package_meta"])
+					for key := range historyRows([]map[string]any{row}) {
+						row["private"], row["visibility_reason"] = historyVisibility(live[key])
+					}
+				}
+			}
 			if ref.Entity == "announcement" && t.Name == "app_config" {
 				if value, ok := row["value"].(map[string]any); ok && (value["sourceLocale"] == nil || value["sourceLocale"] == "") {
 					// Snapshots predating English authoring used Chinese implicitly.
