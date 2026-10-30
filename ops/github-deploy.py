@@ -1233,12 +1233,12 @@ class Deployment:
         container = self.config['caddy_container']
         if not backup.is_file():
             raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}); '
-                               f'backup {backup} is missing. The live file is left as found (not valid) and needs manual '
+                               f'backup {backup} is missing. The live file is left as found (interrupted or failing validation) and needs manual '
                                f'recovery. Aborting deployment.')
         if not self._validate_staged(backup.read_bytes()):
             raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}) and '
                                f'backup {backup} is invalid too. The backup was not restored; the live file is left as found '
-                               f'(not valid) and needs manual recovery. Aborting deployment.')
+                               f'(interrupted or failing validation) and needs manual recovery. Aborting deployment.')
         print(f'WARNING: {reason}; restoring {self.live_caddy} in place from {backup}.', flush=True)
         write_caddy_in_place(self.live_caddy, backup.read_bytes())
         if not caddy_validate(container, '/etc/caddy/Caddyfile'):
