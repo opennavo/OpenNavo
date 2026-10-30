@@ -300,11 +300,50 @@ def extract_admin(data, destination):
 
 
 def command(args, output=None):
-    result = subprocess.run(args, stdout=output or subprocess.PIPE, stderr=subprocess.PIPE, timeout=1200)
+    try:
+        result = subprocess.run(args, stdout=output or subprocess.PIPE, stderr=subprocess.PIPE, timeout=1200)
+    except subprocess.TimeoutExpired as error:
+        raise CommandFailure(args, timed_out=True) from error
+    except (FileNotFoundError, OSError) as error:
+        raise CommandFailure(args, cause=error) from error
     if result.returncode:
         # Docker/Compose diagnostics can contain expanded credentials.
-        raise RuntimeError(f'command failed: {args[0]} (exit {result.returncode}); inspect privately on host')
+        raise CommandFailure(args, returncode=result.returncode,
+                             stdout=getattr(result, 'stdout', b''),
+                             stderr=getattr(result, 'stderr', b''))
     return result.stdout.decode().strip() if output is None else ''
+
+
+class CommandFailure(RuntimeError):
+    """A command failure retaining diagnostics for the few callers that need them.
+
+    The message deliberately does not include command output: Docker diagnostics can
+    contain credentials. Caddy validation uses the private fields below to distinguish
+    a bad Caddyfile from a validator/container/runtime failure.
+    """
+
+    def __init__(self, args, *, returncode=None, stdout=b'', stderr=b'',
+                 timed_out=False, cause=None):
+        self.command_args = list(args)
+        self.returncode = returncode
+        self.stdout = stdout or b''
+        self.stderr = stderr or b''
+        self.timed_out = timed_out
+        self.cause = cause
+        detail = 'timed out' if timed_out else 'could not run' if cause is not None else f'exit {returncode}'
+        super().__init__(f'command failed: {args[0]} ({detail}); inspect privately on host')
+
+
+class CaddyValidatorUnavailable(RuntimeError):
+    """The Caddy validator could not be executed reliably."""
+
+
+class CaddyConfigInvalid(RuntimeError):
+    """Caddy ran and reported an invalid configuration."""
+
+
+class CaddyStateError(RuntimeError):
+    """The live Caddyfile does not match the persistent write marker."""
 
 
 @contextlib.contextmanager
@@ -371,6 +410,86 @@ def write_caddy_in_place(path, content):
         target.write(content)
         target.flush()
         os.fsync(target.fileno())
+
+
+def sha256_bytes(content):
+    return hashlib.sha256(content).hexdigest()
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_json_atomic(path, value):
+    """Durably replace a small sidecar without replacing the Caddy bind mount."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = (json.dumps(value, indent=2, sort_keys=True) + '\n').encode()
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.' + path.name + '.',
+                                         suffix='.tmp', delete=False) as staged:
+            temporary = Path(staged.name)
+            staged.write(encoded)
+            staged.flush()
+            os.fsync(staged.fileno())
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+        # fsync the directory where supported so the rename survives a host reboot.
+        try:
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            pass
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+_CADDY_CONFIG_ERROR = re.compile(
+    r'(?is)(?:'
+    r'caddyfile|'
+    r'adapt(?:ing|er)?(?:\s+config)?|'
+    r'parsing\s+(?:the\s+)?caddyfile|'
+    r'(?:un)?marshaling\s+config|'
+    r'loading\s+(?:initial\s+)?config|'
+    r'config(?:uration)?\s+(?:error|invalid)|'
+    r'invalid\s+(?:staged\s+)?config'
+    r')')
+
+
+def _command_diagnostics(error):
+    values = [str(error)]
+    for name in ('stdout', 'stderr', 'output'):
+        value = getattr(error, name, None)
+        if value:
+            if isinstance(value, bytes):
+                value = value.decode('utf-8', 'replace')
+            values.append(str(value))
+    return '\n'.join(values)
+
+
+def _is_caddy_config_error(error):
+    """Return true only when Caddy emitted a configuration/adaptation diagnostic."""
+    return bool(_CADDY_CONFIG_ERROR.search(_command_diagnostics(error)))
+
+
+def _caddy_validation_failure(error, context):
+    # Timeout, missing docker/container, and all opaque non-zero exits are runtime
+    # failures. They must never be treated as permission to restore a live file.
+    if isinstance(error, CaddyConfigInvalid):
+        return error
+    if _is_caddy_config_error(error):
+        return CaddyConfigInvalid(
+            f'{context}: Caddy reported a configuration error; inspect the private validator output')
+    return CaddyValidatorUnavailable(
+        f'{context}: Caddy validator unavailable; refusing to modify the live Caddyfile')
 
 
 def public_mcp_route(alias):
@@ -1094,11 +1213,121 @@ class Deployment:
             raise
         print('API and web monitoring targets updated and healthy.', flush=True)
 
+    @property
+    def caddy_state_path(self):
+        return self.live_caddy.with_name('Caddyfile.state.json')
+
+    def _read_caddy_state(self):
+        try:
+            return json.loads(self.caddy_state_path.read_text())
+        except FileNotFoundError:
+            return None
+        except (OSError, TypeError, ValueError) as error:
+            raise CaddyStateError(
+                f'Caddyfile state marker {self.caddy_state_path} is unreadable; refusing to deploy') from error
+
+    def _write_caddy_state(self, *, status, deploy_sha, expected_sha256,
+                           backup_sha256, backup_deploy_sha):
+        write_json_atomic(self.caddy_state_path, {
+            'status': status,
+            'deploy_sha': deploy_sha or '',
+            'expected_sha256': expected_sha256,
+            'backup_sha256': backup_sha256,
+            'backup_deploy_sha': backup_deploy_sha or '',
+        })
+
+    def _committed_caddy_state(self, expected_sha256, deploy_sha=None):
+        """Record the digest currently trusted after a write or rollback."""
+        state = self._read_caddy_state() or {}
+        backup = self.live_caddy.with_name('Caddyfile.bak')
+        backup_digest = sha256_file(backup) if backup.is_file() else expected_sha256
+        self._write_caddy_state(
+            status='committed',
+            deploy_sha=(deploy_sha if deploy_sha is not None else
+                        state.get('deploy_sha') or getattr(self, 'payload', {}).get('sha', '')),
+            expected_sha256=expected_sha256,
+            backup_sha256=backup_digest,
+            backup_deploy_sha=state.get('backup_deploy_sha', ''),
+        )
+
+    def _run_caddy_validate(self, remote):
+        args = ['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate',
+                '--config', remote, '--adapter', 'caddyfile']
+        try:
+            return command(args)
+        except Exception as error:
+            raise _caddy_validation_failure(
+                error, f'Caddy validation of {remote} failed') from error
+
+    def _validate_current_for_recovery(self):
+        """Probe the validator before a marker-driven recovery can overwrite live bytes."""
+        return self._run_caddy_validate('/etc/caddy/Caddyfile')
+
+    def check_caddy_state(self):
+        """Validate the persistent write marker before trusting or replacing live Caddy."""
+        state = self._read_caddy_state()
+        if state is None:
+            # Legacy installations have no marker. The caller still runs the ordinary
+            # Caddy validator, but there is no digest-based recovery to perform.
+            return False
+        if not isinstance(state, dict) or state.get('status') not in {'writing', 'committed'}:
+            raise CaddyStateError(
+                f'Caddyfile state marker {self.caddy_state_path} has an invalid status; refusing to deploy')
+        expected = state.get('expected_sha256')
+        backup_expected = state.get('backup_sha256')
+        if not (isinstance(expected, str) and re.fullmatch(r'[0-9a-f]{64}', expected)):
+            raise CaddyStateError(
+                f'Caddyfile state marker {self.caddy_state_path} has an invalid expected digest')
+        if not (isinstance(backup_expected, str) and re.fullmatch(r'[0-9a-f]{64}', backup_expected)):
+            raise CaddyStateError(
+                f'Caddyfile state marker {self.caddy_state_path} has an invalid backup digest')
+
+        live_digest = sha256_file(self.live_caddy)
+        if state['status'] == 'committed':
+            if live_digest != expected:
+                raise CaddyStateError(
+                    f'Live Caddyfile digest changed after committed deployment; refusing to overwrite '
+                    f'{self.live_caddy} (manual edit or corruption detected)')
+            return True
+
+        # A process may have written the live file and crashed before changing the
+        # marker to committed. Finalize that durable write after validating it.
+        if live_digest == expected:
+            self._validate_current_for_recovery()
+            self._committed_caddy_state(expected, deploy_sha=state.get('deploy_sha'))
+            return True
+
+        backup = self.live_caddy.with_name('Caddyfile.bak')
+        if not backup.is_file() or sha256_file(backup) != backup_expected:
+            raise CaddyStateError(
+                f'Caddyfile.bak digest does not match the recorded interrupted write; refusing to restore '
+                f'{self.live_caddy}')
+
+        # Establish that Docker/Caddy can actually validate before touching the
+        # bind-mounted file. A valid digest mismatch is still recoverable: it can be
+        # a crash after a truncating write that happens to remain valid Caddy syntax.
+        self._validate_current_for_recovery()
+        current = self.live_caddy.read_bytes()
+        try:
+            write_caddy_in_place(self.live_caddy, backup.read_bytes())
+            print(f'Recovered interrupted Caddyfile write; restored {self.live_caddy} '
+                  f'in place from {backup}.', flush=True)
+            self._validate_current_for_recovery()
+        except CaddyValidatorUnavailable:
+            # Keep the pre-recovery bytes when the second validation cannot run.
+            write_caddy_in_place(self.live_caddy, current)
+            raise
+        self._committed_caddy_state(
+            backup_expected, deploy_sha=state.get('backup_deploy_sha') or state.get('deploy_sha'))
+        return True
+
     def install_caddy(self, content):
         """Back up the live file and validate a staged copy before updating its inode."""
         container = self.config['caddy_container']
         backup = self.live_caddy.with_name('Caddyfile.bak')
         write_caddy_in_place(backup, self.live_caddy.read_bytes())
+        live_written = False
+        validation_error = None
         try:
             with tempfile.NamedTemporaryFile(dir=self.live_caddy.parent, prefix='.Caddyfile-', delete=False) as staged:
                 path = Path(staged.name)
@@ -1108,23 +1337,45 @@ class Deployment:
                     staged.flush()
                     os.fsync(staged.fileno())
                     command(['docker', 'cp', str(path), container + ':' + remote])
-                    command(['docker', 'exec', container, 'caddy', 'validate', '--config', remote, '--adapter', 'caddyfile'])
+                    self._run_caddy_validate(remote)
+                    deploy_sha = getattr(self, 'payload', {}).get('sha', '')
+                    previous_sha = (getattr(self, 'state', {}) or {}).get('sha', '')
+                    state = self._read_caddy_state()
+                    if state and state.get('status') == 'committed':
+                        previous_sha = state.get('deploy_sha') or previous_sha
+                    self._write_caddy_state(
+                        status='writing', deploy_sha=deploy_sha,
+                        expected_sha256=sha256_bytes(content),
+                        backup_sha256=sha256_file(backup),
+                        backup_deploy_sha=previous_sha,
+                    )
+                    live_written = True
                     write_caddy_in_place(self.live_caddy, content)
+                    self._committed_caddy_state(sha256_bytes(content), deploy_sha=deploy_sha)
+                except (CaddyValidatorUnavailable, CaddyConfigInvalid) as error:
+                    validation_error = error
+                    raise
                 finally:
                     path.unlink(missing_ok=True)
                     with contextlib.suppress(RuntimeError, OSError):
                         command(['docker', 'exec', container, 'rm', '-f', remote])
         except Exception:
-            write_caddy_in_place(self.live_caddy, backup.read_bytes())
+            # A validator/runtime failure happens before the live write and must
+            # leave the bind-mounted file byte-for-byte untouched. Restore only
+            # after an actual write failure, or a reported config error.
+            if live_written or isinstance(validation_error, CaddyConfigInvalid):
+                write_caddy_in_place(self.live_caddy, backup.read_bytes())
             raise
 
-    def validate_live_caddy(self):
+    def validate_live_caddy(self, *, check_state=True):
         """Recover an interrupted in-place write before trusting the live configuration."""
-        args = ['docker', 'exec', self.config['caddy_container'], 'caddy', 'validate',
-                '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile']
+        if check_state:
+            self.check_caddy_state()
         try:
-            command(args)
-        except Exception as error:
+            self._run_caddy_validate('/etc/caddy/Caddyfile')
+        except CaddyValidatorUnavailable:
+            raise
+        except CaddyConfigInvalid as error:
             backup = self.live_caddy.with_name('Caddyfile.bak')
             if not backup.is_file():
                 raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy}; '
@@ -1132,25 +1383,29 @@ class Deployment:
             print(f'WARNING: live Caddyfile validation failed; restoring {self.live_caddy} '
                   f'in place from {backup}.', flush=True)
             write_caddy_in_place(self.live_caddy, backup.read_bytes())
-            command(args)
+            self._run_caddy_validate('/etc/caddy/Caddyfile')
             print(f'Restored live Caddyfile from {backup}; validation passed.', flush=True)
 
     def reload(self):
+        validation_complete = False
         try:
-            self.validate_live_caddy()
+            self.check_caddy_state()
+            self.validate_live_caddy(check_state=False)
+            validation_complete = True
             command(['docker', 'kill', '--signal=USR1', self.config['caddy_container']])
         except Exception:
-            # Prefer the adjacent backup of the actual live file at this switch.
-            # Keep the release snapshot fallback for rollback without a prior install.
-            directory = getattr(self, 'directory', None)
-            before = self.live_caddy.with_name('Caddyfile.bak')
-            try:
-                if not before.is_file():
-                    before = directory / 'before-caddy' if directory is not None else None
-                if before is not None and before.is_file():
-                    write_caddy_in_place(self.live_caddy, before.read_bytes())
-            except OSError:
-                pass
+            # A validator/runtime or state-integrity failure must never overwrite
+            # the live file. Signal failures retain the existing rollback path.
+            if validation_complete:
+                directory = getattr(self, 'directory', None)
+                before = self.live_caddy.with_name('Caddyfile.bak')
+                try:
+                    if not before.is_file():
+                        before = directory / 'before-caddy' if directory is not None else None
+                    if before is not None and before.is_file():
+                        write_caddy_in_place(self.live_caddy, before.read_bytes())
+                except OSError:
+                    pass
             self.mark_degraded('Caddy reload failed; routing unconfirmed')
             raise
         self.switch_at = time.monotonic()
