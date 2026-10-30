@@ -193,12 +193,19 @@ impl Client {
             let resolved = socket::path(&self.data_dir);
             let stream = socket::connect_timeout(&resolved.path, CONNECT_TIMEOUT)
                 .map_err(map_connect_error)?;
-            socket::verify_server(&resolved, &stream)
-                .map_err(|error| CallError::UntrustedPeer(error.to_string()))?;
+            // macOS reports EINVAL from setsockopt/getpeereid once the peer
+            // has already closed; that is a disconnect, not a protocol error.
             stream
                 .set_write_timeout(Some(WRITE_TIMEOUT))
                 .and_then(|_| stream.set_read_timeout(Some(self.read_timeout)))
-                .map_err(|error| CallError::Protocol(error.to_string()))?;
+                .map_err(map_setup_error)?;
+            socket::verify_server(&resolved, &stream).map_err(|error| {
+                if error.kind() == ErrorKind::PermissionDenied {
+                    CallError::UntrustedPeer(error.to_string())
+                } else {
+                    map_setup_error(error)
+                }
+            })?;
             self.stream = Some(BufReader::new(stream));
         }
         Ok(self.stream.as_mut().expect("stream was just installed"))
@@ -218,6 +225,14 @@ fn map_connect_error(error: io::Error) -> CallError {
             CallError::AppNotRunning
         }
         _ => CallError::Protocol(error.to_string()),
+    }
+}
+
+fn map_setup_error(error: io::Error) -> CallError {
+    if error.raw_os_error() == Some(nix::libc::EINVAL) {
+        CallError::Disconnected
+    } else {
+        map_stream_error(error)
     }
 }
 
