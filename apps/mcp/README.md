@@ -22,6 +22,9 @@ below the 300/minute quota on the ordinary GET endpoints used by the other
 tools; this server does not expose package lookup, whose API quota is
 30/minute. Forwarded client IPs are accepted only when the direct peer is in
 `OPENNAVO_PUBLIC_MCP_TRUSTED_PROXIES`; otherwise the connection peer is used.
+The limiter retains up to 10,000 identity buckets and evicts only expired
+buckets. If all slots are active, new identities share one overflow bucket
+with the same quota; identity churn cannot reset existing clients' limits.
 The public API package lookup is intentionally `POST /packages/lookup` with a
 JSON body; `GET /packages/lookup?tokens=...` is outside the OpenAPI route and
 returns 404.

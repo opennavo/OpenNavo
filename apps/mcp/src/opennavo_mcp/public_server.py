@@ -303,7 +303,8 @@ def _release(value: Any, link: str) -> dict[str, Any]:
 def _dependency(value: Any) -> dict[str, Any]:
     source = _map(value)
     out = _pick(source, "kind", "token", "name", "displayName", "version", "optional")
-    out.update(_package_status(source))
+    # DependencyNode does not guarantee lifecycle flags; absence means unknown.
+    out.update({key: bool(source[key]) for key in ("deprecated", "disabled") if key in source})
     token, kind = source.get("token"), source.get("kind", "cask")
     if isinstance(token, str) and token:
         out["link"] = app_link(str(kind), token)
@@ -831,10 +832,10 @@ class _Bucket:
 class PublicGCRALimiter:
     """In-process GCRA matching the API's count/window/burst semantics.
 
-    Client keys are untrusted, so buckets use a hard bounded LRU. Expired
-    windows are removed on every access. A denied check refreshes that key's
-    LRU position, so an active limit can only reset after its bucket expires or
-    is evicted after enough other clients access the limiter to make it the LRU.
+    Client keys are untrusted, so the LRU has a hard identity cap. Only expired
+    buckets are removed, never active quota state. When all slots are active,
+    new identities share one overflow bucket with the same count/window/burst
+    quota. Memory is bounded by max_entries plus that single overflow bucket.
     """
 
     def __init__(
@@ -850,6 +851,7 @@ class PublicGCRALimiter:
         self.interval = window_seconds / count
         self.max_entries = max_entries
         self._buckets: OrderedDict[str, _Bucket] = OrderedDict()
+        self._overflow: _Bucket | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -869,16 +871,20 @@ class PublicGCRALimiter:
             old = self._buckets.get(key)
             if old is not None:
                 self._buckets.move_to_end(key)
+            overflow = old is None and len(self._buckets) >= self.max_entries
+            if overflow:
+                old = self._overflow
             tat = old.tat if old and old.expires > current else current
             allow_at = tat - (self.count - cost) * self.interval
             if current < allow_at:
                 return False, max(1, int(allow_at - current + 0.999)), 0
             next_tat = max(tat, current) + cost * self.interval
-            self._buckets[key] = _Bucket(next_tat, next_tat)
-            self._buckets.move_to_end(key)
+            if overflow:
+                self._overflow = _Bucket(next_tat, next_tat)
+            else:
+                self._buckets[key] = _Bucket(next_tat, next_tat)
+                self._buckets.move_to_end(key)
             remaining = max(0, self.count - int((next_tat - current) / self.interval + 0.999))
-            while len(self._buckets) > self.max_entries:
-                self._buckets.popitem(last=False)
             return True, 0, remaining
 
 

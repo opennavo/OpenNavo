@@ -253,7 +253,7 @@ async def test_package_lists_preserve_packages_and_explicit_status(
         assert all(type(app[key]) is bool for app in apps for key in ("deprecated", "disabled"))
 
 
-async def test_dependency_packages_include_status_recursively() -> None:
+async def test_dependency_packages_only_include_status_when_present_recursively() -> None:
     def handle(_: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(
             200,
@@ -264,7 +264,11 @@ async def test_dependency_packages_include_status_recursively() -> None:
                         {
                             "token": "disabled-app",
                             "disabled": True,
-                            "children": [{"token": "deprecated-app", "deprecated": True}],
+                            "children": [
+                                {"token": "deprecated-app", "deprecated": True},
+                                {"token": "explicit-app", "deprecated": False, "disabled": False},
+                                {"token": "unknown-app"},
+                            ],
                         }
                     ],
                     "dependents": {"count": 1, "top": [{"token": "default-app"}]},
@@ -280,9 +284,12 @@ async def test_dependency_packages_include_status_recursively() -> None:
         dependency = data["dependencies"][0]
         child = dependency["children"][0]
         dependent = data["dependents"]["top"][0]
-        assert dependency["disabled"] is True and dependency["deprecated"] is False
-        assert child["deprecated"] is True and child["disabled"] is False
-        assert dependent["deprecated"] is False and dependent["disabled"] is False
+        assert dependency["disabled"] is True and "deprecated" not in dependency
+        assert child["deprecated"] is True and "disabled" not in child
+        explicit = dependency["children"][1]
+        assert explicit["deprecated"] is False and explicit["disabled"] is False
+        for node in (dependency["children"][2], dependent):
+            assert "deprecated" not in node and "disabled" not in node
 
 
 def test_selected_outputs_have_links_and_size_caps() -> None:
@@ -308,21 +315,46 @@ async def test_public_gcra_is_per_ip_and_bounded() -> None:
     assert (await limiter.check("203.0.113.2", now=0.0))[0] is True
 
 
-async def test_public_gcra_caps_buckets_and_evicts_least_recently_used() -> None:
+async def test_public_gcra_caps_buckets_and_shares_overflow_quota() -> None:
     limiter = PublicGCRALimiter(1, 60, max_entries=3)
     for key in ("a", "b", "c"):
         assert (await limiter.check(key, now=0.0))[0] is True
     assert list(limiter._buckets) == ["a", "b", "c"]  # pyright: ignore[reportPrivateUsage]
 
-    # A denied request still makes the limited client recent; the oldest other
-    # client is evicted when the fourth distinct client arrives.
+    # Denied checks update recency, but all active buckets keep their quota.
     allowed, _, _ = await limiter.check("a", now=0.0)
     assert allowed is False
     assert list(limiter._buckets) == ["b", "c", "a"]  # pyright: ignore[reportPrivateUsage]
     assert (await limiter.check("d", now=1.0))[0] is True
-    assert list(limiter._buckets) == ["c", "a", "d"]  # pyright: ignore[reportPrivateUsage]
+    assert (await limiter.check("e", now=1.0)) == (False, 60, 0)
+    assert list(limiter._buckets) == ["b", "c", "a"]  # pyright: ignore[reportPrivateUsage]
     assert len(limiter._buckets) == 3  # pyright: ignore[reportPrivateUsage]
-    assert (await limiter.check("a", now=1.0))[0] is False
+    for key in ("a", "b", "c"):
+        assert (await limiter.check(key, now=1.0))[0] is False
+    assert (await limiter.check("e", now=61.0))[0] is True
+
+
+async def test_public_gcra_preserves_victim_quota_after_ten_thousand_new_identities() -> None:
+    limiter = PublicGCRALimiter(2, 60)
+    assert (await limiter.check("victim", now=0.0)) == (True, 0, 1)
+    victim = limiter._buckets["victim"]  # pyright: ignore[reportPrivateUsage]
+    for index in range(10_000):
+        await limiter.check(f"new-{index}", now=0.0)
+    assert len(limiter._buckets) == 10_000  # pyright: ignore[reportPrivateUsage]
+    assert limiter._buckets["victim"] is victim  # pyright: ignore[reportPrivateUsage]
+    assert (await limiter.check("victim", now=0.0)) == (True, 0, 0)
+    assert (await limiter.check("victim", now=0.0)) == (False, 30, 0)
+
+
+async def test_public_gcra_evicts_expired_bucket_before_active_lru() -> None:
+    limiter = PublicGCRALimiter(1, 60, max_entries=2)
+    assert (await limiter.check("expired", now=0.0))[0] is True
+    assert (await limiter.check("active", now=30.0))[0] is True
+    assert (await limiter.check("expired", now=30.0))[0] is False
+    assert list(limiter._buckets) == ["active", "expired"]  # pyright: ignore[reportPrivateUsage]
+    assert (await limiter.check("fresh", now=60.0))[0] is True
+    assert list(limiter._buckets) == ["active", "fresh"]  # pyright: ignore[reportPrivateUsage]
+    assert (await limiter.check("active", now=60.0)) == (False, 30, 0)
 
 
 async def test_public_gcra_purges_expired_buckets_on_access() -> None:
