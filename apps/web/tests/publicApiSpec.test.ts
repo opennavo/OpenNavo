@@ -5,9 +5,18 @@ import { publicApiSpecUrl } from '../server/utils/publicApiSpec';
 
 describe('public API specification URL', () => {
   it.each([
-    ['https://api.example.test/api/v1', 'https://api.example.test/api/v1/openapi.yaml'],
-    ['https://api.example.test/api/v1///?secret=value#fragment', 'https://api.example.test/api/v1/openapi.yaml'],
-    ['http://api.example.test/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://api.opennavo.com/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://api.opennavo.com/custom/v1', 'https://api.opennavo.com/custom/v1/openapi.yaml'],
+    ['https://opennavo.com/api/v1', 'https://opennavo.com/api/v1/openapi.yaml'],
+    ['https://api.opennavo.com/api/v1///?secret=value#fragment', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['http://api.opennavo.com/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://api.example.test/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://opennavo.com.evil.test/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://evilopennavo.com/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://user:pass@api.opennavo.com/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://user@opennavo.com/api/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://@opennavo.com/custom/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
+    ['https://:@opennavo.com/custom/v1', 'https://api.opennavo.com/api/v1/openapi.yaml'],
     ['garbage', 'https://api.opennavo.com/api/v1/openapi.yaml'],
     [undefined, 'https://api.opennavo.com/api/v1/openapi.yaml'],
     ['', 'https://api.opennavo.com/api/v1/openapi.yaml'],

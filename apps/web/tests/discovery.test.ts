@@ -23,7 +23,7 @@ describe('public discovery documents', () => {
         'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"'
       );
       expect(body.linkset[0].item.map(item => item.href)).toEqual([
-        'https://api.example.test/api/v1/openapi.yaml',
+        'https://api.opennavo.com/api/v1/openapi.yaml',
         'https://opennavo.com/developers',
         'https://opennavo.com/mcp'
       ]);
