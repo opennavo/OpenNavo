@@ -171,6 +171,19 @@ describe('Markdown alternates (X4)', () => {
     expect(md.endsWith('\n')).toBe(true);
   });
 
+  it.each([
+    ['disabled', { homebrewStatus: { state: 'disabled', reason: 'discontinued', date: null } }, false],
+    ['deprecated', { homebrewStatus: { state: 'deprecated', reason: 'unmaintained', date: null } }, true],
+    ['paused', { homebrewStatus: { state: 'active', reason: null, date: null }, disabled: true }, true]
+  ] as const)('Writes brew commands only while Homebrew can install it: %s', (_, fields, commands) => {
+    const md = renderPackageMarkdown({ ...pkg, ...fields } as PackageDetail, {
+      siteUrl: 'https://opennavo.example',
+      locale: 'en-US'
+    });
+    for (const command of ['brew install --cask facts-app', 'brew uninstall --cask facts-app', '--zap'])
+      expect(md.includes(command), command).toBe(commands);
+  });
+
   it('Writes the page language with its own links', () => {
     const md = renderPackageMarkdown(pkg, { siteUrl: 'https://opennavo.example', locale: 'zh-CN' });
     expect(md).toContain('https://opennavo.example/zh/apps/facts-app');

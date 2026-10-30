@@ -625,6 +625,7 @@
       "versionA": "Последняя версия — {version}.",
       "versionDated": "Последняя версия — {version}, в Homebrew она появилась {date}.",
       "versionAuto": "{name} обновляется само; чтобы обновить его через Homebrew, выполните `brew upgrade --cask --greedy {token}`.",
+      "versionSelf": "{name} обновляется само.",
       "versionBrew": "Чтобы обновить, выполните `brew upgrade --cask {token}`.",
       "versionChannels": "В Homebrew есть также {list}; их нельзя установить одновременно.",
       "extrasQ": "Что ещё устанавливается вместе с {name}?",

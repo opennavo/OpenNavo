@@ -216,9 +216,6 @@ describe('App questions', () => {
       code
     );
     expect(disabled[0]!.answer).not.toContain('desktop.docker.com');
-    // Disabled packages get no brew command answers, matching the hidden install/uninstall blocks.
-    expect(disabled.some(item => item.key === 'uninstall')).toBe(false);
-    for (const item of disabled) expect(item.answer).not.toMatch(/\bbrew (uninstall|upgrade|install)\b|--zap/);
     const deprecated = faqItems(
       pageOf(docker({ homebrewStatus: { state: 'deprecated', reason: 'something custom', date: null } })),
       translator(code),
@@ -238,6 +235,19 @@ describe('App questions', () => {
       }
     });
     expect(faqItems(pageOf(single), translator(code), code).map(item => item.key)).toContain('uninstall');
+  });
+
+  it.each([
+    ['disabled', { state: 'disabled', reason: 'fails_gatekeeper_check', date: '2026-09-01' }, false],
+    ['deprecated', { state: 'deprecated', reason: 'unmaintained', date: null }, true],
+    ['active', { state: 'active', reason: null, date: null }, true]
+  ] as const)('Gives brew command answers only while Homebrew can install it: %s', (_, homebrewStatus, commands) => {
+    const t = translator('en-US');
+    const items = faqItems(pageOf(docker({ homebrewStatus, autoUpdates: true })), t, 'en-US');
+    expect(items.some(item => item.key === 'uninstall')).toBe(commands);
+    expect(items.some(item => /\bbrew (uninstall|upgrade|install)\b|--zap/.test(item.answer))).toBe(commands);
+    // A self-updating app still says so after Homebrew disabled it.
+    expect(items.find(item => item.key === 'version')?.answer).toContain('Docker Desktop updates itself');
   });
 
   it('Says why Homebrew disabled an app and nothing it no longer checks', () => {

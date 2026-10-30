@@ -433,8 +433,12 @@ export function faqItems(pkg: PackagePage, t: FaqTranslate, locale: Locale): Faq
         pkg.versionCommittedAt
           ? t('package.faq.versionDated', { version, date: date(pkg.versionCommittedAt) })
           : t('package.faq.versionA', { version }),
-        commands &&
-          (pkg.autoUpdates ? t('package.faq.versionAuto', { name, token }) : t('package.faq.versionBrew', { token })),
+        can.homebrew &&
+          (commands
+            ? pkg.autoUpdates
+              ? t('package.faq.versionAuto', { name, token })
+              : t('package.faq.versionBrew', { token })
+            : pkg.autoUpdates && t('package.faq.versionSelf', { name })),
         can.homebrew && channels.length > 0 && t('package.faq.versionChannels', { list: list(channels.map(code)) })
       ])
     );

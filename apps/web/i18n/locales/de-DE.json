@@ -625,6 +625,7 @@
       "versionA": "Die aktuelle Version ist {version}.",
       "versionDated": "Die aktuelle Version ist {version}; Homebrew hat sie am {date} aufgenommen.",
       "versionAuto": "{name} aktualisiert sich selbst; für ein Update über Homebrew führen Sie `brew upgrade --cask --greedy {token}` aus.",
+      "versionSelf": "{name} aktualisiert sich selbst.",
       "versionBrew": "Zum Aktualisieren führen Sie `brew upgrade --cask {token}` aus.",
       "versionChannels": "Homebrew bietet außerdem {list} an; eine parallele Installation ist nicht möglich.",
       "extrasQ": "Was wird mit {name} zusätzlich installiert?",
