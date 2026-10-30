@@ -288,8 +288,7 @@ export function renderPackageMarkdown(pkg: PackageDetail, { siteUrl, locale }: P
   const cleanup = zap.length > 0 && (pkg.kind !== 'cask' || commands);
   if (commands || regular.length || cleanup) {
     lines.push(`## ${m('markdown.uninstall')}`, '');
-    if (commands)
-      lines.push(`- \`brew uninstall --cask ${pkg.token}\``, '', m('package.guide.uninstall'), '');
+    if (commands) lines.push(`- \`brew uninstall --cask ${pkg.token}\``, '', m('package.guide.uninstall'), '');
     const declarations = (items: typeof regular) => {
       for (const item of items)
         lines.push(
