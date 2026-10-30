@@ -3,6 +3,7 @@ import { computed, createSSRApp, h, ref, resolveComponent } from 'vue';
 import type { Component } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import PackageFaq from '../app/components/package/PackageFaq.vue';
 import PackageCommand from '../app/components/package/PackageCommand.vue';
 import PackageInstall from '../app/components/package/PackageInstall.vue';
 import PackageInstallDetailsContent from '../app/components/package/PackageInstallDetailsContent.vue';
@@ -143,4 +144,16 @@ it('hides uninstall and Deep clean in the details body when disabled', async () 
   expect(page.querySelector('[data-testid="package-uninstall"]')).toBeNull();
   expect(page.querySelector('[data-testid="package-zap"]')).toBeNull();
   expect(page.textContent?.includes('brew uninstall')).toBe(false);
+});
+
+it('renders no brew uninstall or --zap in the SSR FAQ when disabled', async () => {
+  const active = await render(PackageFaq, { pkg: pkg() });
+  expect(active.textContent).toContain('brew uninstall --cask iterm2');
+  const value = {
+    ...pkg(),
+    homebrewStatus: { state: 'disabled', reason: 'discontinued', date: null },
+    disabled: true
+  } as PackagePage;
+  const page = await render(PackageFaq, { pkg: value });
+  expect(page.textContent).not.toMatch(/\bbrew (uninstall|upgrade|install)\b|--zap/);
 });
