@@ -1,20 +1,25 @@
 //! Hand-written, newline-delimited JSON-RPC 2.0 transport for MCP stdio mode.
 //!
-//! B1 implements only the small surface needed by an MCP client: `initialize`,
-//! `notifications/initialized`, `ping`, `tools/list` and `tools/call`. The
-//! server is generic over `BufRead`/`Write` so tests can drive it in memory.
+//! B2 implements the small surface needed by an MCP client: `initialize`,
+//! `notifications/initialized`, `ping`, `tools/list` and `tools/call`. Tool
+//! calls are forwarded lazily to the app socket after checking the persisted
+//! master switch; `initialize` and `tools/list` never need the app. The server
+//! is generic over `BufRead`/`Write` so tests can drive it in memory.
 
 use std::io::{self, BufRead, Write};
 
 use serde_json::{Map, Value, json};
 
-use super::tools;
+use super::{client, state, tools};
 
 /// Maximum accepted input line length, excluding the trailing newline.
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 
 /// MCP protocol versions this server can speak, newest first.
-pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
+///
+/// Only `2025-06-18` is advertised: earlier revisions (notably `2025-03-26`)
+/// permit JSON-RPC batching, which this server deliberately does not support.
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18"];
 
 /// Newest supported protocol version, used whenever the client's request
 /// cannot be honored (missing, malformed, or unsupported).
@@ -25,16 +30,18 @@ pub const SERVER_NAME: &str = "opennavo";
 
 /// Whether local MCP may serve tool calls.
 ///
-/// B1 only stubs this decision. B2/B5 replace it with the persisted master
-/// switch and app/socket liveness checks.
+/// The static variants are used by in-memory tests; the live stdio server
+/// resolves the persisted switch and socket for every `tools/call`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Availability {
     /// The app is running and the Local MCP switch is on.
     Enabled,
-    /// The Local MCP switch is off (B1 default).
+    /// The Local MCP switch is off (the default).
     SwitchOff,
     /// The switch is on but the app-side broker is not reachable.
     AppNotRunning,
+    /// The broker disappeared while serving this session.
+    AppDisconnected,
 }
 
 impl Availability {
@@ -51,6 +58,9 @@ impl Availability {
             Self::AppNotRunning => {
                 "OpenNavo is not running; tools/call will return E_APP_NOT_RUNNING"
             }
+            Self::AppDisconnected => {
+                "OpenNavo disconnected; tools/call will return E_APP_DISCONNECTED"
+            }
         }
     }
 
@@ -66,18 +76,26 @@ impl Availability {
             Self::AppNotRunning => Some((
                 -32002,
                 "E_APP_NOT_RUNNING",
-                "OpenNavo is not running. Ask the user to open OpenNavo, then retry.",
+                "OpenNavo is not running. Please open OpenNavo and try again.",
+            )),
+            Self::AppDisconnected => Some((
+                -32003,
+                "E_APP_DISCONNECTED",
+                "OpenNavo disconnected before answering. Please retry the call.",
             )),
         }
     }
 }
 
-/// Resolve the current Local MCP availability.
+/// Resolve the persisted Local MCP switch without touching the socket.
 ///
-/// B1 always reports `SwitchOff`; the real switch and socket checks arrive in
-/// B2/B5. Tests inject the other variants through `serve_with_session`.
-pub const fn local_mcp_availability() -> Availability {
-    Availability::SwitchOff
+/// A missing or unreadable state file means OFF. Tests inject static
+/// availability through `serve_with_availability`.
+pub fn local_mcp_availability() -> Availability {
+    match state::data_dir() {
+        Ok(data_dir) if state::load(&data_dir).enabled => Availability::Enabled,
+        _ => Availability::SwitchOff,
+    }
 }
 
 /// Per-process MCP session state.
@@ -93,18 +111,28 @@ impl Session {
     }
 }
 
-/// Strip control, bidirectional formatting, and other invisible formatting
-/// characters, then truncate to 64 Unicode scalar values. The client-supplied
-/// name is never echoed.
+/// Strip control, line/paragraph separators, bidirectional formatting, and
+/// other invisible formatting characters, then truncate to 64 Unicode scalar
+/// values. The client-supplied name is never echoed.
 pub fn sanitize_client_name(name: &str) -> String {
     name.chars()
         .filter(|character| {
             !character.is_control()
+                && !is_line_separator(*character)
                 && !is_bidi_control(*character)
                 && !is_invisible_format(*character)
         })
         .take(64)
         .collect()
+}
+
+/// Unicode line separator (U+2028) and paragraph separator (U+2029).
+///
+/// These are not `char::is_control`, but they terminate lines in some
+/// consumers, so they must not survive a value that is later written as a
+/// single line.
+fn is_line_separator(character: char) -> bool {
+    matches!(character, '\u{2028}' | '\u{2029}')
 }
 
 fn is_bidi_control(character: char) -> bool {
@@ -122,9 +150,43 @@ fn is_invisible_format(character: char) -> bool {
     )
 }
 
-/// Serve MCP over the given streams using the B1 default availability.
+/// Live backend used by the `mcp` subcommand.
+enum Backend {
+    Static(Availability),
+    Live(client::Client),
+}
+
+impl Backend {
+    fn availability(&self) -> Availability {
+        match self {
+            Self::Static(availability) => *availability,
+            Self::Live(client) => {
+                if state::load(client.data_dir()).enabled {
+                    Availability::Enabled
+                } else {
+                    Availability::SwitchOff
+                }
+            }
+        }
+    }
+
+    fn call_tool(&mut self, params: Value) -> Result<Value, client::CallError> {
+        match self {
+            Self::Live(client) => client.call("tools/call", params),
+            Self::Static(_) => Ok(Value::Null),
+        }
+    }
+}
+
+/// Serve MCP over the given streams with the live switch and socket.
 pub fn serve<R: BufRead, W: Write>(input: R, output: W) -> io::Result<()> {
-    serve_with_availability(input, output, local_mcp_availability())
+    let backend = match state::data_dir() {
+        Ok(data_dir) => Backend::Live(client::Client::new(data_dir)),
+        Err(_) => Backend::Static(Availability::SwitchOff),
+    };
+    eprintln!("mcp: {}", backend.availability().startup_message());
+    let mut session = Session::default();
+    serve_with_backend(input, output, backend, &mut session)
 }
 
 /// Serve MCP with an explicitly injected availability decision.
@@ -138,11 +200,30 @@ pub fn serve_with_availability<R: BufRead, W: Write>(
     serve_with_session(input, output, availability, &mut session)
 }
 
+/// Serve MCP with a caller-supplied live client (tests use a temp data dir).
+pub fn serve_with_client<R: BufRead, W: Write>(
+    input: R,
+    output: W,
+    client: client::Client,
+) -> io::Result<()> {
+    let mut session = Session::default();
+    serve_with_backend(input, output, Backend::Live(client), &mut session)
+}
+
 /// Serve MCP while exposing the session for tests.
 pub fn serve_with_session<R: BufRead, W: Write>(
+    input: R,
+    output: W,
+    availability: Availability,
+    session: &mut Session,
+) -> io::Result<()> {
+    serve_with_backend(input, output, Backend::Static(availability), session)
+}
+
+fn serve_with_backend<R: BufRead, W: Write>(
     mut input: R,
     mut output: W,
-    availability: Availability,
+    mut backend: Backend,
     session: &mut Session,
 ) -> io::Result<()> {
     let mut line = Vec::new();
@@ -168,7 +249,7 @@ pub fn serve_with_session<R: BufRead, W: Write>(
             return Ok(());
         }
 
-        handle_line(&line, &mut output, session, availability)?;
+        handle_line(&line, &mut output, session, &mut backend)?;
     }
 }
 
@@ -176,7 +257,7 @@ fn handle_line<W: Write>(
     line: &[u8],
     output: &mut W,
     session: &mut Session,
-    availability: Availability,
+    backend: &mut Backend,
 ) -> io::Result<()> {
     let text = match std::str::from_utf8(line) {
         Ok(text) => text,
@@ -186,11 +267,31 @@ fn handle_line<W: Write>(
         Ok(message) => message,
         Err(_) => return write_parse_error(output),
     };
+    if message.is_array() {
+        return write_error(
+            output,
+            Value::Null,
+            -32600,
+            "Batch requests are not supported",
+            None,
+        );
+    }
     let Some(object) = message.as_object() else {
         return write_error(output, Value::Null, -32600, "Invalid Request", None);
     };
 
-    let id = object.get("id").cloned();
+    // JSON-RPC ids are strings, integer numbers, or null. Anything else is an
+    // invalid request; a malformed id never gets echoed back.
+    let id = match object.get("id") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(_)) => object.get("id").cloned(),
+        Some(Value::Number(number)) if number.is_i64() || number.is_u64() => {
+            object.get("id").cloned()
+        }
+        Some(_) => {
+            return write_error(output, Value::Null, -32600, "Invalid Request", None);
+        }
+    };
     if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return write_error(
             output,
@@ -230,7 +331,7 @@ fn handle_line<W: Write>(
         }
         "ping" => write_result(output, id, json!({})),
         "tools/list" => write_result(output, id, tools::list_result()),
-        "tools/call" => write_tools_call(output, id, availability),
+        "tools/call" => write_tools_call(output, id, object.get("params"), backend, session),
         _ => write_error(output, id, -32601, "Method not found", None),
     }
 }
@@ -259,15 +360,57 @@ fn capture_client_name(params: Option<&Value>, session: &mut Session) {
     else {
         return;
     };
-    session.client_name = Some(sanitize_client_name(name));
+    let sanitized = sanitize_client_name(name);
+    // A name made only of stripped characters carries no information; treat it
+    // as if no name was supplied.
+    session.client_name = if sanitized.is_empty() {
+        None
+    } else {
+        Some(sanitized)
+    };
 }
 
 fn write_tools_call<W: Write>(
     output: &mut W,
     id: Value,
-    availability: Availability,
+    params: Option<&Value>,
+    backend: &mut Backend,
+    session: &Session,
 ) -> io::Result<()> {
-    if let Some((code, data_code, message)) = availability.disabled_error() {
+    let Some(params) = params.and_then(Value::as_object) else {
+        return write_error(
+            output,
+            id,
+            -32602,
+            "Invalid tool call",
+            Some(json!({ "code": "E_INVALID_ARG" })),
+        );
+    };
+    let Some(name) = params.get("name").and_then(Value::as_str) else {
+        return write_error(
+            output,
+            id,
+            -32602,
+            "Invalid tool call",
+            Some(json!({ "code": "E_INVALID_ARG" })),
+        );
+    };
+
+    // Never forward a write or unknown name: `tools/list` advertises only the
+    // read tools, and phase B2 has no write switch yet.
+    if !tools::is_read_tool(name) {
+        return write_error(
+            output,
+            id,
+            -32602,
+            &format!("Unknown tool: {name}"),
+            Some(json!({ "code": "E_TOOL_NOT_FOUND" })),
+        );
+    }
+
+    if let Backend::Static(availability) = &*backend
+        && let Some((code, data_code, message)) = availability.disabled_error()
+    {
         return write_error(
             output,
             id,
@@ -277,14 +420,43 @@ fn write_tools_call<W: Write>(
         );
     }
 
-    // B1 advertises no tools even when enabled; B2 adds the read tools.
-    write_error(
-        output,
-        id,
-        -32602,
-        "Unknown tool",
-        Some(json!({ "code": "E_TOOL_NOT_FOUND" })),
-    )
+    let mut forwarded = Value::Object(params.clone());
+    if let Some(client_name) = session.client_name()
+        && let Some(object) = forwarded.as_object_mut()
+    {
+        object.insert("client".to_owned(), json!({ "name": client_name }));
+    }
+
+    match backend.call_tool(forwarded) {
+        Ok(result) => write_result(output, id, tool_result(result)),
+        Err(error) => write_error(
+            output,
+            id,
+            error.jsonrpc_code(),
+            &error.message(),
+            Some(json!({ "code": error.data_code() })),
+        ),
+    }
+}
+
+/// Wrap a broker result as an MCP `CallToolResult`.
+///
+/// The broker returns structured JSON; clients expect a `content` array. Text
+/// is the JSON encoding, and object results are also exposed through
+/// `structuredContent` for clients that support it.
+fn tool_result(result: Value) -> Value {
+    if result.get("content").is_some() {
+        return result;
+    }
+    let text = serde_json::to_string(&result).unwrap_or_else(|_| "null".to_owned());
+    if result.is_object() {
+        json!({
+            "content": [{ "type": "text", "text": text }],
+            "structuredContent": result,
+        })
+    } else {
+        json!({ "content": [{ "type": "text", "text": text }] })
+    }
 }
 
 fn write_parse_error<W: Write>(output: &mut W) -> io::Result<()> {
@@ -332,10 +504,13 @@ mod tests {
     use super::*;
 
     fn run(input: &str, availability: Availability) -> (Vec<Value>, Session) {
+        run_bytes(input.as_bytes(), availability)
+    }
+
+    fn run_bytes(input: &[u8], availability: Availability) -> (Vec<Value>, Session) {
         let mut output = Vec::new();
         let mut session = Session::default();
-        serve_with_session(input.as_bytes(), &mut output, availability, &mut session)
-            .expect("serve");
+        serve_with_session(input, &mut output, availability, &mut session).expect("serve");
         let responses = String::from_utf8(output)
             .expect("utf-8")
             .lines()
@@ -440,6 +615,149 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_client_name_strips_line_and_paragraph_separators() {
+        assert_eq!(
+            sanitize_client_name("a\u{2028}b\u{2029}c"),
+            "abc",
+            "U+2028 and U+2029 must not survive into a single-line value"
+        );
+
+        let only_separators = "\u{2028}\u{2029}\u{200B}";
+        assert_eq!(sanitize_client_name(only_separators), "");
+        let input = format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"clientInfo\":{{\"name\":{}}}}}}}\n",
+            serde_json::to_string(only_separators).expect("json")
+        );
+        let (responses, session) = run(&input, Availability::Enabled);
+        assert_eq!(responses.len(), 1);
+        assert_eq!(
+            session.client_name(),
+            None,
+            "a name that is empty after sanitizing must become None"
+        );
+    }
+
+    #[test]
+    fn crlf_line_endings_are_accepted_and_carriage_return_is_stripped() {
+        let input = concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"crlf\"}}}\r\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\r\n",
+        );
+        let (responses, session) = run(input, Availability::Enabled);
+        assert_eq!(responses.len(), 2);
+        assert_eq!(responses[0]["id"], 1);
+        assert_eq!(responses[1]["id"], 2);
+        assert_eq!(responses[1]["result"], json!({}));
+        assert_eq!(session.client_name(), Some("crlf"));
+    }
+
+    #[test]
+    fn final_line_without_newline_is_processed() {
+        let input = r#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#;
+        let (responses, _) = run(input, Availability::Enabled);
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0]["id"], 7);
+        assert_eq!(responses[0]["result"], json!({}));
+    }
+
+    #[test]
+    fn invalid_utf8_returns_parse_error_and_keeps_serving() {
+        let mut input = vec![0xFF, 0xFE, b'\n'];
+        input.extend_from_slice(br#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#);
+        input.push(b'\n');
+        let (responses, _) = run_bytes(&input, Availability::Enabled);
+        assert_eq!(responses.len(), 2);
+        assert_eq!(responses[0]["id"], Value::Null);
+        assert_eq!(responses[0]["error"]["code"], -32700);
+        assert_eq!(responses[1]["id"], 2);
+        assert_eq!(responses[1]["result"], json!({}));
+    }
+
+    #[test]
+    fn invalid_id_types_are_rejected_with_null_id() {
+        for id in ["true", "1.5", "[]", "{}", r#"{"nested":1}"#] {
+            let request = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#);
+            let (responses, _) = run(&format!("{request}\n"), Availability::Enabled);
+            assert_eq!(responses.len(), 1, "id {id}");
+            assert_eq!(responses[0]["id"], Value::Null, "id {id}");
+            assert_eq!(responses[0]["error"]["code"], -32600, "id {id}");
+            assert_eq!(
+                responses[0]["error"]["message"], "Invalid Request",
+                "id {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn string_and_integer_ids_are_echoed_and_null_id_is_a_notification() {
+        for (id, expected) in [
+            (r#""abc""#, json!("abc")),
+            ("0", json!(0)),
+            ("-5", json!(-5)),
+            ("9007199254740993", json!(9007199254740993_i64)),
+        ] {
+            let request = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#);
+            let (responses, _) = run(&format!("{request}\n"), Availability::Enabled);
+            assert_eq!(responses.len(), 1, "id {id}");
+            assert_eq!(responses[0]["id"], expected, "id {id}");
+            assert_eq!(responses[0]["result"], json!({}), "id {id}");
+        }
+
+        for request in [
+            r#"{"jsonrpc":"2.0","method":"ping"}"#,
+            r#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#,
+        ] {
+            let (responses, _) = run(&format!("{request}\n"), Availability::Enabled);
+            assert!(
+                responses.is_empty(),
+                "notification must not receive a response: {request}"
+            );
+        }
+    }
+
+    #[test]
+    fn batch_requests_get_one_error_with_null_id_and_serving_continues() {
+        for batch in [
+            "[]",
+            r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#,
+            r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","id":2,"method":"ping"}]"#,
+        ] {
+            let input = format!(
+                "{batch}\n{}\n",
+                r#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#
+            );
+            let (responses, _) = run(&input, Availability::Enabled);
+            assert_eq!(responses.len(), 2, "batch {batch}");
+            assert_eq!(responses[0]["id"], Value::Null, "batch {batch}");
+            assert_eq!(responses[0]["error"]["code"], -32600, "batch {batch}");
+            assert_eq!(
+                responses[0]["error"]["message"], "Batch requests are not supported",
+                "batch {batch}"
+            );
+            assert_eq!(responses[1]["id"], 3, "batch {batch}");
+            assert_eq!(responses[1]["result"], json!({}), "batch {batch}");
+        }
+    }
+
+    #[test]
+    fn only_non_batching_protocol_versions_are_supported() {
+        assert_eq!(
+            SUPPORTED_PROTOCOL_VERSIONS,
+            &["2025-06-18"][..],
+            "batching-capable revisions must not be advertised"
+        );
+        for requested in ["2025-03-26", "2024-11-05"] {
+            let input = initialize_with_params(&format!(r#"{{"protocolVersion":"{requested}"}}"#));
+            let (responses, _) = run(&input, Availability::Enabled);
+            assert_eq!(responses.len(), 1, "version {requested}");
+            assert_eq!(
+                responses[0]["result"]["protocolVersion"], LATEST_PROTOCOL_VERSION,
+                "version {requested} must fall back to latest"
+            );
+        }
+    }
+
+    #[test]
     fn ping_and_unknown_method() {
         let input = concat!(
             r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
@@ -465,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn switch_off_keeps_initialize_and_lists_no_tools_but_rejects_calls() {
+    fn switch_off_keeps_initialize_and_lists_read_tools_but_rejects_calls() {
         let input = with_initialize(concat!(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
             "\n",
@@ -475,7 +793,16 @@ mod tests {
         let (responses, _) = run(&input, Availability::SwitchOff);
         assert_eq!(responses.len(), 3);
         assert_eq!(responses[0]["result"]["capabilities"]["tools"], json!({}));
-        assert_eq!(responses[1]["result"]["tools"], json!([]));
+        assert_eq!(
+            responses[1]["result"]["tools"],
+            tools::list_result()["tools"]
+        );
+        assert!(
+            !responses[1]["result"]["tools"]
+                .as_array()
+                .expect("tools")
+                .is_empty()
+        );
         let error = &responses[2]["error"];
         assert_eq!(error["code"], -32001);
         assert_eq!(error["data"]["code"], "E_MCP_DISABLED");
@@ -483,6 +810,68 @@ mod tests {
             error["message"],
             "Local MCP is turned off in OpenNavo Settings. Ask the user to enable it."
         );
+    }
+
+    #[test]
+    fn read_tools_do_not_expose_write_names() {
+        let input = with_initialize(concat!(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            "\n",
+        ));
+        let (responses, _) = run(&input, Availability::Enabled);
+        let tools = responses[1]["result"]["tools"]
+            .as_array()
+            .expect("tools array");
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "search_catalog",
+                "get_catalog_item",
+                "list_installed_apps",
+                "list_updatable_apps",
+                "get_task"
+            ]
+        );
+        for forbidden in ["install_app", "uninstall_app", "get_latest_scan_result"] {
+            assert!(
+                !names.contains(&forbidden),
+                "{forbidden} must not be listed"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_and_write_tool_calls_are_rejected() {
+        for name in [
+            "install_app",
+            "uninstall_app",
+            "get_latest_scan_result",
+            "delete_everything",
+        ] {
+            let input = with_initialize(&format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{{\"name\":\"{name}\",\"arguments\":{{}}}}}}\n"
+            ));
+            let (responses, _) = run(&input, Availability::Enabled);
+            let error = &responses[1]["error"];
+            assert_eq!(error["code"], -32602, "name {name}");
+            assert_eq!(error["data"]["code"], "E_TOOL_NOT_FOUND", "name {name}");
+        }
+    }
+
+    #[test]
+    fn tool_results_are_wrapped_in_a_mcp_content_array() {
+        let input = with_initialize(concat!(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_catalog","arguments":{"query":"firefox"}}}"#,
+            "\n",
+        ));
+        let (responses, _) = run(&input, Availability::Enabled);
+        let result = &responses[1]["result"];
+        assert_eq!(result["content"][0]["type"], "text");
+        assert!(result["content"][0]["text"].is_string());
     }
 
     #[test]
@@ -499,7 +888,57 @@ mod tests {
         assert_eq!(error["data"]["code"], "E_APP_NOT_RUNNING");
         assert_eq!(
             error["message"],
-            "OpenNavo is not running. Ask the user to open OpenNavo, then retry."
+            "OpenNavo is not running. Please open OpenNavo and try again."
+        );
+    }
+
+    #[test]
+    fn live_switch_off_returns_e_mcp_disabled_without_a_socket() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = with_initialize(concat!(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_catalog"}}"#,
+            "\n",
+        ));
+        let mut output = Vec::new();
+        serve_with_client(
+            input.as_bytes(),
+            &mut output,
+            client::Client::new(dir.path().to_path_buf()),
+        )
+        .expect("serve");
+        let responses: Vec<Value> = String::from_utf8(output)
+            .expect("utf8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("json"))
+            .collect();
+        assert_eq!(responses[1]["error"]["data"]["code"], "E_MCP_DISABLED");
+    }
+
+    #[test]
+    fn live_switch_on_without_socket_returns_e_app_not_running() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        state::prepare_enabled_for_test(dir.path());
+        let input = with_initialize(concat!(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_catalog"}}"#,
+            "\n",
+        ));
+        let mut output = Vec::new();
+        serve_with_client(
+            input.as_bytes(),
+            &mut output,
+            client::Client::new(dir.path().to_path_buf()),
+        )
+        .expect("serve");
+        let responses: Vec<Value> = String::from_utf8(output)
+            .expect("utf8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("json"))
+            .collect();
+        let error = &responses[1]["error"];
+        assert_eq!(error["data"]["code"], "E_APP_NOT_RUNNING");
+        assert_eq!(
+            error["message"],
+            "OpenNavo is not running. Please open OpenNavo and try again."
         );
     }
 

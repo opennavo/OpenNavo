@@ -177,6 +177,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::updates::updates_ignore,
             commands::updates::updates_unignore,
             commands::settings::settings_get,
+            commands::mcp::mcp_set_enabled,
+            commands::mcp::mcp_status,
             commands::settings::locale_get,
             commands::settings::system_locale_get,
             commands::settings::settings_set,
@@ -447,6 +449,7 @@ pub fn run() {
             }))?;
             core.install_settings_save(save)?;
             app.manage(core.clone());
+            mcp::broker::install(app.handle().clone());
             app.manage(std::sync::Arc::new(guide::Guide::default()));
             // Tauri builds the config-defined main window before this closure runs. Apply the saved appearance before
             // lifecycle can show that window, so a forced light or dark start never flashes the other theme.
@@ -488,7 +491,12 @@ pub fn run() {
 
     // Runtime initialization fails only during startup (configuration/system resources); continuing is impossible, so exit.
     match result {
-        Ok(app) => app.run(lifecycle::run_event),
+        Ok(app) => app.run(|app, event| {
+            if matches!(&event, tauri::RunEvent::Exit) {
+                mcp::broker::shutdown(app);
+            }
+            lifecycle::run_event(app, event);
+        }),
         Err(error) => {
             eprintln!("OpenNavo startup failed: {error}");
             std::process::exit(1);

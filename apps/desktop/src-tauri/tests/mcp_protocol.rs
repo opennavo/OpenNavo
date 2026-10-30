@@ -28,9 +28,13 @@ fn argv(values: &[&str]) -> Vec<OsString> {
 }
 
 fn run(input: &str, availability: Availability) -> (Vec<Value>, Session) {
+    run_bytes(input.as_bytes(), availability)
+}
+
+fn run_bytes(input: &[u8], availability: Availability) -> (Vec<Value>, Session) {
     let mut output = Vec::new();
     let mut session = Session::default();
-    protocol::serve_with_session(input.as_bytes(), &mut output, availability, &mut session)
+    protocol::serve_with_session(input, &mut output, availability, &mut session)
         .expect("serve should finish cleanly");
     let responses = String::from_utf8(output)
         .expect("protocol output is UTF-8")
@@ -94,7 +98,21 @@ fn initialize_returns_tools_capability_and_server_info() {
     assert_eq!(result["capabilities"], json!({ "tools": {} }));
     assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
     assert!(result["serverInfo"]["version"].is_string());
-    assert_eq!(tools::list_result()["tools"], json!([]));
+    assert_eq!(
+        tools::list_result()["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "search_catalog",
+            "get_catalog_item",
+            "list_installed_apps",
+            "list_updatable_apps",
+            "get_task"
+        ]
+    );
 }
 
 #[test]
@@ -102,6 +120,11 @@ fn initialize_negotiates_protocol_version() {
     assert_eq!(
         LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS[0],
         "latest must be the first supported version"
+    );
+    assert_eq!(
+        SUPPORTED_PROTOCOL_VERSIONS,
+        &["2025-06-18"][..],
+        "batching-capable revisions must not be advertised"
     );
     for version in SUPPORTED_PROTOCOL_VERSIONS {
         let input = format!(
@@ -126,6 +149,8 @@ fn initialize_falls_back_to_latest_for_unusable_protocol_version() {
         r#"{"protocolVersion":"2099-01-01"}"#,
         r#"{"protocolVersion":""}"#,
         r#"{"protocolVersion":"2025-06-18 "}"#,
+        r#"{"protocolVersion":"2025-03-26"}"#,
+        r#"{"protocolVersion":"2024-11-05"}"#,
     ] {
         let input = format!(
             "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{params}}}\n"
@@ -190,6 +215,25 @@ fn sanitize_client_name_strips_invisible_and_tag_characters() {
         protocol::sanitize_client_name(&padded),
         "z".repeat(64),
         "stripping happens before truncation"
+    );
+
+    assert_eq!(
+        protocol::sanitize_client_name("a\u{2028}b\u{2029}c"),
+        "abc",
+        "U+2028 and U+2029 must be stripped too"
+    );
+
+    let separators_only = "\u{2028}\u{2029}\u{200B}\u{FEFF}";
+    let input = format!(
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"clientInfo\":{{\"name\":{}}}}}}}\n",
+        serde_json::to_string(separators_only).expect("encode client name")
+    );
+    let (responses, session) = run(&input, Availability::Enabled);
+    assert_eq!(responses.len(), 1);
+    assert_eq!(
+        session.client_name(),
+        None,
+        "a client name that is empty after sanitizing must become None"
     );
 }
 
@@ -267,6 +311,109 @@ fn malformed_json_and_oversized_line_do_not_panic() {
 }
 
 #[test]
+fn crlf_line_endings_and_final_line_without_newline_are_processed() {
+    let input = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"crlf\"}}}\r\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\r\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#,
+    );
+    let (responses, session) = run(input, Availability::Enabled);
+    assert_eq!(
+        responses.len(),
+        3,
+        "CRLF and an unterminated final line must both be processed"
+    );
+    assert_eq!(responses[0]["id"], 1);
+    assert_eq!(responses[1]["id"], 2);
+    assert_eq!(responses[2]["id"], 3);
+    assert_eq!(responses[2]["result"], json!({}));
+    assert_eq!(
+        session.client_name(),
+        Some("crlf"),
+        "the CR must not leak into the parsed message"
+    );
+}
+
+#[test]
+fn invalid_utf8_returns_parse_error_and_keeps_serving() {
+    let mut input = vec![0xFF, 0xFE, b'\n'];
+    input.extend_from_slice(br#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#);
+    input.push(b'\n');
+    let (responses, _) = run_bytes(&input, Availability::Enabled);
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["id"], Value::Null);
+    assert_eq!(responses[0]["error"]["code"], -32700);
+    assert_eq!(responses[1]["id"], 2);
+    assert_eq!(responses[1]["result"], json!({}));
+}
+
+#[test]
+fn invalid_id_types_are_rejected_with_null_id() {
+    for id in ["true", "1.5", "[]", "{}", r#"{"nested":1}"#] {
+        let input = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#);
+        let (responses, _) = run(&format!("{input}\n"), Availability::Enabled);
+        assert_eq!(responses.len(), 1, "id {id}");
+        assert_eq!(responses[0]["id"], Value::Null, "id {id}");
+        assert_eq!(responses[0]["error"]["code"], -32600, "id {id}");
+        assert_eq!(
+            responses[0]["error"]["message"], "Invalid Request",
+            "id {id}"
+        );
+    }
+}
+
+#[test]
+fn string_and_integer_ids_are_echoed_and_null_id_is_a_notification() {
+    for (id, expected) in [
+        (r#""abc""#, json!("abc")),
+        ("0", json!(0)),
+        ("-5", json!(-5)),
+        ("9007199254740993", json!(9007199254740993_i64)),
+    ] {
+        let input = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#);
+        let (responses, _) = run(&format!("{input}\n"), Availability::Enabled);
+        assert_eq!(responses.len(), 1, "id {id}");
+        assert_eq!(responses[0]["id"], expected, "id {id}");
+        assert_eq!(responses[0]["result"], json!({}), "id {id}");
+    }
+
+    for request in [
+        r#"{"jsonrpc":"2.0","method":"ping"}"#,
+        r#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#,
+    ] {
+        let (responses, _) = run(&format!("{request}\n"), Availability::Enabled);
+        assert!(
+            responses.is_empty(),
+            "notification must not receive a response: {request}"
+        );
+    }
+}
+
+#[test]
+fn batch_requests_get_one_error_with_null_id_and_serving_continues() {
+    for batch in [
+        "[]",
+        r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#,
+        r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","id":2,"method":"ping"}]"#,
+    ] {
+        let input = format!(
+            "{batch}\n{}\n",
+            r#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#
+        );
+        let (responses, _) = run(&input, Availability::Enabled);
+        assert_eq!(responses.len(), 2, "batch {batch}");
+        assert_eq!(responses[0]["id"], Value::Null, "batch {batch}");
+        assert_eq!(responses[0]["error"]["code"], -32600, "batch {batch}");
+        assert_eq!(
+            responses[0]["error"]["message"], "Batch requests are not supported",
+            "batch {batch}"
+        );
+        assert_eq!(responses[1]["id"], 3, "batch {batch}");
+        assert_eq!(responses[1]["result"], json!({}), "batch {batch}");
+    }
+}
+
+#[test]
 fn stdout_contains_only_protocol_json() {
     let input = format!(
         "{INITIALIZE}{}\n{}\n",
@@ -285,6 +432,25 @@ fn stdout_contains_only_protocol_json() {
         .spawn()
         .expect("spawn the app binary in mcp mode");
 
+    // Drain both pipes concurrently with the child's lifetime. Reading only
+    // after `wait` would deadlock once either pipe's kernel buffer fills.
+    let mut stdout_pipe = child.stdout.take().expect("child stdout is piped");
+    let stdout_reader = std::thread::spawn(move || {
+        let mut stdout = String::new();
+        stdout_pipe
+            .read_to_string(&mut stdout)
+            .expect("read child stdout");
+        stdout
+    });
+    let mut stderr_pipe = child.stderr.take().expect("child stderr is piped");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut stderr = String::new();
+        stderr_pipe
+            .read_to_string(&mut stderr)
+            .expect("read child stderr");
+        stderr
+    });
+
     let mut stdin = child.stdin.take().expect("child stdin is piped");
     stdin
         .write_all(input.as_bytes())
@@ -293,21 +459,8 @@ fn stdout_contains_only_protocol_json() {
     drop(stdin);
 
     let status = wait_with_timeout(&mut child, Duration::from_secs(20));
-
-    let mut stdout = String::new();
-    child
-        .stdout
-        .take()
-        .expect("child stdout is piped")
-        .read_to_string(&mut stdout)
-        .expect("read child stdout");
-    let mut stderr = String::new();
-    child
-        .stderr
-        .take()
-        .expect("child stderr is piped")
-        .read_to_string(&mut stderr)
-        .expect("read child stderr");
+    let stdout = stdout_reader.join().expect("stdout reader thread panicked");
+    let stderr = stderr_reader.join().expect("stderr reader thread panicked");
 
     assert!(
         status.success(),

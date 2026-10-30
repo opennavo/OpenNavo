@@ -52,6 +52,10 @@ pub fn entry() -> Option<i32> {
 fn run_stdio() -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
+    // `protocol::serve` resolves the persisted master switch for every
+    // `tools/call`, then lazily connects to the app socket. `initialize` and
+    // `tools/list` stay local, so MCP clients can handshake while OpenNavo is
+    // closed.
     match protocol::serve(stdin.lock(), stdout.lock()) {
         Ok(()) => 0,
         Err(error) => {
