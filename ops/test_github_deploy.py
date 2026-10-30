@@ -918,8 +918,8 @@ class DeployTests(unittest.TestCase):
         }
         process = {
             deploy.SWITCH_CADDY_WRITTEN: 'may still run the previous release',
-            deploy.SWITCH_CADDY_RELOADED: 'the Caddy process runs the candidate release',
-            deploy.SWITCH_CONFIG_PROMOTED: 'the Caddy process runs the candidate release',
+            deploy.SWITCH_CADDY_RELOADED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
+            deploy.SWITCH_CONFIG_PROMOTED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
         }
         for label, (before_caddy, mode, inject, error) in aborts.items():
             for phase, running in process.items():
@@ -979,6 +979,46 @@ class DeployTests(unittest.TestCase):
             self.assertIn('the Caddy process runs the previous release', reason)
             self.assertIn('all name the previous release', reason)
             self.assert_retry_prepares_from(obj, obj.release, services, previous_caddy)
+
+    def test_rollback_abort_during_caddy_writing_reports_live_as_unknown(self):
+        # The live write completed (live really is the candidate) but the phase never advanced.
+        with tempfile.TemporaryDirectory() as root:
+            obj, _ = prepare_on_host(root, {}, include_public_mcp=True)
+            self._staged.stop()
+            obj.state['sha'] = 'c' * 40
+            deploy.write_private(obj.state_path, obj.state)
+            deploy.write_private(obj.directory / 'before-state.json', obj.state)
+            candidate_caddy = (obj.directory / 'Caddyfile.next').read_bytes()
+            obj.record_switch(deploy.SWITCH_CADDY_WRITING)
+            deploy.write_caddy_in_place(obj.live_caddy, candidate_caddy)
+            env, rolling = obj.env.read_bytes(), obj.rolling.read_bytes()
+            obj.compose = unittest.mock.Mock()
+            obj.degraded_marker_written = False
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, validator='daemon')), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(deploy.CaddyValidatorUnavailable):
+                obj.rollback()
+            self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+            self.assertEqual((obj.env.read_bytes(), obj.rolling.read_bytes()), (env, rolling))
+            state = json.loads(obj.state_path.read_text())
+            self.assertEqual((state['sha'], state['services'], state['unverified']),
+                             ('c' * 40, obj.state['services'], True))
+            reason = json.loads(obj.degraded_path.read_text())['reason']
+            self.assertIn('live.caddy content is unknown (may be the candidate, partially written or the '
+                          'previous release) and needs manual verification', reason)
+            self.assertNotIn('all name the previous release', reason)
+            # Retrying the old sha after a manual marker removal must not take the shortcut.
+            obj.degraded_path.unlink()
+            retry = deploy.Deployment(obj.config, {**payload(), 'sha': 'c' * 40, 'run_id': '124'})
+            retry.validate_live_caddy = unittest.mock.Mock()
+            retry.verify = unittest.mock.Mock()
+            retry.cleanup = unittest.mock.Mock()
+            retry.capacity_gate = unittest.mock.Mock(side_effect=RuntimeError('full deployment path'))
+            with contextlib.redirect_stdout(io.StringIO()) as out, \
+                    self.assertRaisesRegex(RuntimeError, 'full deployment path'):
+                retry.apply(archive())
+            self.assertNotIn('already deployed', out.getvalue())
+            retry.verify.assert_not_called()
+            retry.cleanup.assert_not_called()
 
     def test_rollback_abort_with_unrecorded_phase_reports_files_as_found(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1431,7 +1471,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 self.assertIn('DEGRADED', output.getvalue())
                 self.assertIn('all name the candidate release', output.getvalue())
                 self.assertIn('may still run the previous release' if not promoted
-                              else 'the Caddy process runs the candidate release', output.getvalue())
+                              else 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified', output.getvalue())
                 marker = json.loads(obj.degraded_path.read_text())
                 self.assertEqual(marker['release'], obj.release)
                 self.assertEqual(marker['sha'], obj.payload['sha'])

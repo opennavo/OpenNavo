@@ -639,8 +639,8 @@ SWITCH_PROCESS = {
                            'previous release'),
     SWITCH_CADDY_WRITTEN: ('the live Caddyfile file is the candidate but Caddy reload (USR1) was not confirmed, '
                            'so the Caddy process may still run the previous release'),
-    SWITCH_CADDY_RELOADED: 'the Caddy process runs the candidate release',
-    SWITCH_CONFIG_PROMOTED: 'the Caddy process runs the candidate release',
+    SWITCH_CADDY_RELOADED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
+    SWITCH_CONFIG_PROMOTED: 'USR1 was sent to Caddy (it runs the candidate Caddyfile), but routing was not verified',
 }
 
 
@@ -1444,7 +1444,9 @@ class Deployment:
                 target = 'previous'
                 plan = [(self.env, lambda: (self.directory / 'before-release.env').read_bytes()),
                         (self.rolling, lambda: (self.directory / 'before-rolling.json').read_bytes()),
-                        (self.state_path, lambda: self._state_bytes(self._previous_state(), phase))]
+                        (self.state_path, lambda: self._state_bytes(
+                            {**self._previous_state(), **({'unverified': True} if phase == SWITCH_CADDY_WRITING else {})},
+                            phase))]
             else:
                 plan = []
             for path, source in plan:
@@ -1467,6 +1469,11 @@ class Deployment:
                      f'failed, so those files may hold either release')
         else:
             files = f'{self.live_caddy.name} file, {names} all name the {target} release'
+            if phase == SWITCH_CADDY_WRITING:
+                # The in-place write may have completed, stopped part-way or been undone by recovery.
+                files = (f'{self.live_caddy.name} content is unknown (may be the candidate, partially written '
+                         f'or the previous release) and needs manual verification; {names} name the previous '
+                         'release (state marked unverified)')
         process = SWITCH_PROCESS.get(phase, 'the Caddy process state is unknown')
         message = (f'rollback aborted: {cause}; switch phase {phase or "unknown"}: {process}; {files}; '
                    'Caddy was not switched back by rollback; candidate containers retained')
