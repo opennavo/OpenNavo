@@ -2084,7 +2084,6 @@
     "termsAttribution": "Atribución: enlaza a la página correspondiente de opennavo.com cuando publiques datos del catálogo o trabajos derivados.",
     "termsSla": "Sin SLA: las interfaces pueden cambiar, estar limitadas o no estar disponibles sin un compromiso de nivel de servicio.",
     "termsScraping": "Scraping: no extraigas datos por encima de los límites publicados ni intentes eludir los controles por IP.",
-    "termsReadOnly": "Solo lectura: la API pública y MCP no ofrecen operaciones de cuenta, escritura ni administración.",
-    "viewMcp": "Abrir el endpoint de MCP"
+    "termsReadOnly": "Solo lectura: la API pública y MCP no ofrecen operaciones de cuenta, escritura ni administración."
   }
 }

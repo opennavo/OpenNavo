@@ -2084,7 +2084,6 @@
     "termsAttribution": "署名：发布目录数据或衍生成果时，请链接回 opennavo.com 的相关页面。",
     "termsSla": "不提供 SLA：接口可能在没有服务等级承诺的情况下变更、限流或暂时不可用。",
     "termsScraping": "抓取：请勿超出公布的限制抓取，也不要尝试规避按 IP 的控制。",
-    "termsReadOnly": "只读：公共 API 和 MCP 不提供账号、写入或管理操作。",
-    "viewMcp": "打开 MCP 端点"
+    "termsReadOnly": "只读：公共 API 和 MCP 不提供账号、写入或管理操作。"
   }
 }

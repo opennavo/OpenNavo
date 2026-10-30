@@ -22,7 +22,8 @@ describe('public API specification URL', () => {
     ['   ', 'https://api.opennavo.com/api/v1/openapi.yaml']
   ])('resolves %s consistently in discovery documents', (apiBase, expected) => {
     expect(publicApiSpecUrl(apiBase)).toBe(expected);
-    expect(createApiCatalog(apiBase).linkset[0].item[0].href).toBe(expected);
+    expect(createApiCatalog(apiBase).linkset[0]['service-desc'][0].href).toBe(expected);
+    expect(createApiCatalog(apiBase).linkset[0].anchor).toBe(expected.replace(/\/openapi\.yaml$/, ''));
     expect(renderLlms('https://opennavo.com', apiBase)).toContain(`- Public API: <${expected}>`);
   });
 
@@ -44,7 +45,8 @@ describe('public API specification URL', () => {
   ])('rejects %s and falls back to production in discovery documents', apiBase => {
     const expected = 'https://api.opennavo.com/api/v1/openapi.yaml';
     expect(publicApiSpecUrl(apiBase)).toBe(expected);
-    expect(createApiCatalog(apiBase).linkset[0].item[0].href).toBe(expected);
+    expect(createApiCatalog(apiBase).linkset[0]['service-desc'][0].href).toBe(expected);
+    expect(createApiCatalog(apiBase).linkset[0].anchor).toBe(expected.replace(/\/openapi\.yaml$/, ''));
     expect(renderLlms('https://opennavo.com', apiBase)).toContain(`- Public API: <${expected}>`);
   });
 });

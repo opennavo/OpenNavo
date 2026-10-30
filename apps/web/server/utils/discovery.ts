@@ -2,34 +2,22 @@ import { publicApiSpecUrl } from './publicApiSpec';
 
 /** Stable, public discovery documents. Keep these values free of deployment-only hosts and credentials. */
 export const PUBLIC_SITE = 'https://opennavo.com';
-export const API_CATALOG_URL = `${PUBLIC_SITE}/.well-known/api-catalog`;
 
-/** RFC 9727 Linkset representation for the public API, docs, and MCP entry point. */
+/**
+ * RFC 9727 API catalog as an RFC 9264 linkset (application/linkset+json, Appendix A.1 shape): one
+ * link context object anchored at the public API base, with each relation type as a top-level member
+ * whose value is an array of target objects.
+ */
 export function createApiCatalog(apiBase?: string) {
+  const specUrl = publicApiSpecUrl(apiBase);
   return {
     linkset: [
       {
-        anchor: API_CATALOG_URL,
-        item: [
-          {
-            href: publicApiSpecUrl(apiBase),
-            rel: 'describedby',
-            type: 'application/vnd.oai.openapi',
-            title: 'OpenNavo Public Read API'
-          },
-          {
-            href: `${PUBLIC_SITE}/developers`,
-            rel: 'documentation',
-            type: 'text/html',
-            title: 'OpenNavo developers'
-          },
-          {
-            href: `${PUBLIC_SITE}/mcp`,
-            rel: 'service',
-            type: 'application/mcp',
-            title: 'OpenNavo public MCP'
-          }
-        ]
+        anchor: specUrl.replace(/\/openapi\.yaml$/, ''),
+        'service-desc': [{ href: specUrl, type: 'application/vnd.oai.openapi', title: 'OpenNavo Public Read API' }],
+        'service-doc': [{ href: `${PUBLIC_SITE}/developers`, type: 'text/html', title: 'OpenNavo developers' }],
+        // Streamable HTTP MCP endpoint; there is no registered media type for it, so none is claimed.
+        service: [{ href: `${PUBLIC_SITE}/mcp`, title: 'OpenNavo public MCP' }]
       }
     ]
   } as const;

@@ -3852,7 +3852,7 @@ paths:
             default: false
             example: false
         - $ref: '#/components/parameters/Current'
-        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/SizeTwenty'
         - $ref: '#/components/parameters/Locale'
       responses:
         '200':
@@ -4898,7 +4898,7 @@ paths:
         - catalog
       operationId: getPackageLifecycle
       summary: 'Where a package URL should go'
-      description: 'For URLs whose detail request returned 404 (WP2). active: serve the page; renamed: redirect permanently to token; removed: the app left Homebrew, answer 410 and show the read-only summary in removed. Unknown tokens return 404. A live package always wins over an alias.'
+      description: 'For URLs whose detail request returned 404 (WP2). All states answer 200. active: serve the page; renamed: a website should redirect permanently to token; removed: the app left Homebrew, and a website should answer 410 Gone and show the read-only summary in removed. Unknown tokens return 404. A live package always wins over an alias.'
       parameters:
         - $ref: '#/components/parameters/KindPath'
         - $ref: '#/components/parameters/TokenPath'
@@ -5112,7 +5112,7 @@ paths:
         - articles
       operationId: getArticle
       summary: 'One article'
-      description: 'published: the published revision, in the requested language when its translation is ready and not held back (availableLocales lists those languages; others show the source text and should not be indexed). moved: a former slug, redirect permanently to slug. withdrawn: taken off the site, answer 410. Unknown slugs return 404. Drafts are never readable here.'
+      description: 'published: the published revision, in the requested language when its translation is ready and not held back (availableLocales lists those languages; others show the source text and should not be indexed). moved: a former slug; the API answers 200 with state moved and slug set to the current slug, and a website should redirect permanently to it. withdrawn: taken off the site; the API answers 200 with state withdrawn and no article, and a website should answer 410 Gone. Unknown slugs return 404. Drafts are never readable here.'
       parameters:
         - $ref: '#/components/parameters/ArticleSlugPath'
         - $ref: '#/components/parameters/Locale'
@@ -6208,7 +6208,7 @@ paths:
       summary: 'Published collections'
       parameters:
         - $ref: '#/components/parameters/Current'
-        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/SizeTwenty'
         - $ref: '#/components/parameters/Locale'
       responses:
         '200':
@@ -9569,6 +9569,11 @@ components:
       name: size
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 24, example: 24 }
+    SizeTwenty:
+      name: size
+      in: query
+      description: Page size; these listings default to 20.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20, example: 20 }
     CatalogLocales:
       name: locales
       in: query

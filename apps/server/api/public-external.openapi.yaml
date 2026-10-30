@@ -166,7 +166,7 @@ paths:
           type: boolean
           default: false
       - "$ref": "#/components/parameters/Current"
-      - "$ref": "#/components/parameters/Size"
+      - "$ref": "#/components/parameters/SizeTwenty"
       - "$ref": "#/components/parameters/Locale"
       responses:
         '200':
@@ -317,6 +317,8 @@ paths:
                 type: string
         default:
           "$ref": "#/components/responses/Error"
+        '404':
+          "$ref": "#/components/responses/Error"
         '429':
           description: The per-IP rate limit was exceeded.
           headers:
@@ -420,7 +422,7 @@ paths:
       - articles
       operationId: getArticle
       summary: One article
-      description: 'published: the published revision, in the requested language when its translation is ready and not held back (availableLocales lists those languages; others show the source text and should not be indexed). moved: a former slug, redirect permanently to slug. withdrawn: taken off the site, answer 410. Unknown slugs return 404. Drafts are never readable here.'
+      description: 'published: the published revision, in the requested language when its translation is ready and not held back (availableLocales lists those languages; others show the source text and should not be indexed). moved: a former slug; the API answers 200 with state moved and slug set to the current slug, and a website should redirect permanently to it. withdrawn: taken off the site; the API answers 200 with state withdrawn and no article, and a website should answer 410 Gone. Unknown slugs return 404. Drafts are never readable here.'
       parameters:
       - "$ref": "#/components/parameters/ArticleSlugPath"
       - "$ref": "#/components/parameters/Locale"
@@ -437,6 +439,8 @@ paths:
               schema:
                 type: string
         default:
+          "$ref": "#/components/responses/Error"
+        '404':
           "$ref": "#/components/responses/Error"
         '429':
           description: The per-IP rate limit was exceeded.
@@ -635,7 +639,7 @@ paths:
       summary: Published collections
       parameters:
       - "$ref": "#/components/parameters/Current"
-      - "$ref": "#/components/parameters/Size"
+      - "$ref": "#/components/parameters/SizeTwenty"
       - "$ref": "#/components/parameters/Locale"
       responses:
         '200':
@@ -795,7 +799,7 @@ components:
       in: query
       schema:
         "$ref": "#/components/schemas/Locale"
-      description: locale > Accept-Language (six languages matched by q value) > en-US. Missing translations fall back to en-US, then the source language.
+      description: locale > Accept-Language (the ten site languages, matched by q value) > en-US. Missing translations fall back to en-US, then the source language.
     KindPath:
       name: kind
       in: path
@@ -826,6 +830,14 @@ components:
         minimum: 1
         maximum: 100
         default: 24
+    SizeTwenty:
+      name: size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
     ArticleSlugPath:
       name: slug
       in: path
@@ -3644,7 +3656,7 @@ components:
           pattern: "^[a-f0-9]{64}$"
   responses:
     Error:
-      description: Error response; see the domain error codes in apps/server/internal/domain. data is null.
+      description: Error response. code is a stable numeric OpenNavo error code, msg a localized message, and data is null.
       content:
         application/json:
           schema:

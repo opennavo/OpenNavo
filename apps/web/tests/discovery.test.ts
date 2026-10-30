@@ -22,11 +22,38 @@ describe('public discovery documents', () => {
       expect(getResponseHeader(event, 'content-type')).toBe(
         'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"'
       );
-      expect(body.linkset[0].item.map(item => item.href)).toEqual([
-        'https://api.opennavo.com/api/v1/openapi.yaml',
-        'https://opennavo.com/developers',
-        'https://opennavo.com/mcp'
-      ]);
+      // RFC 9727 Appendix A.1 / RFC 9264 Section 4.2: the API base is the link context and each
+      // relation is a top-level member holding an array of target objects; no nested "item" list.
+      expect(body).toEqual({
+        linkset: [
+          {
+            anchor: 'https://api.opennavo.com/api/v1',
+            'service-desc': [
+              {
+                href: 'https://api.opennavo.com/api/v1/openapi.yaml',
+                type: 'application/vnd.oai.openapi',
+                title: 'OpenNavo Public Read API'
+              }
+            ],
+            'service-doc': [
+              { href: 'https://opennavo.com/developers', type: 'text/html', title: 'OpenNavo developers' }
+            ],
+            service: [{ href: 'https://opennavo.com/mcp', title: 'OpenNavo public MCP' }]
+          }
+        ]
+      });
+      for (const context of body.linkset) {
+        expect(context.anchor).not.toBe('https://opennavo.com/.well-known/api-catalog');
+        expect(context).not.toHaveProperty('item');
+        for (const [relation, targets] of Object.entries(context)) {
+          if (relation === 'anchor') continue;
+          expect(Array.isArray(targets)).toBe(true);
+          for (const target of targets as { href: string; type?: string }[]) {
+            expect(new URL(target.href).protocol).toBe('https:');
+            expect(target.type).not.toBe('application/mcp');
+          }
+        }
+      }
     } finally {
       socket.destroy();
       vi.unstubAllGlobals();

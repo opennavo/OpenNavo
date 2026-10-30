@@ -189,7 +189,7 @@ export interface paths {
         };
         /**
          * Where a package URL should go
-         * @description For URLs whose detail request returned 404 (WP2). active: serve the page; renamed: redirect permanently to token; removed: the app left Homebrew, answer 410 and show the read-only summary in removed. Unknown tokens return 404. A live package always wins over an alias.
+         * @description For URLs whose detail request returned 404 (WP2). All states answer 200. active: serve the page; renamed: a website should redirect permanently to token; removed: the app left Homebrew, and a website should answer 410 Gone and show the read-only summary in removed. Unknown tokens return 404. A live package always wins over an alias.
          */
         get: operations["getPackageLifecycle"];
         put?: never;
@@ -229,7 +229,7 @@ export interface paths {
         };
         /**
          * One article
-         * @description published: the published revision, in the requested language when its translation is ready and not held back (availableLocales lists those languages; others show the source text and should not be indexed). moved: a former slug, redirect permanently to slug. withdrawn: taken off the site, answer 410. Unknown slugs return 404. Drafts are never readable here.
+         * @description published: the published revision, in the requested language when its translation is ready and not held back (availableLocales lists those languages; others show the source text and should not be indexed). moved: a former slug; the API answers 200 with state moved and slug set to the current slug, and a website should redirect permanently to it. withdrawn: taken off the site; the API answers 200 with state withdrawn and no article, and a website should answer 410 Gone. Unknown slugs return 404. Drafts are never readable here.
          */
         get: operations["getArticle"];
         put?: never;
@@ -8521,6 +8521,8 @@ export interface components {
         AuthorSlugPath: string;
         Current: number;
         Size: number;
+        /** @description Page size; these listings default to 20. */
+        SizeTwenty: number;
         /** @description all returns text in every desktop language; the ten-language client sends it. Without it responses keep the original six languages (en-US, zh-CN, ja-JP, es-ES, pt-BR, ru-RU), because older clients reject other language keys. */
         CatalogLocales: "all";
     };
@@ -8751,7 +8753,8 @@ export interface operations {
                 /** @description Return only versions with release notes */
                 onlyWithNotes?: boolean;
                 current?: components["parameters"]["Current"];
-                size?: components["parameters"]["Size"];
+                /** @description Page size; these listings default to 20. */
+                size?: components["parameters"]["SizeTwenty"];
                 /** @description locale > Accept-Language (six languages matched by q value) > en-US. Missing translations fall back to en-US, then the source language. */
                 locale?: components["parameters"]["Locale"];
             };
@@ -9196,7 +9199,8 @@ export interface operations {
         parameters: {
             query?: {
                 current?: components["parameters"]["Current"];
-                size?: components["parameters"]["Size"];
+                /** @description Page size; these listings default to 20. */
+                size?: components["parameters"]["SizeTwenty"];
                 /** @description locale > Accept-Language (six languages matched by q value) > en-US. Missing translations fall back to en-US, then the source language. */
                 locale?: components["parameters"]["Locale"];
             };

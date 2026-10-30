@@ -2084,7 +2084,6 @@
     "termsAttribution": "署名：釋出目錄資料或衍生成果時，請連結回 opennavo.com 的相關頁面。",
     "termsSla": "不提供 SLA：介面可能在沒有服務等級承諾的情況下變更、限流或暫時不可用。",
     "termsScraping": "抓取：請勿超出公佈的限制抓取，也不要嘗試規避按 IP 的控制。",
-    "termsReadOnly": "只讀：公共 API 和 MCP 不提供帳號、寫入或管理操作。",
-    "viewMcp": "開啟 MCP 端點"
+    "termsReadOnly": "只讀：公共 API 和 MCP 不提供帳號、寫入或管理操作。"
   }
 }
