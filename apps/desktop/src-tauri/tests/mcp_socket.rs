@@ -403,7 +403,12 @@ fn unsupported_method_returns_jsonrpc_error() {
 #[test]
 fn read_tools_do_not_expose_write_names() {
     let dir = tempdir();
-    let broker = start_broker(dir.path());
+    // A tool host is required to exercise dispatch: `Broker::new` has no host
+    // and deliberately answers every `tools/call` with E_MCP_DISABLED, which
+    // says nothing about unknown or write-tool names. The switch itself is
+    // already on via `start_broker_with_host`.
+    let host = Arc::new(MockHost::default());
+    let broker = start_broker_with_host(dir.path(), host);
     let path = socket::path(dir.path()).path;
 
     let response = request(&path, json!({"v": 1, "id": "list", "method": "tools/list"}));

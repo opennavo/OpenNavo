@@ -192,6 +192,10 @@ export const commands = {
 	updatesIgnore: (target: TaskTarget, version: string | null, until: number | null) => typedError<null, AppError>(__TAURI_INVOKE("updates_ignore", { target, version, until })),
 	updatesUnignore: (target: TaskTarget) => typedError<null, AppError>(__TAURI_INVOKE("updates_unignore", { target })),
 	settingsGet: () => typedError<Settings, AppError>(__TAURI_INVOKE("settings_get")),
+	/**  Turn the Local MCP broker on or off immediately and persist the choice. */
+	mcpSetEnabled: (enabled: boolean) => typedError<McpStatus, AppError>(__TAURI_INVOKE("mcp_set_enabled", { enabled })),
+	/**  Return the persisted master switch and live broker state. */
+	mcpStatus: () => __TAURI_INVOKE<McpStatus>("mcp_status"),
 	localeGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("locale_get")),
 	systemLocaleGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("system_locale_get")),
 	settingsSet: (settings: Settings) => typedError<Settings, AppError>(__TAURI_INVOKE("settings_set", { settings })),
@@ -1387,6 +1391,14 @@ export type MasUpdate = {
 };
 
 export type MatchReason = "app_bundle" | "brew_uninstall" | "zap_rule" | "bundle_id" | "app_group" | "launchd" | "symlink" | "pkg_receipt" | "team_id" | "name_exact" | "name_similar";
+
+/**  Broker status surfaced by `mcp_status`. */
+export type McpStatus = {
+	enabled: boolean,
+	running: boolean,
+	socketPath: string | null,
+	error: string | null,
+};
 
 export type MemoryPressure = "normal" | "warning" | "critical";
 
