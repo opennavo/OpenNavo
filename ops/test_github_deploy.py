@@ -116,6 +116,35 @@ def prepare_on_host(root, api_environment, include_public_mcp=False):
     return obj, json.loads((obj.directory / 'rolling.compose.json').read_text())
 
 
+
+def fake_public_mcp(requests=None, *, call_result=None, subpath_status=404):
+    """urlopen fake for the public MCP: handshake, tools/list, tools/call and the /mcp/x probe."""
+    requests = [] if requests is None else requests
+    if call_result is None:
+        call_result = {'result': {'content': [{'type': 'text', 'text': '[{"slug":"developer-tools"}]'}]}}
+
+    class Response(io.BytesIO):
+        def __init__(self, body, session=None, status=200):
+            super().__init__(json.dumps(body).encode())
+            self.status = status
+            self.headers = {'Mcp-Session-Id': session} if session else {}
+
+    def urlopen(request, timeout):
+        if request.data is None:
+            requests.append(('GET', request.full_url))
+            if subpath_status >= 400:
+                raise deploy.urllib.error.HTTPError(request.full_url, subpath_status, 'probe', {}, None)
+            return Response({}, status=subpath_status)
+        method = json.loads(request.data)['method']
+        requests.append(method)
+        if method == 'initialize':
+            return Response({'result': {'protocolVersion': '2025-06-18'}}, 'session-1')
+        if method == 'tools/list':
+            return Response({'result': {'tools': [{'name': 'list_categories'}]}})
+        return Response(call_result)
+    return urlopen
+
+
 class DeployTests(unittest.TestCase):
     def setUp(self):
         # Rollback flows validate before-caddy as a staged copy. Tests that script the exact docker
@@ -608,15 +637,11 @@ class DeployTests(unittest.TestCase):
             obj.update_monitoring = lambda services: events.append('monitoring')
             obj.drain_retired = lambda *args, **kwargs: True
             requests = []
-            def urlopen(request, timeout):
-                requests.append(json.loads(request.data)['method'])
-                response = io.BytesIO(json.dumps({'result': {'tools': [{'name': 'search_apps'}]}}).encode())
-                response.status, response.headers = 200, {}
-                return response
+            urlopen = fake_public_mcp(requests)
             with patch.object(deploy, 'command', return_value='candidate-id'), \
                     patch.object(deploy.urllib.request, 'urlopen', side_effect=urlopen):
                 obj.rollback()
-            self.assertEqual(requests, ['initialize', 'tools/list'])
+            self.assertEqual(requests[:3], ['initialize', 'tools/list', 'tools/call'])
             self.assertLess(events.index('reload'), events.index('monitoring'))
             self.assertIn(('up', '-d', '--no-deps', '--wait', '--wait-timeout', '240',
                            'public-mcp_old', 'worker'), events)
@@ -626,9 +651,11 @@ class DeployTests(unittest.TestCase):
             events.clear()
             with patch.object(deploy, 'command') as run, \
                     patch.object(deploy.urllib.request, 'urlopen', side_effect=RuntimeError('handshake failed')), \
+                    patch.object(obj, 'mark_degraded') as marked, \
                     self.assertRaisesRegex(RuntimeError, 'handshake failed'):
                 obj.rollback()
             run.assert_not_called()
+            self.assertIn('verification', marked.call_args.args[0])
             self.assertNotIn('monitoring', events)
             self.assertFalse(any(isinstance(event, tuple) and event[0] in ('stop', 'rm') for event in events))
 
@@ -855,6 +882,43 @@ class DeployTests(unittest.TestCase):
                 obj.reload.assert_not_called()
                 self._staged.start()
 
+    def test_forward_verify_failure_then_unavailable_rollback_validator_marks_degraded(self):
+        # Forward verify() fails, rollback restores env/rolling, then caddy validate on before-caddy
+        # cannot run (docker exec exit 125 or a timeout). Live must stay on the candidate and the
+        # persistent marker must block the next deployment.
+        for mode in ['daemon', 'timeout']:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
+                obj, _ = prepare_on_host(root, {})
+                self._staged.stop()
+                obj.config['caddy_container'] = 'fixture-caddy'
+                candidate = obj.live_caddy.read_bytes()
+                obj.directory.mkdir(parents=True, exist_ok=True)
+                (obj.directory / 'before-caddy').write_bytes(GOOD_CADDY)
+                for name in ['before-release.env', 'before-rolling.json']:
+                    (obj.directory / name).write_text('previous')
+                before = obj.live_caddy.stat()
+                obj.compose = unittest.mock.Mock()
+                obj.reload = unittest.mock.Mock()
+                obj.degraded_marker_written = False
+                obj.verify = unittest.mock.Mock(side_effect=RuntimeError('post-deployment route checks failed'))
+                fake = FakeCaddy(obj.live_caddy, good=(candidate, GOOD_CADDY), validator=mode)
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()) as out:
+                    try:
+                        obj.verify()
+                    except RuntimeError:
+                        with self.assertRaises(deploy.CaddyValidatorUnavailable):
+                            obj.rollback()
+                self.assertTrue(obj.degraded_path.exists())
+                self.assertIn('could not be validated', json.loads(obj.degraded_path.read_text())['reason'])
+                self.assertIn('was not changed', out.getvalue())
+                self.assertEqual(obj.live_caddy.read_bytes(), candidate)
+                self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
+                obj.reload.assert_not_called()
+                with self.assertRaisesRegex(RuntimeError, 'blocked by persistent degraded marker'):
+                    obj.apply(None)
+                self._staged.start()
+
     def test_public_mcp_route_requires_one_web_block_and_catch_all_proxy(self):
         for source in ['reverse_proxy {\n}\n', '{$WEB_DOMAIN} {\nreverse_proxy web:3000\n}\n']:
             with self.subTest(source=source), self.assertRaises(ValueError):
@@ -874,20 +938,45 @@ class DeployTests(unittest.TestCase):
 
         def urlopen(request, timeout):
             responses.append(request)
-            if len(responses) == 1:
-                return Response(b'{"result":{"protocolVersion":"2025-06-18"}}', 'session-1')
-            return Response(b'{"result":{"tools":[{"name":"search_apps"}]}}')
+            return inner(request, timeout)
+        inner = fake_public_mcp(seen := [])
 
         with patch.object(deploy.urllib.request, 'urlopen', side_effect=urlopen):
             obj.verify_public_mcp()
+        self.assertEqual(seen, ['initialize', 'tools/list', 'tools/call',
+                                ('GET', 'http://127.0.0.1:80/mcp/x')])
+        self.assertEqual(json.loads(responses[2].data)['params'], {'name': 'list_categories', 'arguments': {}})
         self.assertEqual(responses[0].get_header('Host'), 'opennavo.com')
         self.assertEqual(responses[1].get_header('Mcp-session-id'), 'session-1')
         self.assertEqual(responses[0].get_header('Accept'), 'application/json, text/event-stream')
 
+        class Response(io.BytesIO):
+            status, headers = 200, {}
         with patch.object(deploy.urllib.request, 'urlopen', side_effect=[
                 Response(b'{"result":{}}'), Response(b'{"result":{"tools":[]}}')]):
             with self.assertRaisesRegex(RuntimeError, 'no tools'):
                 obj.verify_public_mcp()
+
+    def test_verify_public_mcp_fails_when_api_base_or_trust_is_misconfigured(self):
+        obj = deploy.Deployment.__new__(deploy.Deployment)
+        obj.config = {'local_origin': 'http://127.0.0.1:80', 'public_mcp_host': 'opennavo.com', 'checks': []}
+        broken = {
+            'tool error (API base unreachable)': {'result': {'isError': True, 'content': [
+                {'type': 'text', 'text': 'fetch failed: ECONNREFUSED'}]}},
+            'JSON-RPC error (trust rejected)': {'error': {'code': -32603, 'message': 'forbidden'}},
+            'empty content': {'result': {'content': []}},
+            'blank text': {'result': {'content': [{'type': 'text', 'text': '  '}]}},
+        }
+        for label, body in broken.items():
+            with self.subTest(label), patch.object(deploy.urllib.request, 'urlopen',
+                                                   side_effect=fake_public_mcp(call_result=body)):
+                with self.assertRaises(RuntimeError):
+                    obj.verify_public_mcp()
+        for status in (200, 301, 502):
+            with self.subTest(subpath=status), patch.object(
+                    deploy.urllib.request, 'urlopen', side_effect=fake_public_mcp(subpath_status=status)):
+                with self.assertRaisesRegex(RuntimeError, f'/mcp/x returned {status}'):
+                    obj.verify_public_mcp()
 
     def test_monitoring_targets_preserves_other_jobs_and_follows_release_and_rollback(self):
         source = """global:
@@ -1705,8 +1794,10 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             events.clear()
             def fail_monitoring(_): raise RuntimeError('monitoring unavailable')
             obj.update_monitoring = fail_monitoring
-            with self.assertRaisesRegex(RuntimeError, 'monitoring unavailable'):
+            with patch.object(obj, 'mark_degraded') as marked, \
+                    self.assertRaisesRegex(RuntimeError, 'monitoring unavailable'):
                 obj.rollback()
+            marked.assert_called_once()
             self.assertFalse(any(event and event[0] == 'stop' for event in events if isinstance(event, tuple)))
             self.assertEqual(obj.live_caddy.read_text(), 'old')
 

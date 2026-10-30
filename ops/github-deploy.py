@@ -1280,13 +1280,13 @@ class Deployment:
         endpoint = self.config['local_origin'].rstrip('/') + '/mcp'
         session = None
 
-        def post(request_id, method):
+        def post(request_id, method, call_params=None):
             nonlocal session
             params = ({
                 'protocolVersion': '2025-06-18',
                 'capabilities': {},
                 'clientInfo': {'name': 'opennavo-deploy', 'version': '1'},
-            } if method == 'initialize' else {})
+            } if method == 'initialize' else (call_params or {}))
             request = urllib.request.Request(
                 endpoint,
                 data=json.dumps({'jsonrpc': '2.0', 'id': request_id, 'method': method,
@@ -1321,6 +1321,21 @@ class Deployment:
         result = post(2, 'tools/list')
         if not isinstance(result, dict) or not isinstance(result.get('tools'), list) or not result['tools']:
             raise RuntimeError('public MCP tools/list returned no tools')
+        # initialize/tools/list never reach the API; a real tool call proves API base and trust work.
+        called = post(3, 'tools/call', {'name': 'list_categories', 'arguments': {}})
+        content = called.get('content') if isinstance(called, dict) else None
+        if (not isinstance(content, list) or not content or called.get('isError')
+                or not any(isinstance(item, dict) and str(item.get('text') or '').strip() for item in content)):
+            raise RuntimeError('public MCP tools/call list_categories returned an error or no content')
+        # Only the exact /mcp path is public; sub-paths must not reach the MCP service.
+        probe = urllib.request.Request(endpoint + '/x', method='GET', headers={'Host': host})
+        try:
+            with urllib.request.urlopen(probe, timeout=15) as response:
+                status = getattr(response, 'status', None) or response.getcode()
+        except urllib.error.HTTPError as error:
+            status = error.code
+        if status != 404:
+            raise RuntimeError(f'public MCP sub-path /mcp/x returned {status}, expected 404')
         print(f'Public MCP route verified ({len(result["tools"])} tools).', flush=True)
 
     def verify(self, expected=None):
@@ -1366,20 +1381,37 @@ class Deployment:
         print('Previous release services are healthy; switching Caddy back.', flush=True)
         # Deliberate switch back to the previous release's config (not a backup recovery);
         # reload() validates it before signalling and recovers only under the shared rule.
-        previous = (self.directory / 'before-caddy').read_bytes()
-        # Validate before writing; an unavailable validator raises and also leaves the live file alone.
-        if not self._validate_staged(previous):
+        # Every abort from here on leaves env/rolling on the previous release while Caddy may still
+        # route to the candidate, so each one records the persistent degraded marker that blocks
+        # the next deployment until an operator confirms recovery.
+        live_note = f'{self.live_caddy} was not changed and still routes to the candidate'
+        try:
+            previous = (self.directory / 'before-caddy').read_bytes()
+            valid = self._validate_staged(previous)
+        except Exception:
+            self.mark_degraded('previous Caddyfile could not be validated; routing still on candidate; '
+                               'candidate containers retained')
+            print(f'WARNING: rollback aborted before writing Caddy; {live_note}.', flush=True)
+            raise
+        if not valid:
             self.mark_degraded('previous Caddyfile is invalid; routing still on candidate; candidate containers retained')
             raise RuntimeError(f'degraded rollback: {self.directory / "before-caddy"} failed caddy validate; '
-                               f'{self.live_caddy} was not changed and still routes to the candidate.')
-        write_caddy_in_place(self.live_caddy, previous)
-        self.reload()
+                               f'{live_note}.')
+        try:
+            write_caddy_in_place(self.live_caddy, previous)
+        except Exception:
+            self.mark_degraded('rollback Caddyfile write failed; routing unconfirmed; candidate containers retained')
+            print(f'WARNING: rollback write to {self.live_caddy} failed; the file may be partially written '
+                  f'({caddy_intent_path(self.live_caddy).name} records the expected content).', flush=True)
+            raise
+        self.reload()  # marks degraded itself on every failure
         try:
             self.verify(expected=self.state.get('sha', '')[:12])
             if 'public-mcp' in self.state['services']:
                 self.verify_public_mcp()
             self.update_monitoring(self.state['services'])
         except Exception:
+            self.mark_degraded('rollback verification or monitoring failed; candidate containers retained')
             print('WARNING: rollback verification or monitoring failed; candidate containers retained.', flush=True)
             raise
         candidates = []
