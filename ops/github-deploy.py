@@ -1224,10 +1224,12 @@ class Deployment:
         container = self.config['caddy_container']
         if not backup.is_file():
             raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}); '
-                               f'backup {backup} is missing. Aborting deployment.')
+                               f'backup {backup} is missing. The live file is left as found (not valid) and needs manual '
+                               f'recovery. Aborting deployment.')
         if not self._validate_staged(backup.read_bytes()):
             raise RuntimeError(f'Live Caddyfile validation failed for {self.live_caddy} ({reason}) and '
-                               f'backup {backup} is invalid too. Aborting deployment without changes.')
+                               f'backup {backup} is invalid too. The backup was not restored; the live file is left as found '
+                               f'(not valid) and needs manual recovery. Aborting deployment.')
         print(f'WARNING: {reason}; restoring {self.live_caddy} in place from {backup}.', flush=True)
         write_caddy_in_place(self.live_caddy, backup.read_bytes())
         if not caddy_validate(container, '/etc/caddy/Caddyfile'):
@@ -1364,7 +1366,13 @@ class Deployment:
         print('Previous release services are healthy; switching Caddy back.', flush=True)
         # Deliberate switch back to the previous release's config (not a backup recovery);
         # reload() validates it before signalling and recovers only under the shared rule.
-        write_caddy_in_place(self.live_caddy, (self.directory / 'before-caddy').read_bytes())
+        previous = (self.directory / 'before-caddy').read_bytes()
+        # Validate before writing; an unavailable validator raises and also leaves the live file alone.
+        if not self._validate_staged(previous):
+            self.mark_degraded('previous Caddyfile is invalid; routing still on candidate; candidate containers retained')
+            raise RuntimeError(f'degraded rollback: {self.directory / "before-caddy"} failed caddy validate; '
+                               f'{self.live_caddy} was not changed and still routes to the candidate.')
+        write_caddy_in_place(self.live_caddy, previous)
         self.reload()
         try:
             self.verify(expected=self.state.get('sha', '')[:12])

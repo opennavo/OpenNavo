@@ -117,6 +117,16 @@ def prepare_on_host(root, api_environment, include_public_mcp=False):
 
 
 class DeployTests(unittest.TestCase):
+    def setUp(self):
+        # Rollback flows validate before-caddy as a staged copy. Tests that script the exact docker
+        # command sequence treat that step as passing; Caddy-specific tests use the real check.
+        self._staged = patch.object(deploy.Deployment, '_validate_staged', return_value=True)
+        self._staged.start()
+        self.addCleanup(patch.stopall)
+
+    def real_staged_validation(self):
+        self._staged.stop()
+
     def test_merge_web_assets_keeps_recent_old_files_and_expires_stale_files(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
@@ -666,6 +676,8 @@ class DeployTests(unittest.TestCase):
                     routed = again
 
     def _caddy_obj(self, root, live=GOOD_CADDY, backup=None):
+        with contextlib.suppress(RuntimeError):
+            self.real_staged_validation()
         obj = object.__new__(deploy.Deployment)
         obj.root = obj.directory = Path(root)
         (obj.root / 'deploy').mkdir(exist_ok=True)
@@ -815,6 +827,34 @@ class DeployTests(unittest.TestCase):
                 obj.install_caddy(newer)
             self.assertEqual(obj.live_caddy.read_bytes(), b'partial')
             del real
+    def test_rollback_with_invalid_before_caddy_never_touches_live(self):
+        for mode in ['ok', 'daemon']:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root:
+                obj, _ = prepare_on_host(root, {})
+                self.real_staged_validation() if mode == 'ok' else None
+                obj.config['caddy_container'] = 'fixture-caddy'
+                candidate = obj.live_caddy.read_bytes()
+                obj.directory.mkdir(parents=True, exist_ok=True)
+                (obj.directory / 'before-caddy').write_bytes(TRUNCATED_CADDY)
+                before = obj.live_caddy.stat()
+                obj.compose = unittest.mock.Mock()
+                obj.reload = unittest.mock.Mock()
+                fake = FakeCaddy(obj.live_caddy, good=(candidate,), validator=mode)
+                if mode == 'daemon':
+                    self._staged.stop()
+                with patch.object(deploy, 'command', side_effect=fake), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    if mode == 'ok':
+                        with self.assertRaisesRegex(RuntimeError, 'was not changed'):
+                            obj.rollback()
+                    else:
+                        with self.assertRaises(deploy.CaddyValidatorUnavailable):
+                            obj.rollback()
+                self.assertEqual(obj.live_caddy.read_bytes(), candidate)
+                self.assertEqual(obj.live_caddy.stat().st_mtime_ns, before.st_mtime_ns)
+                obj.reload.assert_not_called()
+                self._staged.start()
+
     def test_public_mcp_route_requires_one_web_block_and_catch_all_proxy(self):
         for source in ['reverse_proxy {\n}\n', '{$WEB_DOMAIN} {\nreverse_proxy web:3000\n}\n']:
             with self.subTest(source=source), self.assertRaises(ValueError):
