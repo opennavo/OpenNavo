@@ -637,6 +637,7 @@ SWITCH_CADDY_WRITING = 'caddy-writing'    # candidate validated; in-place write 
 SWITCH_CADDY_WRITTEN = 'caddy-written'    # live file is the candidate; USR1 not yet confirmed
 SWITCH_CADDY_RELOADED = 'caddy-reloaded'  # USR1 sent to Caddy; routing not verified
 SWITCH_CONFIG_PROMOTED = 'config-promoted'  # env and rolling overlay promoted to the candidate
+SWITCH_ROLLING_BACK = 'rolling-back'      # rollback started; cleared only after previous is reloaded and verified
 SWITCH_ROUTED_TO_CANDIDATE = (SWITCH_CADDY_WRITTEN, SWITCH_CADDY_RELOADED, SWITCH_CONFIG_PROMOTED)
 SWITCH_PROCESS = {
     SWITCH_NONE: 'the Caddy process runs the previous release',
@@ -1405,6 +1406,8 @@ class Deployment:
             return phase
         recorded = self.state.get('switch') if isinstance(getattr(self, 'state', None), dict) else None
         if isinstance(recorded, dict) and recorded.get('release') == self.release:
+            if recorded.get('phase') == SWITCH_ROLLING_BACK:
+                return recorded.get('forward_phase')
             return recorded.get('phase')
         return None
 
@@ -1421,6 +1424,18 @@ class Deployment:
     def _switch_record(self, phase, **extra):
         return {'release': self.release, 'phase': phase, 'sha': self.payload['sha'],
                 'services': self.services, **extra}
+
+    def record_rollback(self):
+        """Atomically record that rollback has begun, together with the previous state it restores.
+
+        The record survives until the previous Caddyfile is reloaded and verified, so a run killed at
+        any point of the switch back is recognised by reconcile_interrupted_switch().
+        """
+        previous = self._previous_state()
+        self._switch_phase = self.switch_phase()  # keep the forward phase for abort decisions
+        write_private(self.state_path, {**previous, 'switch': self._switch_record(
+            SWITCH_ROLLING_BACK, forward_phase=self._switch_phase,
+            previous_sha=previous.get('sha'), previous_services=previous.get('services'))})
 
     def reconcile_interrupted_switch(self):
         """Make live Caddy, env, rolling and state agree before a deployment trusts any of them.
@@ -1440,11 +1455,15 @@ class Deployment:
         try:
             before_state = json.loads((previous_dir / 'before-state.json').read_text())
             base = {key: value for key, value in before_state.items() if key not in ('switch', 'unverified')}
-            if phase in (SWITCH_NONE, SWITCH_CADDY_WRITING):
-                if phase == SWITCH_CADDY_WRITING:
-                    backup = self.live_caddy.with_name('Caddyfile.bak').read_bytes()
+            if phase in (SWITCH_NONE, SWITCH_CADDY_WRITING, SWITCH_ROLLING_BACK):
+                if phase != SWITCH_NONE:
+                    # rolling-back: the previous Caddyfile of that release; caddy-writing: the backup
+                    # install_caddy took of the previous live file just before writing.
+                    source = (previous_dir / 'before-caddy' if phase == SWITCH_ROLLING_BACK
+                              else self.live_caddy.with_name('Caddyfile.bak'))
+                    backup = source.read_bytes()
                     if not self._validate_staged(backup):
-                        raise RuntimeError('Caddyfile.bak failed caddy validate')
+                        raise RuntimeError(f'{source.name} failed caddy validate')
                     if self.live_caddy.read_bytes() != backup:
                         write_caddy_in_place(self.live_caddy, backup)
                 sources, route = ('before-release.env', 'before-rolling.json'), 'previous'
@@ -1564,9 +1583,9 @@ class Deployment:
         if not valid:
             raise RuntimeError(self._abort_rollback(f'{self.directory / "before-caddy"} failed caddy validate'))
         try:
+            self.record_rollback()  # previous state + rolling-back record, in one atomic write
             self.env.write_bytes((self.directory / 'before-release.env').read_bytes())
             self.rolling.write_bytes((self.directory / 'before-rolling.json').read_bytes())
-            write_private(self.state_path, self._previous_state())
         except Exception as error:
             # Re-align env, rolling and state with the recorded forward phase before raising.
             print('WARNING: ' + self._abort_rollback(
@@ -1607,6 +1626,12 @@ class Deployment:
             self.mark_degraded(f'rollback verification or monitoring failed; Caddy was reloaded with the previous '
                                f'Caddyfile; {restored}; candidate containers retained')
             print('WARNING: rollback verification or monitoring failed; candidate containers retained.', flush=True)
+            raise
+        try:
+            write_private(self.state_path, self._previous_state())  # verified: clear the rolling-back record
+        except Exception:
+            self.mark_degraded(f'rollback verified but clearing the rolling-back record in {self.state_path.name} '
+                               f'failed; {restored}; candidate containers retained')
             raise
         candidates = []
         for service in self.services.values():

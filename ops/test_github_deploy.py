@@ -630,6 +630,7 @@ class DeployTests(unittest.TestCase):
             obj.directory = root
             obj.state_path = root / 'state.json'
             deploy.write_private(root / 'before-state.json', obj.state)
+            obj.root, obj.release, obj.payload = root, 'gh-test', payload()
             obj.live_caddy, obj.env, obj.rolling = (root / name for name in ['live', 'env', 'rolling'])
             obj.live_caddy.write_text('candidate')
             (root / 'before-caddy').write_text('old')
@@ -889,7 +890,8 @@ class DeployTests(unittest.TestCase):
             obj.record_switch(deploy.SWITCH_CONFIG_PROMOTED)
         self.assertEqual(obj.switch_phase(), phase)
         self.assertEqual(json.loads(obj.state_path.read_text())['switch']['phase'], phase)
-        (obj.directory / 'before-caddy').write_bytes(before_caddy)
+        if before_caddy is not None:  # None keeps prepare()'s real snapshot of the previous route
+            (obj.directory / 'before-caddy').write_bytes(before_caddy)
         obj.compose = unittest.mock.Mock()
         return obj, candidate_caddy
 
@@ -1108,6 +1110,62 @@ class DeployTests(unittest.TestCase):
                 self.assertEqual((retry.state['release'], retry.state['services'], retry.state['unverified']),
                                  (obj.release, obj.services, True))
                 self._staged.start()
+
+    def test_retry_after_rollback_killed_at_each_point_restores_previous(self):
+        class Killed(BaseException):
+            """SIGKILL stand-in: no except-Exception handler runs and no marker is written."""
+
+        def kill(*args, **kwargs):
+            raise Killed()
+        points = ['after rolling-back record', 'between env and rolling', 'before reload',
+                  'after reload', 'after verify']
+        for point in points:
+            with self.subTest(point=point), tempfile.TemporaryDirectory() as root:
+                obj, candidate_caddy = self._switched(root, None, deploy.SWITCH_CONFIG_PROMOTED)
+                previous_caddy = (obj.directory / 'before-caddy').read_bytes()
+                obj.verify = unittest.mock.Mock()
+                obj.verify_public_mcp = unittest.mock.Mock()
+                obj.update_monitoring = unittest.mock.Mock()
+                original = Path.write_bytes
+                def write_bytes(path, data):
+                    if point == 'between env and rolling' and path == obj.rolling:
+                        raise Killed()
+                    return original(path, data)
+                if point == 'after rolling-back record':
+                    obj.compose = unittest.mock.Mock(side_effect=kill)
+                elif point == 'before reload':
+                    obj.reload = unittest.mock.Mock(side_effect=kill)
+                elif point == 'after reload':
+                    obj.verify.side_effect = kill
+                elif point == 'after verify':
+                    obj.update_monitoring.side_effect = kill
+                with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy, previous_caddy))), \
+                        patch.object(Path, 'write_bytes', write_bytes), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(Killed):
+                    obj.rollback()
+                self.assertFalse(obj.degraded_path.exists())
+                self.assertEqual(json.loads(obj.state_path.read_text())['switch']['phase'], deploy.SWITCH_ROLLING_BACK)
+                retry = self.retry_after_interrupt(obj, good=(candidate_caddy, previous_caddy))
+                previous = json.loads((obj.directory / 'before-state.json').read_text())
+                self.assertEqual(obj.live_caddy.read_bytes(), previous_caddy)
+                self.assertEqual(obj.env.read_bytes(), (obj.directory / 'before-release.env').read_bytes())
+                self.assertEqual(obj.rolling.read_bytes(), (obj.directory / 'before-rolling.json').read_bytes())
+                self.assertEqual((retry.state['services'], retry.state['unverified']), (previous['services'], True))
+                self.assertNotIn('switch', retry.state)
+                self._staged.start()
+
+    def test_retry_after_rolling_back_with_unusable_previous_caddy_marks_degraded(self):
+        with tempfile.TemporaryDirectory() as root:
+            obj, candidate_caddy = self._switched(root, GOOD_CADDY, deploy.SWITCH_CONFIG_PROMOTED)
+            with patch.object(deploy, 'command', return_value=''):
+                obj.record_rollback()
+            (obj.directory / 'before-caddy').write_bytes(TRUNCATED_CADDY)
+            retry = deploy.Deployment(obj.config, {**payload(), 'run_id': '124'})
+            with patch.object(deploy, 'command', side_effect=FakeCaddy(obj.live_caddy, good=(candidate_caddy,))), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                retry.apply(archive())
+            self.assertEqual(obj.live_caddy.read_bytes(), candidate_caddy)
+            self.assertIn('before-caddy failed caddy validate', json.loads(obj.degraded_path.read_text())['reason'])
 
     def test_private_state_write_is_atomic(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1528,6 +1586,7 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
             obj.directory = directory
             obj.state_path = directory / 'state.json'
             deploy.write_private(directory / 'before-state.json', obj.state)
+            obj.root, obj.release, obj.payload = directory, 'gh-test', payload()
             obj.live_caddy = directory / 'live'
             obj.env = directory / 'env'
             obj.rolling = directory / 'rolling'
@@ -1757,7 +1816,11 @@ globalThis.fetch = async () => ({ ok: true, text: async () => '# HELP opennavo_w
                 with self.assertRaisesRegex(RuntimeError, error):
                     obj.apply(archive())
                 self.assertEqual(reload_attempt, 2)
-                self.assertEqual(obj.state_path.read_bytes(), before_state)
+                state = json.loads(obj.state_path.read_text())
+                if rollback_failure:
+                    # Unverified switch back: previous state plus the rolling-back record for reconcile.
+                    self.assertEqual(state.pop('switch')['phase'], deploy.SWITCH_ROLLING_BACK)
+                self.assertEqual(state, json.loads(before_state))
                 self.assertEqual(obj.live_caddy.read_bytes(), before_caddy)
                 obj.cleanup.assert_not_called()
                 obj.prune.assert_not_called()
