@@ -323,6 +323,17 @@ describe('QA spec card regressions', () => {
     }
   });
 
+  it('drops unsafe homepage and stars hrefs before rendering', () => {
+    const pkg = Object.assign(detail(), {
+      repository: { url: 'javascript:alert(1)', stars: 42 },
+      homepage: 'javascript:alert(2)'
+    });
+    const spec = packageSpec(pkg, null, null, t, 'en-US', SPEC_NOW);
+    expect(spec.rows.find(row => row.key === 'openSource')?.href).toBeUndefined();
+    expect(spec.rows.find(row => row.key === 'openSource')?.stars?.href).toBeUndefined();
+    expect(spec.rows.some(row => row.key === 'homepage')).toBe(false);
+  });
+
   it.each(['cask', 'formula', 'link'] as const)(
     'keeps a standalone top-level license without OSI data for %s',
     kind => {
@@ -350,5 +361,37 @@ describe('QA spec card regressions', () => {
     expect(
       packageSpec(pkg, null, null, t, 'fr-FR', SPEC_NOW).rows.find(row => row.key === 'openSource')?.stars?.label
     ).toBe('★12,3\u00a0k');
+  });
+});
+
+describe('product star formatting', () => {
+  it.each([
+    ['en-US', 1_000, '1K'],
+    ['en-US', 12_345, '12.3K'],
+    ['en-US', 184_400, '184.4K'],
+    ['en-US', 999_949, '999.9K'],
+    ['en-US', 999_950, '1M'],
+    ['en-US', 1_200_000, '1.2M'],
+    ['zh-CN', 1_000, '1,000'],
+    ['zh-CN', 12_345, '1.2万'],
+    ['zh-CN', 999_950, '100万'],
+    ['ja-JP', 1_000, '1,000'],
+    ['ja-JP', 12_345, '1.2万'],
+    ['ja-JP', 999_950, '100万'],
+    ['de-DE', 1_000, '1.000'],
+    ['de-DE', 12_345, '12.345'],
+    ['de-DE', 999_950, '1\u00a0Mio.']
+  ] as const)('%s formats %s stars on the desktop detail page', (locale, stars, expected) => {
+    const spec = packageSpec(
+      detail({ repository: { url: 'https://github.com/acme/stars', stars, archived: false } }),
+      null,
+      null,
+      t,
+      locale,
+      SPEC_NOW
+    );
+    const label = spec.rows.find(row => row.key === 'openSource')?.stars?.label;
+    expect(label).toBe(`★${expected}`);
+    expect(label).not.toMatch(/1000[.,]0/);
   });
 });

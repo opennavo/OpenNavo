@@ -37,7 +37,7 @@ const { data: related } = useRemoteLoader(
   () =>
     unwrap(
       api.GET('/packages/{kind}/{token}/related', {
-        params: { path: { kind: kind.value, token: token.value }, query: { limit: 5 } }
+        params: { path: { kind: kind.value, token: token.value }, query: { limit: 4 } }
       })
     ),
   [kind, token, appLocale]
@@ -142,6 +142,8 @@ function onCopied(text: string) {
     :info="[]"
     :related="relatedItems"
     :related-title="t('package.related')"
+    related-more-href="/discover"
+    :related-more-label="t('package.relatedMore')"
     :link-as="RouterLink"
     @copied="onCopied"
   >

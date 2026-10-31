@@ -19,6 +19,8 @@ const t = (key: string, named?: Record<string, unknown>) =>
   siteMessage('en-US', key, named as Record<string, string | number>);
 beforeEach(() => {
   vi.stubGlobal('computed', computed);
+  vi.stubGlobal('useToasts', () => ({ push: () => {} }));
+  vi.stubGlobal('useLocalePath', () => (path: string) => path);
   vi.stubGlobal('useI18n', () => ({ t, locale: ref('en') }));
   vi.stubGlobal('toAppLocale', () => 'en-US');
 });

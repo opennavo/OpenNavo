@@ -438,13 +438,14 @@ export function quickFacts(pkg: PackagePage, t: Translate, locale: Locale): { ro
   if (pkg.license) add({ key: 'license', label: t('package.info.license'), value: pkg.license });
 
   if (pkg.kind === 'cask') {
-    add({
-      key: 'install',
-      label: t('package.quick.install'),
-      value: pkg.installCommand,
-      code: true
-    });
     const state = packageInstallState(pkg);
+    if (state !== 'disabled')
+      add({
+        key: 'install',
+        label: t('package.quick.install'),
+        value: pkg.installCommand,
+        code: true
+      });
     const status =
       state === 'disabled'
         ? t('package.quick.homebrewDisabled')

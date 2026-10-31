@@ -89,11 +89,12 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale, 
   const github = pkg.kind === 'link' && pkg.link?.github;
   const repoIdentity = verifiedIdentities(pkg).find(item => item.openSource === 'yes' || item.repositoryUrl);
   const identityOpenSource = !osi && repoIdentity?.openSource === 'yes';
-  const repositoryUrl =
+  const repositoryUrl = httpsUrl(
     repository?.url ??
-    osi?.url ??
-    (github ? `https://github.com/${github.repo}` : undefined) ??
-    repoIdentity?.repositoryUrl;
+      osi?.url ??
+      (github ? `https://github.com/${github.repo}` : undefined) ??
+      repoIdentity?.repositoryUrl
+  );
   if (osi || repository || github || identityOpenSource || repoIdentity?.repositoryUrl) {
     const repo = repoText(
       signals,
@@ -120,7 +121,7 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale, 
           ? undefined
           : {
               label: `★${formatRepoStars(signals.stars, locale)}`,
-              href: repository?.url ?? repositoryUrl,
+              href: httpsUrl(repository?.url) ?? repositoryUrl,
               checked: signals.checkedAt
                 ? t('package.repo.checked', { date: formatDate(signals.checkedAt, { locale }) })
                 : undefined

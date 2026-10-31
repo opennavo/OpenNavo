@@ -185,7 +185,7 @@ function factsFrom(detail) {
       sha256: detail.downloadSha256 ?? null,
       artifacts: detail.artifacts,
       caveats: detail.caveats ?? null,
-      aliases: [],
+      aliases: detail.aliases ?? [],
       dependencyCount: (detail.dependsOn?.casks.length ?? 0) + (detail.dependsOn?.formulae.length ?? 0),
       conflictCount: (detail.conflictsWith?.casks.length ?? 0) + (detail.conflictsWith?.formulae.length ?? 0)
     },
@@ -359,6 +359,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
   const factsApp = {
     displayName: 'Facts App',
     names: ['Facts App', 'facts-app', 'Facts Alternate'],
+    aliases: ['facts-app-old'],
     autoUpdates: true,
     homepage: 'https://vendor.example/',
     downloadUrl: 'https://vendor.example/FactsApp.dmg',
@@ -668,6 +669,18 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
             conflictsWith: { casks: [], formulae: [] },
             supports: { status: 'unknown', arm64: false, x86_64: false },
             platforms: [],
+            // Link apps have no Install Details tab, so their vendor requirements and source must stay on the overview.
+            macosSupplement: {
+              ranges: [{ arch: 'arm64', support: 'native', minimum: '13', maximum: null }],
+              appVersion: '2.4.1',
+              sourceUrl: 'https://lumen.app/requirements',
+              method: 'vendor_docs',
+              verifiedAt: '2025-12-01T08:00:00Z',
+              stale: false,
+              conflicts: []
+            },
+            // Link apps have no Install Details tab, so the full price table must stay on the overview too.
+            price: { ...factsApp.price, sourceUrl: 'https://lumen.app/pricing' },
             screenshots: [],
             releaseCount: 0,
             releaseStats: { count30d: 0, cadence: 'unknown', brewLag: null },
@@ -1925,7 +1938,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       assert.equal((await fetch(`${origin}/background-items/${segment}`, { redirect: 'manual' })).status, 404, segment);
     assert.equal(requestedLabels.length, before, 'invalid labels never reach the API');
     for (const prefix of ['', '/zh']) {
-      const html = await (await fetch(`${origin}${prefix}/apps/facts-app`)).text();
+      const html = await (await fetch(`${origin}${prefix}/apps/facts-app/details`)).text();
       for (const label of backgroundLabels)
         assert.ok(html.includes(`href="${prefix}${labelPath(label)}"`), `uninstall link for ${label}`);
     }
@@ -2034,7 +2047,8 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       assert.equal(actions.children.length, 2);
       assert.ok(!actions.contains(badge));
       assert.ok(!actions.closest('section').textContent.includes('homebrew/cask'));
-      assert.ok(page.querySelector('[data-testid="package-sources"]').textContent.includes('homebrew/cask'));
+      const details = JSDOM.fragment(await (await fetch(`${origin}${prefix}/apps/facts-app/details`)).text());
+      assert.ok(details.querySelector('[data-testid="package-sources"]').textContent.includes('homebrew/cask'));
     }
     const disabled = JSDOM.fragment(await (await fetch(`${origin}/apps/repair-disabled`)).text());
     assert.equal(disabled.querySelector('[data-testid="package-source-badge"]').getAttribute('data-state'), 'disabled');
@@ -2051,7 +2065,11 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       const card = page.querySelector('[data-testid="package-spec-card"]');
       for (const text of ['Apple silicon', 'Apache-2.0', 'Verified Developer', 'EXAMPLE123'])
         assert.ok(card.textContent.includes(text), text);
-      const requirements = page.querySelector('[data-testid="package-requirements"]');
+      const detailsResponse = await fetch(`${origin}/apps/qa-spec-metadata/details`);
+      assert.equal(detailsResponse.status, 200, logs);
+      const details = JSDOM.fragment(await detailsResponse.text());
+      const requirements = details.querySelector('[data-testid="package-requirements"]');
+      assert.ok(requirements);
       for (const text of ['Apple silicon', 'Intel', '2.0.0', '1.0.0', 'macOS 12'])
         assert.ok(requirements.textContent.includes(text), text);
       assert.ok(requirements.textContent.includes('Not native on Apple silicon'), requirements.textContent);
@@ -2118,12 +2136,34 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     assert.ok(!html.includes('/apps/lumen-notes/details'), 'no install details tab');
     for (const tab of ['dependencies', 'details'])
       assert.equal((await fetch(`${origin}/apps/lumen-notes/${tab}`)).status, 404, tab);
+    // Link apps have no Install Details tab, so requirements and sources stay visible on the overview.
+    const overview = JSDOM.fragment(html);
+    const requirements = overview.querySelector('[data-testid="package-requirements"]');
+    assert.ok(requirements, 'link apps keep requirements on the overview');
+    assert.ok(requirements.textContent.includes('macOS 13'), requirements.textContent);
+    const sources = overview.querySelector('[data-testid="package-sources"]');
+    assert.ok(sources, 'link apps keep sources on the overview');
+    assert.ok(sources.textContent.includes('lumen.app'), sources.textContent);
+    const price = overview.querySelector('[data-testid="package-price"]');
+    assert.ok(price, 'link apps keep the full price table on the overview');
+    assert.ok(price.innerHTML.includes('https://lumen.app/pricing'), 'link apps keep the purchase link');
     // Version history comes from the link app's own releases.
     const versions = await fetch(`${origin}/apps/lumen-notes/versions`);
     const versionsHtml = await versions.text();
     assert.equal(versions.status, 200, logs);
     assert.ok(versionsHtml.includes('Lumen link release notes'));
     assert.ok(!versionsHtml.includes('Added to Homebrew'), 'no Homebrew adoption lag for link apps');
+  });
+
+  await t.test('install details keep former tokens and show the install command', async () => {
+    const response = await fetch(`${origin}/apps/facts-app/details`);
+    const html = await response.text();
+    assert.equal(response.status, 200, logs);
+    const details = JSDOM.fragment(html);
+    const command = details.querySelector('[data-testid="package-install-command"]');
+    assert.ok(command, 'install details keep the install command');
+    assert.ok(command.textContent.includes('brew install --cask facts-app'), command.textContent);
+    assert.ok(details.textContent.includes('facts-app-old'), 'former tokens stay visible');
   });
 
   await t.test('release label totals match locale and original mode', async () => {
@@ -2430,10 +2470,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       for (const prefix of ['', '/zh', '/ja']) {
         const path = `${prefix}/apps/${token}`;
         const overview = await (await get(path)).text();
-        assert.equal(
-          dependencyLinks(overview, `${path}/dependencies`).length,
-          token === 'dependency-content-app' ? 2 : 1
-        );
+        assert.equal(dependencyLinks(overview, `${path}/dependencies`).length, 1);
         const response = await get(`${path}/dependencies`);
         assert.equal(response.status, 200, logs);
         const html = await response.text();
@@ -3028,14 +3065,20 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     assert.doesNotMatch(basic.description, /pricing|system requirements|alternatives|release history/);
     const free = await page('/apps/seo-free');
     assert.ok(free.description.includes('pricing'));
-    assert.ok(free.html.includes('data-testid="package-price"'));
+    assert.ok(free.html.includes('data-testid="package-spec-card"'));
+    assert.ok((await page('/apps/seo-free/details')).html.includes('data-testid="package-price"'));
     const full = await page('/apps/seo-uninstall');
     assert.match(
       full.description,
       /Explore installation, pricing, system requirements, uninstallation, and alternatives/
     );
-    for (const id of ['package-uninstall', 'package-alternatives', 'package-requirements', 'package-price'])
+    for (const id of ['package-uninstall', 'package-alternatives'])
       assert.ok(full.html.includes(`data-testid="${id}"`), id);
+    const installation = await page('/apps/seo-uninstall/details');
+    for (const id of ['package-requirements', 'package-price']) {
+      assert.ok(!full.html.includes(`data-testid="${id}"`), `${id} moved out of Overview`);
+      assert.ok(installation.html.includes(`data-testid="${id}"`), id);
+    }
     // The eight untranslated locales fall back to English keys while retaining locale list punctuation.
     for (const prefix of Object.values(localePrefixes)) {
       const { description } = await page(`${prefix}/apps/seo-basic`);
@@ -3469,7 +3512,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       const download = await html(`${prefix}/download`);
       assert.ok(links(download, `${prefix}/security/clamav`, title('clamav')), `${prefix}/download → clamav`);
       // Every app page's security facts link the engine its scan runs on.
-      const app = await html(`${prefix}/apps/ordinary-app`);
+      const app = await html(`${prefix}/apps/ordinary-app/details`);
       const safety = /data-testid="package-safety"[\s\S]*?<\/section>/.exec(app)?.[0] ?? '';
       assert.ok(links(safety, `${prefix}/security/clamav`, title('clamav')), safety || `${prefix} no safety facts`);
       // Security-category apps link the two features the promo names, and /security.
@@ -3622,14 +3665,25 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     assert.equal(specs.length, 1, 'one shared specification card');
     assert.ok(specs[0].textContent.includes('$9.99 per month'), 'verified price remains in the spec card');
     assert.ok(specs[0].textContent.includes('macOS 13 or later'), 'verified requirement remains in the spec card');
-    const section = id => new RegExp(`data-testid="${id}"[\\s\\S]*?</section>`).exec(page)?.[0] ?? '';
+    const detailsPage = await html('/apps/facts-app/details');
+    const detailsDocument = JSDOM.fragment(detailsPage);
+    const section = id =>
+      (document.querySelector(`[data-testid="${id}"]`) ?? detailsDocument.querySelector(`[data-testid="${id}"]`))
+        ?.outerHTML ?? '';
     // T2 splits the former guide/facts cards into install, uninstall, price and requirements sections.
     const guide = section('package-install');
     assert.ok(guide.includes('Homebrew installs the app in your Applications folder.'), guide);
-    assert.ok(guide.includes('href="https://vendor.example/FactsApp.dmg"'));
+    assert.ok(!guide.includes('href="https://vendor.example/FactsApp.dmg"'));
+    assert.ok(detailsPage.includes('href="https://vendor.example/FactsApp.dmg"'));
+    assert.equal(document.querySelector('[data-testid="package-requirements"]'), null);
     const checksumDisclaimer = 'SHA-256 only checks that the download is complete; it is not a security certification.';
-    assert.ok(guide.includes(checksumDisclaimer), 'download instructions retain the checksum limitation');
-    assert.equal(document.querySelector('main')?.textContent.split(checksumDisclaimer).length - 1, 1);
+    assert.ok(detailsPage.includes(checksumDisclaimer), 'download details retain the checksum limitation');
+    assert.equal(detailsDocument.querySelector('main')?.textContent.split(checksumDisclaimer).length - 1, 1);
+    assert.equal(document.querySelector('main')?.textContent.split(checksumDisclaimer).length - 1, 0);
+    assert.equal(detailsDocument.querySelectorAll('[data-testid="package-sources"] time').length, 1);
+    assert.ok(document.querySelector('[data-testid="package-without-homebrew"]:not([open])'));
+    assert.ok(document.querySelector('[data-testid="package-zap"]:not([open])'));
+    assert.equal(document.querySelectorAll('[data-testid="package-install-command"] code').length, 1);
     assert.ok(
       section('package-safety').includes('This is not a safety certification.'),
       'the safety section retains its broader security-facts disclaimer'

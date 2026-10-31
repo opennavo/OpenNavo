@@ -10,7 +10,7 @@ import type { FactEvidence, PackagePage } from '~/utils/packageFacts';
 // presented as a safety certification, and an empty CVE list is not shown as a verdict. The scan link opens
 // a preview in the OpenNavo app; the person starts the scan there. Its note links to the page on ClamAV,
 // the engine that scan runs on (F8).
-const props = defineProps<{ pkg: PackagePage }>();
+const props = defineProps<{ pkg: PackagePage; showChecked?: boolean }>();
 
 const { t, locale } = useI18n();
 const localePath = useLocalePath();
@@ -62,7 +62,9 @@ const visible = computed(() => Boolean(security.value) || channels.value.length 
     <h2 id="safety-title" class="m-0 text-13.5px font-600 text-ink-primary">
       {{ t('package.safety.title', { name: pkg.displayName }) }}
     </h2>
-    <p class="m-0 mt-4px text-12px leading-[1.6] text-ink-tertiary">{{ t('package.safety.hint') }}</p>
+    <p class="m-0 mt-4px text-12px leading-[1.6] text-ink-tertiary">
+      {{ t('package.safety.hint') }}
+    </p>
     <dl class="m-0 mt-10px flex flex-col gap-10px text-13px leading-[1.6]">
       <div v-if="identity">
         <dt class="text-12px text-ink-tertiary">{{ t('package.safety.identity') }}</dt>
@@ -79,7 +81,7 @@ const visible = computed(() => Boolean(security.value) || channels.value.length 
               rel="nofollow noopener noreferrer"
               class="text-ink-secondary underline-offset-2 hover:text-ink-primary"
               >{{ displayUrl(identity.evidence.sourceUrl) }}</a
-            ><template v-if="identityChecked"
+            ><template v-if="showChecked !== false && identityChecked"
               >{{ ` · ${identityChecked.before}`
               }}<time :datetime="identityChecked.iso">{{ identityChecked.date }}</time
               >{{ identityChecked.after }}</template

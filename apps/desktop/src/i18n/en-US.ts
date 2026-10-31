@@ -461,6 +461,7 @@ const messages: MessageSchema = {
       }
     },
     related: 'Similar Apps',
+    relatedMore: 'See more',
     screenshots: 'Screenshots',
     caveats: 'Caveats',
     info: {
