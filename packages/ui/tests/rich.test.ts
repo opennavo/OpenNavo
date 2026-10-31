@@ -35,7 +35,7 @@ describe('sanitizeReleaseHtml', () => {
     expect(links.find(link => link.textContent === 'bad')?.hasAttribute('href')).toBe(false);
     const notes = links.find(link => link.textContent === 'notes');
     expect(notes?.getAttribute('target')).toBe('_blank');
-    expect(notes?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(notes?.getAttribute('rel')).toBe('noopener noreferrer nofollow ugc');
   });
 
   it('Never loads images: https ones become links named by their alt text, others disappear', () => {
@@ -99,7 +99,7 @@ describe('renderMarkdown', () => {
     ]);
     for (const link of links) {
       expect(link.getAttribute('target')).toBe('_blank');
-      expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+      expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow ugc');
     }
   });
 

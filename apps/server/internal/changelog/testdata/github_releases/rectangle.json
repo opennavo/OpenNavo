@@ -1,0 +1,47 @@
+[
+  {
+    "tag_name": "v2.0.4",
+    "name": "v2.0.4",
+    "body": "## What's Changed\r\n* Keep snap previews translucent with Reduce Transparency by @kiteretsu903 in https://github.com/rxhanson/Rectangle/pull/1898\r\n* Isolate and improve optional window animations by @kiteretsu903 in https://github.com/rxhanson/Rectangle/pull/1886\r\n* Avoid redundant Accessibility writes during ordinary window placement by @kiteretsu903 in https://github.com/rxhanson/Rectangle/pull/1899\r\n* Add mouse button shortcuts for window actions by @harshpatel333 in https://github.com/rxhanson/Rectangle/pull/1895\r\n* Add Persian (fa) localization by @aliafshany in https://github.com/rxhanson/Rectangle/pull/1910\r\n* Keep snap-preview material and geometry in sync by @kiteretsu903 in https://github.com/rxhanson/Rectangle/pull/1900\r\n* Add an option to snap before reaching outer screen edges by @kiteretsu903 in https://github.com/rxhanson/Rectangle/pull/1901\r\n* Sort the stacked-window list alphabetically by @MyronKoch in https://github.com/rxhanson/Rectangle/pull/1909\r\n* Persian: fix right-to-left layout of the accessibility prompt by @aliafshany in https://github.com/rxhanson/Rectangle/pull/1914\r\n* Honor screenEdgeGapTopNotch when it is set to 0 by @efim0v in https://github.com/rxhanson/Rectangle/pull/1911\r\n* Complete the Simplified Chinese (zh-Hans) localization by @AkiyamaKunka in https://github.com/rxhanson/Rectangle/pull/1916\r\n* Add regression coverage for Todo placement on offset displays by @culpen90 in https://github.com/rxhanson/Rectangle/pull/1919\r\n* Add full-height vertical sixth window actions by @ehippy in https://github.com/rxhanson/Rectangle/pull/1917\r\n* Complete the Brazilian Portuguese (pt-BR) localization by @OCampezzi in https://github.com/rxhanson/Rectangle/pull/1918\r\n* Ukrainian localization by @lsl87Serhii in https://github.com/rxhanson/Rectangle/pull/1923\r\n* Add a Simplified Chinese README by @AkiyamaKunka in https://github.com/rxhanson/Rectangle/pull/1928\r\n* Add a repeated-commands option that switches to the opposite side by @AkiyamaKunka in https://github.com/rxhanson/Rectangle/pull/1925\r\n* Fix drag-snap window detection for Emacs 28 by @culpen90 in https://github.com/rxhanson/Rectangle/pull/1926\r\n* Give Debug builds their own bundle identifier by @AkiyamaKunka in https://github.com/rxhanson/Rectangle/pull/1927\r\n* Point README to the 2.0 Settings tabs by @AkiyamaKunka in https://github.com/rxhanson/Rectangle/pull/1931\r\n* Use a Chinese screenshot in README.zh-Hans.md by @AkiyamaKunka in https://github.com/rxhanson/Rectangle/pull/1936\r\n* Document the alwaysAccountForStage hidden preference by @AkiyamaKunka in https://github.com/rxhanson/Rectangle/pull/1932\r\n* Minor bug fixes by @rxhanson \r\n\r\n## New Contributors\r\n* @aliafshany made their first contribution in https://github.com/rxhanson/Rectangle/pull/1910\r\n* @efim0v made their first contribution in https://github.com/rxhanson/Rectangle/pull/1911\r\n* @AkiyamaKunka made their first contribution in https://github.com/rxhanson/Rectangle/pull/1916\r\n* @ehippy made their first contribution in https://github.com/rxhanson/Rectangle/pull/1917\r\n* @OCampezzi made their first contribution in https://github.com/rxhanson/Rectangle/pull/1918\r\n* @lsl87Serhii made their first contribution in https://github.com/rxhanson/Rectangle/pull/1923\r\n\r\n**Full Changelog**: https://github.com/rxhanson/Rectangle/compare/v2.0.3...v2.0.4",
+    "html_url": "https://github.com/rxhanson/Rectangle/releases/tag/v2.0.4",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-20T18:10:59Z"
+  },
+  {
+    "tag_name": "v2.0.3",
+    "name": "v2.0.3",
+    "body": "## What's Changed\r\n* Various bug fixes for the v2 redesign by @rxhanson \r\n* Add shortcuts to cycle through stacked windows by @harshpatel333 in https://github.com/rxhanson/Rectangle/pull/1883\r\n* Add full-height vertical eighth window actions by @Soren90912 in https://github.com/rxhanson/Rectangle/pull/1873\r\n* Fix title bar double-click targeting by @kiteretsu903 in https://github.com/rxhanson/Rectangle/pull/1885\r\n\r\n## New Contributors\r\n* @harshpatel333 made their first contribution in https://github.com/rxhanson/Rectangle/pull/1883\r\n* @Soren90912 made their first contribution in https://github.com/rxhanson/Rectangle/pull/1873\r\n\r\n**Full Changelog**: https://github.com/rxhanson/Rectangle/compare/v2.0.2...v2.0.3",
+    "html_url": "https://github.com/rxhanson/Rectangle/releases/tag/v2.0.3",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-05T20:38:54Z"
+  },
+  {
+    "tag_name": "v2.0.2",
+    "name": "v2.0.2",
+    "body": "* Fixes a crash when footprint blur is enabled on macOS < 26\r\n\r\n**Full Changelog**: https://github.com/rxhanson/Rectangle/compare/v2.0.1...v2.0.2",
+    "html_url": "https://github.com/rxhanson/Rectangle/releases/tag/v2.0.2",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-09-27T12:34:07Z"
+  },
+  {
+    "tag_name": "v2.0.1",
+    "name": "v2.0.1",
+    "body": "* Fixes a crash in macOS 15\r\n* Fixes a 20px column showing on the left side of the shortcuts outline view in macOS 15\r\n\r\n**Full Changelog**: https://github.com/rxhanson/Rectangle/compare/v2.0...v2.0.1",
+    "html_url": "https://github.com/rxhanson/Rectangle/releases/tag/v2.0.1",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-09-26T14:28:40Z"
+  },
+  {
+    "tag_name": "v2.0",
+    "name": "v2.0",
+    "body": "Recently, there have been a lot more contributions to Rectangle. A top goal for Rectangle has always been to keep it simple, and the UI redesign in 2.0 is built to maintain this simplicity while accommodating more changes.\r\n\r\n## What's Changed\r\n* Add keyboard navigation to the stacked-window switcher by @MyronKoch in https://github.com/rxhanson/Rectangle/pull/1808\r\n* Prevent Chromium Enhanced UI performance regression by @culpen90 in https://github.com/rxhanson/Rectangle/pull/1822\r\n* Correct stale Dock insets during window actions by @culpen90 in https://github.com/rxhanson/Rectangle/pull/1823\r\n* Let half actions preserve the window's size on the other axis (opt-in) by @X-Wei in https://github.com/rxhanson/Rectangle/pull/1824\r\n* Show the description next to the window list shortcut recorder by @MyronKoch in https://github.com/rxhanson/Rectangle/pull/1832\r\n* Let a repeated Maximize restore the window's previous size and position (opt-in) by @X-Wei in https://github.com/rxhanson/Rectangle/pull/1837\r\n* fix: explain when windows cannot fit a layout by @culpen90 in https://github.com/rxhanson/Rectangle/pull/1847\r\n* add new window actions: tile a display in rows or columns by @dank-openai in https://github.com/rxhanson/Rectangle/pull/1850\r\n* fix: don't realign a window that is within a point of filling its zone by @anandghegde in https://github.com/rxhanson/Rectangle/pull/1853\r\n* fix: keep the restore rect when unsnapRestoreFromSizeChange is off by @Yash121l in https://github.com/rxhanson/Rectangle/pull/1855\r\n* Add optional snapping animations and a blurred snap preview by @kiteretsu903 in https://github.com/rxhanson/Rectangle/pull/1849\r\n* Add an option to keep constrained windows top-aligned by @slava-class in https://github.com/rxhanson/Rectangle/pull/1856\r\n* tiling: Cycle Rows and Columns through balanced grids by @dank-openai in https://github.com/rxhanson/Rectangle/pull/1857\r\n* Tweaked app icon for macOS 27 by @alexkaessner in https://github.com/rxhanson/Rectangle/pull/1858\r\n* Modernize the Rectangle UI by @rxhanson in https://github.com/rxhanson/Rectangle/pull/1866\r\n* Keep a window's position when moving it to another display by @anandghegde in https://github.com/rxhanson/Rectangle/pull/1863\r\n\r\n## New Contributors\r\n* @X-Wei made their first contribution in https://github.com/rxhanson/Rectangle/pull/1824\r\n* @dank-openai made their first contribution in https://github.com/rxhanson/Rectangle/pull/1850\r\n* @anandghegde made their first contribution in https://github.com/rxhanson/Rectangle/pull/1853\r\n* @Yash121l made their first contribution in https://github.com/rxhanson/Rectangle/pull/1855\r\n* @kiteretsu903 made their first contribution in https://github.com/rxhanson/Rectangle/pull/1849\r\n* @slava-class made their first contribution in https://github.com/rxhanson/Rectangle/pull/1856\r\n\r\n**Full Changelog**: https://github.com/rxhanson/Rectangle/compare/v1.100...v2.0",
+    "html_url": "https://github.com/rxhanson/Rectangle/releases/tag/v2.0",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-09-25T18:35:33Z"
+  }
+]

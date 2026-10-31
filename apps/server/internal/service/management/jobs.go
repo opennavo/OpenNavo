@@ -133,5 +133,5 @@ func (s *Service) sources(ctx context.Context, in Input) (any, error) {
 	if _, err := s.Store.AdminPackage(ctx, in.ID); err != nil {
 		return nil, err
 	}
-	return s.Store.JSONRows(ctx, `SELECT jsonb_build_object('id',id,'type',type,'config',config,'priority',priority,'enabled',enabled,'resolvedBy',resolved_by,'lastFetchedAt',last_fetched_at,'lastStatus',last_status,'lastError',last_error,'failCount',fail_count,'nextFetchAt',next_fetch_at) AS data FROM changelog_sources WHERE package_id=? AND type='homebrew_commits' ORDER BY priority,id`, in.ID)
+	return s.Store.JSONRows(ctx, `SELECT jsonb_build_object('id',id,'type',type,'config',config,'priority',priority,'enabled',enabled,'resolvedBy',resolved_by,'lastFetchedAt',last_fetched_at,'lastStatus',last_status,'lastError',last_error,'failCount',fail_count,'nextFetchAt',next_fetch_at) AS data FROM changelog_sources WHERE package_id=? AND type IN ('homebrew_commits','github_releases') ORDER BY priority,id`, in.ID)
 }
