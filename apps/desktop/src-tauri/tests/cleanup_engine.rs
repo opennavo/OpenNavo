@@ -2123,8 +2123,20 @@ async fn incomplete_measurements_keep_all_candidates_and_latest_selection() {
             }
         }
         let report = f.scan(&[CleanupCategory::DevCaches]).await;
+        if timeout.is_zero() {
+            // #116: past the category deadline nothing new is listed, and nothing is selectable.
+            assert!(items(&report).is_empty());
+            assert!(report.categories.iter().all(|c| !c.complete));
+            continue;
+        }
         assert_eq!(items(&report).len(), 20);
         assert!(!report.categories[0].complete);
+        // #116: a lower bound is never selected or deletable.
+        assert!(
+            items(&report)
+                .iter()
+                .all(|i| !i.selected && !i.size_complete)
+        );
         let entry = f.engine.cached(&report.report_id, 0).unwrap();
         assert!(
             entry
