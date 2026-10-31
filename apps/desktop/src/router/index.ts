@@ -223,7 +223,7 @@ export const routes: RouteRecordRaw[] = [
     redirect: '/updates'
   },
   {
-    path: '/settings/:section(general|mirrors|homebrew|appstore|cleanup|monitor|security|privacy|about)?',
+    path: '/settings/:section(general|mirrors|homebrew|appstore|cleanup|monitor|security|mcp|privacy|about)?',
     name: 'settings',
     component: () => import('@/pages/SettingsPage.vue'),
     meta: { nav: 'settings' }

@@ -865,7 +865,8 @@
       "about": "Sobre",
       "cleanup": "Limpeza",
       "monitor": "Monitor do sistema",
-      "security": "Segurança"
+      "security": "Segurança",
+      "mcp": "MCP local"
     },
     "general": {
       "followSystem": "Seguir o sistema (atual: {language})",
@@ -966,7 +967,30 @@
       "catalog": "Catálogo local: {count} pacote, sincronizado {time} | Catálogo local: {count} pacotes, sincronizados {time}",
       "sync": "Sincronizar agora"
     },
-    "saved": "Salvo"
+    "saved": "Salvo",
+    "mcp": {
+      "enable": "Ativar MCP local",
+      "enableHint": "Permite que apps de IA neste Mac, como Claude Desktop, Cursor e Codex, pesquisem apps e leiam sua lista de apps instalados. Desativado por padrão; enquanto estiver desativado, nenhuma conexão é aceita.",
+      "write": "Permitir instalar e desinstalar",
+      "writeHint": "Os apps de IA só podem pedir. Nada é executado até você clicar em Permitir no OpenNavo.",
+      "stillOn": "Ainda ativado",
+      "offFailed": "Não foi possível desativar o MCP local. Ele continua ativado e os apps de IA ainda podem se conectar. Tente novamente.",
+      "writeOffFailed": "Não foi possível desativar a instalação e a desinstalação. Elas continuam permitidas. Tente novamente.",
+      "changeFailed": "Não foi possível alterar o MCP local. Tente novamente.",
+      "config": "Configuração do cliente",
+      "configHint": "Cole nas configurações de MCP do seu app de IA. Ela aponta para o local atual do OpenNavo.",
+      "copy": "Copiar configuração",
+      "copied": "Configuração do {client} copiada",
+      "copyFailed": "Não foi possível copiar a configuração.",
+      "moved": "O OpenNavo foi movido depois que você copiou a configuração. Copie de novo para que seus apps de IA continuem encontrando o OpenNavo.",
+      "pathUnavailable": "Não foi possível encontrar onde o OpenNavo está instalado, então não há configuração para copiar.",
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Outro (JSON)"
+      }
+    }
   },
   "mirrors": {
     "official": "Oficial",

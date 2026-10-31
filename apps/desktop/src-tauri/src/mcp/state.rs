@@ -26,6 +26,9 @@ pub const BUNDLE_ID: &str = "com.opennavo.desktop";
 pub struct State {
     #[serde(default)]
     pub enabled: bool,
+    /// Write-tool switch. Only meaningful while `enabled`; off by default.
+    #[serde(default)]
+    pub write_enabled: bool,
 }
 
 /// Resolve the application data directory used by the GUI.
@@ -86,12 +89,29 @@ pub fn load(data_dir: &Path) -> State {
     serde_json::from_slice::<State>(&bytes)
         .map(|state| State {
             enabled: state.enabled,
+            write_enabled: state.enabled && state.write_enabled,
         })
         .unwrap_or_default()
 }
 
-/// Persist the master switch atomically as `mcp/state.json` with mode `0600`.
+/// Persist the master switch with the write switch off.
 pub fn save(data_dir: &Path, enabled: bool) -> io::Result<()> {
+    save_state(
+        data_dir,
+        State {
+            enabled,
+            write_enabled: false,
+        },
+    )
+}
+
+/// Persist both switches atomically as `mcp/state.json` with mode `0600`.
+/// The write switch is never stored on while the master switch is off.
+pub fn save_state(data_dir: &Path, state: State) -> io::Result<()> {
+    let state = State {
+        enabled: state.enabled,
+        write_enabled: state.enabled && state.write_enabled,
+    };
     let dir = mcp_dir(data_dir);
     ensure_private_dir(&dir)?;
     let path = dir.join("state.json");
@@ -110,7 +130,7 @@ pub fn save(data_dir: &Path, enabled: bool) -> io::Result<()> {
             options.mode(0o600);
         }
         let mut file = options.open(&temporary)?;
-        let body = serde_json::to_vec_pretty(&State { enabled }).map_err(io::Error::other)?;
+        let body = serde_json::to_vec_pretty(&state).map_err(io::Error::other)?;
         file.write_all(&body)?;
         file.sync_all()?;
         fs::rename(&temporary, &path)?;
@@ -227,8 +247,11 @@ fn ensure_trusted_ancestors(parent: &Path) -> io::Result<()> {
 }
 
 /// `mkdir(0700)` and, when this call created the directory, force the mode to
-/// exactly `0700` through an `O_NOFOLLOW` descriptor so a restrictive umask
-/// cannot leave it unusable. An existing directory is left untouched (and is
+/// exactly `0700` through an `O_NOFOLLOW` descriptor. A umask that only clears
+/// group/other bits is repaired this way; one that also clears the owner's
+/// read bit makes the `open` fail, and then the directory this call just
+/// created is removed again (`rmdir`, so only while still empty) instead of
+/// being left behind unusable. An existing directory is left untouched (and is
 /// verified by the caller).
 fn mkdir_private(path: &Path) -> io::Result<()> {
     let raw = c_path(path)?;
@@ -249,7 +272,9 @@ fn mkdir_private(path: &Path) -> io::Result<()> {
         )
     };
     if fd < 0 {
-        return Err(io::Error::last_os_error());
+        let error = io::Error::last_os_error();
+        unsafe { nix::libc::rmdir(raw.as_ptr()) };
+        return Err(error);
     }
     let result = if unsafe { nix::libc::fchmod(fd, 0o700) } != 0 {
         Err(io::Error::last_os_error())
@@ -257,6 +282,9 @@ fn mkdir_private(path: &Path) -> io::Result<()> {
         Ok(())
     };
     unsafe { nix::libc::close(fd) };
+    if result.is_err() {
+        unsafe { nix::libc::rmdir(raw.as_ptr()) };
+    }
     result
 }
 
@@ -360,6 +388,102 @@ mod tests {
             0o755
         );
         assert!(verify_private_dir(&mcp).is_err());
+    }
+
+    #[test]
+    fn sticky_or_setgid_leaf_is_refused_not_repaired() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for mode in [0o1700, 0o2700] {
+            let dir = tempdir();
+            let mcp = mcp_dir(dir.path());
+            fs::create_dir(&mcp).expect("mcp");
+            fs::set_permissions(&mcp, fs::Permissions::from_mode(mode)).expect("chmod");
+            let actual = fs::metadata(&mcp).expect("meta").permissions().mode() & 0o7777;
+            if actual != mode {
+                // The filesystem dropped the special bit (e.g. setgid on some
+                // mounts); nothing to check for this mode.
+                continue;
+            }
+            let error = ensure_private_dir(&mcp).expect_err("special bit");
+            assert_eq!(
+                error.kind(),
+                io::ErrorKind::PermissionDenied,
+                "mode {mode:o}"
+            );
+            assert!(verify_private_dir(&mcp).is_err(), "mode {mode:o}");
+            assert_eq!(
+                fs::metadata(&mcp).expect("meta").permissions().mode() & 0o7777,
+                mode,
+                "mode {mode:o} must not be repaired"
+            );
+        }
+    }
+
+    #[test]
+    fn write_switch_requires_master_switch() {
+        let dir = tempdir();
+        save_state(
+            dir.path(),
+            State {
+                enabled: true,
+                write_enabled: true,
+            },
+        )
+        .expect("save");
+        assert_eq!(
+            load(dir.path()),
+            State {
+                enabled: true,
+                write_enabled: true
+            }
+        );
+        save_state(
+            dir.path(),
+            State {
+                enabled: false,
+                write_enabled: true,
+            },
+        )
+        .expect("save");
+        assert_eq!(load(dir.path()), State::default());
+        fs::write(
+            state_path(dir.path()),
+            br#"{"enabled":false,"writeEnabled":true}"#,
+        )
+        .expect("write");
+        assert!(!load(dir.path()).write_enabled);
+        save(dir.path(), true).expect("save");
+        assert!(!load(dir.path()).write_enabled, "save keeps writes off");
+    }
+
+    /// A umask that clears the owner's read bit makes the created directory
+    /// unopenable; it must be removed again rather than left behind. Runs in
+    /// a child process because the umask is process-wide.
+    #[test]
+    fn unopenable_new_directory_is_removed() {
+        if let Some(root) = std::env::var_os("OPENNAVO_UMASK_RMDIR_CHILD_DIR") {
+            unsafe { nix::libc::umask(0o477) };
+            let leaf = PathBuf::from(root).join("mcp");
+            assert!(mkdir_private(&leaf).is_err());
+            assert!(fs::symlink_metadata(&leaf).is_err(), "leaf left behind");
+            return;
+        }
+        // Root can open any directory, so the failure cannot be provoked.
+        if unsafe { nix::libc::geteuid() } == 0 {
+            return;
+        }
+        let dir = tempdir();
+        let status = std::process::Command::new(std::env::current_exe().expect("exe"))
+            .args([
+                "--exact",
+                "mcp::state::tests::unopenable_new_directory_is_removed",
+                "--test-threads=1",
+            ])
+            .env("OPENNAVO_UMASK_RMDIR_CHILD_DIR", dir.path())
+            .status()
+            .expect("spawn child");
+        assert!(status.success());
     }
 
     #[test]

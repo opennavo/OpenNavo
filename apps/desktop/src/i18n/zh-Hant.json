@@ -865,7 +865,31 @@
       "about": "關於",
       "cleanup": "清理",
       "monitor": "電腦監控",
-      "security": "安全防護"
+      "security": "安全防護",
+      "mcp": "本地 MCP"
+    },
+    "mcp": {
+      "enable": "開啟本地 MCP",
+      "enableHint": "讓這台 Mac 上的 AI 應用（如 Claude Desktop、Cursor、Codex）搜尋應用、讀取已安裝列表。預設關閉；關閉時不接受任何連線。",
+      "write": "允許安裝和解除安裝",
+      "writeHint": "AI 應用只能發起請求，你在 OpenNavo 裡點了「允許」才會執行。",
+      "stillOn": "仍開著",
+      "offFailed": "無法關閉本地 MCP。它仍開著，AI 應用仍可連線，請重試。",
+      "writeOffFailed": "無法關閉安裝和解除安裝，它們仍被允許，請重試。",
+      "changeFailed": "無法更改本地 MCP 設定，請重試。",
+      "config": "客戶端配置",
+      "configHint": "貼上到 AI 應用的 MCP 設定中。配置指向 OpenNavo 當前所在的位置。",
+      "copy": "複製配置",
+      "copied": "已複製 {client} 配置",
+      "copyFailed": "無法複製配置。",
+      "moved": "複製配置後 OpenNavo 移動了位置，請重新複製，AI 應用才能繼續找到它。",
+      "pathUnavailable": "找不到 OpenNavo 的安裝位置，暫無可複製的配置。",
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "其他（JSON）"
+      }
     },
     "general": {
       "followSystem": "跟隨系統（當前：{language}）",

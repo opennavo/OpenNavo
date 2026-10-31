@@ -47,9 +47,13 @@ const ACCEPT_POLL: Duration = Duration::from_millis(20);
 #[serde(rename_all = "camelCase")]
 pub struct McpStatus {
     pub enabled: bool,
+    /// Write-tool switch; always `false` while `enabled` is off.
+    pub write_enabled: bool,
     pub running: bool,
     pub socket_path: Option<String>,
     pub error: Option<String>,
+    /// Absolute path of the running app executable, for client config presets.
+    pub command_path: Option<String>,
 }
 
 /// Broker operation failure with a stable code.
@@ -83,6 +87,7 @@ impl std::error::Error for BrokerError {}
 #[derive(Default)]
 struct Inner {
     enabled: bool,
+    write_enabled: bool,
     running: bool,
     path: Option<PathBuf>,
     error: Option<String>,
@@ -114,12 +119,13 @@ impl Broker {
 
     /// Broker with the app-side read-tool implementation.
     pub fn with_host(data_dir: PathBuf, host: Option<Arc<dyn ToolHost>>) -> Self {
-        let enabled = state::load(&data_dir).enabled;
+        let persisted = state::load(&data_dir);
         Self {
             data_dir,
             host,
             inner: Mutex::new(Inner {
-                enabled,
+                enabled: persisted.enabled,
+                write_enabled: persisted.write_enabled,
                 ..Inner::default()
             }),
             lifecycle: Mutex::new(()),
@@ -131,12 +137,16 @@ impl Broker {
         let inner = self.lock();
         McpStatus {
             enabled: inner.enabled,
+            write_enabled: inner.enabled && inner.write_enabled,
             running: inner.running,
             socket_path: inner
                 .path
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
             error: inner.error.clone(),
+            command_path: std::env::current_exe()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned()),
         }
     }
 
@@ -171,7 +181,8 @@ impl Broker {
         if inner.running {
             inner.enabled = true;
             inner.error = None;
-            return state::save(&self.data_dir, true).map_err(BrokerError::io);
+            return state::save_state(&self.data_dir, self.persisted(&inner, true))
+                .map_err(BrokerError::io);
         }
         let previous_enabled = inner.enabled;
 
@@ -186,7 +197,7 @@ impl Broker {
             failure
         })?;
 
-        if let Err(error) = state::save(&self.data_dir, true) {
+        if let Err(error) = state::save_state(&self.data_dir, self.persisted(&inner, true)) {
             drop(listener);
             socket::remove_if_same(&self.data_dir, socket_id);
             let failure = BrokerError::io(error);
@@ -221,7 +232,7 @@ impl Broker {
                 inner.socket_id = None;
                 let failure = BrokerError::io(error);
                 inner.error = Some(failure.to_string());
-                let _ = state::save(&self.data_dir, previous_enabled);
+                let _ = state::save_state(&self.data_dir, self.persisted(&inner, previous_enabled));
                 socket::remove_if_same(&self.data_dir, socket_id);
                 Err(failure)
             }
@@ -241,11 +252,56 @@ impl Broker {
         let thread = {
             let mut inner = self.lock();
             inner.enabled = false;
+            inner.write_enabled = false;
             inner.error = None;
             self.stop_runtime(&mut inner)
         };
         join(thread);
         Ok(())
+    }
+
+    /// Apply the write-tool switch and persist it. Requires the master switch.
+    ///
+    /// Like turning Local MCP off, the new value is persisted first; if that
+    /// fails nothing changes and the error is reported. Turning writes off
+    /// then drops every live connection and clears their sessions, so no
+    /// client keeps a session (or anything issued on it) that was opened while
+    /// writes were allowed. The listener keeps running for read tools.
+    pub fn set_write_enabled(&self, write_enabled: bool) -> Result<(), BrokerError> {
+        let _transition = self.transition();
+        let mut inner = self.lock();
+        if !inner.enabled {
+            return Err(BrokerError::new(
+                "E_MCP_DISABLED",
+                "Turn on Local MCP before allowing write tools",
+            ));
+        }
+        let next = state::State {
+            enabled: true,
+            write_enabled,
+        };
+        if let Err(error) = state::save_state(&self.data_dir, next) {
+            let failure = BrokerError::io(error);
+            inner.error = Some(failure.to_string());
+            return Err(failure);
+        }
+        inner.write_enabled = write_enabled;
+        inner.error = None;
+        if !write_enabled {
+            for connection in inner.connections.values() {
+                let _ = connection.shutdown(std::net::Shutdown::Both);
+            }
+            inner.connections.clear();
+            inner.sessions.clear();
+        }
+        Ok(())
+    }
+
+    fn persisted(&self, inner: &Inner, enabled: bool) -> state::State {
+        state::State {
+            enabled,
+            write_enabled: enabled && inner.write_enabled,
+        }
     }
 
     /// Stop accepting, drop connections, and clear sessions without changing
@@ -849,6 +905,95 @@ mod tests {
         let mut byte = [0u8; 1];
         let _ = stream.read(&mut byte);
         assert!(broker.lock().sessions.is_empty());
+    }
+
+    #[test]
+    fn write_switch_requires_master_and_resets_when_master_turns_off() {
+        let dir = tempdir();
+        let broker = Arc::new(Broker::new(dir.path().to_path_buf()));
+        let error = broker.set_write_enabled(true).expect_err("master off");
+        assert_eq!(error.code, "E_MCP_DISABLED");
+        assert!(!state::load(dir.path()).write_enabled);
+
+        broker.set_enabled(true).expect("enable");
+        wait_running(&broker);
+        broker.set_write_enabled(true).expect("allow writes");
+        assert!(broker.status().write_enabled);
+        assert!(state::load(dir.path()).write_enabled);
+        // Re-enabling while running keeps the persisted write switch.
+        broker.set_enabled(true).expect("enable again");
+        assert!(state::load(dir.path()).write_enabled);
+
+        broker.set_enabled(false).expect("disable");
+        assert!(!broker.status().write_enabled);
+        assert_eq!(state::load(dir.path()), state::State::default());
+        broker.set_enabled(true).expect("enable");
+        assert!(
+            !broker.status().write_enabled,
+            "writes stay off after re-enable"
+        );
+        broker.set_enabled(false).expect("disable");
+    }
+
+    #[test]
+    fn turning_writes_off_disconnects_clients_but_keeps_listening() {
+        let dir = tempdir();
+        let broker = Arc::new(Broker::new(dir.path().to_path_buf()));
+        broker.set_enabled(true).expect("enable");
+        wait_running(&broker);
+        broker.set_write_enabled(true).expect("allow writes");
+        let mut stream = UnixStream::connect(socket::path(dir.path()).path).expect("connect");
+        for _ in 0..100 {
+            if !broker.lock().sessions.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(broker.lock().sessions.len(), 1);
+        broker.set_write_enabled(false).expect("forbid writes");
+        let mut byte = [0u8; 1];
+        assert_eq!(stream.read(&mut byte).unwrap_or(0), 0);
+        assert!(broker.lock().sessions.is_empty());
+        let status = broker.status();
+        assert!(status.running && !status.write_enabled, "{status:?}");
+        let response = request(
+            &socket::path(dir.path()).path,
+            json!({"v":1,"id":"1","method":"ping","params":{}}),
+        );
+        assert_eq!(response["ok"], true);
+        broker.set_enabled(false).expect("disable");
+    }
+
+    #[test]
+    fn failed_write_off_persist_keeps_writes_on_and_reports() {
+        use std::os::unix::fs::PermissionsExt;
+
+        if unsafe { nix::libc::geteuid() } == 0 {
+            return;
+        }
+        let dir = tempdir();
+        let broker = Arc::new(Broker::new(dir.path().to_path_buf()));
+        broker.set_enabled(true).expect("enable");
+        wait_running(&broker);
+        broker.set_write_enabled(true).expect("allow writes");
+        let mcp = state::mcp_dir(dir.path());
+        std::fs::set_permissions(&mcp, std::fs::Permissions::from_mode(0o500)).expect("chmod");
+        broker
+            .set_write_enabled(false)
+            .expect_err("persist must fail");
+        let status = broker.status();
+        assert!(status.write_enabled && status.error.is_some(), "{status:?}");
+        assert!(state::load(dir.path()).write_enabled);
+        std::fs::set_permissions(&mcp, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+        broker.set_enabled(false).expect("disable");
+    }
+
+    #[test]
+    fn status_reports_absolute_command_path() {
+        let dir = tempdir();
+        let broker = Broker::new(dir.path().to_path_buf());
+        let path = broker.status().command_path.expect("current exe");
+        assert!(std::path::Path::new(&path).is_absolute());
     }
 
     #[test]

@@ -178,6 +178,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::updates::updates_unignore,
             commands::settings::settings_get,
             commands::mcp::mcp_set_enabled,
+            commands::mcp::mcp_set_write_enabled,
             commands::mcp::mcp_status,
             commands::settings::locale_get,
             commands::settings::system_locale_get,

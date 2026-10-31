@@ -865,7 +865,8 @@
       "about": "Acerca de",
       "cleanup": "Limpieza",
       "monitor": "Monitor del sistema",
-      "security": "Seguridad"
+      "security": "Seguridad",
+      "mcp": "MCP local"
     },
     "general": {
       "followSystem": "Seguir el sistema (actual: {language})",
@@ -966,7 +967,30 @@
       "catalog": "Catálogo local: {count} paquete, sincronizado {time} | Catálogo local: {count} paquetes, sincronizados {time}",
       "sync": "Sincronizar ahora"
     },
-    "saved": "Guardado"
+    "saved": "Guardado",
+    "mcp": {
+      "enable": "Activar MCP local",
+      "enableHint": "Permite que las apps de IA de este Mac, como Claude Desktop, Cursor y Codex, busquen apps y lean tu lista de apps instaladas. Desactivado por defecto; mientras esté desactivado, no se acepta ninguna conexión.",
+      "write": "Permitir instalar y desinstalar",
+      "writeHint": "Las apps de IA solo pueden pedirlo. No se ejecuta nada hasta que hagas clic en Permitir en OpenNavo.",
+      "stillOn": "Sigue activado",
+      "offFailed": "No se ha podido desactivar el MCP local. Sigue activado y las apps de IA pueden seguir conectándose. Inténtalo de nuevo.",
+      "writeOffFailed": "No se ha podido desactivar la instalación y desinstalación. Siguen permitidas. Inténtalo de nuevo.",
+      "changeFailed": "No se ha podido cambiar el MCP local. Inténtalo de nuevo.",
+      "config": "Configuración del cliente",
+      "configHint": "Pégala en los ajustes de MCP de tu app de IA. Apunta a la ubicación actual de OpenNavo.",
+      "copy": "Copiar configuración",
+      "copied": "Configuración de {client} copiada",
+      "copyFailed": "No se ha podido copiar la configuración.",
+      "moved": "OpenNavo se ha movido desde que copiaste la configuración. Vuelve a copiarla para que tus apps de IA puedan seguir encontrándolo.",
+      "pathUnavailable": "No se ha encontrado dónde está instalado OpenNavo, así que no hay configuración que copiar.",
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Otro (JSON)"
+      }
+    }
   },
   "mirrors": {
     "official": "Oficial",

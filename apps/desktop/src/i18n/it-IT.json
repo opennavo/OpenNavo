@@ -865,7 +865,8 @@
       "about": "Informazioni",
       "cleanup": "Pulizia",
       "monitor": "Monitoraggio del sistema",
-      "security": "Sicurezza"
+      "security": "Sicurezza",
+      "mcp": "MCP locale"
     },
     "general": {
       "followSystem": "Lingua di sistema (attuale: {language})",
@@ -966,7 +967,30 @@
       "catalog": "Catalogo locale: {count} pacchetto, sincronizzato {time} | Catalogo locale: {count} pacchetti, sincronizzato {time}",
       "sync": "Sincronizza ora"
     },
-    "saved": "Salvato"
+    "saved": "Salvato",
+    "mcp": {
+      "enable": "Attiva MCP locale",
+      "enableHint": "Consente alle app di IA su questo Mac, come Claude Desktop, Cursor e Codex, di cercare app e leggere l’elenco delle app installate. Disattivato per impostazione predefinita; finché è disattivato non viene accettata alcuna connessione.",
+      "write": "Consenti installazione e disinstallazione",
+      "writeHint": "Le app di IA possono solo chiederlo. Non viene eseguito nulla finché non fai clic su Consenti in OpenNavo.",
+      "stillOn": "Ancora attivo",
+      "offFailed": "Impossibile disattivare MCP locale. È ancora attivo e le app di IA possono ancora connettersi. Riprova.",
+      "writeOffFailed": "Impossibile disattivare installazione e disinstallazione. Sono ancora consentite. Riprova.",
+      "changeFailed": "Impossibile modificare MCP locale. Riprova.",
+      "config": "Configurazione del client",
+      "configHint": "Incollala nelle impostazioni MCP della tua app di IA. Punta alla posizione attuale di OpenNavo.",
+      "copy": "Copia configurazione",
+      "copied": "Configurazione di {client} copiata",
+      "copyFailed": "Impossibile copiare la configurazione.",
+      "moved": "OpenNavo è stato spostato dopo che hai copiato la configurazione. Copiala di nuovo perché le tue app di IA possano ancora trovarlo.",
+      "pathUnavailable": "Impossibile trovare dove è installato OpenNavo, quindi non c’è nessuna configurazione da copiare.",
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Altro (JSON)"
+      }
+    }
   },
   "mirrors": {
     "official": "Fonte ufficiale",

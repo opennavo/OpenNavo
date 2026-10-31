@@ -17,6 +17,7 @@ import {
 import AppStoreSettings from '@/components/settings/AppStoreSettings.vue';
 import CleanupSettings from '@/components/settings/CleanupSettings.vue';
 import SecuritySettings from '@/components/settings/SecuritySettings.vue';
+import LocalMcpSettings from '@/components/settings/LocalMcpSettings.vue';
 import MonitorSettings from '@/components/settings/MonitorSettings.vue';
 import MirrorSettings from '@/components/settings/MirrorSettings.vue';
 import AppUpdater from '@/components/settings/AppUpdater.vue';
@@ -43,6 +44,7 @@ type Section =
   | 'cleanup'
   | 'monitor'
   | 'security'
+  | 'mcp'
   | 'privacy'
   | 'about';
 
@@ -92,6 +94,7 @@ const sections: Section[] = [
   'cleanup',
   'monitor',
   'security',
+  'mcp',
   'privacy',
   'about'
 ];
@@ -389,6 +392,8 @@ onMounted(async () => {
         <PermissionGate v-else-if="section === 'security'" feature="security" variant="section"
           ><SecuritySettings
         /></PermissionGate>
+
+        <LocalMcpSettings v-else-if="section === 'mcp'" />
 
         <OnCard v-else-if="section === 'privacy'" padding="none">
           <SettingRow

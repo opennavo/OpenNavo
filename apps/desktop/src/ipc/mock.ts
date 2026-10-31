@@ -13,6 +13,7 @@ import type {
   Kind,
   LinkOpenTarget,
   ListQuery,
+  McpStatus,
   Permissions,
   PrivacyPane,
   SearchQuery,
@@ -43,6 +44,9 @@ import { createMonitorMock } from './mock-data/monitor';
 import { createUninstallMock } from './mock-data/uninstall';
 import { createMockScheduler } from './mock-data/scheduler';
 import type { MockFailure, MockState } from './mock-data/runner';
+
+const MOCK_MCP_COMMAND = '/Applications/OpenNavo.app/Contents/MacOS/opennavo-desktop';
+const MOCK_MCP_SOCKET = '/Users/mock/Library/Application Support/com.opennavo.desktop/mcp/opennavo.sock';
 
 const appInfo: AppInfo = { version: '0.0.0', os: 'macos', arch: 'aarch64' };
 
@@ -264,12 +268,27 @@ export function installMockIpc(
   };
   // Comma-separated ?mock= switches: no-brew, first-run (fresh settings), slow-official / official-down (slow/failed official probe), slow-mirrors (mirrors slower than official),
   // brew-install-fail-download / brew-install-fail-sudo (Homebrew install failures), no-app-management (permission denied for app update/uninstall),
+  // mcp-on / mcp-write-on (Local MCP starts on) / mcp-off-fails (turning Local MCP or its writes off cannot be saved),
   // full_disk_access / no-permission-check / permission-relaunch / permission-relaunch-ineffective (privacy, below), restore, update.
   const flags = new Set(
     typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('mock') ?? '').split(',') : []
   );
   // first-run neither reads nor writes persisted simulated settings, avoiding changes to other tabs at the same URL.
   const persist = persistSettings && !flags.has('first-run');
+  const mcpOn = flags.has('mcp-on') || flags.has('mcp-write-on');
+  let mcp: McpStatus = {
+    enabled: mcpOn,
+    writeEnabled: flags.has('mcp-write-on'),
+    running: mcpOn,
+    socketPath: mcpOn ? MOCK_MCP_SOCKET : null,
+    error: null,
+    commandPath: MOCK_MCP_COMMAND
+  };
+  const mcpOffFailed = () => {
+    const message = 'Permission denied (os error 13)';
+    mcp = { ...mcp, error: `E_MCP_BROKER: ${message}` };
+    throw { code: 'E_MCP_BROKER', message, detail: null };
+  };
   const noBrew = options.brew === false || flags.has('no-brew');
   const installed = noBrew ? [] : installedFixture();
   const state: MockState = {
@@ -755,6 +774,23 @@ export function installMockIpc(
       return { cleared, kept: kept.length };
     },
     history_export_csv: () => state.history.length,
+    // Local MCP: like Rust, a failed "off" keeps the switch on and reports the error in the status.
+    mcp_status: () => ({ ...mcp }),
+    mcp_set_enabled: args => {
+      const enabled = args.enabled as boolean;
+      if (!enabled && mcp.enabled && flags.has('mcp-off-fails')) return mcpOffFailed();
+      mcp = { ...mcp, enabled, running: enabled, writeEnabled: enabled && mcp.writeEnabled, error: null };
+      mcp.socketPath = enabled ? MOCK_MCP_SOCKET : null;
+      return { ...mcp };
+    },
+    mcp_set_write_enabled: args => {
+      const enabled = args.enabled as boolean;
+      if (!mcp.enabled)
+        throw { code: 'E_MCP_DISABLED', message: 'Turn on Local MCP before allowing write tools', detail: null };
+      if (!enabled && mcp.writeEnabled && flags.has('mcp-off-fails')) return mcpOffFailed();
+      mcp = { ...mcp, writeEnabled: enabled, error: null };
+      return { ...mcp };
+    },
     settings_get: () => settings,
     settings_set: args => {
       const before = settings.locale;

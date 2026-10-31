@@ -865,7 +865,8 @@
       "about": "Über uns",
       "cleanup": "Bereinigung",
       "monitor": "Systemmonitor",
-      "security": "Sicherheit"
+      "security": "Sicherheit",
+      "mcp": "Lokales MCP"
     },
     "general": {
       "followSystem": "Systemsprache (aktuell: {language})",
@@ -966,7 +967,30 @@
       "catalog": "Lokales Verzeichnis: {count} Paket, synchronisiert {time} | Lokales Verzeichnis: {count} Pakete, synchronisiert {time}",
       "sync": "Jetzt synchronisieren"
     },
-    "saved": "Gespeichert"
+    "saved": "Gespeichert",
+    "mcp": {
+      "enable": "Lokales MCP aktivieren",
+      "enableHint": "Erlaubt KI-Apps auf diesem Mac wie Claude Desktop, Cursor und Codex, Apps zu suchen und Ihre installierten Apps zu lesen. Standardmäßig aus; solange es aus ist, werden keine Verbindungen angenommen.",
+      "write": "Installieren und Deinstallieren erlauben",
+      "writeHint": "KI-Apps können nur anfragen. Nichts wird ausgeführt, bis Sie in OpenNavo auf „Erlauben“ klicken.",
+      "stillOn": "Noch aktiv",
+      "offFailed": "Lokales MCP konnte nicht deaktiviert werden. Es ist weiterhin aktiv, und KI-Apps können sich weiter verbinden. Bitte versuchen Sie es erneut.",
+      "writeOffFailed": "Installieren und Deinstallieren konnten nicht deaktiviert werden. Beides ist weiterhin erlaubt. Bitte versuchen Sie es erneut.",
+      "changeFailed": "Lokales MCP konnte nicht geändert werden. Bitte versuchen Sie es erneut.",
+      "config": "Client-Konfiguration",
+      "configHint": "Fügen Sie sie in die MCP-Einstellungen Ihrer KI-App ein. Sie verweist auf den aktuellen Speicherort von OpenNavo.",
+      "copy": "Konfiguration kopieren",
+      "copied": "{client}-Konfiguration kopiert",
+      "copyFailed": "Die Konfiguration konnte nicht kopiert werden.",
+      "moved": "OpenNavo wurde verschoben, nachdem Sie die Konfiguration kopiert haben. Kopieren Sie sie erneut, damit Ihre KI-Apps OpenNavo weiterhin finden.",
+      "pathUnavailable": "Der Installationsort von OpenNavo wurde nicht gefunden, daher gibt es keine Konfiguration zum Kopieren.",
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Andere (JSON)"
+      }
+    }
   },
   "mirrors": {
     "official": "Offizielle Quelle",

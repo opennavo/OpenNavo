@@ -1,7 +1,7 @@
 //! Local MCP master-switch commands.
 //!
-//! B2 only exposes the backend switch and status. The Settings UI, write
-//! switch, read tools and config presets arrive in later tasks.
+//! Settings drives both switches through these commands. Write tools arrive
+//! in a later task; the write switch only gates them.
 
 use std::sync::Arc;
 
@@ -29,6 +29,19 @@ pub async fn mcp_set_enabled(
     let broker = broker.inner().clone();
     let switch = Arc::clone(&broker);
     crate::blocking(move || switch.set_enabled(enabled).map_err(map_error)).await?;
+    Ok(broker.status())
+}
+
+/// Allow or forbid Local MCP write tools immediately; turning it off disconnects every client.
+#[tauri::command]
+#[specta::specta]
+pub async fn mcp_set_write_enabled(
+    broker: State<'_, Arc<Broker>>,
+    enabled: bool,
+) -> Result<McpStatus, AppError> {
+    let broker = broker.inner().clone();
+    let switch = Arc::clone(&broker);
+    crate::blocking(move || switch.set_write_enabled(enabled).map_err(map_error)).await?;
     Ok(broker.status())
 }
 
