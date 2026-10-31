@@ -211,9 +211,9 @@ const unlisted = computed(() =>
           </template>
         </dl>
         <template v-if="hasList">
-          <!-- An app request without a name already shows the summary as its heading. -->
+          <!-- An app request without a name already shows the summary as its heading; one without a size has nothing to add. -->
           <p
-            v-if="view.name || !fromApp"
+            v-if="!fromApp || (view.name && (isBrewfile || view.bytes !== null))"
             class="m-0 mt-12px text-12.5px font-600 text-ink-primary"
             data-test="mcp-confirm-summary"
           >
