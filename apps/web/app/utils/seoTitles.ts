@@ -193,6 +193,17 @@ export function textWidth(text: string): number {
   return width;
 }
 
+/** Search results show about 60 columns (≈580 px at the site's type sizes); a wide glyph takes two. */
+export const TITLE_WIDTH = 60;
+
+/**
+ * A title that fits the result-page budget without cutting the package name. The name is what tells
+ * similar pages apart, so the brand suffix goes first when a title does not fit.
+ */
+export function fitTitle(title: string): string {
+  return textWidth(title) <= TITLE_WIDTH ? title : brandlessTitle(title);
+}
+
 // Sentence ends skip abbreviations such as "e.g. PDF"; clause ends skip Latin commas, which also
 // separate list items ("text, files, voice").
 const SENTENCE_END = /(?<!\b\p{L})[.!?](?=\s)|[。！？]/gu;
@@ -259,7 +270,7 @@ export function overviewTitle(pkg: OverviewFacts, t: Translate): string {
     : pkg.isFont && !/\bfonts?\b|字体/iu.test(pkg.displayName)
       ? 'package.seo.titleFont'
       : 'package.seo.titleApp';
-  return withName(t, key, titleName(pkg.displayName));
+  return fitTitle(withName(t, key, titleName(pkg.displayName)));
 }
 
 /** An overview's own search title and description in the page's language, set by editors or agents. */
