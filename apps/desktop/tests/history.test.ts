@@ -367,7 +367,8 @@ it('Clearing keeps what can still be undone or rolled back, and says how many', 
     trashed: 2,
     deleted: 4,
     skipped: [],
-    restorable
+    restorable,
+    planned: []
   });
   context.state.history = [
     {

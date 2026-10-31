@@ -144,6 +144,18 @@ pub struct UninstallOutcome {
     pub deleted: i64,
     pub skipped: Vec<SkippedItem>,
     pub restorable: bool,
+    /// Cleanup only: every selected item as shown before it ran (size and whether that size was fully measured), so a
+    /// finished task can be audited from the database (#116). Empty for uninstall tasks.
+    pub planned: Vec<CleanupPlannedItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupPlannedItem {
+    pub item_id: String,
+    pub path: String,
+    pub size_bytes: Option<u64>,
+    pub size_complete: bool,
 }
 
 // Legacy storage may omit trashedBytes. Keep this input default separate from the
@@ -160,6 +172,8 @@ impl<'de> Deserialize<'de> for UninstallOutcome {
             deleted: i64,
             skipped: Vec<SkippedItem>,
             restorable: bool,
+            #[serde(default)]
+            planned: Vec<CleanupPlannedItem>,
         }
         let stored = StoredOutcome::deserialize(deserializer)?;
         Ok(Self {
@@ -169,6 +183,7 @@ impl<'de> Deserialize<'de> for UninstallOutcome {
             deleted: stored.deleted,
             skipped: stored.skipped,
             restorable: stored.restorable,
+            planned: stored.planned,
         })
     }
 }

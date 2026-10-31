@@ -614,7 +614,7 @@ it.each([0, 1])(
       ...state.history[0]!,
       id: store.taskId,
       state: 'succeeded',
-      outcome: { freedBytes: 42, trashedBytes: 42, trashed: 2, deleted: 0, skipped: [], restorable: true }
+      outcome: { freedBytes: 42, trashedBytes: 42, trashed: 2, deleted: 0, skipped: [], restorable: true, planned: [] }
     });
     const restore = vi
       .spyOn(commands, 'uninstallRestore')

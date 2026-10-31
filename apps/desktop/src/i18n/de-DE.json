@@ -1413,6 +1413,8 @@
     "E_PROTECTED": "Diese App ist geschützt und kann nicht deinstalliert werden",
     "E_APP_MANAGEMENT": "Erlauben Sie OpenNavo zuerst die App-Verwaltung",
     "E_UNINSTALL_INCOMPLETE": "App noch vorhanden. Deinstallation unvollständig; prüfen Sie das Protokoll und versuchen Sie es erneut",
+    "E_CLEANUP_OVERSIZE": "Bereinigung abgebrochen: Die Auswahl ist größer als angezeigt, darüber hinaus wurde nichts entfernt. Erneut scannen und wiederholen.",
+    "E_CLEANUP_SIZE_UNKNOWN": "Die Größe dieses Eintrags wurde nicht vollständig gemessen, daher kann er nicht bereinigt werden. Erneut scannen und wiederholen.",
     "E_PLAN_EXPIRED": "Dateien wurden geändert. Scannen Sie erneut",
     "E_SCAN_CANCELED": "Scan abgebrochen",
     "E_RESTORE_UNAVAILABLE": "Einige Dateien sind nicht mehr im Papierkorb und konnten nicht wiederhergestellt werden",
@@ -1828,6 +1830,7 @@
       "admin": "Administratorpasswort erforderlich",
       "reveal": "Im Finder anzeigen",
       "protect": "Immer behalten",
+      "partial": "Nur teilweise gemessen, daher nicht direkt löschbar. Erneut scannen und wiederholen.",
       "keptOpen": "{count} verwendete Datei bleibt erhalten | {count} verwendete Dateien bleiben erhalten"
     },
     "footer": {
@@ -1843,6 +1846,7 @@
       "count": "Insgesamt {count} Eintrag | Insgesamt {count} Einträge",
       "delete": "{size} endgültig löschen: Caches, Protokolle, Entwickler-Caches und ähnliche regenerierbare Dateien. Nicht rückgängig machbar.",
       "trash": "{size} in den Papierkorb verschieben: Reste gelöschter Apps und ähnliche Dateien. Danach rückgängig machbar.",
+      "partial": "{count} Einträge wurden nur teilweise gemessen (mindestens {size}). Sie sind nicht ausgewählt und werden nicht entfernt.",
       "emptyTrash": "Sie haben den Papierkorb ausgewählt: Sein gesamter Inhalt wird unwiderruflich gelöscht.",
       "admin": "Darunter ist {count} systemweites Hintergrundobjekt; Ihr Administratorpasswort wird einmal angefordert. | Darunter sind {count} systemweite Hintergrundobjekte; Ihr Administratorpasswort wird einmal angefordert.",
       "cancel": "Abbrechen",

@@ -1452,6 +1452,9 @@ const messages: MessageSchema = {
     E_PROTECTED: 'This app is protected and cannot be uninstalled',
     E_APP_MANAGEMENT: 'Allow OpenNavo to manage apps first',
     E_UNINSTALL_INCOMPLETE: 'The app still exists. Uninstall did not complete; check the log and try again.',
+    E_CLEANUP_OVERSIZE:
+      'Cleanup stopped: the selection is larger than shown, so nothing beyond the shown size was removed. Scan again and retry.',
+    E_CLEANUP_SIZE_UNKNOWN: 'This item’s size wasn’t fully measured, so it can’t be cleaned. Scan again and retry.',
     E_PLAN_EXPIRED: 'Files changed. Scan again.',
     E_SCAN_CANCELED: 'Scan canceled',
     E_RESTORE_UNAVAILABLE: 'Some files are no longer in the Trash and could not be put back',
@@ -1882,6 +1885,7 @@ const messages: MessageSchema = {
       admin: 'Needs your administrator password',
       reveal: 'Show in Finder',
       protect: 'Always Keep',
+      partial: 'Only part of this folder was measured, so it can’t be removed directly. Scan again to retry.',
       keptOpen: 'Keeps {count} file in use | Keeps {count} files in use'
     },
     footer: {
@@ -1898,6 +1902,8 @@ const messages: MessageSchema = {
       delete:
         '{size} is deleted for good: caches, logs, developer caches, and similar files that apps rebuild. This can’t be undone.',
       trash: '{size} goes to the Trash: leftovers of deleted apps and similar files. You can undo this afterward.',
+      partial:
+        '{count} item(s) were only partly measured (at least {size}). They’re not selected and won’t be removed.',
       emptyTrash: 'You selected the Trash: everything in it will be emptied and can’t be recovered.',
       admin:
         '{count} of them is a system-level background item and needs your administrator password once. | {count} of them are system-level background items and need your administrator password once.',

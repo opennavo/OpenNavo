@@ -751,6 +751,10 @@ pub struct Meter {
 /// descendants are retained. No cached list of half a million files grants deletion rights.
 /// Large trees are emptied by `workers` threads; every folder is still opened from its verified parent and removed
 /// from it only once everything below it is gone.
+/// Empties and removes a cache folder. `limit` is the most it may free: a file that would take the total past it is
+/// kept and the removal stops with `E_CLEANUP_OVERSIZE`, so a tree larger than what the user was shown is never
+/// emptied past the shown size plus tolerance (#116).
+#[allow(clippy::too_many_arguments)]
 pub fn remove_cache(
     path: &Path,
     before: &Snapshot,
@@ -759,6 +763,7 @@ pub fn remove_cache(
     open: &[PathBuf],
     workers: usize,
     meter: &Meter,
+    limit: u64,
 ) -> Result<u64, AppError> {
     let current = Snapshot::capture(path)?;
     if !same_root(before, &current) {
@@ -781,6 +786,7 @@ pub fn remove_cache(
         open,
         meter,
         bytes: AtomicU64::new(0),
+        limit,
         failure: Mutex::new(None),
         failed: AtomicBool::new(false),
         // Kept unless the root's last piece of work says otherwise.
@@ -865,6 +871,8 @@ struct Removal<'a, P> {
     open: &'a [PathBuf],
     meter: &'a Meter,
     bytes: AtomicU64,
+    /// Bytes this removal may free at most; reserved before each unlink.
+    limit: u64,
     failure: Mutex<Option<AppError>>,
     failed: AtomicBool,
     root_retained: AtomicBool,
@@ -881,8 +889,16 @@ impl<P: Fn(&Path) -> bool + Sync> Removal<'_, P> {
             .get_or_insert(error);
         self.failed.store(true, Ordering::Release);
     }
+    /// Claims room for a file before it is unlinked; false once the limit would be passed.
+    fn reserve(&self, bytes: u64) -> bool {
+        let before = self.bytes.fetch_add(bytes, Ordering::AcqRel);
+        if before.saturating_add(bytes) > self.limit {
+            self.bytes.fetch_sub(bytes, Ordering::AcqRel);
+            return false;
+        }
+        true
+    }
     fn counted(&self, bytes: u64) {
-        self.bytes.fetch_add(bytes, Ordering::AcqRel);
         self.meter.entries.fetch_add(1, Ordering::Relaxed);
         self.meter.bytes.fetch_add(bytes, Ordering::Relaxed);
     }
@@ -942,9 +958,17 @@ impl<P: Fn(&Path) -> bool + Sync> Removal<'_, P> {
                 folder.keep();
                 continue;
             }
+            if !self.reserve(now.bytes) {
+                self.fail(AppError::new("E_CLEANUP_OVERSIZE", "cleanup_item_limit"));
+                folder.keep();
+                break;
+            }
             match folder.dir.unlink(name, false) {
                 Ok(()) => self.counted(now.bytes),
-                Err(_) => folder.keep(),
+                Err(_) => {
+                    self.bytes.fetch_sub(now.bytes, Ordering::AcqRel);
+                    folder.keep();
+                }
             }
         }
         folder.pending.fetch_add(children.len(), Ordering::AcqRel);
@@ -1129,6 +1153,7 @@ mod removal_tests {
             &open,
             workers,
             &meter,
+            u64::MAX,
         );
         (result, meter)
     }
@@ -1163,6 +1188,7 @@ mod removal_tests {
             open: &[],
             meter: &meter,
             bytes: AtomicU64::new(0),
+            limit: u64::MAX,
             failure: Mutex::new(None),
             failed: AtomicBool::new(false),
             root_retained: AtomicBool::new(true),
@@ -1236,6 +1262,45 @@ mod removal_tests {
     }
 
     #[test]
+    fn removal_stops_at_its_byte_limit_and_keeps_the_rest() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap().join("cache");
+        for i in 0..200 {
+            let dir = root.join(format!("{:02}", i % 7));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(format!("f{i}")), [3u8; 8192]).unwrap();
+        }
+        let one = fs::symlink_metadata(root.join("00/f0")).unwrap().blocks() * 512;
+        let limit = one * 20;
+        let before = Snapshot::capture(&root).unwrap();
+        for workers in [1, WORKERS] {
+            let meter = Meter::default();
+            let error = remove_cache(
+                &root,
+                &before,
+                &AtomicBool::new(false),
+                |_| false,
+                &[],
+                workers,
+                &meter,
+                limit,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "E_CLEANUP_OVERSIZE");
+            assert!(meter.bytes.load(Ordering::Acquire) <= limit);
+            assert!(root.exists());
+        }
+        let left = remaining(&root)
+            .iter()
+            .filter(|p| p.components().count() == 2)
+            .count();
+        assert!(
+            left >= 200 - 40,
+            "at most twice the limit's worth of files went, {left} left"
+        );
+    }
+
+    #[test]
     fn parallel_removal_removes_a_fully_removable_root() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap().join("cache");
@@ -1254,6 +1319,7 @@ mod removal_tests {
             &[],
             WORKERS,
             &meter,
+            u64::MAX,
         )
         .unwrap();
         assert!(!root.exists());
@@ -1282,6 +1348,7 @@ mod removal_tests {
             &[],
             WORKERS,
             &meter,
+            u64::MAX,
         );
         assert!(result.is_ok());
         assert!(f.root.exists());

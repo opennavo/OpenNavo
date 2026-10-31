@@ -1413,6 +1413,8 @@
     "E_PROTECTED": "Este app é protegido e não pode ser desinstalado",
     "E_APP_MANAGEMENT": "Primeiro permita que o OpenNavo gerencie apps",
     "E_UNINSTALL_INCOMPLETE": "O aplicativo ainda existe. A desinstalação não foi concluída; confira o registro e tente novamente.",
+    "E_CLEANUP_OVERSIZE": "Limpeza interrompida: a seleção é maior do que o mostrado, e nada além do tamanho mostrado foi removido. Escaneie de novo e tente outra vez.",
+    "E_CLEANUP_SIZE_UNKNOWN": "O tamanho deste item não foi medido por completo, então ele não pode ser limpo. Escaneie de novo e tente outra vez.",
     "E_PLAN_EXPIRED": "Os arquivos mudaram. Verifique de novo.",
     "E_SCAN_CANCELED": "Verificação cancelada",
     "E_RESTORE_UNAVAILABLE": "Alguns arquivos não estão mais no Lixo e não puderam ser restaurados",
@@ -1828,6 +1830,7 @@
       "admin": "Precisa da sua senha de administrador",
       "reveal": "Mostrar no Finder",
       "protect": "Manter sempre",
+      "partial": "Medido só em parte, então não pode ser removido diretamente. Escaneie de novo e tente outra vez.",
       "keptOpen": "Mantém {count} arquivo em uso | Mantém {count} arquivos em uso"
     },
     "footer": {
@@ -1843,6 +1846,7 @@
       "count": "{count} item | {count} itens",
       "delete": "{size} é apagado de vez: caches, logs, caches de desenvolvimento e arquivos parecidos que os apps recriam. Não dá para desfazer.",
       "trash": "{size} vai para o Lixo: restos de apps apagados e arquivos parecidos. Dá para desfazer depois.",
+      "partial": "{count} item(ns) medido(s) só em parte (pelo menos {size}). Não estão selecionados e não serão removidos.",
       "emptyTrash": "Você selecionou o Lixo: tudo o que está nele será apagado e não poderá ser recuperado.",
       "admin": "Inclui {count} item em segundo plano do sistema, que pede sua senha de administrador uma vez. | Inclui {count} itens em segundo plano do sistema, que pedem sua senha de administrador uma vez.",
       "cancel": "Cancelar",

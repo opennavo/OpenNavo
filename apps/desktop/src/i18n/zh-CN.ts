@@ -1417,6 +1417,8 @@ export default {
     E_PROTECTED: '这个 App 受保护，不能卸载',
     E_APP_MANAGEMENT: '需要先允许 OpenNavo 管理 App',
     E_UNINSTALL_INCOMPLETE: '应用仍然存在，卸载未完成；请查看日志后重试',
+    E_CLEANUP_OVERSIZE: '清理已中止：选中的项目实际比显示的大，没有删除超出部分。请重新扫描后再试',
+    E_CLEANUP_SIZE_UNKNOWN: '这一项的大小没有算完，不能清理。请重新扫描后再试',
     E_PLAN_EXPIRED: '文件有变化，请重新扫描',
     E_SCAN_CANCELED: '已取消扫描',
     E_RESTORE_UNAVAILABLE: '有些文件已经不在废纸篓里，没能放回',
@@ -1826,6 +1828,7 @@ export default {
       admin: '需要管理员密码',
       reveal: '在访达中显示',
       protect: '始终保留',
+      partial: '只算出了一部分大小，不能直接删除。重新扫描后再试',
       keptOpen: '保留 {count} 个正在使用的文件'
     },
     footer: {
@@ -1841,6 +1844,7 @@ export default {
       count: '共 {count} 项',
       delete: '{size} 直接删除：缓存、日志、开发工具缓存等，删了会自动重建，无法撤销。',
       trash: '{size} 移到废纸篓：已删除 App 的残留等，完成后可以撤销。',
+      partial: '{count} 项只算出了部分大小（至少 {size}），没有选中，不会删除。',
       emptyTrash: '你勾选了「废纸篓」：里面现有的东西会被清空，无法恢复。',
       admin: '其中 {count} 项是系统级的后台项目，会请求一次管理员密码。',
       cancel: '取消',

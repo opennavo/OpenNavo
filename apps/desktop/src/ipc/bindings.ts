@@ -735,6 +735,7 @@ export type CleanupItem = {
 	kind: CleanupItemKind,
 	command: string | null,
 	sizeBytes: number | null,
+	sizeComplete: boolean,
 	keptOpenFiles: number,
 	modifiedAt: number | null,
 	reason: CleanupReason,
@@ -742,6 +743,13 @@ export type CleanupItem = {
 	deleteMode: DeleteMode,
 	needsAdmin: boolean,
 	note: string | null,
+};
+
+export type CleanupPlannedItem = {
+	itemId: string,
+	path: string,
+	sizeBytes: number | null,
+	sizeComplete: boolean,
 };
 
 export type CleanupItemKind = "file" | "dir" | "command";
@@ -2317,6 +2325,7 @@ export type UninstallOutcome = {
 	deleted: number,
 	skipped: SkippedItem[],
 	restorable: boolean,
+	planned: CleanupPlannedItem[],
 };
 
 export type UninstallPlan = {

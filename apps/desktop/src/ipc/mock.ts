@@ -143,6 +143,13 @@ function mockFailure(
   mirrorKey: string,
   permissions: Permissions
 ): MockFailure | undefined {
+  // #116: a selection that measures larger than shown stops before anything is removed.
+  if (task.op === 'clean' && flags.has('cleanup-oversize'))
+    return {
+      step: 1,
+      error: { code: 'E_CLEANUP_OVERSIZE', message: 'cleanup_oversize', detail: null },
+      lines: ['abort: ~/.npm/_cacache now measures 2.1 GB, shown 640 MB (limit 768 MB); nothing was removed']
+    };
   if (task.op === 'install_homebrew' && flags.has('brew-install-fail-download'))
     return {
       step: 0,

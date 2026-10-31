@@ -471,6 +471,7 @@ pub async fn run(
         deleted: 0,
         skipped: vec![],
         restorable: false,
+        planned: vec![],
     };
     let mode = task
         .options

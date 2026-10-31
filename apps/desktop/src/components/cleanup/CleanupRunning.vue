@@ -33,8 +33,13 @@ const rows = computed(() =>
       : items.every(freesNow)
         ? t('cleanup.run.delete')
         : t('cleanup.run.trash');
-    const size = items.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0);
-    return [{ key: category.key, how, size: formatBytes(size, { locale: appLocale.value }) }];
+    const bytes = formatBytes(
+      items.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0),
+      { locale: appLocale.value }
+    );
+    // A lower bound is never presented as an exact size (#116).
+    const size = items.some(item => !item.sizeComplete) ? t('cleanup.category.atLeast', { size: bytes }) : bytes;
+    return [{ key: category.key, how, size }];
   })
 );
 </script>

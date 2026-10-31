@@ -350,7 +350,15 @@ it('Undo skips known Homebrew tasks without a manifest', async () => {
       ...state.history[0]!,
       id,
       state: 'succeeded',
-      outcome: { freedBytes: 2, trashedBytes: 2, trashed: 1, deleted: 0, skipped: [], restorable: id === 'local' }
+      outcome: {
+        freedBytes: 2,
+        trashedBytes: 2,
+        trashed: 1,
+        deleted: 0,
+        skipped: [],
+        restorable: id === 'local',
+        planned: []
+      }
     });
   const restore = vi
     .spyOn(commands, 'uninstallRestore')
@@ -455,7 +463,8 @@ it.each(['failed', 'canceled'] as const)('Keeps partial %s outcomes available fo
       trashed: 2,
       deleted: 1,
       skipped: [{ itemId: 'kept', path: '/kept', reason: 'in_use' }],
-      restorable: true
+      restorable: true,
+      planned: []
     }
   });
   await flushPromises();
@@ -620,7 +629,7 @@ describe('History', () => {
       state: 'succeeded' as const,
       target: { kind: 'app' as const, token: 'local-zoom' },
       targetName: 'zoom.us',
-      outcome: { freedBytes: 10, trashedBytes: 10, trashed: 2, deleted: 0, skipped: [], restorable: true }
+      outcome: { freedBytes: 10, trashedBytes: 10, trashed: 2, deleted: 0, skipped: [], restorable: true, planned: [] }
     };
     const restore = vi
       .spyOn(commands, 'uninstallRestore')
