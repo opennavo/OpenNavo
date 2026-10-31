@@ -1021,7 +1021,8 @@
           "allowed": "Consentita",
           "denied": "Negata",
           "timedOut": "Nessuna risposta in tempo",
-          "invalidated": "Consentita, poi annullata"
+          "invalidated": "Annullata",
+          "rejected": "Rifiutata senza chiedere"
         }
       }
     }

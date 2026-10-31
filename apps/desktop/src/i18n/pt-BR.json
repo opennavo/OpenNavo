@@ -1021,7 +1021,8 @@
           "allowed": "Permitida",
           "denied": "Negada",
           "timedOut": "Sem resposta a tempo",
-          "invalidated": "Permitida e depois anulada"
+          "invalidated": "Anulada",
+          "rejected": "Recusada sem perguntar"
         }
       }
     }

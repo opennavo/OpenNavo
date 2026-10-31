@@ -14,8 +14,60 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{Manager, Runtime};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tokio::sync::oneshot;
+
+/// Show a native confirmation whose default button (Return) is the refusal. Approving always takes a
+/// deliberate click: the approve button has no key equivalent, and Escape never approves. If the dialog
+/// cannot be shown, `on_reply` is dropped and the waiting request ends as denied.
+fn show_confirmation<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    title: String,
+    message: String,
+    approve: String,
+    refuse: String,
+    on_reply: impl FnOnce(bool) + Send + 'static,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.run_on_main_thread(move || {
+            on_reply(run_alert(&title, &message, &approve, &refuse));
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        // Plugin dialogs make the first button the default, so it is the refusal; `true` means it was chosen.
+        app.dialog()
+            .message(message)
+            .title(title)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(refuse, approve))
+            .show(move |refused| on_reply(!refused));
+    }
+}
+
+/// AppKit alert: refusal added first (default, Return), approval second with no key equivalent.
+#[cfg(target_os = "macos")]
+fn run_alert(title: &str, message: &str, approve: &str, refuse: &str) -> bool {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSAlert, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication};
+    use objc2_foundation::NSString;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    #[allow(deprecated)]
+    NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+    let alert = NSAlert::new(mtm);
+    alert.setAlertStyle(NSAlertStyle::Warning);
+    alert.setMessageText(&NSString::from_str(title));
+    alert.setInformativeText(&NSString::from_str(message));
+    let refuse_button = alert.addButtonWithTitle(&NSString::from_str(refuse));
+    refuse_button.setKeyEquivalent(&NSString::from_str("\r"));
+    let approve_button = alert.addButtonWithTitle(&NSString::from_str(approve));
+    approve_button.setKeyEquivalent(&NSString::from_str(""));
+    alert.runModal() == NSAlertSecondButtonReturn
+}
 
 const DIALOG_TIMEOUT: Duration = Duration::from_secs(60);
 const GRANT_TTL: Duration = Duration::from_secs(30);
@@ -220,20 +272,18 @@ impl ConfirmationService {
         let service = std::sync::Arc::clone(self);
         let dialog_id = pending.id;
         let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        app.dialog()
-            .message(pending.request.message(locale)?)
-            .title(text(locale, "title")?)
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                text(locale, "allow")?,
-                text(locale, "deny")?,
-            ))
-            // tauri-plugin-dialog's desktop adapter calls run_on_main_thread before showing AppKit/rfd.
-            .show(move |allowed| {
+        show_confirmation(
+            app,
+            text(locale, "title")?,
+            pending.request.message(locale)?,
+            text(locale, "allow")?,
+            text(locale, "deny")?,
+            move |allowed| {
                 service.finish_reply(dialog_id, allowed, |result| {
                     let _ = sender.send(result);
                 });
-            });
+            },
+        );
 
         self.wait_for_reply(pending, receiver, guard).await
     }
@@ -252,19 +302,18 @@ impl ConfirmationService {
         let service = std::sync::Arc::clone(self);
         let dialog_id = pending.id;
         let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        app.dialog()
-            .message(message)
-            .title(text(locale, "title")?)
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                text(locale, "allow")?,
-                text(locale, "deny")?,
-            ))
-            .show(move |allowed| {
+        show_confirmation(
+            app,
+            text(locale, "title")?,
+            message,
+            text(locale, "allow")?,
+            text(locale, "deny")?,
+            move |allowed| {
                 service.finish_reply(dialog_id, allowed, |result| {
                     let _ = sender.send(result);
                 });
-            });
+            },
+        );
 
         self.wait_for_reply(pending, receiver, guard).await
     }
@@ -284,19 +333,18 @@ impl ConfirmationService {
         let service = std::sync::Arc::clone(self);
         let dialog_id = pending.id;
         let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        app.dialog()
-            .message(request.collection_message(&items, install_count, locale)?)
-            .title(text(locale, "title")?)
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                text(locale, "installAll")?,
-                text(locale, "cancel")?,
-            ))
-            .show(move |allowed| {
+        show_confirmation(
+            app,
+            text(locale, "title")?,
+            request.collection_message(&items, install_count, locale)?,
+            text(locale, "installAll")?,
+            text(locale, "cancel")?,
+            move |allowed| {
                 service.finish_reply(dialog_id, allowed, |result| {
                     let _ = sender.send(result);
                 });
-            });
+            },
+        );
 
         self.wait_for_reply(pending, receiver, guard).await
     }
@@ -570,15 +618,7 @@ impl ConfirmationService {
 fn display_value(value: &str) -> String {
     const MAX_DISPLAY_CHARS: usize = 512;
     let mut chars = value.chars().filter(|character| {
-        !character.is_control()
-            && !matches!(
-                *character,
-                '\u{202A}'..='\u{202E}'
-                    | '\u{2066}'..='\u{2069}'
-                    | '\u{200E}'
-                    | '\u{200F}'
-                    | '\u{061C}'
-            )
+        !character.is_control() && !crate::mcp::protocol::is_hidden_text(*character)
     });
     let mut display: String = chars.by_ref().take(MAX_DISPLAY_CHARS).collect();
     if chars.next().is_some() {

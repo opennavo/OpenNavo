@@ -1021,7 +1021,8 @@
           "allowed": "Erlaubt",
           "denied": "Abgelehnt",
           "timedOut": "Keine Antwort rechtzeitig",
-          "invalidated": "Erlaubt, dann verworfen"
+          "invalidated": "Verworfen",
+          "rejected": "Ohne Rückfrage abgelehnt"
         }
       }
     }

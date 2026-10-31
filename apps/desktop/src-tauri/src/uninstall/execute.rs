@@ -186,6 +186,19 @@ impl Engine {
         choices: Vec<UninstallChoice>,
         mode: DeleteMode,
     ) -> Result<Vec<Task>, AppError> {
+        self.execute_choices_with(queue, plan_id, choices, mode, false)
+    }
+
+    /// Like [`Self::execute_choices`]; `only_selected` removes exactly the chosen items and none of
+    /// the plan's required ones (Local MCP moves only the app bundle).
+    pub fn execute_choices_with(
+        self: &Arc<Self>,
+        queue: &TaskQueue,
+        plan_id: &str,
+        choices: Vec<UninstallChoice>,
+        mode: DeleteMode,
+        only_selected: bool,
+    ) -> Result<Vec<Task>, AppError> {
         let _guard = self.operation_lock.lock().map_err(poison)?;
         if choices.is_empty()
             || choices.len() > 100
@@ -234,6 +247,7 @@ impl Engine {
                 item_ids: Some(choice.item_ids),
                 delete_mode: Some(mode),
                 quit_running: choice.quit_running,
+                only_selected,
                 ..Default::default()
             };
             self.task_plan(TaskOp::Uninstall, Some(&target), &options)?;
@@ -405,7 +419,7 @@ pub async fn run(
         .items
         .iter()
         .filter(|i| {
-            i.required
+            (i.required && !task.options.only_selected)
                 || task
                     .options
                     .item_ids

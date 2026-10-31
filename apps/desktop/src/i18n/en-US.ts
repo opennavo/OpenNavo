@@ -934,7 +934,8 @@ const messages: MessageSchema = {
           allowed: 'Allowed',
           denied: 'Denied',
           timedOut: 'No answer in time',
-          invalidated: 'Allowed, then cancelled'
+          invalidated: 'Withdrawn',
+          rejected: 'Refused before asking'
         }
       },
       clients: {

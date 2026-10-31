@@ -17,7 +17,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -114,6 +114,9 @@ pub struct Broker {
     lifecycle: Mutex<()>,
     /// Set while a write tool runs (including its dialog).
     writing: AtomicBool,
+    /// Bumped whenever a switch turns off; an approval from an older
+    /// generation is void even if the switches are back on.
+    write_generation: AtomicU64,
     /// Executable a socket peer must run before it may call write tools.
     trusted_client: Option<PathBuf>,
 }
@@ -137,6 +140,7 @@ impl Broker {
             }),
             lifecycle: Mutex::new(()),
             writing: AtomicBool::new(false),
+            write_generation: AtomicU64::new(0),
             // B1: clients run this same executable as `<app binary> mcp`.
             trusted_client: std::env::current_exe().ok(),
         }
@@ -162,6 +166,7 @@ impl Broker {
     /// open) and wait, bounded, until it has returned. Called after a switch
     /// is turned off, with no broker lock held.
     fn drain_writes(&self) {
+        self.write_generation.fetch_add(1, Ordering::AcqRel);
         if let Some(host) = &self.host {
             host.cancel_writes();
         }
@@ -632,7 +637,7 @@ fn call_write(
     if !trusted {
         return Err(rpc_error(
             "E_MCP_UNTRUSTED_CLIENT",
-            "Install and uninstall are only accepted through OpenNavo's own mcp command.",
+            "Install and uninstall are only accepted through OpenNavo's own mcp command. If OpenNavo was just moved, restart OpenNavo.",
         ));
     }
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -648,6 +653,7 @@ fn call_write(
     let Some(_slot) = WriteSlot::acquire(&broker) else {
         return Err(rpc_error("E_BUSY", super::tools::BUSY_MESSAGE));
     };
+    let generation = broker.write_generation.load(Ordering::Acquire);
     let check = weak.clone();
     let context = super::tools::WriteContext {
         connection,
@@ -658,9 +664,10 @@ fn call_write(
         // must not leave an approval behind.
         still_valid: Arc::new(move || {
             peer.as_ref().is_some_and(peer_open)
-                && check
-                    .upgrade()
-                    .is_some_and(|broker| broker.write_valid(connection))
+                && check.upgrade().is_some_and(|broker| {
+                    broker.write_generation.load(Ordering::Acquire) == generation
+                        && broker.write_valid(connection)
+                })
         }),
     };
     drop(broker);
@@ -1514,6 +1521,9 @@ mod tests {
         let context = entered.recv_timeout(Duration::from_secs(5)).expect("write");
         assert!((context.still_valid)());
         broker.set_write_enabled(false).expect("write off");
+        assert!(!(context.still_valid)());
+        // Turning writes back on does not revive an approval from before.
+        broker.set_write_enabled(true).expect("write on");
         assert!(!(context.still_valid)());
         release.send(()).expect("release");
         let _ = call.join();

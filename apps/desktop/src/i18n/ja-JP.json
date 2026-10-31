@@ -1021,7 +1021,8 @@
           "allowed": "許可済み",
           "denied": "拒否",
           "timedOut": "時間内に応答なし",
-          "invalidated": "許可後に無効化"
+          "invalidated": "取り消し済み",
+          "rejected": "確認前に拒否"
         }
       }
     }

@@ -383,8 +383,8 @@ export type AuditCaller = {
 	pid: number | null,
 };
 
-/**  The user's answer; `invalidated` means approved but discarded because the connection or a switch went away first. */
-export type AuditDecision = "allowed" | "denied" | "timedOut" | "invalidated";
+/**  The user's answer; `invalidated`: withdrawn because the connection or a switch went away; `rejected`: refused before asking. */
+export type AuditDecision = "allowed" | "denied" | "timedOut" | "invalidated" | "rejected";
 
 /**  One write request as shown in Settings. */
 export type AuditEntry = {
@@ -2206,6 +2206,8 @@ export type TaskOptions = {
 	reopen?: boolean,
 	/**  Rollback only: the history id of the update being undone. */
 	rollbackOf?: string | null,
+	/**  Uninstall only: remove exactly `item_ids`, without the plan's required items (Local MCP). */
+	onlySelected?: boolean,
 };
 
 export type TaskPhase = "scanning" | "preparing" | "fetching" | "downloading" | "installing" | "linking" | "cleaning" | "uninstalling" | "updating" | "finishing";

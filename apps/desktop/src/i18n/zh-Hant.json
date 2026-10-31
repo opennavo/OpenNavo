@@ -915,7 +915,8 @@
           "allowed": "已允許",
           "denied": "已拒絕",
           "timedOut": "超時未答覆",
-          "invalidated": "已允許，隨後作廢"
+          "invalidated": "已作廢",
+          "rejected": "未詢問即拒絕"
         }
       },
       "clients": {

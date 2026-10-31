@@ -48,7 +48,7 @@ pub struct AuditCaller {
     pub pid: Option<i32>,
 }
 
-/// The user's answer; `invalidated` means approved but discarded because the connection or a switch went away first.
+/// The user's answer; `invalidated`: withdrawn because the connection or a switch went away; `rejected`: refused before asking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum AuditDecision {
@@ -56,6 +56,7 @@ pub enum AuditDecision {
     Denied,
     TimedOut,
     Invalidated,
+    Rejected,
 }
 
 /// One write request as shown in Settings.

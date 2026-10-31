@@ -116,14 +116,16 @@ impl Session {
 /// values. The client-supplied name is never echoed.
 pub fn sanitize_client_name(name: &str) -> String {
     name.chars()
-        .filter(|character| {
-            !character.is_control()
-                && !is_line_separator(*character)
-                && !is_bidi_control(*character)
-                && !is_invisible_format(*character)
-        })
+        .filter(|character| !character.is_control() && !is_hidden_text(*character))
         .take(64)
         .collect()
+}
+
+/// Characters that must never reach a single-line display: line and paragraph
+/// separators, bidirectional formatting, and invisible formatting. Shared by
+/// the client name, the confirmation dialog and its displayed values.
+pub fn is_hidden_text(character: char) -> bool {
+    is_line_separator(character) || is_bidi_control(character) || is_invisible_format(character)
 }
 
 /// Unicode line separator (U+2028) and paragraph separator (U+2029).
@@ -142,11 +144,12 @@ fn is_bidi_control(character: char) -> bool {
     )
 }
 
-/// Zero-width space, byte-order mark, and the Unicode tag block.
+/// Zero-width characters, word joiner and invisible operators, byte-order
+/// mark, and the Unicode tag block.
 fn is_invisible_format(character: char) -> bool {
     matches!(
         character,
-        '\u{200B}' | '\u{FEFF}' | '\u{E0000}'..='\u{E007F}'
+        '\u{200B}'..='\u{200D}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}' | '\u{E0000}'..='\u{E007F}'
     )
 }
 

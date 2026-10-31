@@ -910,7 +910,8 @@ export default {
           allowed: '已允许',
           denied: '已拒绝',
           timedOut: '超时未答复',
-          invalidated: '已允许，随后作废'
+          invalidated: '已作废',
+          rejected: '未询问即拒绝'
         }
       },
       clients: {

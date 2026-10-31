@@ -68,10 +68,35 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 impl Writes {
     pub fn run(&self, request: WriteRequest, context: WriteContext) -> Result<Value, ToolError> {
         self.audit.check().map_err(|_| audit_unavailable())?;
-        let plan = block_on(self.plan(&request))?;
         let identity = self.identify(&context);
+        // The entry exists before anything can fail, so every refusal is recorded with its reason.
+        let mut entry = AuditEntry {
+            id: uuid::Uuid::now_v7().to_string(),
+            at: audit::now_ms(),
+            tool: request.tool().to_owned(),
+            object: request.object(),
+            caller: identity.caller.clone(),
+            decision: AuditDecision::Rejected,
+            result: None,
+        };
+        let reject = |entry: &mut AuditEntry, decision, error: ToolError| {
+            refuse(&self.audit, entry, decision, error)
+        };
+        let plan = match block_on(self.plan(&request)) {
+            Ok(plan) => plan,
+            Err(error) => return Err(reject(&mut entry, AuditDecision::Rejected, error)),
+        };
         let locale = crate::confirmation::app_locale(&self.app);
-        let message = dialog_message(locale, &plan, &identity).map_err(tool_error)?;
+        let message = match dialog_message(locale, &plan, &identity) {
+            Ok(message) => message,
+            Err(error) => {
+                return Err(reject(
+                    &mut entry,
+                    AuditDecision::Rejected,
+                    tool_error(error),
+                ));
+            }
+        };
         let confirmation_request = ConfirmationRequest {
             caller: MCP_CALLER.into(),
             source: identity.caller.path.clone().unwrap_or_default(),
@@ -82,58 +107,60 @@ impl Writes {
                 Plan::Uninstall { plan_id, .. } => Some(plan_id.clone()),
             },
         };
-        let service = self.confirmation()?;
+        let service = match self.confirmation() {
+            Ok(service) => service,
+            Err(error) => return Err(reject(&mut entry, AuditDecision::Rejected, error)),
+        };
         // Planning can take a while; do not open a dialog for a request that is already void.
         if !(context.still_valid)() {
-            return Err(invalidated());
+            return Err(reject(
+                &mut entry,
+                AuditDecision::Invalidated,
+                invalidated(),
+            ));
         }
         let decision =
             block_on(service.confirm_message(&self.app, confirmation_request.clone(), message));
-        let mut entry = AuditEntry {
-            id: uuid::Uuid::now_v7().to_string(),
-            at: audit::now_ms(),
-            tool: request.tool().to_owned(),
-            object: request.object(),
-            caller: identity.caller,
-            decision: AuditDecision::Denied,
-            result: None,
-        };
         let grant = match decision {
             Ok(grant) => grant,
-            Err(error) if error.code == "E_BUSY" => {
-                return Err(ToolError::new("E_BUSY", BUSY_MESSAGE));
-            }
-            Err(error) if error.code == "E_CONFIRMATION_INVALIDATED" => {
-                entry.decision = AuditDecision::Invalidated;
-                let _ = self.audit.record(&entry, entry.at);
-                return Err(invalidated());
-            }
             Err(error) => {
-                entry.decision = if error.code == "E_CONFIRMATION_TIMEOUT" {
-                    AuditDecision::TimedOut
-                } else {
-                    AuditDecision::Denied
+                let (decision, error) = match error.code.as_str() {
+                    "E_BUSY" => (
+                        AuditDecision::Rejected,
+                        ToolError::new("E_BUSY", BUSY_MESSAGE),
+                    ),
+                    "E_CONFIRMATION_INVALIDATED" => (AuditDecision::Invalidated, invalidated()),
+                    "E_CONFIRMATION_TIMEOUT" => (
+                        AuditDecision::TimedOut,
+                        ToolError::new(
+                            "E_CONFIRMATION_TIMEOUT",
+                            "The user did not answer the confirmation in time.",
+                        ),
+                    ),
+                    _ => (
+                        AuditDecision::Denied,
+                        ToolError::new(
+                            "E_CONFIRMATION_DENIED",
+                            "The user denied this request in OpenNavo.",
+                        ),
+                    ),
                 };
-                let _ = self.audit.record(&entry, entry.at);
-                return Err(match entry.decision {
-                    AuditDecision::TimedOut => ToolError::new(
-                        "E_CONFIRMATION_TIMEOUT",
-                        "The user did not answer the confirmation in time.",
-                    ),
-                    _ => ToolError::new(
-                        "E_CONFIRMATION_DENIED",
-                        "The user denied this request in OpenNavo.",
-                    ),
-                });
+                return Err(reject(&mut entry, decision, error));
             }
         };
-        service
-            .consume(&grant, &confirmation_request)
-            .map_err(tool_error)?;
+        if let Err(error) = service.consume(&grant, &confirmation_request) {
+            return Err(reject(
+                &mut entry,
+                AuditDecision::Invalidated,
+                tool_error(error),
+            ));
+        }
         if !(context.still_valid)() {
-            entry.decision = AuditDecision::Invalidated;
-            let _ = self.audit.record(&entry, audit::now_ms());
-            return Err(invalidated());
+            return Err(reject(
+                &mut entry,
+                AuditDecision::Invalidated,
+                invalidated(),
+            ));
         }
         entry.decision = AuditDecision::Allowed;
         self.audit
@@ -345,7 +372,7 @@ impl Writes {
                 let queue = self.core.queue.clone();
                 let engine = queue.uninstall_engine.clone();
                 let tasks = crate::blocking(move || {
-                    engine.execute_choices(
+                    engine.execute_choices_with(
                         &queue,
                         &plan_id,
                         vec![UninstallChoice {
@@ -354,6 +381,7 @@ impl Writes {
                             quit_running: false,
                         }],
                         DeleteMode::Trash,
+                        true,
                     )
                 })
                 .await
@@ -419,6 +447,20 @@ fn item_name(item: &crate::model::CatalogItem) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Record a write that ends without running, then hand back its error. The
+/// write is refused either way, so a failed record changes nothing.
+fn refuse(
+    audit: &Audit,
+    entry: &mut AuditEntry,
+    decision: AuditDecision,
+    error: ToolError,
+) -> ToolError {
+    entry.decision = decision;
+    entry.result = Some(error.code.clone());
+    let _ = audit.record(entry, audit::now_ms());
+    error
+}
+
 /// Confirmation caller for every Local MCP write; switch-off revokes by it.
 const MCP_CALLER: &str = "local mcp";
 
@@ -451,8 +493,8 @@ fn text(locale: Locale, key: &str) -> Result<String, AppError> {
 fn one_line(value: &str) -> String {
     let cleaned: String = value
         .chars()
-        // Bidi overrides and zero-width characters could reorder or hide text in the dialog.
-        .filter(|character| !is_invisible(*character))
+        // Separators, bidi overrides and invisible characters could reorder or hide text in the dialog.
+        .filter(|character| !super::protocol::is_hidden_text(*character))
         .map(|character| {
             if character.is_control() {
                 ' '
@@ -463,18 +505,6 @@ fn one_line(value: &str) -> String {
         .take(300)
         .collect();
     cleaned.trim().to_owned()
-}
-
-fn is_invisible(character: char) -> bool {
-    matches!(
-        character,
-        '\u{061C}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{2069}'
-            | '\u{FEFF}'
-    )
 }
 
 /// The main caller line: signer when signed, otherwise "Unsigned · path".
@@ -588,6 +618,32 @@ mod tests {
     }
 
     #[test]
+    fn refusals_are_recorded_with_decision_and_result() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let audit = Audit::new(dir.path());
+        let mut entry = AuditEntry {
+            id: "a".into(),
+            at: audit::now_ms(),
+            tool: "install_app".into(),
+            object: "cask/iina".into(),
+            caller: caller(false),
+            decision: AuditDecision::Allowed,
+            result: None,
+        };
+        let error = refuse(
+            &audit,
+            &mut entry,
+            AuditDecision::Rejected,
+            ToolError::new("E_BUSY", BUSY_MESSAGE),
+        );
+        assert_eq!(error.code, "E_BUSY");
+        let listed = audit.list(audit::now_ms()).expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].decision, AuditDecision::Rejected);
+        assert_eq!(listed[0].result.as_deref(), Some("E_BUSY"));
+    }
+
+    #[test]
     fn one_line_strips_control_characters() {
         assert_eq!(one_line("evil\nAllowed: yes\u{7}"), "evil Allowed: yes");
         assert_eq!(one_line(&"x".repeat(400)).len(), 300);
@@ -596,5 +652,6 @@ mod tests {
             "IINAppa.exe"
         );
         assert_eq!(one_line("a\u{2066}b\u{2069}c\u{200F}"), "abc");
+        assert_eq!(one_line("a\u{2028}b\u{2029}c\u{E0041}d"), "abcd");
     }
 }
