@@ -465,6 +465,7 @@ mod expiry_tests {
                 kind: CleanupItemKind::File,
                 command: None,
                 size_bytes: Some(10),
+                size_complete: true,
                 kept_open_files: 0,
                 modified_at: None,
                 reason: CleanupReason::LogFile,
