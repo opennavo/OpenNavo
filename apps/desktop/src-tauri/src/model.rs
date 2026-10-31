@@ -384,7 +384,6 @@ pub struct TaskOptions {
     /// Rollback only: the history id of the update being undone.
     pub rollback_of: Option<String>,
     /// Uninstall only: remove exactly `item_ids`, without the plan's required items (Local MCP).
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub only_selected: bool,
 }
 
