@@ -8,6 +8,7 @@ import {
   detailsDescription,
   DESCRIPTION_WIDTH,
   fitSummary,
+  fitTitle,
   overrideDescription,
   overrideTitle,
   overviewDescription as describeOverview,
@@ -18,6 +19,7 @@ import {
   pagedTitle,
   reliableVersion,
   textWidth,
+  TITLE_WIDTH,
   titleName,
   usableSummary,
   variantLabel,
@@ -95,7 +97,7 @@ describe('WP1 titles and descriptions', () => {
       const title = overviewTitle(pkg, t);
       const description = overviewDescription(pkg, t);
       expect(title).toContain(pkg.displayName);
-      expect(title.endsWith(' · OpenNavo')).toBe(true);
+      // Brand and budget rules are asserted in "Title width budget" below.
       expect(`${title} ${description}`).not.toMatch(/[{}]|brew install|undefined|null/);
       if (!pkg.summary || pkg.disabled) expect(description).toContain(pkg.displayName);
       // The whole summary leads; the section sentence follows only when it fits after it.
@@ -204,6 +206,28 @@ describe('WP1 titles and descriptions', () => {
   });
 });
 
+describe('Title width budget', () => {
+  it('keeps ru and ja app titles within 60 columns for a 20-character name', () => {
+    for (const code of ['ru-RU', 'ja-JP'] as const)
+      for (const isFont of [false, true]) {
+        const title = overviewTitle({ ...app, displayName: 'ABCDEFGHIJKLMNOPQRST', isFont }, translator(code));
+        expect(textWidth(title), title).toBeLessThanOrEqual(TITLE_WIDTH);
+        expect(title).toContain('ABCDEFGHIJKLMNOPQRST');
+      }
+  });
+
+  it('drops the brand before the name and never cuts the name', () => {
+    const t = translator('en-US');
+    const short = overviewTitle({ ...app, displayName: 'Zen' }, t);
+    expect(short.endsWith(' · OpenNavo')).toBe(true);
+    const long = overviewTitle({ ...app, displayName: longName }, t);
+    expect(long).toContain(longName);
+    expect(long.endsWith(' · OpenNavo')).toBe(false);
+    expect(textWidth(long)).toBeGreaterThan(TITLE_WIDTH);
+    expect(fitTitle('Zen for Mac · OpenNavo')).toBe('Zen for Mac · OpenNavo');
+  });
+});
+
 describe('App names that already name the platform', () => {
   // [WeChat for Mac, 微信 Mac 版 (the Chinese catalog name), WeChat for Mac when Homebrew disabled it]
   const expected: Record<(typeof LOCALES)[number], [string, string, string]> = {
@@ -214,8 +238,8 @@ describe('App names that already name the platform', () => {
       'WeChat for Mac · OpenNavo'
     ],
     'ja-JP': [
-      'WeChat for Mac ダウンロード・インストール · OpenNavo',
-      '微信 for Mac ダウンロード・インストール · OpenNavo',
+      'WeChat for Mac ダウンロード · OpenNavo',
+      '微信 for Mac ダウンロード · OpenNavo',
       'WeChatの Mac 版 · OpenNavo'
     ],
     'es-ES': [
@@ -225,8 +249,8 @@ describe('App names that already name the platform', () => {
     ],
     'pt-BR': ['Baixar WeChat para Mac · OpenNavo', 'Baixar 微信 para Mac · OpenNavo', 'WeChat para Mac · OpenNavo'],
     'ru-RU': [
-      'WeChat для Mac — скачать и установить · OpenNavo',
-      '微信 для Mac — скачать и установить · OpenNavo',
+      'WeChat для Mac — скачать · OpenNavo',
+      '微信 для Mac — скачать · OpenNavo',
       'WeChat для компьютеров Mac · OpenNavo'
     ],
     'de-DE': [
