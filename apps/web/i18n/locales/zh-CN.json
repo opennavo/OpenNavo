@@ -948,13 +948,7 @@
     "pageLink": "{title}，第 {page} 页",
     "bucketsLabel": "按首字母浏览",
     "leafMetaTitle": "{title}（A–Z 索引）· OpenNavo",
-    "leafDescription": "{title}，按名称排列，共 {count} 个，每个都有介绍、版本记录和安装方式。",
-    "directory": {
-      "kicker": "目录",
-      "title": "按目录找 App",
-      "body": "按用途浏览分类，看编辑整理的合集，或者在全部应用和 A–Z 索引里找到每一个 App。",
-      "category": "{name}类应用"
-    }
+    "leafDescription": "{title}，按名称排列，共 {count} 个，每个都有介绍、版本记录和安装方式。"
   },
   "feeds": {
     "subscribe": "订阅更新（RSS）",

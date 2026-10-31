@@ -2258,20 +2258,13 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       }
     );
   }
-  await t.test('home directories and disabled desktop cask render in SSR', async () => {
+  await t.test('home omits the directory block and the disabled desktop cask in SSR', async () => {
     for (const prefix of ['', '/zh']) {
       const html = await (await fetch(`${origin}${prefix || '/'}`, { headers: { accept: 'text/html' } })).text();
       assert.ok(!html.includes('brew install --cask opennavo'));
-      for (const [kind, minimum] of [
-        ['categories', 6],
-        ['collections', 4],
-        ['articles', 3]
-      ]) {
-        const links = [...html.matchAll(new RegExp(`href="(${prefix}/${kind}/[a-z0-9-]+)"`, 'g'))].map(
-          match => match[1]
-        );
-        assert.ok(new Set(links).size >= minimum, `${prefix}/${kind}: ${links}`);
-      }
+      // The directory links block (four entry cards and the category / collection / article columns) was removed.
+      assert.ok(!/id="directory-(categories|collections|articles)"/.test(html), `${prefix}: directory columns`);
+      assert.ok(!/href="[^"]*\/articles\/[a-z0-9-]+"/.test(html), `${prefix}: article links`);
 
       const download = await (await fetch(`${origin}${prefix}/download`, { headers: { accept: 'text/html' } })).text();
       assert.ok(!download.includes('brew install --cask opennavo'));
