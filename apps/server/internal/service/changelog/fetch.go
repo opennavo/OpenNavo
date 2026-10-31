@@ -12,6 +12,12 @@ import (
 	"github.com/opennavo/opennavo/server/internal/jobs"
 )
 
+// fetchLease is how long a source enqueued by the schedule stays claimed. Its next_fetch_at moves this far
+// ahead at enqueue, so later ticks cannot enqueue it again while the task waits in a backlog; the fetch
+// itself then sets the real next_fetch_at (interval on success, backoff on failure). Only a task that is
+// lost without running waits out the lease.
+const fetchLease = 2 * time.Hour
+
 type Enqueuer interface {
 	Enqueue(context.Context, string, jobs.Payload, jobs.Metadata) (string, error)
 }
@@ -111,6 +117,17 @@ func (s *Service) fetch(ctx context.Context, id int64, observed map[string]any) 
 		source.Since = &since
 	}
 	result, err := s.Fetcher.Fetch(ctx, p, source)
+	if err != nil && errors.Is(err, context.Canceled) {
+		// A worker shutdown cancels the run and asynq requeues it: not an upstream failure, so the backoff
+		// and fail_count stay as they were. The source becomes due again right away.
+		write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if saveErr := s.Store.ChangelogCanceled(write, id, s.now()); saveErr != nil {
+			return nil, saveErr
+		}
+		category, _ := pipeline.Failure(err)
+		return map[string]any{"status": "canceled", "source": state.Type, "errorCategory": category}, err
+	}
 	if err != nil {
 		status, next := "error", s.now().Add(time.Duration(math.Pow(2, float64(min(state.FailCount+1, 8))))*time.Hour)
 		if next.After(s.now().Add(7 * 24 * time.Hour)) {
@@ -123,7 +140,10 @@ func (s *Service) fetch(ctx context.Context, id int64, observed map[string]any) 
 		} else if errors.As(err, &httpError) && httpError.Status == 404 {
 			status = "not_found"
 		}
-		if saveErr := s.Store.ChangelogFailure(context.WithoutCancel(ctx), id, status, pipeline.FailureMessage(err), next); saveErr != nil {
+		// Record the failure even after a timeout ended the run context, within its own deadline.
+		write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if saveErr := s.Store.ChangelogFailure(write, id, status, pipeline.FailureMessage(err), next); saveErr != nil {
 			return nil, saveErr
 		}
 		category, httpStatus := pipeline.Failure(err)
@@ -160,7 +180,9 @@ func (s *Service) Schedule(ctx context.Context) (map[string]any, error) {
 			return nil, err
 		}
 	}
-	ids, err := s.Store.ChangelogDue(ctx, s.now())
+	// Claim due sources by moving next_fetch_at past the lease before enqueueing, so a backlog longer
+	// than the task's uniqueness lock cannot enqueue the same source on the next tick.
+	ids, err := s.Store.ClaimChangelogDue(ctx, s.now(), s.now().Add(fetchLease))
 	if err != nil {
 		return nil, err
 	}

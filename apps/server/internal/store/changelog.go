@@ -185,3 +185,20 @@ func (s *Store) ChangelogSourceIdentity(ctx context.Context, id int64) (Changelo
 	}
 	return row, nil
 }
+
+// ClaimChangelogDue returns the due sources (same selection as ChangelogDue) and moves their next_fetch_at to
+// leaseUntil in the same statement, so concurrent or later schedule ticks do not select them again.
+func (s *Store) ClaimChangelogDue(ctx context.Context, now, leaseUntil time.Time) ([]int64, error) {
+	ids, err := s.ChangelogDue(ctx, now)
+	if err != nil || len(ids) == 0 {
+		return ids, err
+	}
+	claimed := []int64{}
+	err = s.DB.WithContext(ctx).Raw("UPDATE changelog_sources SET next_fetch_at=? WHERE id IN ? AND next_fetch_at<=? RETURNING id", leaseUntil, ids, now).Scan(&claimed).Error
+	return claimed, err
+}
+
+// ChangelogCanceled makes a canceled fetch due again without counting it as a failure.
+func (s *Store) ChangelogCanceled(ctx context.Context, id int64, now time.Time) error {
+	return s.DB.WithContext(ctx).Exec("UPDATE changelog_sources SET next_fetch_at=?,updated_at=? WHERE id=?", now, now, id).Error
+}

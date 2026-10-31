@@ -309,6 +309,13 @@ func (s *Store) ApplyCatalogBatchWithLifecycle(ctx context.Context, mutations []
 					return fmt.Errorf("record package alias: %w", err)
 				}
 			}
+			if versionChanged {
+				// The outbox below enqueues this package's changelog fetches; lease them like the schedule
+				// does (changelog.fetchLease) so a backlog cannot make the next tick enqueue them again.
+				if err := tx.WithContext(ctx).Exec("UPDATE changelog_sources SET next_fetch_at=GREATEST(next_fetch_at,now()+interval '2 hours') WHERE package_id=? AND enabled", id).Error; err != nil {
+					return fmt.Errorf("lease changelog sources: %w", err)
+				}
+			}
 			if isNew || versionChanged {
 				if err := tx.WithContext(ctx).Exec("INSERT INTO package_versions (package_id,version,version_base,first_seen_at) VALUES (?,?,?,now()) ON CONFLICT (package_id,version) DO NOTHING", id, item.Version, item.VersionBase).Error; err != nil {
 					return fmt.Errorf("record package version: %w", err)

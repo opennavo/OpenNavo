@@ -100,6 +100,8 @@ func TestCommitFetchIdempotenceHistoryAndBackoff(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, before, requests, "retired sources must never reach the transport")
 	queue.Count = 0
+	// The first tick leased the Homebrew source; make it due again to check the selection.
+	require.NoError(t, st.DB.WithContext(ctx).Exec("UPDATE changelog_sources SET next_fetch_at=? WHERE id=?", now.Add(-time.Minute), sid).Error)
 	stats, err = svc.Schedule(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, stats["sources"])
