@@ -492,6 +492,7 @@
     },
     "repo": {
       "stars": "星標數",
+      "starsBadge": "GitHub 星標 {count}",
       "checked": "倉庫資料核查於 {date}。",
       "updated": "{days} 天前更新",
       "unmaintained": "可能已停止維護",

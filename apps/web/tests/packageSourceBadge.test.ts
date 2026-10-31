@@ -338,3 +338,32 @@ it.each(lifecycleCases.filter(item => item.expected === 'deprecated' || item.exp
     expect(card.querySelector('button[aria-label="Copy install command"]')).not.toBeNull();
   }
 );
+
+it('shows the GitHub star chip right of the source badge, linked and labelled', async () => {
+  const value = pkg();
+  (value as unknown as Record<string, unknown>).repository = { url: 'https://github.com/iina/iina', stars: 46966 };
+  locale = 'zh-CN';
+  const page = await render(value);
+  const tags = page.querySelector('[data-testid="package-header-tags"]')!;
+  const star = tags.querySelector<HTMLAnchorElement>('[data-testid="package-star-badge"]')!;
+  expect(star.textContent?.replace(/\s+/g, ' ').trim()).toBe('★ 4.7万');
+  expect(star.getAttribute('href')).toBe('https://github.com/iina/iina');
+  expect(star.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+  expect(star.getAttribute('aria-label')).toBe('GitHub 星标 46,966');
+  const badge = tags.querySelector('[data-testid="package-source-badge"]')!;
+  expect(badge.compareDocumentPosition(star) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('hides the star chip without stars or without a GitHub repository', async () => {
+  const none = pkg();
+  delete (none as unknown as Record<string, unknown>).repository;
+  expect((await render(none)).querySelector('[data-testid="package-star-badge"]')).toBeNull();
+  const gitlab = pkg();
+  (gitlab as unknown as Record<string, unknown>).repository = { url: 'https://gitlab.com/a/b', stars: 10 };
+  delete (gitlab as unknown as Record<string, unknown>).openSource;
+  expect((await render(gitlab)).querySelector('[data-testid="package-star-badge"]')).toBeNull();
+});
+
+it.each(SITE_LOCALES)('has star badge copy in %s', value => {
+  expect(siteMessage(value, 'package.repo.starsBadge', { count: '1' })).toMatch(/GitHub.*1|1.*GitHub/);
+});

@@ -27,6 +27,7 @@ export { default as OnMarkdownView } from './components/OnMarkdownView.vue';
 export { default as OnOffline } from './components/OnOffline.vue';
 export { default as OnPackageHeader } from './components/OnPackageHeader.vue';
 export { default as OnPackageSourceBadge } from './components/OnPackageSourceBadge.vue';
+export { default as OnPackageStarBadge } from './components/OnPackageStarBadge.vue';
 export { default as OnPackageListView } from './components/OnPackageListView.vue';
 export { default as OnPackageNotice } from './components/OnPackageNotice.vue';
 export { default as OnPackageOverview } from './components/OnPackageOverview.vue';
@@ -105,6 +106,7 @@ export type { OnModalProps, OnModalSize } from './components/OnModal.vue';
 export type { OnOfflineProps } from './components/OnOffline.vue';
 export type { OnPackageHeaderChip, OnPackageHeaderProps } from './components/OnPackageHeader.vue';
 export type { OnPackageSourceBadgeProps } from './components/OnPackageSourceBadge.vue';
+export type { OnPackageStarBadgeProps } from './components/OnPackageStarBadge.vue';
 export type { OnPackageListViewProps } from './components/OnPackageListView.vue';
 export type { OnPackageNoticeProps } from './components/OnPackageNotice.vue';
 export type { OnPackageOverviewProps, OnRelatedPackage } from './components/OnPackageOverview.vue';
@@ -160,8 +162,10 @@ export {
   repoAgeDays,
   repoMaintenanceStatus,
   repoSignalDays,
-  toPackageRepoSignals
+  toPackageRepoSignals,
+  toPackageStarBadge
 } from './utils/repoSignals';
+export type { PackageStarBadge } from './utils/repoSignals';
 export type { PackageRepoSignals } from './utils/repoSignals';
 export type { PackageRepositoryInput } from './utils/repoSignals';
 export { commandBreak } from './utils/command';

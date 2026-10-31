@@ -492,6 +492,7 @@
     },
     "repo": {
       "stars": "★",
+      "starsBadge": "Estrellas en GitHub: {count}",
       "updated": "Actualizado hace {days} día | Actualizado hace {days} días",
       "unmaintained": "Puede que ya no reciba mantenimiento",
       "archived": "Archivado",

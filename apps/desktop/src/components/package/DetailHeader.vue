@@ -3,7 +3,16 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { PackageDetail } from '@opennavo/api';
 import { formatDate, isThirdPartyTap, packageInstallState, toPackageSource } from '@opennavo/shared';
-import { displayUrl, OnButton, OnIcon, OnMenu, OnPackageHeader, toPackageRepoSignals } from '@opennavo/ui';
+import {
+  displayUrl,
+  OnButton,
+  OnIcon,
+  OnMenu,
+  OnPackageHeader,
+  OnPackageStarBadge,
+  toPackageRepoSignals,
+  toPackageStarBadge
+} from '@opennavo/ui';
 import type { OnPackageHeaderChip } from '@opennavo/ui';
 import PackageGetButton from './PackageGetButton.vue';
 import DetailSourceBadge from './DetailSourceBadge.vue';
@@ -45,6 +54,13 @@ const subtitle = computed(() => [props.detail?.developer, summary.value].filter(
 const iconUrl = computed(() => props.detail?.iconUrl ?? props.local?.iconUrl ?? null);
 const accent = computed(() => props.detail?.accentColor ?? props.local?.accentColor ?? null);
 const repoSignals = computed(() => toPackageRepoSignals(props.detail));
+// GitHub star chip right of the source badge; hidden without a GitHub repository or a star count.
+const starBadge = computed(() => toPackageStarBadge(props.detail, appLocale.value));
+const starAria = computed(() =>
+  starBadge.value
+    ? t('package.repo.starsBadge', { count: new Intl.NumberFormat(appLocale.value).format(starBadge.value.stars) })
+    : ''
+);
 const officialSource = computed(() => (props.detail ? toPackageSource(props.detail) : null));
 
 const installed = computed(() => library.find(props.kind, props.token));
@@ -159,6 +175,12 @@ const onSelect = (key: string) => {
   >
     <template #tags>
       <DetailSourceBadge v-if="detail && officialSource" :pkg="detail" />
+      <OnPackageStarBadge
+        v-if="starBadge"
+        :label="starBadge.label"
+        :accessible-label="starAria"
+        :href="starBadge.href"
+      />
     </template>
     <template #actions>
       <OnButton
