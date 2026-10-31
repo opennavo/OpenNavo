@@ -8,6 +8,11 @@ on:
         description: Commit on main with successful CI
         required: true
         default: main
+      force:
+        description: Redeploy even if production inputs are unchanged (e.g. same commit); skips the inputs-unchanged check. The CI gate still applies.
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
   actions: read
@@ -20,7 +25,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       sha: ${{ steps.source.outputs.sha }}
-      needed: ${{ steps.changes.outputs.needed }}
+      # force=true bypasses only the inputs-unchanged skip; require-ci still gates.
+      needed: ${{ inputs.force == true && 'true' || steps.changes.outputs.needed }}
     steps:
       - uses: actions/checkout@v7
         with:
