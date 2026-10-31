@@ -4,28 +4,21 @@ import { downloadChoice } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
 import { installLifecycle } from '~/utils/packageInstall';
 import { packagePath } from '~/utils/packageView';
-import { trackEvent } from '~/utils/analytics';
 
-// One overview guide; download addresses, checksums and file declarations live in Install details.
+// One overview guide; the install command and lifecycle notice live in the shared header, while download
+// addresses, checksums and file declarations live in Install details.
 const props = defineProps<{ pkg: PackagePage }>();
 const { t } = useI18n();
 const localePath = useLocalePath();
-const toasts = useToasts();
 const note = computed(() => installNote(props.pkg));
 const download = computed(() => downloadChoice(props.pkg));
-const lifecycle = computed(() => installLifecycle(props.pkg, t));
-const state = computed(() => lifecycle.value.state);
-const notice = computed(() => lifecycle.value.notice);
+const state = computed(() => installLifecycle(props.pkg, t).state);
 // H9: when the server consolidates Install details into the overview, the layout 301s the details
 // page here. Link the same-page body instead (rendered by the overview), never the redirected tab.
 const detailsRedirect = computed(() => Boolean(props.pkg.indexing?.detailsRedirect));
 const detailsHref = computed(() =>
   detailsRedirect.value ? '#install-details' : `${localePath(packagePath(props.pkg.token, 'details'))}#requirements`
 );
-function onCopied(command: string) {
-  toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
-  trackEvent('copy_install_command');
-}
 </script>
 
 <template>
@@ -38,24 +31,6 @@ function onCopied(command: string) {
     <h2 id="install-title" class="m-0 text-13.5px font-600 text-ink-primary">
       {{ t('package.install.title', { name: pkg.displayName }) }}
     </h2>
-    <div class="package-overview-install-command mt-10px" data-testid="package-install-command">
-      <p
-        v-if="notice"
-        role="note"
-        class="m-0 mb-10px rounded-default border border-solid px-12px py-10px text-12.5px leading-[1.6]"
-        :class="
-          state === 'disabled' ? 'border-status-danger text-status-danger' : 'border-status-warning text-status-warning'
-        "
-      >
-        {{ notice }}
-      </p>
-      <PackageCommand
-        v-if="state !== 'disabled'"
-        :command="pkg.installCommand"
-        :copy-label="t('package.copy.install')"
-        @copied="onCopied"
-      />
-    </div>
     <p v-if="note && state !== 'disabled'" class="m-0 mt-8px text-13px leading-[1.6] text-ink-secondary">
       {{
         note.key === 'installPkg' ? t('package.guide.installPkg', { pkg: note.pkg }) : t(`package.guide.${note.key}`)

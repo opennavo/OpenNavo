@@ -99,12 +99,9 @@ export function packageSpec(
     if (value.kind === 'cask')
       rows.push({ key: 'fontLocation', label: t('package.details.location'), value: '~/Library/Fonts', mono: true });
   }
-  const price =
-    link?.pricing && link.pricing !== 'unknown'
-      ? t(`package.link.pricing.${link.pricing}`)
-      : detail?.price
-        ? t(`package.link.pricing.${detail.price.type}`)
-        : '';
+  let price = '';
+  if (link?.pricing && link.pricing !== 'unknown') price = t(`package.link.pricing.${link.pricing}`);
+  else if (detail?.price) price = t(`package.link.pricing.${detail.price.type}`);
   if (price) rows.push({ key: 'price', label: t('package.spec.price'), value: price });
 
   const system = detail?.dependsOn?.macos ?? detail?.minMacos;

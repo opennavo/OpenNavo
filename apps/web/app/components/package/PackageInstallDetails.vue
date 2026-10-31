@@ -20,5 +20,6 @@ usePageSeo({
 </script>
 
 <template>
-  <PackageInstallDetailsContent v-if="pkg" :pkg="pkg" />
+  <!-- The install command and lifecycle notice live in the shared header on every tab. -->
+  <PackageInstallDetailsContent v-if="pkg" :pkg="pkg" :show-command="false" />
 </template>

@@ -129,6 +129,7 @@
     "more": "Weitere Aktionen",
     "copy": "Kopieren",
     "copied": "Kopiert",
+    "copyFailed": "Zwischenablage nicht verfügbar. Kopieren Sie den Wert manuell.",
     "cancel": "Abbrechen",
     "close": "Schließen",
     "count": "{count} App | {count} Apps"
@@ -282,7 +283,9 @@
         "paid": "Kostenpflichtig",
         "freemium": "Kostenlos mit kostenpflichtigen Funktionen",
         "subscription": "Abonnement",
-        "open_source": "Kostenlos und Open Source"
+        "open_source": "Kostenlos und Open Source",
+        "free_with_iap": "Kostenlos mit In-App-Käufen",
+        "trial": "Kostenlose Testversion verfügbar"
       },
       "verdict": {
         "verifying": "{file} wird geprüft…",
@@ -467,6 +470,8 @@
       "license": "Lizenz"
     },
     "spec": {
+      "downloadSource": "Downloadquelle",
+      "fontFiles": "Schriftdateien",
       "title": "Auf einen Blick",
       "price": "Preis",
       "system": "System",
@@ -475,17 +480,15 @@
       "openSource": "Open Source",
       "repository": "Repository",
       "githubRepository": "GitHub-Repository",
+      "checked": "Geprüft",
       "developer": "Entwickler",
       "homepage": "Website",
       "token": "Paketkennung",
+      "bundleId": "Bundle ID",
       "installedVersion": "Installierte Version",
       "installLocation": "Installationsort",
       "yes": "Ja",
-      "no": "Nein",
-      "checked": "Geprüft",
-      "downloadSource": "Downloadquelle",
-      "fontFiles": "Schriftdateien",
-      "bundleId": "Bundle ID"
+      "no": "Nein"
     },
     "repo": {
       "stars": "★",

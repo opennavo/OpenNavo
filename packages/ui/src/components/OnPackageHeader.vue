@@ -47,7 +47,13 @@ const props = withDefaults(defineProps<OnPackageHeaderProps>(), { chips: () => [
 
 const linkAttrs = (href: string) => (props.linkAs === 'a' ? { href } : { to: href });
 
-defineSlots<{ actions?: () => unknown; tags?: () => unknown; default?: () => unknown }>();
+defineSlots<{
+  actions?: () => unknown;
+  /** Below the action row, spanning the header column, e.g. the web's mobile install command. */
+  command?: () => unknown;
+  tags?: () => unknown;
+  default?: () => unknown;
+}>();
 
 const glow = computed(() => ({ background: detailGlow(props.accent ?? undefined) }));
 </script>
@@ -100,7 +106,7 @@ const glow = computed(() => ({ background: detailGlow(props.accent ?? undefined)
     </div>
     <div
       class="relative flex shrink-0 flex-col items-start gap-10px md:items-end"
-      :class="stretchActions ? 'w-full md:w-auto' : ''"
+      :class="stretchActions || $slots.command ? 'w-full md:w-auto' : ''"
     >
       <div
         v-if="$slots.actions"
@@ -110,7 +116,10 @@ const glow = computed(() => ({ background: detailGlow(props.accent ?? undefined)
       >
         <slot name="actions" />
       </div>
-      <small v-if="meta" class="text-12px text-ink-tertiary">{{ meta }}</small>
+      <div v-if="$slots.command" class="w-full">
+        <slot name="command" />
+      </div>
+      <small v-if="meta" class="text-12px text-ink-tertiary max-[640px]:hidden">{{ meta }}</small>
     </div>
     <!-- Default slot: header overlays, such as desktop uninstall confirmation. -->
     <slot />

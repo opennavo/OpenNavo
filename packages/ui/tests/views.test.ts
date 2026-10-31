@@ -560,7 +560,6 @@ describe('Detail views', () => {
         caveats: '需要重启',
         caveatsTitle: '注意事项',
         command: 'brew install --cask ghostty',
-        info: [{ key: 'token', label: 'Token', value: 'ghostty', mono: true }],
         related: [{ key: 'cask/a', kind: 'cask', token: 'a', name: 'A', description: '简介', href: '/apps/a' }],
         relatedTitle: '相似应用',
         linkAs: RouterLinkStub
@@ -580,10 +579,34 @@ describe('Detail views', () => {
     expect(wrapper.find('a[href="#/apps/a"]').text()).toBe('A');
   });
 
+  it('Keeps the spec card after the description and renders related packages once', () => {
+    const related = [{ key: 'cask/a', kind: 'cask' as const, token: 'a', name: 'Related App', href: '/apps/a' }];
+    const wrapper = mount(OnPackageOverview, {
+      props: {
+        hasAbout: true,
+        related,
+        relatedTitle: 'Related',
+        linkAs: RouterLinkStub
+      },
+      slots: {
+        about: () => h('div', { id: 'about-slot' }, 'About'),
+        spec: () => h('div', { id: 'spec-slot' }, 'Spec'),
+        main: () => h('div', { id: 'main-slot' }, 'Main')
+      },
+      global: withLocale('en-US')
+    });
+    const about = wrapper.get('#about-slot').element;
+    const spec = wrapper.get('#spec-slot').element;
+    const main = wrapper.get('#main-slot').element;
+    expect(about.compareDocumentPosition(spec) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(spec.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(wrapper.text().match(/Related App/g)).toHaveLength(1);
+  });
+
   it('Overviews pass the app name on to screenshots without a caption', () => {
     const screenshots = [{ src: '/shots/1.png' }, { src: '/shots/2.png', caption: '设置' }];
     const alts = (props: Record<string, unknown>) =>
-      mount(OnPackageOverview, { props: { info: [], screenshots, ...props }, global: withLocale('zh-CN') })
+      mount(OnPackageOverview, { props: { screenshots, ...props }, global: withLocale('zh-CN') })
         .findAll('img')
         .map(image => image.attributes('alt'));
     expect(alts({ screenshotsName: 'Ghostty' })).toEqual(['Ghostty · 截图 1', '设置']);

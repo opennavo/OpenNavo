@@ -123,6 +123,9 @@ const relatedItems = computed<OnRelatedPackage[]>(() =>
   }))
 );
 
+function onCopyFailed() {
+  toasts.push({ tone: 'warning', title: t('common.copyFailed'), description: command.value, duration: 0 });
+}
 function onCopied(text: string) {
   toasts.push({ tone: 'success', title: t('common.copied'), description: text });
 }
@@ -139,13 +142,13 @@ function onCopied(text: string) {
     :caveats-title="t('package.caveats')"
     :command="command"
     :install-notice="installNotice"
-    :info="[]"
     :related="relatedItems"
     :related-title="t('package.related')"
     related-more-href="/discover"
     :related-more-label="t('package.relatedMore')"
     :link-as="RouterLink"
     @copied="onCopied"
+    @copy-failed="onCopyFailed"
   >
     <template #about>
       <OnMarkdown size="md" :heading-level="3" :source="description" />
@@ -175,7 +178,7 @@ function onCopied(text: string) {
       />
     </template>
     <template #aside>
-      <MonthlyInstallsCard v-if="detail && kind !== 'link'" :installs="detail.installs" />
+      <MonthlyInstallsCard v-if="detail && kind !== 'link'" class="hidden lg:block" :installs="detail.installs" />
       <MasAlsoPanel v-if="kind !== 'formula'" :bundle-ids="storeBundleIds" />
     </template>
   </OnPackageOverview>

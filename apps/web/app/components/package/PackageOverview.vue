@@ -15,6 +15,8 @@ import {
   withVariantNames
 } from '~/utils/seoTitles';
 import { packageSpec } from '~/utils/packageSpec';
+import PackageLead from './PackageLead.vue';
+import PackagePrice from './PackagePrice.vue';
 import PackageRequirements from './PackageRequirements.vue';
 import PackageSources from './PackageSources.vue';
 import PackageInstallDetailsContent from './PackageInstallDetailsContent.vue';
@@ -167,7 +169,6 @@ usePageSeo({
       :screenshots-name="pkg.displayName"
       :has-about="Boolean(description)"
       related-in-main
-      :info="[]"
       :related="relatedItems"
       :related-title="t(pkg.isFont ? 'package.relatedFonts' : 'package.related')"
       :related-more-href="localePath('/apps')"
@@ -175,6 +176,8 @@ usePageSeo({
       :link-as="NuxtLink"
     >
       <template #about>
+        <!-- Link apps have no Install Details tab, so their lead, price and requirements stay on the overview. -->
+        <PackageLead v-if="pkg.kind === 'link'" class="mb-10px" :pkg="pkg" />
         <MarkdownContent class="package-overview-description" size="md" :heading-level="3" :source="description" />
       </template>
       <template #main>
@@ -216,7 +219,7 @@ usePageSeo({
         />
       </template>
       <template #aside>
-        <MonthlyInstalls v-if="can.installs" :installs="pkg.installs" />
+        <MonthlyInstalls v-if="can.installs" class="hidden lg:block" :installs="pkg.installs" />
         <PackageSecurityPromo v-if="isSecurityApp" />
       </template>
       <template #asideEnd>

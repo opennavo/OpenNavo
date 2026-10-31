@@ -129,6 +129,7 @@
     "more": "Другие действия",
     "copy": "Копировать",
     "copied": "Скопировано",
+    "copyFailed": "Буфер обмена недоступен. Скопируйте значение вручную.",
     "cancel": "Отмена",
     "close": "Закрыть",
     "count": "{count} приложение | {count} приложения | {count} приложений | {count} приложения"
@@ -282,7 +283,9 @@
         "paid": "Платно",
         "freemium": "Бесплатно, есть платные функции",
         "subscription": "Подписка",
-        "open_source": "Бесплатно, открытый код"
+        "open_source": "Бесплатно, открытый код",
+        "free_with_iap": "Бесплатно, со встроенными покупками",
+        "trial": "Есть пробный период"
       },
       "verdict": {
         "verifying": "Проверяем {file}…",
@@ -467,6 +470,8 @@
       "license": "Лицензия"
     },
     "spec": {
+      "downloadSource": "Источник загрузки",
+      "fontFiles": "Файлы шрифта",
       "title": "Основные сведения",
       "price": "Цена",
       "system": "Система",
@@ -475,17 +480,15 @@
       "openSource": "Открытый исходный код",
       "repository": "Репозиторий",
       "githubRepository": "Репозиторий GitHub",
+      "checked": "Проверено",
       "developer": "Разработчик",
       "homepage": "Сайт",
       "token": "Идентификатор",
+      "bundleId": "Bundle ID",
       "installedVersion": "Установленная версия",
       "installLocation": "Путь установки",
       "yes": "Да",
-      "no": "Нет",
-      "checked": "Проверено",
-      "downloadSource": "Источник загрузки",
-      "fontFiles": "Файлы шрифта",
-      "bundleId": "Bundle ID"
+      "no": "Нет"
     },
     "repo": {
       "stars": "★",
