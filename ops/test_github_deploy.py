@@ -1421,31 +1421,107 @@ scrape_configs:
                                         capture_output=True, text=True, timeout=10)
                 self.assertEqual(result.returncode, expected, result.stderr)
 
-    def test_candidate_warmup_records_retired_statuses_but_rejects_server_failures(self):
+    def run_warm_script(self, page_statuses, ready_statuses=(200,), paths=('/apps/retired',), ready_timeout='60000'):
+        """Execute the deployed warmup script with fetch/timers replaced; statuses are consumed in order."""
         prelude = """
-let calls = 0;
-globalThis.fetch = async () => {
-  calls += 1;
-  const status = calls <= 2 ? (calls === 1 ? 404 : 410) : 200;
+const pageStatuses = %s;
+const readyStatuses = %s;
+let now = 0;
+Date.now = () => now;
+globalThis.setTimeout = (callback, ms) => { now += ms || 0; callback(); };
+globalThis.fetch = async (url) => {
+  const queue = String(url).endsWith('/readyz') ? readyStatuses : pageStatuses;
+  const status = queue.length > 1 ? queue.shift() : queue[0];
+  if (status === 'error') throw Object.assign(new Error('boom SECRET_ENV=leak'), {name: 'TypeError'});
   return { status, arrayBuffer: async () => new ArrayBuffer(0) };
 };
-globalThis.setTimeout = callback => { callback(); };
-"""
-        result = subprocess.run(
-            ['node', '--input-type=module', '-e', prelude + deploy.WARM_SCRIPT,
-             json.dumps(['/apps/retired']), deploy.WARM_ORIGIN, deploy.WARM_HOST, deploy.WARM_INTERNAL_ORIGIN],
+""" % (json.dumps(list(page_statuses)), json.dumps(list(ready_statuses)))
+        return subprocess.run(
+            ['node', '--input-type=module', '-e', prelude + deploy.WARM_SCRIPT, json.dumps(list(paths)),
+             deploy.WARM_ORIGIN, deploy.WARM_HOST, deploy.WARM_INTERNAL_ORIGIN, ready_timeout],
             capture_output=True, text=True, timeout=10
         )
+
+    def test_candidate_warmup_records_retired_statuses_but_rejects_server_failures(self):
+        result = self.run_warm_script([404, 410, 200])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('status=404', result.stdout)
         self.assertIn('status=410', result.stdout)
-        failure = subprocess.run(
-            ['node', '--input-type=module', '-e',
-             "globalThis.fetch = async () => ({status: 503, arrayBuffer: async () => new ArrayBuffer(0)});" + deploy.WARM_SCRIPT,
-             json.dumps(['/apps/broken']), deploy.WARM_ORIGIN, deploy.WARM_HOST, deploy.WARM_INTERNAL_ORIGIN],
-            capture_output=True, text=True, timeout=10
-        )
+        failure = self.run_warm_script([503], paths=['/apps/broken'])
         self.assertEqual(failure.returncode, 1)
+
+    def test_candidate_warmup_retries_first_pass_cold_start_failure_once(self):
+        for first in (502, 'error'):
+            with self.subTest(first=first):
+                result = self.run_warm_script([first, 200], paths=['/'])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('warm retry pass=1 path=/', result.stderr)
+                self.assertIn('warm pass=2 path=/ status=200', result.stdout)
+
+    def test_candidate_warmup_second_pass_stays_strict(self):
+        # Pass 1 fails then recovers, pass 2 returns 5xx: no retry, deployment fails.
+        result = self.run_warm_script([500, 200, 503, 200], paths=['/'])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn('warm retry pass=2', result.stderr)
+        self.assertIn('warm pass=2 path=/ status=503', result.stdout)
+        failure = self.run_warm_script([500, 500], paths=['/'])
+        self.assertEqual(failure.returncode, 1)
+        self.assertNotIn('warm pass=2', failure.stdout)
+
+    def test_candidate_warmup_waits_for_ready_and_times_out(self):
+        result = self.run_warm_script([200], ready_statuses=[503, 'error', 200, 200], paths=['/'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('candidate ready wait attempts=3', result.stdout)
+        timeout = self.run_warm_script([200], ready_statuses=[503], paths=['/'], ready_timeout='5000')
+        self.assertEqual(timeout.returncode, 1)
+        self.assertIn('candidate ready wait timed out', timeout.stderr)
+        self.assertNotIn('warm pass=1', timeout.stdout)
+
+    def warm_deployer(self, script_result):
+        obj = deploy.Deployment.__new__(deploy.Deployment)
+        obj.warm_paths = ['/']
+        obj.candidate_webs = lambda: ['abcdef1234567890']
+        calls = []
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, script_result.returncode,
+                                               script_result.stdout.encode(), script_result.stderr.encode())
+        return obj, calls, fake_run
+
+    def test_warm_candidates_logs_script_output_on_failure_without_secrets(self):
+        script = self.run_warm_script([503], paths=['/'])
+        script = subprocess.CompletedProcess(script.args, script.returncode, script.stdout,
+                                             script.stderr + 'node:internal stack TOKEN=supersecret\n')
+        obj, calls, fake_run = self.warm_deployer(script)
+        output = io.StringIO()
+        with patch.object(deploy, 'command', return_value='healthy'), \
+                patch.object(deploy.subprocess, 'run', fake_run), \
+                contextlib.redirect_stdout(output):
+            with self.assertRaisesRegex(RuntimeError, 'candidate warmup failed'):
+                obj.warm_candidates()
+        log = output.getvalue()
+        self.assertIn('warmup stdout:', log)
+        self.assertIn('warm pass=1 path=/ status=503', log)
+        self.assertIn('warmup stderr:', log)
+        self.assertIn('warm retry pass=1 path=/', log)
+        self.assertIn('other line(s) hidden', log)
+        self.assertNotIn('supersecret', log)
+        self.assertEqual(calls[0][-1], str(deploy.WARM_READY_TIMEOUT_MS))
+
+    def test_warm_candidates_passes_after_first_pass_retry(self):
+        script = self.run_warm_script([500, 200], paths=['/'])
+        obj, _, fake_run = self.warm_deployer(script)
+        output = io.StringIO()
+        with patch.object(deploy, 'command', return_value='healthy'), \
+                patch.object(deploy.subprocess, 'run', fake_run), \
+                contextlib.redirect_stdout(output):
+            obj.warm_candidates()
+        self.assertIn('All candidate web replicas warmed and ready.', output.getvalue())
+
+    def test_warm_output_truncates(self):
+        text = deploy.warm_output(('warm pass=1 path=/x status=200 ms=1\n' * 500).encode())
+        self.assertTrue(text.startswith('...(truncated)'))
+        self.assertLessEqual(len(text), deploy.WARM_OUTPUT_LIMIT + 20)
 
     def test_drain_script_falls_back_to_the_existing_load_shed_metric(self):
         script = """
