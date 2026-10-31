@@ -795,10 +795,6 @@ export type CleanupVolume = {
 	freeBytes: number,
 };
 
-/**
- *  How the machine's busy share was spent over one process window (all ratios of the whole machine).
- *  `readable + finished + other` equals `usage` unless the parts overshoot it by sampling skew, then `other` is 0.
- */
 /**  One app of a collection confirmation, filtered for display. */
 export type ConfirmItemView = {
 	name: string,
@@ -811,6 +807,10 @@ export type ConfirmItemView = {
 	skip: string | null,
 };
 
+/**
+ *  How the machine's busy share was spent over one process window (all ratios of the whole machine).
+ *  `readable + finished + other` equals `usage` unless the parts overshoot it by sampling skew, then `other` is 0.
+ */
 export type CpuBreakdown = {
 	/**  The host's busy ratio over the same window as the process figures. */
 	usage: number,

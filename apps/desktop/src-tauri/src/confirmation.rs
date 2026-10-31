@@ -274,12 +274,11 @@ pub struct ConfirmationService {
 #[derive(Debug)]
 struct PendingConfirmation {
     id: u64,
-    request: ConfirmationRequest,
     cancelled: oneshot::Receiver<()>,
 }
 
 /// Clears the single active slot when the command future is cancelled (for example when its webview is
-/// destroyed). Native dialog callbacks can arrive later; `finish` checks the id and ignores those stale clicks.
+/// destroyed). Window answers can arrive later; `finish` checks the id and ignores those stale clicks.
 struct ConfirmationDropGuard {
     service: std::sync::Arc<ConfirmationService>,
     id: u64,
@@ -412,7 +411,6 @@ impl ConfirmationService {
         let (cancel, cancelled) = oneshot::channel();
         let pending = PendingConfirmation {
             id: state.next_id,
-            request: request.clone(),
             cancelled,
         };
         state.active = Some(ActiveConfirmation {
