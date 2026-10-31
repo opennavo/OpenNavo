@@ -177,7 +177,7 @@ pub async fn uninstall_retry(
         TaskKind::Formula => "formula",
         _ => "cask",
     };
-    let mut view = crate::confirmation::McpConfirmView::app_action(
+    let view = crate::confirmation::McpConfirmView::app_action(
         "brewUninstall",
         &target.token,
         vec![crate::confirmation::ConfirmItemView::row(
