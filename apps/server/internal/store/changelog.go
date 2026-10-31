@@ -166,39 +166,3 @@ func (s *Store) UnresolvedHomebrewSources(ctx context.Context) ([]changelog.Cand
 	err := s.DB.WithContext(ctx).Raw(candidateSQL + ` WHERE NOT COALESCE(m.changelog_excluded,false) AND p.kind='cask' AND p.removed_at IS NULL AND NOT p.disabled AND p.ruby_source_path IS NOT NULL AND ` + OfficialTapSQL + ` AND NOT EXISTS(SELECT 1 FROM changelog_sources s WHERE s.package_id=p.id AND s.type='homebrew_commits') ORDER BY p.popularity DESC,p.id`).Scan(&rows).Error
 	return rows, err
 }
-
-// ChangelogSourceIdentity names a source for job stats regardless of its type or package state.
-type ChangelogSourceIdentity struct {
-	Type, Token string
-	Config      json.RawMessage
-	FailCount   int
-}
-
-func (s *Store) ChangelogSourceIdentity(ctx context.Context, id int64) (ChangelogSourceIdentity, error) {
-	var row ChangelogSourceIdentity
-	r := s.DB.WithContext(ctx).Raw("SELECT s.type,p.token,s.config,s.fail_count FROM changelog_sources s JOIN packages p ON p.id=s.package_id WHERE s.id=?", id).Scan(&row)
-	if r.Error != nil {
-		return row, r.Error
-	}
-	if r.RowsAffected == 0 {
-		return row, gorm.ErrRecordNotFound
-	}
-	return row, nil
-}
-
-// ClaimChangelogDue returns the due sources (same selection as ChangelogDue) and moves their next_fetch_at to
-// leaseUntil in the same statement, so concurrent or later schedule ticks do not select them again.
-func (s *Store) ClaimChangelogDue(ctx context.Context, now, leaseUntil time.Time) ([]int64, error) {
-	ids, err := s.ChangelogDue(ctx, now)
-	if err != nil || len(ids) == 0 {
-		return ids, err
-	}
-	claimed := []int64{}
-	err = s.DB.WithContext(ctx).Raw("UPDATE changelog_sources SET next_fetch_at=? WHERE id IN ? AND next_fetch_at<=? RETURNING id", leaseUntil, ids, now).Scan(&claimed).Error
-	return claimed, err
-}
-
-// ChangelogCanceled makes a canceled fetch due again without counting it as a failure.
-func (s *Store) ChangelogCanceled(ctx context.Context, id int64, now time.Time) error {
-	return s.DB.WithContext(ctx).Exec("UPDATE changelog_sources SET next_fetch_at=?,updated_at=? WHERE id=?", now, now, id).Error
-}
