@@ -129,6 +129,7 @@
     "more": "更多操作",
     "copy": "複製",
     "copied": "已複製",
+    "copyFailed": "無法訪問剪貼簿，請手動複製該值。",
     "cancel": "取消",
     "close": "關閉",
     "count": "{count} 個"
@@ -282,7 +283,9 @@
         "paid": "付費",
         "freemium": "免費，含付費功能",
         "subscription": "訂閱",
-        "open_source": "開源免費"
+        "open_source": "開源免費",
+        "free_with_iap": "免費，含應用內購買",
+        "trial": "提供免費試用"
       },
       "verdict": {
         "verifying": "正在核驗 {file}…",
@@ -453,6 +456,7 @@
       }
     },
     "related": "相似應用",
+    "relatedMore": "檢視更多",
     "screenshots": "截圖",
     "caveats": "注意事項",
     "info": {

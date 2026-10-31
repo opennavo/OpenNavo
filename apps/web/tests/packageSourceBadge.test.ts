@@ -8,6 +8,7 @@ import { SITE_LOCALES } from '@opennavo/shared';
 import type { SiteLocale } from '@opennavo/shared';
 import Header from '../app/components/package/PackageHeader.vue';
 import GetMenu from '../app/components/package/GetMenu.vue';
+import PackageCommand from '../app/components/package/PackageCommand.vue';
 import { officialSource } from '../app/utils/packageFacts';
 import type { PackagePage } from '../app/utils/packageFacts';
 import { siteMessage } from '../server/utils/siteCopy';
@@ -54,6 +55,7 @@ afterEach(() => {
 
 function components(app: App) {
   app.component('GetMenu', GetMenu);
+  app.component('PackageCommand', PackageCommand);
   app.component('NuxtLink', {
     props: ['to'],
     setup:
@@ -74,10 +76,15 @@ async function render(value = pkg()) {
 it('keeps Get and Homepage in one right-aligned row inside the header actions', async () => {
   const page = await render();
   const actions = page.querySelector('[data-testid="package-header-actions"]')!;
+  // The mobile install card sits below the action row, so the row itself keeps exactly the two buttons.
   expect(actions.children).toHaveLength(2);
   expect(actions.children[0].querySelector('button')?.getAttribute('aria-label')).toBe('Get iTerm2');
   expect(actions.children[1].tagName).toBe('A');
   expect(actions.children[1].textContent).toContain('Homepage');
+  const command = page.querySelector('[data-testid="package-install-command"]')!;
+  expect(command.textContent).toContain('brew install --cask iterm2');
+  expect(command.classList.contains('col-span-2')).toBe(true);
+  expect(actions.contains(command)).toBe(false);
   expect(actions.classList.contains('grid')).toBe(true);
   expect(actions.classList.contains('grid-cols-2')).toBe(true);
   expect(actions.classList.contains('w-full')).toBe(true);
@@ -275,3 +282,59 @@ it('supports touch clicks, keyboard focus, Escape and hover on the actual badge'
   await nextTick();
   expect(tooltip.classList.contains('invisible')).toBe(true);
 });
+
+it.each(lifecycleCases.filter(item => item.expected === 'disabled'))(
+  'replaces the mobile install command with the disabled notice: $name',
+  async ({ fields }) => {
+    const value = Object.assign(
+      pkg(),
+      {
+        disabled: false,
+        deprecated: false,
+        disable: null,
+        deprecation: null,
+        recommendationPaused: false,
+        homebrewStatus: null
+      },
+      fields
+    ) as PackagePage;
+    const page = await render(value);
+    const actions = page.querySelector('[data-testid="package-header-actions"]')!;
+    const card = page.querySelector('[data-testid="package-install-command"]')!;
+    const notice = card.querySelector('[data-testid="package-mobile-install-notice"]')!;
+    expect(notice.getAttribute('role')).toBe('note');
+    expect(notice.textContent).toContain('Homebrew has disabled this package:');
+    expect(notice.classList.contains('text-status-danger')).toBe(true);
+    expect(card.querySelector('pre code, button')).toBeNull();
+    expect(actions.querySelector('button')?.hasAttribute('disabled')).toBe(true);
+  }
+);
+
+it.each(lifecycleCases.filter(item => item.expected === 'deprecated' || item.expected === 'paused'))(
+  'keeps the mobile install command behind a lifecycle warning: $name',
+  async ({ fields, expected }) => {
+    const value = Object.assign(
+      pkg(),
+      {
+        disabled: false,
+        deprecated: false,
+        disable: null,
+        deprecation: null,
+        recommendationPaused: false,
+        homebrewStatus: null
+      },
+      fields
+    ) as PackagePage;
+    const page = await render(value);
+    const card = page.querySelector('[data-testid="package-install-command"]')!;
+    const notice = card.querySelector('[data-testid="package-mobile-install-notice"]')!;
+    const command = card.querySelector('pre code')!;
+    expect(notice.classList.contains('text-status-warning')).toBe(true);
+    expect(notice.textContent).toContain(
+      expected === 'deprecated' ? 'Homebrew has deprecated this package:' : 'Homebrew still offers this app'
+    );
+    expect(command.textContent).toBe('brew install --cask iterm2');
+    expect(notice.compareDocumentPosition(command) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.querySelector('button[aria-label="Copy install command"]')).not.toBeNull();
+  }
+);

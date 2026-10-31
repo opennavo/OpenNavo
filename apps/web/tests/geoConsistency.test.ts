@@ -226,7 +226,8 @@ describe('G5 cross-export normalized facts', () => {
         expect(schema?.softwareRequirements).toContain('13');
         break;
       case 'G5-23':
-        expect(html.requirements).toContain('2026-10-19');
+        expect(html.sources).toContain('2026-10-19');
+        expect(html.requirements).not.toContain('2026-10-19');
         expect(md).not.toContain('2020-01-01');
         expect(schema).toHaveProperty('softwareRequirements');
         break;
@@ -267,7 +268,8 @@ describe('G5 cross-export normalized facts', () => {
       case 'G5-28':
         expect(html.details).toContain(GEO_HASH);
         expect(md).toContain(GEO_HASH);
-        expect(plainHtml(html.install!)).toContain(page.facts.overview.caveats!);
+        expect(plainHtml(html.details!)).toContain(page.facts.overview.caveats!);
+        expect(plainHtml(html.install!)).not.toContain(page.facts.overview.caveats!);
         expect(md).toContain(mdText(page.facts.overview.caveats!));
         expect(md).toContain(t('package.guide.sha'));
         break;

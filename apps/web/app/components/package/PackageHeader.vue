@@ -7,6 +7,7 @@ import { httpsUrl, linkDownloadUrl, linkSource } from '~/utils/linkApp';
 import { officialSource } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
 import PackageSourceBadge from './PackageSourceBadge.vue';
+import { useToasts } from '~/composables/useToasts';
 
 // Detail header (08 §10.5, 03-detail): shared OnPackageHeader (ADR-017), web Get menu/homepage right.
 // Link apps (store/security plan §4) swap the Get menu for Download, which opens the developer's own address.
@@ -36,12 +37,37 @@ const repoSignals = computed(() => toPackageRepoSignals(props.pkg));
 const installState = computed(() => packageInstallState(props.pkg));
 const unavailable = computed(() => installState.value === 'disabled');
 const source = computed(() => officialSource(props.pkg));
+// Mobile install guidance: a disabled package explains why instead of offering the command; a deprecated or
+// paused one still offers Homebrew's command with the warning first.
+const installNotice = computed(() => {
+  const state = installState.value;
+  if (state === 'active' || isLink.value) return undefined;
+  const reason =
+    (state === 'deprecated' ? props.pkg.deprecation?.reason : props.pkg.disable?.reason) ??
+    props.pkg.homebrewStatus?.reason ??
+    t('package.noReason');
+  return {
+    text: t(
+      state === 'disabled'
+        ? 'package.disabledNotice'
+        : state === 'deprecated'
+          ? 'package.deprecatedNotice'
+          : 'package.staleNotice',
+      { reason }
+    ),
+    disabled: state === 'disabled'
+  };
+});
 // Pair actions in equal columns only when the header actually has Get/Download and Homepage.
 const actionCount = computed(() => {
   if (isLink.value) return Number(Boolean(downloadUrl.value)) + Number(Boolean(homepage.value));
   return 1 + Number(Boolean(homepage.value));
 });
 const stretchActions = computed(() => actionCount.value === 2);
+
+function onCopyFailed() {
+  useToasts().push({ tone: 'warning', title: t('toast.copyFailed'), duration: 0 });
+}
 
 const chips = computed<OnPackageHeaderChip[]>(() => {
   const kind = isLink.value
@@ -135,6 +161,35 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
         {{ t('package.homepage') }}
         <OnIcon name="arrow-up-right" :size="15" />
       </OnButton>
+    </template>
+    <template #command>
+      <!-- The install card: one command at every width, or a lifecycle warning (and no command when disabled). -->
+      <div
+        v-if="!isLink && (installNotice || !unavailable)"
+        class="on-detail-install-command flex flex-col gap-10px basis-full col-span-2"
+        data-testid="package-install-command"
+      >
+        <p
+          v-if="installNotice"
+          role="note"
+          data-testid="package-mobile-install-notice"
+          class="m-0 rounded-default border border-solid px-10px py-8px text-12px leading-[1.6]"
+          :class="
+            installNotice.disabled
+              ? 'border-status-danger text-status-danger'
+              : 'border-status-warning text-status-warning'
+          "
+        >
+          {{ installNotice.text }}
+        </p>
+        <PackageCommand
+          v-if="!unavailable"
+          :command="pkg.installCommand"
+          :copy-label="t('package.copy.install')"
+          @copied="trackEvent('copy_install_command')"
+          @copy-failed="onCopyFailed"
+        />
+      </div>
     </template>
   </OnPackageHeader>
 </template>

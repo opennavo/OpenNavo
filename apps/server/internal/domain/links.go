@@ -76,6 +76,9 @@ type LinkInput struct {
 	SparkleFeed        *string            `json:"sparkleFeed"`
 	AssetRules         map[string]string  `json:"assetRules"`
 	Notes              map[string]*string `json:"notes"`
+	// Version is the current version of a link app with no GitHub or Sparkle source; editors set it
+	// by hand, while a synced source owns it otherwise.
+	Version *string `json:"version,omitempty"`
 }
 
 var linkToken = regexp.MustCompile(`^[a-z0-9][a-z0-9+@._-]{0,127}$`)
@@ -85,6 +88,7 @@ func ValidLinkToken(token string) bool { return linkToken.MatchString(token) }
 
 var linkRepo = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$`)
 var linkTeam = regexp.MustCompile(`^[A-Z0-9]{10}$`)
+var linkVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$`)
 var linkBundle = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$`)
 
 func LinkHTTPS(value string) bool {
@@ -166,6 +170,14 @@ func (v *LinkInput) Validate() error {
 	}
 	return nil
 }
+
+// ValidLinkVersion reports whether a hand-set link version is a plain version string such as 1.0.7.
+func ValidLinkVersion(v string) bool {
+	return linkVersion.MatchString(v) && strings.ContainsAny(v, "0123456789")
+}
+
+// HasReleaseSource reports whether sync owns the version, which then rejects manual version writes.
+func (v LinkInput) HasReleaseSource() bool { return v.GithubRepo != nil || v.SparkleFeed != nil }
 
 // HasGithubFilters also selects the releases list when prereleases are requested:
 // GitHub's /releases/latest endpoint never includes them.

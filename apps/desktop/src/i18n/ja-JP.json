@@ -129,6 +129,7 @@
     "more": "その他の操作",
     "copy": "コピー",
     "copied": "コピーしました",
+    "copyFailed": "クリップボードを利用できません。値を手動でコピーしてください。",
     "cancel": "キャンセル",
     "close": "閉じる",
     "count": "{count} 件"
@@ -282,7 +283,9 @@
         "paid": "有料",
         "freemium": "無料（有料機能あり）",
         "subscription": "サブスクリプション",
-        "open_source": "無料のオープンソース"
+        "open_source": "無料のオープンソース",
+        "free_with_iap": "無料（アプリ内課金あり）",
+        "trial": "無料トライアルあり"
       },
       "verdict": {
         "verifying": "{file} を確認しています…",
@@ -453,6 +456,7 @@
       }
     },
     "related": "類似アプリ",
+    "relatedMore": "もっと見る",
     "screenshots": "スクリーンショット",
     "caveats": "注意事項",
     "info": {
@@ -466,6 +470,8 @@
       "license": "ライセンス"
     },
     "spec": {
+      "downloadSource": "ダウンロード元",
+      "fontFiles": "フォントファイル",
       "title": "基本情報",
       "price": "価格",
       "system": "システム要件",
@@ -474,17 +480,15 @@
       "openSource": "オープンソース",
       "repository": "リポジトリ",
       "githubRepository": "GitHub リポジトリ",
+      "checked": "確認日",
       "developer": "開発元",
       "homepage": "ホームページ",
       "token": "パッケージ識別子",
+      "bundleId": "Bundle ID",
       "installedVersion": "インストール済みのバージョン",
       "installLocation": "インストール先",
       "yes": "はい",
-      "no": "いいえ",
-      "checked": "確認日",
-      "downloadSource": "ダウンロード元",
-      "fontFiles": "フォントファイル",
-      "bundleId": "Bundle ID"
+      "no": "いいえ"
     },
     "repo": {
       "stars": "★",

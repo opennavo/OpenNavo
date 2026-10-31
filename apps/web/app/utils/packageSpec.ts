@@ -57,13 +57,13 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale, 
       .map(row => ({ key: row.key, label: row.label, value: row.value, mono: row.code }));
   rows.push(...originalRows(['version', 'source', 'files', 'location']));
   const prices = verifiedPrices(pkg);
-  const price = prices.length
-    ? [
-        ...new Set(prices.map(item => [priceUsage(item, t), priceAmount(item, t, locale)].filter(Boolean).join(' · ')))
-      ].join(' / ')
-    : pkg.link && pkg.link.pricing !== 'unknown'
-      ? t(`package.link.pricing.${pkg.link.pricing}`)
-      : '';
+  let price = '';
+  if (prices.length) {
+    const values = prices.map(item => [priceUsage(item, t), priceAmount(item, t, locale)].filter(Boolean).join(' · '));
+    price = [...new Set(values)].join(' / ');
+  } else if (pkg.link && pkg.link.pricing !== 'unknown') {
+    price = t(`package.link.pricing.${pkg.link.pricing}`);
+  }
   if (price) rows.push({ key: 'price', label: t('package.spec.price'), value: price });
 
   const range = macosText(macosRange(pkg), t);
@@ -89,11 +89,12 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale, 
   const github = pkg.kind === 'link' && pkg.link?.github;
   const repoIdentity = verifiedIdentities(pkg).find(item => item.openSource === 'yes' || item.repositoryUrl);
   const identityOpenSource = !osi && repoIdentity?.openSource === 'yes';
-  const repositoryUrl =
+  const repositoryUrl = httpsUrl(
     repository?.url ??
-    osi?.url ??
-    (github ? `https://github.com/${github.repo}` : undefined) ??
-    repoIdentity?.repositoryUrl;
+      osi?.url ??
+      (github ? `https://github.com/${github.repo}` : undefined) ??
+      repoIdentity?.repositoryUrl
+  );
   if (osi || repository || github || identityOpenSource || repoIdentity?.repositoryUrl) {
     const repo = repoText(
       signals,
@@ -120,7 +121,7 @@ export function packageSpec(pkg: PackagePage, t: Translate, locale: SiteLocale, 
           ? undefined
           : {
               label: `★${formatRepoStars(signals.stars, locale)}`,
-              href: repository?.url ?? repositoryUrl,
+              href: httpsUrl(repository?.url) ?? repositoryUrl,
               checked: signals.checkedAt
                 ? t('package.repo.checked', { date: formatDate(signals.checkedAt, { locale }) })
                 : undefined

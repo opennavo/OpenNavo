@@ -129,6 +129,7 @@
     "more": "Plus d’actions",
     "copy": "Copier",
     "copied": "Copié",
+    "copyFailed": "Presse-papiers indisponible. Copiez la valeur manuellement.",
     "cancel": "Annuler",
     "close": "Fermer",
     "count": "{count} app | {count} apps"
@@ -282,7 +283,9 @@
         "paid": "Payant",
         "freemium": "Gratuit avec fonctionnalités payantes",
         "subscription": "Abonnement",
-        "open_source": "Gratuit et open source"
+        "open_source": "Gratuit et open source",
+        "free_with_iap": "Gratuit avec achats intégrés",
+        "trial": "Essai gratuit disponible"
       },
       "verdict": {
         "verifying": "Vérification de {file}…",
@@ -453,6 +456,7 @@
       }
     },
     "related": "Apps similaires",
+    "relatedMore": "Voir plus",
     "screenshots": "Captures d’écran",
     "caveats": "Mises en garde",
     "info": {
@@ -466,6 +470,8 @@
       "license": "Licence"
     },
     "spec": {
+      "downloadSource": "Source de téléchargement",
+      "fontFiles": "Fichiers de police",
       "title": "En bref",
       "price": "Prix",
       "system": "Système",
@@ -474,17 +480,15 @@
       "openSource": "Open source",
       "repository": "Dépôt",
       "githubRepository": "Dépôt GitHub",
+      "checked": "Vérifié le",
       "developer": "Développeur",
       "homepage": "Site web",
       "token": "Identifiant",
+      "bundleId": "Bundle ID",
       "installedVersion": "Version installée",
       "installLocation": "Emplacement d’installation",
       "yes": "Oui",
-      "no": "Non",
-      "checked": "Vérifié le",
-      "downloadSource": "Source de téléchargement",
-      "fontFiles": "Fichiers de police",
-      "bundleId": "Bundle ID"
+      "no": "Non"
     },
     "repo": {
       "stars": "★",

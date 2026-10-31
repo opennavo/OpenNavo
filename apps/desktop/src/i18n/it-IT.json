@@ -129,6 +129,7 @@
     "more": "Altre azioni",
     "copy": "Copia",
     "copied": "Copiato",
+    "copyFailed": "Appunti non disponibili. Copia il valore manualmente.",
     "cancel": "Annulla",
     "close": "Chiudi",
     "count": "{count} app | {count} app"
@@ -282,7 +283,9 @@
         "paid": "A pagamento",
         "freemium": "Gratis con funzioni a pagamento",
         "subscription": "Abbonamento",
-        "open_source": "Gratis e open source"
+        "open_source": "Gratis e open source",
+        "free_with_iap": "Gratis con acquisti in-app",
+        "trial": "Prova gratuita disponibile"
       },
       "verdict": {
         "verifying": "Verifica di {file}…",
@@ -453,6 +456,7 @@
       }
     },
     "related": "App simili",
+    "relatedMore": "Mostra altro",
     "screenshots": "Screenshot",
     "caveats": "Avvertenze",
     "info": {
@@ -466,6 +470,8 @@
       "license": "Licenza"
     },
     "spec": {
+      "downloadSource": "Fonte del download",
+      "fontFiles": "File dei font",
       "title": "A colpo d’occhio",
       "price": "Prezzo",
       "system": "Sistema",
@@ -474,17 +480,15 @@
       "openSource": "Open source",
       "repository": "Repository",
       "githubRepository": "Repository GitHub",
+      "checked": "Verificato",
       "developer": "Sviluppatore",
       "homepage": "Sito web",
       "token": "Identificatore",
+      "bundleId": "Bundle ID",
       "installedVersion": "Versione installata",
       "installLocation": "Percorso di installazione",
       "yes": "Sì",
-      "no": "No",
-      "checked": "Verificato",
-      "downloadSource": "Fonte del download",
-      "fontFiles": "File dei font",
-      "bundleId": "Bundle ID"
+      "no": "No"
     },
     "repo": {
       "stars": "★",

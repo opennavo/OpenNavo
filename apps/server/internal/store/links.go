@@ -23,7 +23,7 @@ type LinkApp struct {
 	Removed         bool                  `json:"removed"`
 }
 
-const linkView = `SELECT jsonb_build_object('id',p.id,'revision',l.revision,'kind',p.kind,'token',p.token,'name',p.name,'sourceLocale',p.source_locale,'homepage',l.homepage,'downloadUrl',l.download_url,'githubRepo',l.github_repo,'githubTagPrefix',l.github_tag_prefix,'githubTagRegex',l.github_tag_regex,'githubAssetPattern',l.github_asset_pattern,'includePrereleases',l.include_prereleases,'bundleIds',l.bundle_ids,'teamId',l.team_id,'pricing',l.pricing,'sparkleFeed',l.sparkle_feed,'assetRules',l.asset_rules,'notes',l.notes,'latest',l.latest,'etag',l.etag,'syncedAt',l.synced_at,'lastError',l.last_error,'adoptedByCaskAt',l.adopted_by_cask_at,'removed',p.removed_at IS NOT NULL) AS data FROM link_apps l JOIN packages p ON p.id=l.package_id`
+const linkView = `SELECT jsonb_build_object('id',p.id,'revision',l.revision,'kind',p.kind,'token',p.token,'name',p.name,'sourceLocale',p.source_locale,'homepage',l.homepage,'downloadUrl',l.download_url,'githubRepo',l.github_repo,'githubTagPrefix',l.github_tag_prefix,'githubTagRegex',l.github_tag_regex,'githubAssetPattern',l.github_asset_pattern,'includePrereleases',l.include_prereleases,'bundleIds',l.bundle_ids,'teamId',l.team_id,'pricing',l.pricing,'sparkleFeed',l.sparkle_feed,'assetRules',l.asset_rules,'notes',l.notes,'latest',l.latest,'etag',l.etag,'syncedAt',l.synced_at,'lastError',l.last_error,'adoptedByCaskAt',l.adopted_by_cask_at,'removed',p.removed_at IS NOT NULL,'version',NULLIF(p.version,'')) AS data FROM link_apps l JOIN packages p ON p.id=l.package_id`
 
 func (s *Store) LinkApps(ctx context.Context, activeOnly bool) ([]LinkApp, error) {
 	condition := ""
@@ -110,13 +110,52 @@ func (s *Store) WriteLinkApp(ctx context.Context, id int64, input domain.LinkInp
 	if created {
 		event = "created"
 	}
-	if err := s.linkChanged(ctx, id, "upsert", event, nil); err != nil {
+	var previous *string
+	if input.Version != nil && !input.HasReleaseSource() {
+		manual, before, err := s.writeManualLinkVersion(ctx, id, *input.Version)
+		if err != nil {
+			return 0, err
+		}
+		if before != nil {
+			previous = before
+			if manual && !created {
+				event = "updated"
+			}
+		}
+	}
+	if err := s.linkChanged(ctx, id, "upsert", event, previous); err != nil {
 		return 0, err
 	}
 	if err := addOutbox(ctx, s.DB, "links:sync", "packageId", id); err != nil {
 		return 0, err
 	}
 	return id, nil
+}
+
+// writeManualLinkVersion sets the version of a link app without a release source, recording it in
+// package_versions like a synced release. previous is nil when the version is unchanged; updated is
+// true only for a version the app has never shipped before, matching LinkSyncResult.
+func (s *Store) writeManualLinkVersion(ctx context.Context, id int64, version string) (bool, *string, error) {
+	var current string
+	if err := s.DB.WithContext(ctx).Raw("SELECT version FROM packages WHERE id=?", id).Scan(&current).Error; err != nil {
+		return false, nil, err
+	}
+	if current == version {
+		return false, nil, nil
+	}
+	recorded := s.DB.WithContext(ctx).Exec("INSERT INTO package_versions(package_id,version,version_base,first_seen_at) VALUES(?,?,?,now()) ON CONFLICT(package_id,version) DO NOTHING", id, version, version)
+	if recorded.Error != nil {
+		return false, nil, recorded.Error
+	}
+	if err := s.DB.WithContext(ctx).Exec("UPDATE packages SET version=?,version_base=?,version_changed_at=now(),updated_at=now() WHERE id=?", version, version, id).Error; err != nil {
+		return false, nil, err
+	}
+	// The 00098 revision triggers do not watch packages.version, so a hand-set version advances the
+	// link revision here, in the same transaction, and stale expectedRevision writes are rejected.
+	if err := s.DB.WithContext(ctx).Exec("UPDATE link_apps SET revision=revision+1 WHERE package_id=?", id).Error; err != nil {
+		return false, nil, err
+	}
+	return recorded.RowsAffected > 0, &current, nil
 }
 func (s *Store) RemoveLinkApp(ctx context.Context, id int64) error {
 	if err := LockCatalogWrites(ctx, s.DB); err != nil {

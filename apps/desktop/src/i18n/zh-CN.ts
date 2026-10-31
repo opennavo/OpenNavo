@@ -129,6 +129,7 @@ export default {
     more: '更多操作',
     copy: '复制',
     copied: '已复制',
+    copyFailed: '无法访问剪贴板，请手动复制该值。',
     cancel: '取消',
     close: '关闭',
     count: '{count} 个'
@@ -282,7 +283,9 @@ export default {
         paid: '付费',
         freemium: '免费，含付费功能',
         subscription: '订阅',
-        open_source: '开源免费'
+        open_source: '开源免费',
+        free_with_iap: '免费，含应用内购买',
+        trial: '提供免费试用'
       },
       verdict: {
         verifying: '正在核验 {file}…',
@@ -447,6 +450,7 @@ export default {
       }
     },
     related: '相似应用',
+    relatedMore: '查看更多',
     screenshots: '截图',
     caveats: '注意事项',
     info: {

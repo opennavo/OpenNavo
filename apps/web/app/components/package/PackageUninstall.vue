@@ -6,6 +6,7 @@ import type { UninstallFact } from '~/utils/packageFacts';
 import { aroundDate, isoDate, uninstallFacts } from '~/utils/packageFacts';
 import type { PackagePage } from '~/utils/packageFacts';
 import { packagePath } from '~/utils/packageView';
+import { installLifecycle } from '~/utils/packageInstall';
 import { uninstallPageOpen } from '~/utils/uninstallPage';
 
 // Uninstall {name} and optional data cleanup (T2): the regular uninstall with what Homebrew's definition
@@ -15,12 +16,23 @@ import { uninstallPageOpen } from '~/utils/uninstallPage';
 // items and receipts link to their background-items page (F1). Link apps never get a Homebrew command (T3);
 // they only show declarations if facts list any.
 // `guide`: link the standalone uninstall page (X2) when the server opens it; off on that page itself.
-const props = withDefaults(defineProps<{ pkg: PackagePage; homebrew: boolean; guide?: boolean }>(), { guide: true });
+const props = withDefaults(
+  defineProps<{
+    pkg: PackagePage;
+    homebrew: boolean;
+    guide?: boolean;
+    compact?: boolean;
+    showChecked?: boolean;
+  }>(),
+  { guide: true, compact: false, showChecked: true }
+);
 
 const { t, locale } = useI18n();
 const localePath = useLocalePath();
 const toasts = useToasts();
 const appLocale = computed(() => toAppLocale(locale.value));
+// Homebrew-disabled packages hide uninstall / Deep clean commands (same guard as install).
+const commandsAllowed = computed(() => installLifecycle(props.pkg, t).state !== 'disabled');
 
 const KINDS = ['launchctl', 'login_item', 'pkgutil', 'zap'] as const;
 
@@ -51,7 +63,12 @@ const checked = computed(() => {
     ...aroundDate(t, evidence.status === 'stale' ? 'package.uninstall.asOf' : 'package.uninstall.checked')
   };
 });
-const visible = computed(() => props.homebrew || regular.value.length > 0 || cleanup.value.length > 0);
+const visible = computed(
+  () =>
+    (props.homebrew && commandsAllowed.value) ||
+    regular.value.length > 0 ||
+    (cleanup.value.length > 0 && commandsAllowed.value)
+);
 const guidePath = computed(() =>
   props.guide && uninstallPageOpen(props.pkg) ? localePath(packagePath(props.pkg.token, 'uninstall')) : null
 );
@@ -59,29 +76,40 @@ const guidePath = computed(() =>
 function onCopied(command: string) {
   toasts.push({ tone: 'success', title: t('toast.copied'), description: command });
 }
+
+function onCopyFailed() {
+  toasts.push({ tone: 'warning', title: t('toast.copyFailed'), duration: 0 });
+}
 </script>
 
 <template>
   <section
     v-if="visible"
     id="uninstall"
-    class="rounded-big border border-solid border-line-subtle bg-surface-card px-18px py-16px"
+    :class="
+      compact
+        ? 'mt-16px border-t border-t-solid border-line-subtle pt-14px'
+        : 'rounded-big border border-solid border-line-subtle bg-surface-card px-18px py-16px'
+    "
     aria-labelledby="uninstall-title"
     data-testid="package-uninstall"
   >
     <h2 id="uninstall-title" class="m-0 text-13.5px font-600 text-ink-primary">
       {{ t('package.uninstall.title', { name: pkg.displayName }) }}
     </h2>
-    <div v-if="homebrew" class="mt-10px flex flex-col gap-8px">
+    <div v-if="homebrew && commandsAllowed" class="mt-10px flex flex-col gap-8px">
       <PackageCommand
         :command="`brew uninstall --cask ${pkg.token}`"
         :copy-label="t('package.copy.uninstall')"
         :title="t('package.guide.uninstallTitle')"
         @copied="onCopied"
+        @copy-failed="onCopyFailed"
       />
-      <p class="m-0 text-12px leading-[1.6] text-ink-tertiary">{{ t('package.guide.uninstall') }}</p>
+      <p class="m-0 text-12px leading-[1.6] text-ink-tertiary">
+        {{ t('package.guide.uninstall') }}
+      </p>
     </div>
-    <div v-if="regular.length" class="mt-10px">
+    <div v-if="!compact && regular.length" class="mt-10px">
       <h3 class="m-0 text-12.5px font-600 text-ink-primary">{{ t('package.uninstall.also') }}</h3>
       <dl class="m-0 mt-6px flex flex-col gap-6px text-12.5px leading-[1.6]">
         <div v-for="group in regular" :key="group.kind">
@@ -95,14 +123,19 @@ function onCopied(command: string) {
         </div>
       </dl>
     </div>
-    <div v-if="cleanup.length" class="mt-12px flex flex-col gap-8px" data-testid="package-zap">
-      <h3 class="m-0 text-12.5px font-600 text-ink-primary">{{ t('package.guide.zapTitle') }}</h3>
+    <details v-if="cleanup.length && commandsAllowed" class="mt-12px flex flex-col gap-8px" data-testid="package-zap">
+      <summary
+        class="cursor-pointer text-12.5px font-600 text-ink-primary outline-none focus-visible:shadow-focus-ring"
+      >
+        {{ t('package.guide.zapTitle') }}
+      </summary>
       <PackageCommand
         v-if="homebrew"
         :command="`brew uninstall --zap --cask ${pkg.token}`"
         :copy-label="t('package.copy.cleanup')"
         :title="t('package.guide.uninstallTitle')"
         @copied="onCopied"
+        @copy-failed="onCopyFailed"
       />
       <p class="m-0 text-12px leading-[1.6] text-ink-tertiary">
         <template v-for="(part, index) in zapWarning" :key="index">
@@ -114,7 +147,7 @@ function onCopied(command: string) {
           <template v-else>{{ part.text }}</template>
         </template>
       </p>
-      <details id="uninstall-files" class="text-12.5px leading-[1.6]">
+      <details v-if="!compact" id="uninstall-files" class="text-12.5px leading-[1.6]">
         <summary
           class="cursor-pointer text-ink-secondary outline-none hover:text-ink-primary focus-visible:shadow-focus-ring"
         >
@@ -132,8 +165,11 @@ function onCopied(command: string) {
           </div>
         </dl>
       </details>
-    </div>
-    <p v-if="checked && (regular.length || cleanup.length)" class="m-0 mt-10px text-11.5px text-ink-tertiary">
+    </details>
+    <p
+      v-if="!compact && showChecked && checked && (regular.length || cleanup.length)"
+      class="m-0 mt-10px text-11.5px text-ink-tertiary"
+    >
       {{ checked.before }}<time :datetime="checked.iso">{{ checked.date }}</time
       >{{ checked.after }}
     </p>

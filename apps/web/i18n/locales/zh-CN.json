@@ -101,6 +101,9 @@
     "addedToBrewfile": "已把 {name} 加入 Brewfile 清单",
     "brewfileFull": "清单最多 200 项，先删掉一些再加入"
   },
+  "common": {
+    "copy": "复制"
+  },
   "catalog": {
     "appsTitle": "App",
     "appsMetaTitle": "Mac App 大全 · OpenNavo",
@@ -326,6 +329,9 @@
       }
     },
     "related": "相似应用",
+    "relatedMore": "查看更多",
+    "verified": "已核实",
+    "verifiedDetails": "已核实的下载详情",
     "screenshots": "截图",
     "caveats": "注意事项",
     "info": {
@@ -620,6 +626,7 @@
       "versionA": "最新版本是 {version}。",
       "versionDated": "最新版本是 {version}，Homebrew 收录于 {date}。",
       "versionAuto": "{name} 会自动更新；想用 Homebrew 更新时，运行 `brew upgrade --cask --greedy {token}`。",
+      "versionSelf": "{name} 会自动更新。",
       "versionBrew": "运行 `brew upgrade --cask {token}` 即可更新。",
       "versionChannels": "Homebrew 还提供 {list}，不能与它同时安装。",
       "extrasQ": "安装 {name} 还会装上什么？",

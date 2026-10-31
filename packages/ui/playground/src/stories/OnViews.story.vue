@@ -320,10 +320,6 @@ const detail = samplePackages[1] as PackageSummary;
           <OnPackageOverview
             has-about
             command="brew install --cask visual-studio-code"
-            :info="[
-              { key: 'token', label: 'Token', value: 'visual-studio-code', mono: true },
-              { key: 'auto', label: 'Automatic updates', value: 'Built in (auto_updates)' }
-            ]"
             :related="
               samplePackages.slice(2, 5).map(pkg => ({
                 key: pkg.token,

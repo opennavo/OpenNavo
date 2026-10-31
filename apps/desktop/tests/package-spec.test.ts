@@ -4,6 +4,16 @@ import { OnPackageSpecCard } from '@opennavo/ui';
 import type { PackageDetail } from '@opennavo/api';
 import type { LocalItem } from '@/ipc/client';
 import { packageSpec } from '@/utils/packageSpec';
+import enUS from '@/i18n/en-US';
+import zhCN from '@/i18n/zh-CN';
+import jaJP from '@/i18n/ja-JP.json';
+import esES from '@/i18n/es-ES.json';
+import ptBR from '@/i18n/pt-BR.json';
+import ruRU from '@/i18n/ru-RU.json';
+import deDE from '@/i18n/de-DE.json';
+import frFR from '@/i18n/fr-FR.json';
+import itIT from '@/i18n/it-IT.json';
+import zhHant from '@/i18n/zh-Hant.json';
 
 const SPEC_NOW = Date.parse('2026-10-30T00:00:00Z');
 
@@ -323,6 +333,17 @@ describe('QA spec card regressions', () => {
     }
   });
 
+  it('drops unsafe homepage and stars hrefs before rendering', () => {
+    const pkg = Object.assign(detail(), {
+      repository: { url: 'javascript:alert(1)', stars: 42 },
+      homepage: 'javascript:alert(2)'
+    });
+    const spec = packageSpec(pkg, null, null, t, 'en-US', SPEC_NOW);
+    expect(spec.rows.find(row => row.key === 'openSource')?.href).toBeUndefined();
+    expect(spec.rows.find(row => row.key === 'openSource')?.stars?.href).toBeUndefined();
+    expect(spec.rows.some(row => row.key === 'homepage')).toBe(false);
+  });
+
   it.each(['cask', 'formula', 'link'] as const)(
     'keeps a standalone top-level license without OSI data for %s',
     kind => {
@@ -350,5 +371,68 @@ describe('QA spec card regressions', () => {
     expect(
       packageSpec(pkg, null, null, t, 'fr-FR', SPEC_NOW).rows.find(row => row.key === 'openSource')?.stars?.label
     ).toBe('★12,3\u00a0k');
+  });
+});
+
+describe('product star formatting', () => {
+  it.each([
+    ['en-US', 1_000, '1K'],
+    ['en-US', 12_345, '12.3K'],
+    ['en-US', 184_400, '184.4K'],
+    ['en-US', 999_949, '999.9K'],
+    ['en-US', 999_950, '1M'],
+    ['en-US', 1_200_000, '1.2M'],
+    ['zh-CN', 1_000, '1,000'],
+    ['zh-CN', 12_345, '1.2万'],
+    ['zh-CN', 999_950, '100万'],
+    ['ja-JP', 1_000, '1,000'],
+    ['ja-JP', 12_345, '1.2万'],
+    ['ja-JP', 999_950, '100万'],
+    ['de-DE', 1_000, '1.000'],
+    ['de-DE', 12_345, '12.345'],
+    ['de-DE', 999_950, '1\u00a0Mio.']
+  ] as const)('%s formats %s stars on the desktop detail page', (locale, stars, expected) => {
+    const spec = packageSpec(
+      detail({ repository: { url: 'https://github.com/acme/stars', stars, archived: false } }),
+      null,
+      null,
+      t,
+      locale,
+      SPEC_NOW
+    );
+    const label = spec.rows.find(row => row.key === 'openSource')?.stars?.label;
+    expect(label).toBe(`★${expected}`);
+    expect(label).not.toMatch(/1000[.,]0/);
+  });
+});
+
+describe('desktop link price types', () => {
+  it.each(['free_with_iap', 'trial'] as const)('localises a %s link price', pricing => {
+    const pkg = detail({
+      kind: 'link',
+      link: { pricing, homepage: 'https://example.com/' }
+    } as unknown as Partial<PackageDetail>);
+    expect(rows(pkg).find(row => row.key === 'price')?.value).toBe(`package.link.pricing.${pricing}`);
+  });
+
+  it.each(['free_with_iap', 'trial'] as const)('localises a verified %s detail price', type => {
+    const pkg = detail({ price: { type } } as unknown as Partial<PackageDetail>);
+    expect(rows(pkg).find(row => row.key === 'price')?.value).toBe(`package.link.pricing.${type}`);
+  });
+
+  it.each([
+    ['en-US', enUS],
+    ['zh-CN', zhCN],
+    ['zh-Hant', zhHant],
+    ['ja-JP', jaJP],
+    ['es-ES', esES],
+    ['pt-BR', ptBR],
+    ['ru-RU', ruRU],
+    ['de-DE', deDE],
+    ['fr-FR', frFR],
+    ['it-IT', itIT]
+  ] as const)('has both link price labels in %s', (_locale, messages) => {
+    const pricing = messages.package.link.pricing as Record<string, string>;
+    for (const key of ['free_with_iap', 'trial']) expect(pricing[key]).toBeTruthy();
   });
 });

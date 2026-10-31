@@ -104,7 +104,7 @@ const navButton =
       <li v-for="(item, index) in screenshots" :key="`${index}-${item.src}`" class="shrink-0">
         <button
           type="button"
-          class="relative m-0 box-border block h-200px w-318px cursor-zoom-in overflow-hidden rounded-panel border border-solid border-line-default bg-surface-card-alt p-0 outline-none focus-visible:shadow-focus-ring"
+          class="relative m-0 box-border block h-260px w-420px cursor-zoom-in overflow-hidden rounded-panel border border-solid border-line-default bg-surface-card-alt p-0 outline-none focus-visible:shadow-focus-ring max-[640px]:h-160px max-[640px]:w-260px"
           aria-haspopup="dialog"
           @click="open(index, $event)"
         >

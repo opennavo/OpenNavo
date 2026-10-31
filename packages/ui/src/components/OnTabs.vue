@@ -62,7 +62,7 @@ async function onKeydown(event: KeyboardEvent) {
   <nav
     v-if="isLinkMode"
     :aria-label="ariaLabel"
-    class="flex min-w-0 flex-wrap items-end gap-x-26px border-b border-b-solid border-line-subtle px-4px"
+    class="flex min-w-0 flex-wrap items-end gap-x-26px border-b border-b-solid border-line-subtle px-4px max-[640px]:flex-nowrap max-[640px]:gap-x-18px max-[640px]:overflow-x-auto"
   >
     <component
       :is="item.disabled ? 'span' : linkAs"
@@ -89,7 +89,7 @@ async function onKeydown(event: KeyboardEvent) {
     v-else
     role="tablist"
     :aria-label="ariaLabel"
-    class="flex min-w-0 flex-wrap items-end gap-x-26px border-b border-b-solid border-line-subtle px-4px"
+    class="flex min-w-0 flex-wrap items-end gap-x-26px border-b border-b-solid border-line-subtle px-4px max-[640px]:flex-nowrap max-[640px]:gap-x-18px max-[640px]:overflow-x-auto"
     @keydown="onKeydown"
   >
     <button

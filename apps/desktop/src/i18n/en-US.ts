@@ -134,6 +134,7 @@ const messages: MessageSchema = {
     more: 'More actions',
     copy: 'Copy',
     copied: 'Copied',
+    copyFailed: 'Clipboard unavailable. Copy the value manually.',
     cancel: 'Cancel',
     close: 'Close',
     count: '{count} app | {count} apps'
@@ -289,7 +290,9 @@ const messages: MessageSchema = {
         paid: 'Paid',
         freemium: 'Free with paid features',
         subscription: 'Subscription',
-        open_source: 'Free and open source'
+        open_source: 'Free and open source',
+        free_with_iap: 'Free with in-app purchases',
+        trial: 'Free trial available'
       },
       verdict: {
         verifying: 'Checking {file}…',
@@ -461,6 +464,7 @@ const messages: MessageSchema = {
       }
     },
     related: 'Similar Apps',
+    relatedMore: 'See more',
     screenshots: 'Screenshots',
     caveats: 'Caveats',
     info: {

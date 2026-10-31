@@ -167,3 +167,31 @@ async def test_link_content_token_on_second_page_uses_package_text_operation(
     update = next(req for name, req in backend.calls if name == "updatePackageText")
     assert "/42/" in update.url.path
     assert json.loads(update.content) == {"sourceLocale": "en-US", "summary": "Human summary"}
+
+
+async def test_link_manual_version_update_preview(backend: Backend) -> None:
+    async with Client(backend.server) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+        assert "version" in tools["link_app_update"].input_schema["properties"]
+        assert "version" not in tools["link_app_add"].input_schema["properties"]
+        result = await client.call_tool(
+            "link_app_update",
+            execution_args("link_app_update", {"package": 42, "version": "1.0.7", "dry_run": True}),
+            raise_on_error=False,
+        )
+        assert not result.is_error, result.content
+    request = next(req for name, req in backend.calls if name == "updateLinkPackage")
+    assert request.url.params["dryRun"] == "true"
+    assert json.loads(request.content) == {"version": "1.0.7"}
+
+
+@pytest.mark.parametrize("value", ["", "v 1.0", "-1.0", "x" * 65, None])
+async def test_link_manual_version_contract_rejection(backend: Backend, value: str | None) -> None:
+    async with Client(backend.server) as client:
+        result = await client.call_tool(
+            "link_app_update",
+            execution_args("link_app_update", {"package": 42, "version": value, "dry_run": True}),
+            raise_on_error=False,
+        )
+        assert result.is_error
+    assert not any(name == "updateLinkPackage" for name, _ in backend.calls)

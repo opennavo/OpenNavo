@@ -20,6 +20,16 @@ export interface DesktopPackageSpec {
 
 type Translate = (key: string, named?: Record<string, unknown>, plural?: number) => string;
 
+/** Only absolute https URLs become links, so untrusted API text can never reach an href. */
+function httpsUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).protocol === 'https:' ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function repoSummary(signals: PackageRepoSignals | null, t: Translate, now: number) {
   if (!signals) return { value: '', badge: undefined };
   const values: string[] = [];
@@ -89,12 +99,9 @@ export function packageSpec(
     if (value.kind === 'cask')
       rows.push({ key: 'fontLocation', label: t('package.details.location'), value: '~/Library/Fonts', mono: true });
   }
-  const price =
-    link?.pricing && link.pricing !== 'unknown'
-      ? t(`package.link.pricing.${link.pricing}`)
-      : detail?.price
-        ? t(`package.link.pricing.${detail.price.type}`)
-        : '';
+  let price = '';
+  if (link?.pricing && link.pricing !== 'unknown') price = t(`package.link.pricing.${link.pricing}`);
+  else if (detail?.price) price = t(`package.link.pricing.${detail.price.type}`);
   if (price) rows.push({ key: 'price', label: t('package.spec.price'), value: price });
 
   const system = detail?.dependsOn?.macos ?? detail?.minMacos;
@@ -131,11 +138,12 @@ export function packageSpec(
       (item.openSource === 'yes' || item.repositoryUrl)
   );
   const identityOpenSource = !osi && repoIdentity?.openSource === 'yes';
-  const repositoryUrl =
+  const repositoryUrl = httpsUrl(
     repository?.url ??
-    osi?.url ??
-    (github ? `https://github.com/${github.repo}` : undefined) ??
-    repoIdentity?.repositoryUrl;
+      osi?.url ??
+      (github ? `https://github.com/${github.repo}` : undefined) ??
+      repoIdentity?.repositoryUrl
+  );
   if (repository || osi || github || identityOpenSource || repoIdentity?.repositoryUrl) {
     const summary = repoSummary(signals, t, now);
     rows.push({
@@ -154,7 +162,7 @@ export function packageSpec(
           ? undefined
           : {
               label: `★${formatRepoStars(signals.stars, locale)}`,
-              href: repository?.url ?? repositoryUrl,
+              href: httpsUrl(repository?.url) ?? repositoryUrl,
               checked: signals.checkedAt
                 ? t('package.repo.checked', { date: formatDate(signals.checkedAt, { locale }) })
                 : undefined
@@ -170,7 +178,7 @@ export function packageSpec(
   const teamId = identity?.teamId ?? link?.teamId;
   if (teamId) rows.push({ key: 'teamId', label: t('package.link.teamId'), value: teamId, mono: true });
   if (detail?.license) rows.push({ key: 'license', label: t('package.info.license'), value: detail.license });
-  const homepage = value.kind === 'link' ? (link?.homepage ?? value.homepage) : value.homepage;
+  const homepage = httpsUrl(value.kind === 'link' ? (link?.homepage ?? value.homepage) : value.homepage);
   if (homepage)
     rows.push({
       key: 'homepage',

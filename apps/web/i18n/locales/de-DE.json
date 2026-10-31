@@ -101,6 +101,9 @@
     "addedToBrewfile": "{name} wurde zur Brewfile-Liste hinzugefügt",
     "brewfileFull": "Die Liste fasst höchstens 200 Einträge. Entfernen Sie zuerst einige."
   },
+  "common": {
+    "copy": "Kopieren"
+  },
   "catalog": {
     "appsTitle": "Apps",
     "appsMetaTitle": "Mac-Apps im Überblick · OpenNavo",
@@ -326,6 +329,9 @@
       }
     },
     "related": "Ähnliche Apps",
+    "relatedMore": "Mehr anzeigen",
+    "verified": "Verifiziert",
+    "verifiedDetails": "Verifizierte Download-Details",
     "screenshots": "Screenshots",
     "caveats": "Hinweise",
     "info": {
@@ -620,6 +626,7 @@
       "versionA": "Die aktuelle Version ist {version}.",
       "versionDated": "Die aktuelle Version ist {version}; Homebrew hat sie am {date} aufgenommen.",
       "versionAuto": "{name} aktualisiert sich selbst; für ein Update über Homebrew führen Sie `brew upgrade --cask --greedy {token}` aus.",
+      "versionSelf": "{name} aktualisiert sich selbst.",
       "versionBrew": "Zum Aktualisieren führen Sie `brew upgrade --cask {token}` aus.",
       "versionChannels": "Homebrew bietet außerdem {list} an; eine parallele Installation ist nicht möglich.",
       "extrasQ": "Was wird mit {name} zusätzlich installiert?",

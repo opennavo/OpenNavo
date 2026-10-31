@@ -101,6 +101,9 @@
     "addedToBrewfile": "{name} добавлено в список Brewfile",
     "brewfileFull": "В списке может быть не более 200 элементов. Удалите несколько, прежде чем добавлять новые"
   },
+  "common": {
+    "copy": "Копировать"
+  },
   "catalog": {
     "appsTitle": "Приложения",
     "appsMetaTitle": "Каталог приложений для Mac · OpenNavo",
@@ -326,6 +329,9 @@
       }
     },
     "related": "Похожие приложения",
+    "relatedMore": "Показать ещё",
+    "verified": "Проверено",
+    "verifiedDetails": "Проверенные сведения о загрузке",
     "screenshots": "Снимки экрана",
     "caveats": "Примечания",
     "info": {
@@ -620,6 +626,7 @@
       "versionA": "Последняя версия — {version}.",
       "versionDated": "Последняя версия — {version}, в Homebrew она появилась {date}.",
       "versionAuto": "{name} обновляется само; чтобы обновить его через Homebrew, выполните `brew upgrade --cask --greedy {token}`.",
+      "versionSelf": "{name} обновляется само.",
       "versionBrew": "Чтобы обновить, выполните `brew upgrade --cask {token}`.",
       "versionChannels": "В Homebrew есть также {list}; их нельзя установить одновременно.",
       "extrasQ": "Что ещё устанавливается вместе с {name}?",

@@ -129,6 +129,7 @@
     "more": "Más acciones",
     "copy": "Copiar",
     "copied": "Copiado",
+    "copyFailed": "Portapapeles no disponible. Copia el valor manualmente.",
     "cancel": "Cancelar",
     "close": "Cerrar",
     "count": "{count} aplicación | {count} aplicaciones"
@@ -282,7 +283,9 @@
         "paid": "De pago",
         "freemium": "Gratis con funciones de pago",
         "subscription": "Suscripción",
-        "open_source": "Gratis y de código abierto"
+        "open_source": "Gratis y de código abierto",
+        "free_with_iap": "Gratis con compras dentro de la App",
+        "trial": "Con prueba gratuita"
       },
       "verdict": {
         "verifying": "Comprobando {file}…",
@@ -453,6 +456,7 @@
       }
     },
     "related": "Aplicaciones similares",
+    "relatedMore": "Ver más",
     "screenshots": "Capturas de pantalla",
     "caveats": "Avisos",
     "info": {
@@ -466,6 +470,8 @@
       "license": "Licencia"
     },
     "spec": {
+      "downloadSource": "Origen de la descarga",
+      "fontFiles": "Archivos de fuente",
       "title": "De un vistazo",
       "price": "Precio",
       "system": "Sistema",
@@ -474,17 +480,15 @@
       "openSource": "Código abierto",
       "repository": "Repositorio",
       "githubRepository": "Repositorio de GitHub",
+      "checked": "Comprobado",
       "developer": "Desarrollador",
       "homepage": "Sitio web",
       "token": "Identificador",
+      "bundleId": "Bundle ID",
       "installedVersion": "Versión instalada",
       "installLocation": "Ubicación de instalación",
       "yes": "Sí",
-      "no": "No",
-      "checked": "Comprobado",
-      "downloadSource": "Origen de la descarga",
-      "fontFiles": "Archivos de fuente",
-      "bundleId": "Bundle ID"
+      "no": "No"
     },
     "repo": {
       "stars": "★",

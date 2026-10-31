@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { isThirdPartyTap } from '@opennavo/shared';
-import { displayUrl, OnButton, OnCaskArtifacts, OnCodeText, OnKeyValueList, useUiMessages } from '@opennavo/ui';
+import { isThirdPartyTap, packageInstallState } from '@opennavo/shared';
+import {
+  displayUrl,
+  OnButton,
+  OnCaskArtifacts,
+  OnCodeText,
+  OnInstallCommand,
+  OnKeyValueList,
+  useUiMessages
+} from '@opennavo/ui';
 import type { OnKeyValueItem } from '@opennavo/ui';
 import OfflineNotice from '@/components/common/OfflineNotice.vue';
 import { usePackage } from '@/composables/usePackageDetail';
@@ -17,6 +25,28 @@ const { kind, token, detail, local, error } = usePackage();
 
 const messages = useUiMessages();
 const downloadSha = computed(() => detail.value?.downloadSha256);
+const installState = computed(() => (detail.value ? packageInstallState(detail.value) : 'active'));
+const installCommand = computed(() => detail.value?.installCommand ?? '');
+const installNotice = computed(() => {
+  const value = detail.value;
+  const state = installState.value;
+  if (!value || state === 'active') return undefined;
+  const reason =
+    (state === 'deprecated' ? value.deprecation?.reason : value.disable?.reason) ??
+    value.homebrewStatus?.reason ??
+    t('package.noReason');
+  return {
+    text: t(
+      state === 'disabled'
+        ? 'package.disabledNotice'
+        : state === 'deprecated'
+          ? 'package.deprecatedNotice'
+          : 'package.staleNotice',
+      { reason }
+    ),
+    disabled: state === 'disabled'
+  };
+});
 
 const items = computed<OnKeyValueItem[]>(() => {
   const value = detail.value;
@@ -118,8 +148,20 @@ const items = computed<OnKeyValueItem[]>(() => {
 async function copySha() {
   const sha = downloadSha.value;
   if (!sha) return;
-  await navigator.clipboard.writeText(sha);
-  toasts.push({ tone: 'success', title: t('common.copied'), description: 'SHA-256' });
+  try {
+    await navigator.clipboard.writeText(sha);
+    toasts.push({ tone: 'success', title: t('common.copied'), description: 'SHA-256' });
+  } catch {
+    toasts.push({ tone: 'warning', title: t('common.copyFailed'), description: 'SHA-256', duration: 0 });
+  }
+}
+
+function onCopied(command: string) {
+  toasts.push({ tone: 'success', title: t('common.copied'), description: command });
+}
+
+function onCopyFailed() {
+  toasts.push({ tone: 'warning', title: t('common.copyFailed'), description: installCommand.value, duration: 0 });
 }
 </script>
 
@@ -127,6 +169,31 @@ async function copySha() {
   <OfflineNotice v-if="error && !detail" />
   <div v-else-if="detail || local" class="pt-4px">
     <div class="flex min-w-0 flex-col gap-16px">
+      <section
+        v-if="installCommand || installNotice"
+        class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px"
+        data-testid="package-install-command"
+      >
+        <p
+          v-if="installNotice"
+          role="note"
+          class="m-0 rounded-default border border-solid px-12px py-10px text-12.5px leading-[1.6]"
+          :class="[
+            installNotice.disabled
+              ? 'border-status-danger text-status-danger'
+              : 'border-status-warning text-status-warning',
+            installCommand && !installNotice.disabled ? 'mb-12px' : ''
+          ]"
+        >
+          {{ installNotice.text }}
+        </p>
+        <OnInstallCommand
+          v-if="installCommand && !installNotice?.disabled"
+          :command="installCommand"
+          @copied="onCopied"
+          @copy-failed="onCopyFailed"
+        />
+      </section>
       <section class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-4px">
         <OnKeyValueList :items="items" />
         <div v-if="downloadSha" class="flex justify-end pb-10px">
