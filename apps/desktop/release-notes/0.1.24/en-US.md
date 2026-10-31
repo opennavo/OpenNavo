@@ -6,5 +6,5 @@
 
 - Redesigned app details with an "At a glance" card showing source, price, system requirements and GitHub stars. Apps disabled by Homebrew show a notice instead of an install command.
 - "Also known as" names now only show names in your language.
-- Installs from web links and firewall connection alerts now open in OpenNavo's own windows. Deny or Block is on the left, Allow can only be clicked after a moment, and no keypress can approve anything. Closing or switching away from an install confirmation, including one requested by an AI app, counts as Deny. Collection links list every app, including any that will be skipped and why.
+- Installs from web links and firewall connection alerts now open in OpenNavo's own windows. Deny or Block is on the left, Allow can only be clicked after a moment, and no keypress can approve anything. Closing or switching away from a confirmation window, including install and Trash requests from an AI app, counts as Deny. Collection links list every app, including any that will be skipped and why.
 - Installed apps that are no longer listed in the public catalog can still be opened and managed.
