@@ -29,3 +29,16 @@ func TestManualLinkVersion(t *testing.T) {
 		require.ErrorContains(t, err, "version_managed_by_source")
 	}
 }
+
+// Clearing githubRepo in the same request as a version normalizes the source first, so the version
+// is accepted rather than rejected as source-managed.
+func TestPrepareLinkInputNormalizesSourceBeforeVersion(t *testing.T) {
+	repo := "owner/app"
+	home := "https://example.com/app"
+	input := domain.LinkInput{Token: "app", Name: "App", Homepage: &home, GithubRepo: &repo}
+	blank := ""
+	input.GithubRepo = &blank
+	require.NoError(t, prepareLinkInput(map[string]any{"githubRepo": "", "version": "1.0.7"}, &input))
+	require.Nil(t, input.GithubRepo)
+	require.Equal(t, "1.0.7", *input.Version)
+}

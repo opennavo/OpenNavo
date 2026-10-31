@@ -150,6 +150,11 @@ func (s *Store) writeManualLinkVersion(ctx context.Context, id int64, version st
 	if err := s.DB.WithContext(ctx).Exec("UPDATE packages SET version=?,version_base=?,version_changed_at=now(),updated_at=now() WHERE id=?", version, version, id).Error; err != nil {
 		return false, nil, err
 	}
+	// The 00098 revision triggers do not watch packages.version, so a hand-set version advances the
+	// link revision here, in the same transaction, and stale expectedRevision writes are rejected.
+	if err := s.DB.WithContext(ctx).Exec("UPDATE link_apps SET revision=revision+1 WHERE package_id=?", id).Error; err != nil {
+		return false, nil, err
+	}
 	return recorded.RowsAffected > 0, &current, nil
 }
 func (s *Store) RemoveLinkApp(ctx context.Context, id int64) error {
