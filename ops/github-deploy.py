@@ -86,28 +86,65 @@ PRIVATE_WARM_PREFIXES = (
     '/api', '/admin', '/agent-api', '/auth', '/oauth', '/login', '/reset', '/callback',
     '/.', '/_', '/assets', '/icons', '/screenshots', '/sitemap', '/robots'
 )
+WARM_READY_TIMEOUT_MS = 60000
+WARM_OUTPUT_LIMIT = 4000
+WARM_OUTPUT_PREFIXES = ('warm ', 'candidate ')
+# The script prints only its own status lines (path, status, duration, error name); never headers,
+# bodies, or environment. Pass 1 tolerates one retry per path for cold-start 5xx/request errors;
+# pass 2 stays strict: any 5xx or request error fails the deployment.
 WARM_SCRIPT = r'''const paths=JSON.parse(process.argv[1]);
 const origin=process.argv[2];
 const host=process.argv[3];
 const readyOrigin=process.argv[4];
+const readyTimeoutMs=Number(process.argv[5]||60000);
 const secondPassDurations=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-for(let pass=0;pass<2;pass++) {
-  for(const path of paths) {
-    const start=performance.now();
-    try {
-      const response=await fetch(origin+path,{
-        redirect:'manual',signal:AbortSignal.timeout(15000),
-        headers:{host,accept:'text/html','x-forwarded-proto':'https','user-agent':'OpenNavo-Warmup/1.0'}});
-      await response.arrayBuffer();
-      const elapsed=performance.now()-start;
-      console.log(`warm pass=${pass+1} path=${path} status=${response.status} ms=${Math.round(elapsed)}`);
-      if(response.status>=500) process.exit(1);
-      if(pass===1) secondPassDurations.push(elapsed);
-    } catch(error) {
-      console.error(`warm failed pass=${pass+1} path=${path}: ${error?.name ?? 'request error'}`);
-      process.exit(1);
+const readyStart=Date.now();
+for(let attempt=1;;attempt++) {
+  let status='request error';
+  try {
+    const response=await fetch(readyOrigin+'/readyz',{signal:AbortSignal.timeout(2500)});
+    await response.arrayBuffer();
+    status=response.status;
+    if(response.status===200) {
+      console.log(`candidate ready wait attempts=${attempt} ms=${Date.now()-readyStart}`);
+      break;
     }
+  } catch(error) {
+    status=error?.name ?? 'request error';
+  }
+  if(Date.now()-readyStart>=readyTimeoutMs) {
+    console.error(`candidate ready wait timed out after ${attempt} attempts ms=${Date.now()-readyStart} last=${status}`);
+    process.exit(1);
+  }
+  await delay(1000);
+}
+async function warm(pass,path) {
+  const start=performance.now();
+  try {
+    const response=await fetch(origin+path,{
+      redirect:'manual',signal:AbortSignal.timeout(15000),
+      headers:{host,accept:'text/html','x-forwarded-proto':'https','user-agent':'OpenNavo-Warmup/1.0'}});
+    await response.arrayBuffer();
+    const elapsed=performance.now()-start;
+    console.log(`warm pass=${pass} path=${path} status=${response.status} ms=${Math.round(elapsed)}`);
+    return {ok:response.status<500,elapsed};
+  } catch(error) {
+    const elapsed=performance.now()-start;
+    console.error(`warm failed pass=${pass} path=${path}: ${error?.name ?? 'request error'} ms=${Math.round(elapsed)}`);
+    return {ok:false,elapsed};
+  }
+}
+for(let pass=1;pass<=2;pass++) {
+  for(const path of paths) {
+    let result=await warm(pass,path);
+    if(!result.ok && pass===1) {
+      console.error(`warm retry pass=1 path=${path}`);
+      await delay(2000);
+      result=await warm(pass,path);
+    }
+    if(!result.ok) process.exit(1);
+    if(pass===2) secondPassDurations.push(result.elapsed);
     await delay(500);
   }
 }
@@ -297,6 +334,24 @@ def extract_admin(data, destination):
                     shutil.copyfileobj(source, output)
     if not (destination / 'index.html').is_file():
         raise ValueError('admin index is missing')
+
+
+def warm_output(raw):
+    """Return only the warmup script's own status lines, truncated, for the public deploy log.
+
+    Anything else (Node or Docker diagnostics) is counted but not printed, so expanded
+    environment values can never reach the workflow log.
+    """
+    text = raw.decode(errors='replace') if isinstance(raw, bytes) else (raw or '')
+    lines = text.splitlines()
+    kept = [line[:300] for line in lines if line.startswith(WARM_OUTPUT_PREFIXES)]
+    hidden = len(lines) - len(kept)
+    body = '\n'.join(kept)
+    if len(body) > WARM_OUTPUT_LIMIT:
+        body = '...(truncated)\n' + body[-WARM_OUTPUT_LIMIT:]
+    if hidden:
+        body += f'\n({hidden} other line(s) hidden; inspect privately on host)'
+    return body or '(empty)'
 
 
 def command(args, output=None):
@@ -1113,10 +1168,17 @@ class Deployment:
             health = command(['docker', 'inspect', '-f', '{{.State.Health.Status}}', container])
             if health != 'healthy':
                 raise RuntimeError('candidate web is not healthy')
-            command([
+            result = subprocess.run([
                 'docker', 'exec', container, 'node', '--input-type=module', '-e', WARM_SCRIPT,
-                json.dumps(self.warm_paths), WARM_ORIGIN, WARM_HOST, WARM_INTERNAL_ORIGIN
-            ])
+                json.dumps(self.warm_paths), WARM_ORIGIN, WARM_HOST, WARM_INTERNAL_ORIGIN,
+                str(WARM_READY_TIMEOUT_MS)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1200)
+            if result.returncode:
+                print(f'Warmup failed for candidate web replica {container[:12]} (exit {result.returncode}).',
+                      flush=True)
+                print('warmup stdout:\n' + warm_output(result.stdout), flush=True)
+                print('warmup stderr:\n' + warm_output(result.stderr), flush=True)
+                raise RuntimeError(f'candidate warmup failed (exit {result.returncode})')
             print(f'Warmed candidate web replica {container[:12]}.', flush=True)
         print('All candidate web replicas warmed and ready.', flush=True)
 
