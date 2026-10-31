@@ -33,3 +33,15 @@ func TestScheduledJobsReleaseUniquenessWithinAboutOnePeriod(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 20*time.Minute, uniqueTTL(definition), "the hourly lock must expire before the extra 23:59 tick")
 }
+
+func TestChangelogFetchLockLastsOneRun(t *testing.T) {
+	for _, definition := range Definitions {
+		if definition.Type != "changelog:fetch" {
+			continue
+		}
+		require.Zero(t, definition.Retries, "next_fetch_at owns retries and backoff")
+		require.Equal(t, 20*time.Minute, uniqueTTL(definition))
+		return
+	}
+	t.Fatal("changelog:fetch is not defined")
+}
