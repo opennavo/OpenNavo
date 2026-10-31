@@ -25,8 +25,13 @@ const client = ref<McpClient>('claude');
 const copied = ref(copiedMcpPaths());
 const loadFailed = ref(false);
 
+// Every status update takes a new token; a read only lands if nothing newer arrived meanwhile, so a slow
+// focus-triggered load() can never overwrite the state a switch change just reported.
+let statusToken = 0;
 async function refresh() {
-  status.value = await commands.mcpStatus();
+  const token = ++statusToken;
+  const next = await commands.mcpStatus();
+  if (token === statusToken) status.value = next;
 }
 // The first read can fail (backend not ready, IPC error); show that with a retry instead of a blank page.
 async function load() {
@@ -60,6 +65,7 @@ async function change(kind: 'enabled' | 'write', next: boolean) {
   try {
     const result = kind === 'enabled' ? await commands.mcpSetEnabled(next) : await commands.mcpSetWriteEnabled(next);
     if (result.status === 'ok') {
+      statusToken++;
       status.value = result.data;
       return;
     }

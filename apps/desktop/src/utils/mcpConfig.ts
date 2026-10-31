@@ -48,8 +48,14 @@ export function mcpConfig(client: McpClient, commandPath: string): string {
 export function copiedMcpPaths(): McpCopiedPaths {
   try {
     const raw = localStorage.getItem(MCP_COPIED_PATHS_KEY);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
+    let parsed: unknown;
+    try {
+      parsed = raw ? JSON.parse(raw) : undefined;
+    } catch {
+      // Corrupt value: fall back to the old single-slot key below.
+      parsed = undefined;
+    }
+    if (parsed !== undefined) {
       const out: McpCopiedPaths = {};
       if (parsed && typeof parsed === 'object') {
         for (const client of MCP_CLIENTS) {

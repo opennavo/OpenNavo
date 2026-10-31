@@ -77,8 +77,12 @@ describe('Local MCP config presets', () => {
     localStorage.setItem(MCP_COPIED_PATHS_KEY, JSON.stringify({ claude: OLD, cursor: APP, codex: 7 }));
     expect(copiedMcpPaths()).toEqual({ claude: OLD, cursor: APP });
     expect(mcpMovedClients(APP)).toEqual(['claude']);
+    // A corrupt per-client value falls back to the old key instead of forgetting it.
     localStorage.setItem(MCP_COPIED_PATHS_KEY, '{not json');
-    expect(mcpMovedClients(APP)).toEqual([]);
+    expect(copiedMcpPaths()).toEqual({ claude: OLD, cursor: OLD, codex: OLD, generic: OLD });
+    expect(mcpMovedClients(APP)).toEqual(['claude', 'cursor', 'codex', 'generic']);
+    localStorage.removeItem(MCP_COPIED_PATH_KEY);
+    expect(copiedMcpPaths()).toEqual({});
   });
 });
 
@@ -275,5 +279,25 @@ describe('Settings: Local MCP write request log', () => {
     await wrapper.get('[data-test="mcp-audit-view"]').trigger('click');
     await flushPromises();
     expect(body('mcp-audit-failed')).toHaveLength(1);
+  });
+});
+
+describe('Settings: Local MCP status ordering', () => {
+  it('A slow focus refresh never overwrites the state a switch change reported', async () => {
+    const wrapper = await page();
+    const stale = await commands.mcpStatus();
+    let finish!: () => void;
+    vi.spyOn(commands, 'mcpStatus').mockImplementationOnce(async () => {
+      await new Promise<void>(resolve => (finish = resolve));
+      return stale;
+    });
+    window.dispatchEvent(new Event('focus'));
+    await flushPromises();
+    await wrapper.get('[data-test="mcp-enabled"]').trigger('click');
+    await flushPromises();
+    expect(checked(wrapper, 'mcp-enabled')).toBe(true);
+    finish();
+    await flushPromises();
+    expect(checked(wrapper, 'mcp-enabled')).toBe(true);
   });
 });
