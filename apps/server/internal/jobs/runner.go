@@ -54,6 +54,14 @@ func WrapHandler(ledger Ledger, rdb *redis.Client, handler Handler, defaults ...
 			stats = map[string]any{}
 		}
 		stats["durationMs"] = time.Since(started).Milliseconds()
+		if retried, ok := asynq.GetRetryCount(ctx); ok {
+			// 1-based delivery attempt of this task; handlers may report their own domain attempt as "attempt".
+			stats["taskAttempt"] = retried + 1
+		}
+		if ctx.Err() != nil {
+			stats["canceled"] = errors.Is(ctx.Err(), context.Canceled)
+			stats["timedOut"] = errors.Is(ctx.Err(), context.DeadlineExceeded)
+		}
 		status := "succeeded"
 		var errorMessage *string
 		if taskErr != nil {

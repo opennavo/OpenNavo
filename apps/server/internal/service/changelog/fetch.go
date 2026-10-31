@@ -31,7 +31,32 @@ func (s *Service) now() time.Time {
 	}
 	return time.Now().UTC()
 }
+
+// Fetch reads one changelog source. Every outcome (success, failure, timeout, cancellation) reports which
+// source it was: source_id, package_token, source_url (scheme, host and path only: no query, no
+// credentials) and attempt, the 1-based consecutive attempt counted from changelog_sources.fail_count.
 func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
+	observed := map[string]any{"source_id": id}
+	stats, err := s.fetch(ctx, id, observed)
+	if stats == nil {
+		stats = map[string]any{}
+	}
+	for key, value := range observed {
+		if _, set := stats[key]; !set {
+			stats[key] = value
+		}
+	}
+	if err != nil && stats["errorCategory"] == nil {
+		category, httpStatus := pipeline.Failure(err)
+		stats["errorCategory"] = category
+		if httpStatus != 0 {
+			stats["httpStatus"] = httpStatus
+		}
+	}
+	return stats, err
+}
+
+func (s *Service) fetch(ctx context.Context, id int64, observed map[string]any) (map[string]any, error) {
 	if err := s.Store.DispatchCacheInvalidations(ctx); err != nil {
 		return nil, err
 	}
@@ -39,6 +64,8 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	observed["attempt"] = state.FailCount + 1
+	observed["source"] = state.Type
 	if state.Excluded || !state.Enabled {
 		return map[string]any{"skipped": true, "reason": "excluded_or_disabled"}, nil
 	}
@@ -49,6 +76,10 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 	p, err := s.Store.ChangelogCandidate(ctx, state.PackageID)
 	if err != nil {
 		return nil, err
+	}
+	observed["package_token"] = p.Token
+	if target := pipeline.SourceURL(state.Type, settings); target != "" {
+		observed["source_url"] = target
 	}
 	source := pipeline.FetchSource{ID: state.ID, Type: state.Type, Config: settings}
 	if state.ETag != nil {
@@ -79,7 +110,7 @@ func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 		} else if errors.As(err, &httpError) && httpError.Status == 404 {
 			status = "not_found"
 		}
-		if saveErr := s.Store.ChangelogFailure(ctx, id, status, pipeline.FailureMessage(err), next); saveErr != nil {
+		if saveErr := s.Store.ChangelogFailure(context.WithoutCancel(ctx), id, status, pipeline.FailureMessage(err), next); saveErr != nil {
 			return nil, saveErr
 		}
 		category, httpStatus := pipeline.Failure(err)
