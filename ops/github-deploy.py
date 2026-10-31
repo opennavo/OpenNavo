@@ -22,6 +22,8 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 # DNS targets expose IP scrape URLs; the discovered DNS name identifies the release.
@@ -352,6 +354,129 @@ def warm_output(raw):
     if hidden:
         body += f'\n({hidden} other line(s) hidden; inspect privately on host)'
     return body or '(empty)'
+
+
+VERIFY_USER_AGENT = 'OpenNavo-Deploy-Verify/1.0'
+VERIFY_BODY_PREVIEW_BYTES = 200
+VERIFY_ATTEMPTS = 30
+# Each public-MCP verification sends three POSTs that count against the public per-client quota
+# (60/min). Cap the attempts so retries cannot exhaust it and turn the real failure into a 429.
+PUBLIC_MCP_VERIFY_ATTEMPTS = 5
+PUBLIC_MCP_RETRY_AFTER_LIMIT = 30
+_TOKEN_PATTERNS = (
+    re.compile(r'(?i)(bearer\s+)[^\s"\',;]+'),
+    re.compile(r'(?i)((?:access_|refresh_|id_)?token|secret|password|passwd|api[_-]?key|authorization|cookie|'
+               r'session(?:[_-]?id)?|signature|credential)(["\']?\s*[:=]\s*["\']?)[^\s"\',;&}]+'),
+    re.compile(r'[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}'),  # JWT-like
+    re.compile(r'[A-Za-z0-9+/_\-]{32,}={0,2}'),  # long opaque token / key material
+)
+
+
+def redact_preview(raw, limit=VERIFY_BODY_PREVIEW_BYTES):
+    """First `limit` bytes of a response body as one printable line, with token-like values masked."""
+    data = raw[:limit] if isinstance(raw, (bytes, bytearray)) else str(raw or '').encode()[:limit]
+    text = data.decode('utf-8', 'replace')
+    text = ''.join(ch if ch.isprintable() else ' ' for ch in text)
+    text = _TOKEN_PATTERNS[0].sub(lambda match: match.group(1) + '[redacted]', text)
+    text = _TOKEN_PATTERNS[1].sub(lambda match: match.group(1) + match.group(2) + '[redacted]', text)
+    for pattern in _TOKEN_PATTERNS[2:]:
+        text = pattern.sub('[redacted]', text)
+    return text
+
+
+def redact_url(url):
+    """Drop userinfo, query and fragment: only scheme, host, port and path are logged."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname or ''
+        if parts.port:
+            host += f':{parts.port}'
+        return urllib.parse.urlunsplit((parts.scheme, host, parts.path, '', ''))
+    except ValueError:
+        return '(invalid url)'
+
+
+class RouteCheckError(RuntimeError):
+    """A post-deployment request failed; the message is safe for the public deploy log."""
+
+    def __init__(self, method, url, host, status, body=b'', *, retry_after=None, location=None, public_mcp=False):
+        self.method, self.url, self.host, self.status = method, redact_url(url), host, status
+        self.preview = redact_preview(body)
+        self.retry_after = retry_after
+        self.public_mcp = public_mcp
+        detail = f'{method} {self.url} (Host {host}) -> {status}'
+        if location:
+            detail += f' Location {redact_url(location)}'
+        detail += f'; body[:{VERIFY_BODY_PREVIEW_BYTES}]={self.preview!r}'
+        super().__init__(detail)
+
+
+def _retry_after_seconds(headers):
+    try:
+        value = int(str((headers or {}).get('Retry-After', '')).strip())
+    except ValueError:
+        return None
+    return max(0, min(value, PUBLIC_MCP_RETRY_AFTER_LIMIT))
+
+
+def route_check_error(error, method, url, host, *, public_mcp=False):
+    """Convert an urllib failure into a RouteCheckError with status and a redacted body preview."""
+    if isinstance(error, RouteCheckError):
+        return error
+    if isinstance(error, urllib.error.HTTPError):
+        try:
+            body = error.read(VERIFY_BODY_PREVIEW_BYTES) if error.fp is not None else b''
+        except Exception:
+            body = b''
+        headers = error.headers or {}
+        return RouteCheckError(method, url, host, error.code, body, retry_after=_retry_after_seconds(headers),
+                               location=headers.get('Location'), public_mcp=public_mcp)
+    if isinstance(error, urllib.error.URLError):
+        reason = getattr(error, 'reason', None)
+        return RouteCheckError(method, url, host, f'request error ({type(reason).__name__ if reason else "URLError"})',
+                               public_mcp=public_mcp)
+    return None
+
+
+def warm_retry_summary(stdout, stderr):
+    """Summarize first-pass warmup retries from the script's own status lines (prefix-safe)."""
+    lines = []
+    for raw in (stdout, stderr):
+        text = raw.decode(errors='replace') if isinstance(raw, bytes) else (raw or '')
+        lines.extend(text.splitlines())
+    attempts = {}
+    retried = []
+    passes = set()
+    for line in lines:
+        match = re.match(r'^warm (?:failed )?pass=(\d+) path=(\S+?)(?::)? (?:status=(\S+) )?.*?ms=(\d+)', line)
+        if match:
+            passes.add(match.group(1))
+            if match.group(1) == '1':
+                status = match.group(3) or line.split(': ', 1)[-1].rsplit(' ms=', 1)[0]
+                attempts.setdefault(match.group(2), []).append((status, match.group(4)))
+            continue
+        match = re.match(r'^warm retry pass=1 path=(\S+)', line)
+        if match:
+            retried.append(match.group(1))
+    out = []
+    for path in retried:
+        tries = attempts.get(path, [])
+        # stdout and stderr are captured separately, so order the attempts by outcome: on a
+        # passing warmup the failed attempt came first and the passing one was the retry.
+        failed = [item for item in tries if not (item[0].isdigit() and int(item[0]) < 500)]
+        passed = [item for item in tries if item not in failed]
+        ordered = failed[:1] + passed[:1] if failed else tries
+        first = ordered[0] if ordered else ('unknown', '?')
+        second = ordered[1] if len(ordered) > 1 else ('unknown', '?')
+        out.append(f'warm retry path={path} first={first[0]} first_ms={first[1]} '
+                   f'retry={second[0]} retry_ms={second[1]}'[:300])
+    paths = len(attempts)
+    if retried:
+        out.append(f'warm summary: {len(retried)} first-pass retr{"y" if len(retried) == 1 else "ies"} '
+                   f'across {paths} path(s)')
+    else:
+        out.append(f'warm summary: no retries ({paths} path(s), {len(passes) or 0} pass(es))')
+    return out
 
 
 def command(args, output=None):
@@ -1036,6 +1161,18 @@ class Deployment:
                 if key in service.get('environment', {}):
                     for old, replacement in self.aliases.items():
                         service['environment'][key] = service['environment'][key].replace(old, replacement)
+        # A public-MCP service created for the first time comes from the base Compose file, whose
+        # API base names the unversioned api-proxy alias. Rolling releases only expose versioned
+        # aliases, so point it at this release's API proxy alias like every other service.
+        public_mcp = self.services.get('public-mcp')
+        api_proxy_alias = next(iter(overlay['services'][self.services['api']].get('networks', {})
+                                    .get('proxy', {}).get('aliases', []) or []), None)
+        if public_mcp and api_proxy_alias:
+            environment = overlay['services'][public_mcp].setdefault('environment', {})
+            base = environment.get('OPENNAVO_PUBLIC_API_BASE')
+            if isinstance(base, str):
+                environment['OPENNAVO_PUBLIC_API_BASE'] = re.sub(
+                    r'^(https?://)api-proxy(?=[:/]|$)', lambda match: match.group(1) + api_proxy_alias, base)
         for old, replacement in self.aliases.items():
             routes = routes.replace(old, replacement)
         routes = install_public_mcp_route(
@@ -1179,6 +1316,9 @@ class Deployment:
                 print('warmup stdout:\n' + warm_output(result.stdout), flush=True)
                 print('warmup stderr:\n' + warm_output(result.stderr), flush=True)
                 raise RuntimeError(f'candidate warmup failed (exit {result.returncode})')
+            # Retries that later passed are otherwise invisible; log them (or a no-retry summary)
+            # through the same prefix filter as failures.
+            print(warm_output('\n'.join(warm_retry_summary(result.stdout, result.stderr))), flush=True)
             print(f'Warmed candidate web replica {container[:12]}.', flush=True)
         print('All candidate web replicas warmed and ready.', flush=True)
 
@@ -1398,24 +1538,38 @@ class Deployment:
                     'Accept': 'application/json, text/event-stream',
                     'Content-Type': 'application/json',
                     'MCP-Protocol-Version': '2025-06-18',
+                    'User-Agent': VERIFY_USER_AGENT,
                     **({'Mcp-Session-Id': session} if session else {}),
                 })
-            with urllib.request.urlopen(request, timeout=15) as response:
-                status = getattr(response, 'status', None)
-                if status is None:
-                    status = response.getcode()
-                if status != 200:
-                    raise RuntimeError('public MCP route returned an unexpected status')
-                body = response.read(2 * 1024 * 1024 + 1)
-                headers = getattr(response, 'headers', {})
+            # A redirect would turn the POST into a GET elsewhere (possibly via Cloudflare, which
+            # rejects urllib clients); report it instead of following it.
+            try:
+                with open_without_redirects(request, timeout=15) as response:
+                    status = getattr(response, 'status', None)
+                    if status is None:
+                        status = response.getcode()
+                    body = response.read(2 * 1024 * 1024 + 1)
+                    headers = getattr(response, 'headers', {})
+            except Exception as error:
+                converted = route_check_error(error, f'POST {method}', endpoint, host, public_mcp=True)
+                if converted is None:
+                    raise
+                raise converted from None
+            if status != 200:
+                raise RouteCheckError(f'POST {method}', endpoint, host, status, body, public_mcp=True)
             for name in ('Mcp-Session-Id', 'MCP-Session-Id', 'mcp-session-id'):
                 value = headers.get(name)
                 if value:
                     session = value
                     break
-            payload = self._mcp_payload(body)
+            try:
+                payload = self._mcp_payload(body)
+            except RuntimeError:
+                raise RouteCheckError(f'POST {method}', endpoint, host, f'{status} invalid MCP response', body,
+                                      public_mcp=True) from None
             if not isinstance(payload, dict) or 'result' not in payload or 'error' in payload:
-                raise RuntimeError('public MCP JSON-RPC request failed')
+                raise RouteCheckError(f'POST {method}', endpoint, host, f'{status} JSON-RPC error', body,
+                                      public_mcp=True)
             return payload['result']
 
         post(1, 'initialize')
@@ -1427,10 +1581,13 @@ class Deployment:
         content = called.get('content') if isinstance(called, dict) else None
         if (not isinstance(content, list) or not content or called.get('isError')
                 or not any(isinstance(item, dict) and str(item.get('text') or '').strip() for item in content)):
-            raise RuntimeError('public MCP tools/call list_categories returned an error or no content')
+            text = next((str(item.get('text') or '') for item in content or [] if isinstance(item, dict)), '')
+            raise RouteCheckError('POST tools/call list_categories', endpoint, host,
+                                  '200 tool error or no content', text.encode(), public_mcp=True)
         # Only the exact /mcp path is public; sub-paths must not reach the MCP service.
         # A redirect must not count: a 404 at the redirect target says nothing about /mcp/x.
-        probe = urllib.request.Request(endpoint + '/x', method='GET', headers={'Host': host})
+        probe = urllib.request.Request(endpoint + '/x', method='GET',
+                                       headers={'Host': host, 'User-Agent': VERIFY_USER_AGENT})
         try:
             with open_without_redirects(probe, timeout=15) as response:
                 status = getattr(response, 'status', None) or response.getcode()
@@ -1444,22 +1601,50 @@ class Deployment:
         # A legacy deployment may have no recorded SHA; still check its routes without a header match.
         checking_current = expected is None
         expected = self.payload['sha'][:12] if expected is None else expected
+        check_public_mcp = checking_current and 'public-mcp' in getattr(self, 'services', {})
         last_error = None
-        for _ in range(30):
+        logged = None
+        public_mcp_attempts = 0
+        for attempt in range(1, VERIFY_ATTEMPTS + 1):
+            delay = 2
             try:
                 for check in self.config['checks']:
-                    request = urllib.request.Request(self.config['local_origin'] + check['path'], headers={'Host': check['host']})
-                    with urllib.request.urlopen(request, timeout=15) as response:
-                        if response.status != 200 or (expected and response.headers.get('X-OpenNavo-Release') != expected):
-                            raise RuntimeError('route is not serving the new release')
-                        while response.read(65536):
-                            pass
-                if checking_current and 'public-mcp' in getattr(self, 'services', {}):
+                    url = self.config['local_origin'] + check['path']
+                    request = urllib.request.Request(
+                        url, headers={'Host': check['host'], 'User-Agent': VERIFY_USER_AGENT})
+                    try:
+                        with urllib.request.urlopen(request, timeout=15) as response:
+                            release = response.headers.get('X-OpenNavo-Release')
+                            if response.status != 200 or (expected and release != expected):
+                                body = response.read(VERIFY_BODY_PREVIEW_BYTES)
+                                raise RouteCheckError(
+                                    'GET', url, check['host'],
+                                    f'{response.status} release={release or "(none)"} expected={expected or "(any)"}',
+                                    body)
+                            while response.read(65536):
+                                pass
+                    except Exception as error:
+                        converted = route_check_error(error, 'GET', url, check['host'])
+                        if converted is None:
+                            raise
+                        raise converted from None
+                if check_public_mcp:
+                    if public_mcp_attempts >= PUBLIC_MCP_VERIFY_ATTEMPTS:
+                        break
+                    public_mcp_attempts += 1
                     self.verify_public_mcp()
                 return
             except Exception as error:
-                last_error = type(error).__name__
-                time.sleep(2)
+                last_error = str(error) if isinstance(error, RouteCheckError) else type(error).__name__
+                if last_error != logged:
+                    print(f'Post-deployment check attempt {attempt} failed: {last_error}', flush=True)
+                    logged = last_error
+                if isinstance(error, RouteCheckError) and error.retry_after is not None:
+                    delay = max(delay, error.retry_after)
+                time.sleep(delay)
+        if check_public_mcp and public_mcp_attempts >= PUBLIC_MCP_VERIFY_ATTEMPTS:
+            print(f'Public MCP verification stopped after {public_mcp_attempts} attempts '
+                  f'to stay within the public rate limit.', flush=True)
         raise RuntimeError('post-deployment route checks failed: ' + str(last_error))
 
     def switch_phase(self):

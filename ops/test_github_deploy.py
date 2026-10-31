@@ -76,7 +76,7 @@ class FakeCaddy:
         return ''
 
 
-def prepare_on_host(root, api_environment, include_public_mcp=False):
+def prepare_on_host(root, api_environment, include_public_mcp=False, api_proxy_alias=None):
     """Prepare a release on a minimal existing host and return the deployment and its candidate overlay."""
     directory = Path(root)
     # Pin host configuration so lint's isolated verification environment cannot change it.
@@ -100,6 +100,8 @@ def prepare_on_host(root, api_environment, include_public_mcp=False):
             'environment': {'OPENNAVO_PUBLIC_API_BASE': 'http://api-proxy:8080/api/v1'},
             'networks': {'proxy': {'aliases': ['public-mcp-proxy']}},
         })
+    if api_proxy_alias:
+        overlay['services'][services['api']]['networks'] = {'proxy': {'aliases': [api_proxy_alias]}}
     (directory / 'deploy/rolling.compose.json').write_text(json.dumps(overlay))
     (directory / 'current-release.env').write_text('SERVER_IMAGE=old\n')
     route = ('{$WEB_DOMAIN} {\n'
@@ -1304,7 +1306,12 @@ class DeployTests(unittest.TestCase):
         # Through verify_public_mcp, the 404 behind the redirect must not count as a pass.
         obj = deploy.Deployment.__new__(deploy.Deployment)
         obj.config = {'local_origin': origin, 'public_mcp_host': 'opennavo.com', 'checks': []}
-        with patch.object(deploy.urllib.request, 'urlopen', side_effect=fake_public_mcp()), \
+        real_open = deploy.open_without_redirects
+        fake = fake_public_mcp()
+        # JSON-RPC POSTs go to the fake MCP; only the GET probe uses the real no-redirect opener.
+        with patch.object(deploy, 'open_without_redirects',
+                          side_effect=lambda request, timeout: fake(request, timeout) if request.data is not None
+                          else real_open(request, timeout)), \
                 self.assertRaisesRegex(RuntimeError, '/mcp/x returned 301'):
             obj.verify_public_mcp()
 
@@ -1360,6 +1367,77 @@ class DeployTests(unittest.TestCase):
                     deploy.urllib.request, 'urlopen', side_effect=fake_public_mcp(subpath_status=status)):
                 with self.assertRaisesRegex(RuntimeError, f'/mcp/x returned {status}'):
                     obj.verify_public_mcp()
+
+    def test_first_public_mcp_uses_the_new_versioned_api_proxy_alias(self):
+        # Production hosts only expose versioned aliases; the base Compose api-proxy name does not resolve.
+        with tempfile.TemporaryDirectory() as root:
+            obj, candidate = prepare_on_host(root, {}, api_proxy_alias='api-proxy-gh-old-1')
+            api_alias = candidate['services'][obj.services['api']]['networks']['proxy']['aliases'][0]
+            self.assertEqual(api_alias, 'api-proxy-' + obj.release)
+            environment = candidate['services'][obj.services['public-mcp']]['environment']
+            self.assertEqual(environment['OPENNAVO_PUBLIC_API_BASE'], f'http://{api_alias}:8080/api/v1')
+        with tempfile.TemporaryDirectory() as root:
+            obj, candidate = prepare_on_host(root, {}, include_public_mcp=True)
+            environment = candidate['services'][obj.services['public-mcp']]['environment']
+            self.assertEqual(environment['OPENNAVO_PUBLIC_API_BASE'],
+                             f'http://api-proxy-{obj.release}:8080/api/v1')
+
+    def test_verify_logs_public_mcp_failure_detail_and_caps_attempts(self):
+        obj = object.__new__(deploy.Deployment)
+        obj.payload = payload()
+        obj.services = {'public-mcp': 'public-mcp_new'}
+        obj.config = {'local_origin': 'http://user:pw@127.0.0.1:80', 'public_mcp_host': 'opennavo.com', 'checks': []}
+        posts = []
+
+        def rejected(request, timeout):
+            posts.append(request)
+            fake_value = 'abcdef' + '0123456789'  # assembled so secret scanners do not flag the fixture
+            body = io.BytesIO(('{"error":"rate_limited","access' + '_token":"' + fake_value + '","x":"'
+                               + 'A' * 300 + '"}').encode())
+            raise deploy.urllib.error.HTTPError(request.full_url, 429, 'Too Many', {'Retry-After': '7'}, body)
+        output, sleeps = io.StringIO(), []
+        with patch.object(deploy, 'open_without_redirects', side_effect=rejected), \
+                patch.object(deploy.time, 'sleep', side_effect=sleeps.append), \
+                contextlib.redirect_stdout(output), \
+                self.assertRaisesRegex(RuntimeError, r'route checks failed: POST initialize '
+                                                     r'http://127\.0\.0\.1:80/mcp \(Host opennavo\.com\) -> 429'):
+            obj.verify()
+        log = output.getvalue()
+        self.assertEqual(len(posts), deploy.PUBLIC_MCP_VERIFY_ATTEMPTS)
+        self.assertEqual(posts[0].get_header('User-agent'), deploy.VERIFY_USER_AGENT)
+        self.assertEqual(log.count('Post-deployment check attempt'), 1)  # identical failures are logged once
+        self.assertIn('rate_limited', log)
+        self.assertNotIn('abcdef' + '0123456789', log)
+        self.assertNotIn('pw@', log)
+        self.assertNotIn('A' * 250, log)
+        self.assertIn('stopped after 5 attempts', log)
+        self.assertEqual(sleeps, [7] * deploy.PUBLIC_MCP_VERIFY_ATTEMPTS)
+
+    def test_verify_public_mcp_reports_tool_error_and_redirect(self):
+        obj = object.__new__(deploy.Deployment)
+        obj.config = {'local_origin': 'http://127.0.0.1:80', 'public_mcp_host': 'opennavo.com', 'checks': []}
+        body = {'result': {'isError': True, 'content': [
+            {'type': 'text', 'text': 'public_api_unavailable: the public API could not be reached'}]}}
+        with patch.object(deploy, 'open_without_redirects', side_effect=fake_public_mcp(call_result=body)), \
+                self.assertRaisesRegex(deploy.RouteCheckError, 'tools/call list_categories .* tool error.*public_api_unavailable'):
+            obj.verify_public_mcp()
+
+        def redirect(request, timeout):
+            raise deploy.urllib.error.HTTPError(request.full_url, 308, 'Permanent', {'Location': 'https://opennavo.com/mcp?sig=s3cret'}, io.BytesIO(b''))
+        with patch.object(deploy, 'open_without_redirects', side_effect=redirect), \
+                self.assertRaises(deploy.RouteCheckError) as raised:
+            obj.verify_public_mcp()
+        self.assertIn('-> 308 Location https://opennavo.com/mcp;', str(raised.exception))
+        self.assertNotIn('s3cret', str(raised.exception))
+
+    def test_redact_preview_masks_tokens_and_limits_length(self):
+        # JWT-shaped fixture assembled at runtime so secret scanners do not flag it.
+        jwt_like = '.'.join(['h' * 12, 'p' * 12, 's' * 12])
+        text = deploy.redact_preview(('Authorization: Bearer abc.def.ghi {"token":"t0k"} session_id=xyz '
+                                      + jwt_like + ' ' + 'k' * 400).encode())
+        for secret in ['abc.def.ghi', 't0k', 'xyz', jwt_like, 'k' * 40]:
+            self.assertNotIn(secret, text)
+        self.assertLessEqual(len(deploy.redact_preview(b'x ' * 500)), deploy.VERIFY_BODY_PREVIEW_BYTES)
 
     def test_monitoring_targets_preserves_other_jobs_and_follows_release_and_rollback(self):
         source = """global:
@@ -1517,6 +1595,34 @@ globalThis.fetch = async (url) => {
                 contextlib.redirect_stdout(output):
             obj.warm_candidates()
         self.assertIn('All candidate web replicas warmed and ready.', output.getvalue())
+
+    def test_warm_candidates_logs_retries_and_summary_on_success(self):
+        script = self.run_warm_script([503, 200], paths=['/'])
+        obj, _, fake_run = self.warm_deployer(script)
+        output = io.StringIO()
+        with patch.object(deploy, 'command', return_value='healthy'), \
+                patch.object(deploy.subprocess, 'run', fake_run), \
+                contextlib.redirect_stdout(output):
+            obj.warm_candidates()
+        log = output.getvalue()
+        self.assertRegex(log, r'warm retry path=/ first=503 first_ms=\d+ retry=200 retry_ms=\d+')
+        self.assertIn('warm summary: 1 first-pass retry across 1 path(s)', log)
+
+        script = self.run_warm_script([200], paths=['/', '/zh'])
+        obj, _, fake_run = self.warm_deployer(script)
+        output = io.StringIO()
+        with patch.object(deploy, 'command', return_value='healthy'), \
+                patch.object(deploy.subprocess, 'run', fake_run), \
+                contextlib.redirect_stdout(output):
+            obj.warm_candidates()
+        self.assertIn('warm summary: no retries (2 path(s), 2 pass(es))', output.getvalue())
+
+    def test_warm_retry_summary_reports_request_errors(self):
+        lines = deploy.warm_retry_summary(
+            b'warm pass=1 path=/a status=200 ms=10\nwarm pass=1 path=/b status=200 ms=900\n',
+            b'warm failed pass=1 path=/b: TypeError ms=12\nwarm retry pass=1 path=/b\nTOKEN=x\n')
+        self.assertEqual(lines[0], 'warm retry path=/b first=TypeError first_ms=12 retry=200 retry_ms=900')
+        self.assertTrue(all(line.startswith(deploy.WARM_OUTPUT_PREFIXES) for line in lines))
 
     def test_warm_output_truncates(self):
         text = deploy.warm_output(('warm pass=1 path=/x status=200 ms=1\n' * 500).encode())
