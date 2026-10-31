@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { BRAND } from '@opennavo/shared';
 import { OnButton, OnHighlightText, OnIcon } from '@opennavo/ui';
-import { findCategoryPath } from '~/utils/categories';
 
 // Security (store/security plan §6): the antivirus page in the landing shell. Hero with the Virus Scan demo, the six
 // checks, scan modes, startup items, the system check-up, optional extras, privacy, questions and download. Every
@@ -19,19 +18,6 @@ const { data: home } = await useHome();
 const apps = computed(() =>
   withSampleApps(pickShowcaseApps([home.value?.popularApps, home.value?.recentlyUpdated], 6).map(toLandingApp), 3)
 );
-
-// C5: the security apps category leads the directory links, when the catalog has one.
-const securityCategory = computed(() => {
-  const node = findCategoryPath(home.value?.categories ?? [], 'security').at(-1);
-  return node
-    ? {
-        key: 'security',
-        label: t('browse.directory.category', { name: node.name }),
-        href: localePath(`/categories/${node.slug}`),
-        icon: 'shield-check'
-      }
-    : null;
-});
 
 // The heading's two lines read as one sentence, as on the home page (headingLead).
 const titleLead = computed(() => headingLead(t('security.hero.title')));
@@ -289,9 +275,6 @@ defineOgImage('OgDefaultSatori', {
 
     <!-- F8: the topic pages and the background items encyclopedia (F1), each one click from here. -->
     <SecurityTopicLinks :title="t('securityTopics.linksTitle')" />
-
-    <!-- C5: entry points into the catalog's directories, led by the security apps category. -->
-    <DirectoryLinks :lead="securityCategory" />
 
     <LandingCta :title="t('security.cta.title')" :body="t('security.cta.body')" />
   </div>

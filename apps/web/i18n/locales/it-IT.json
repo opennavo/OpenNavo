@@ -948,13 +948,7 @@
     "pageLink": "{title}, pagina {page}",
     "bucketsLabel": "Sfoglia per iniziale",
     "leafMetaTitle": "{title} (indice A–Z) · OpenNavo",
-    "leafDescription": "{title}, in ordine alfabetico: {count} in totale. Ogni voce ha descrizione, cronologia delle versioni e istruzioni di installazione.",
-    "directory": {
-      "kicker": "Catalogo",
-      "title": "Trova app nel catalogo",
-      "body": "Sfoglia le categorie per funzione, apri una raccolta curata dalla redazione o trova qualsiasi app nell’elenco completo e nell’indice A–Z.",
-      "category": "App della categoria {name}"
-    }
+    "leafDescription": "{title}, in ordine alfabetico: {count} in totale. Ogni voce ha descrizione, cronologia delle versioni e istruzioni di installazione."
   },
   "feeds": {
     "subscribe": "Iscriviti agli aggiornamenti (RSS)",
