@@ -19,13 +19,13 @@ use opennavo_desktop_lib::{
 };
 use std::{
     fs,
-    os::unix::fs::symlink,
+    os::unix::fs::{MetadataExt, symlink},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 #[derive(Default)]
 struct Apps {
@@ -2945,6 +2945,28 @@ async fn docker_socket_replaced_after_scan_is_not_pruned() {
 // ---- #116: never remove more than was shown -------------------------------------------------------------------
 // These two tests compile against desktop-v0.1.24 unchanged and fail there (the whole tree is removed).
 
+/// Like [`tree_allocated`], for a tree another thread is emptying: vanished entries count as gone.
+fn tree_allocated_lenient(root: &Path) -> u64 {
+    let mut total = 0;
+    let mut pending = vec![root.to_owned()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.is_dir() {
+                pending.push(path);
+            } else if metadata.nlink() == 1 {
+                total += metadata.blocks() * 512;
+            }
+        }
+    }
+    total
+}
 fn tree_allocated(root: &Path) -> u64 {
     use std::os::unix::fs::MetadataExt;
     let mut total = 0;
@@ -2993,6 +3015,15 @@ fn big_cache(f: &Fixture, files: usize) -> PathBuf {
         f.file(&format!(".npm/_cacache/content-v2/{:02}/f{i:05}", i % 32));
     }
     f.home.join(".npm/_cacache")
+}
+/// `files` small files under a fixed cache root, spread over 32 folders.
+fn small_cache(f: &Fixture, relative: &str, files: usize) -> PathBuf {
+    for i in 0..files {
+        let path = f.home.join(format!("{relative}/{:02}/f{i:05}", i % 32));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, vec![3u8; 4096]).unwrap();
+    }
+    f.home.join(relative)
 }
 
 #[tokio::test]
@@ -3175,4 +3206,110 @@ fn p0_116_limits_are_proportional_with_fixed_slack() {
     assert_eq!(total_limit(10_000), 11_000 + (256 << 20));
     assert_eq!(item_limit(u64::MAX), u64::MAX);
 }
+// PR #117: an item that grows while it is being emptied stops at the limit, and the bytes it had already unlinked
+// must be reported instead of vanishing from the outcome, the log and the result page.
+#[tokio::test]
+async fn p1_117_aborted_removal_reports_the_bytes_it_already_deleted() {
+    let f = Fixture::new();
+    // Shown while it is small, emptied while it is large.
+    let cache = big_cache(&f, 300);
+    // Emptied first, so the run is already removing files when the grown item reappears.
+    let neighbour = small_cache(&f, ".gradle/caches", 20_000);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let listed = |suffix: &str| {
+        items(&report)
+            .into_iter()
+            .find(|i| i.path.ends_with(suffix))
+            .unwrap_or_else(|| panic!("{suffix} is listed"))
+            .clone()
+    };
+    let neighbour_item = listed(".gradle/caches");
+    let item = listed("_cacache");
+    let shown = item.size_bytes.unwrap();
+    let limit = shown_limit(shown);
+    let neighbour_bytes = tree_allocated(&neighbour);
+    // Grow it on disk without touching what the plan recorded: new files inside the folders the scan already saw.
+    for i in 300..2300 {
+        let path = f
+            .home
+            .join(format!(".npm/_cacache/content-v2/{:02}/f{i:05}", i % 32));
+        fs::write(&path, vec![7u8; 65536]).unwrap();
+    }
+    let grown = tree_allocated(&cache);
+    assert!(
+        grown > limit,
+        "the item must outgrow its limit: {grown} > {limit} (shown {shown})"
+    );
+    // A missing path is not measured by the preflight. Putting the same folder back keeps its identity, so the
+    // removal still accepts the plan it was given.
+    let stash = f.home.join(".stashed-cacache");
+    fs::rename(&cache, &stash).unwrap();
+    let sentinels: Vec<_> = (0..32u32)
+        .map(|d| f.home.join(format!(".gradle/caches/{d:02}/f{d:05}")))
+        .collect();
+    let restore = {
+        let (stash, cache) = (stash.clone(), cache.clone());
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while sentinels.iter().all(|path| path.exists()) {
+                if Instant::now() > deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_micros(200));
+            }
+            fs::rename(&stash, &cache).unwrap();
+        })
+    };
+    let task = f
+        .engine
+        .enqueue(
+            &f.queue,
+            &report.report_id,
+            vec![neighbour_item.id.clone(), item.id.clone()],
+        )
+        .unwrap();
+    let done = wait(&f, &task.id).await;
+    restore.join().unwrap();
+    let deleted_item = grown - tree_allocated_lenient(&cache);
+    let neighbour_left = tree_allocated_lenient(&neighbour);
+    let deleted = neighbour_bytes - neighbour_left + deleted_item;
+
+    assert_eq!(done.state, TaskState::Failed);
+    assert_eq!(
+        done.error.as_ref().unwrap().code,
+        "E_CLEANUP_OVERSIZE",
+        "the run must stop at the limit"
+    );
+    assert!(
+        deleted_item > 0,
+        "the removed item had unlinked files before it stopped"
+    );
+    assert!(
+        deleted_item <= limit,
+        "never free more than the limit: {deleted_item} > {limit}"
+    );
+    let outcome = done.outcome.unwrap();
+    assert_eq!(
+        outcome.freed_bytes, deleted,
+        "the outcome must match the bytes actually deleted"
+    );
+    // The result page and the task table read this persisted outcome.
+    let stored = f.queue.database.tasks().unwrap();
+    let stored = stored.iter().find(|t| t.id == task.id).unwrap();
+    assert_eq!(
+        stored.outcome.as_ref().unwrap().freed_bytes,
+        deleted,
+        "the persisted outcome carries the real deleted bytes"
+    );
+    let log = fs::read_to_string(done.log_path.unwrap()).unwrap();
+    assert!(
+        log.contains(&format!("freed {deleted_item} bytes before")),
+        "the log states the bytes deleted before the abort: {log}"
+    );
+    assert!(
+        log.contains(&format!("freed {deleted_item} bytes); cleanup stopped")),
+        "the abort line states the bytes deleted before the abort: {log}"
+    );
+}
+
 // FIXED-ONLY END

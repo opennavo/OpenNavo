@@ -168,12 +168,24 @@ pub async fn run(
             }
             Ok(Act::Skipped(reason)) => skip(&mut report, &mut outcome, &item, reason),
             Err(error) => {
+                // A removal that stops part-way has already unlinked files: they are counted in the outcome, the log
+                // and the result page like any other freed byte, so an aborted run reports what was really removed
+                // instead of under-reporting it (#117).
+                let freed = meter.bytes.load(Ordering::Relaxed);
+                if freed > 0 {
+                    outcome.freed_bytes = outcome.freed_bytes.saturating_add(freed);
+                    report.line(format!(
+                        "freed {freed} bytes before {} stopped ({})",
+                        display(&item),
+                        error.code
+                    ));
+                }
                 if error.code == "E_BREW_CLEANUP" {
                     command_failure = Some(error.clone());
                 }
                 if error.code == "E_CLEANUP_OVERSIZE" {
                     report.line(format!(
-                        "abort: {} reached its limit of {budget} bytes (shown {} bytes); cleanup stopped",
+                        "abort: {} reached its limit of {budget} bytes (shown {} bytes, freed {freed} bytes); cleanup stopped",
                         display(&item),
                         item.item.size_bytes.unwrap_or(0)
                     ));
