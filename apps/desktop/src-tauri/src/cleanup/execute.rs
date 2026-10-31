@@ -553,6 +553,7 @@ impl Engine {
         let after = measure(&AtomicBool::new(false)).unwrap_or(0);
         Ok(Act::Deleted(before.saturating_sub(after)))
     }
+    #[allow(clippy::too_many_arguments)]
     fn delete_cache(
         &self,
         item: &EntryItem,

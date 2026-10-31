@@ -735,6 +735,10 @@ export type CleanupItem = {
 	kind: CleanupItemKind,
 	command: string | null,
 	sizeBytes: number | null,
+	/**
+	 *  False when the scan stopped measuring early (time or entry limit, unreadable folders): `size_bytes` is then
+	 *  only a lower bound, so the item is shown as "at least" and can never be selected or deleted.
+	 */
 	sizeComplete: boolean,
 	keptOpenFiles: number,
 	modifiedAt: number | null,
@@ -745,14 +749,14 @@ export type CleanupItem = {
 	note: string | null,
 };
 
+export type CleanupItemKind = "file" | "dir" | "command";
+
 export type CleanupPlannedItem = {
 	itemId: string,
 	path: string,
 	sizeBytes: number | null,
 	sizeComplete: boolean,
 };
-
-export type CleanupItemKind = "file" | "dir" | "command";
 
 export type CleanupProgress = {
 	requestId: string,
@@ -2325,6 +2329,10 @@ export type UninstallOutcome = {
 	deleted: number,
 	skipped: SkippedItem[],
 	restorable: boolean,
+	/**
+	 *  Cleanup only: every selected item as shown before it ran (size and whether that size was fully measured), so a
+	 *  finished task can be audited from the database (#116). Empty for uninstall tasks.
+	 */
 	planned: CleanupPlannedItem[],
 };
 
