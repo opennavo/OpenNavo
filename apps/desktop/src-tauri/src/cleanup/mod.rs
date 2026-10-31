@@ -440,7 +440,7 @@ mod expiry_tests {
         assert!(queue.database.tasks().unwrap().is_empty());
     }
 
-    fn queue_with_entry(temp: &tempfile::TempDir) -> TaskQueue {
+    fn queue_with_entry(temp: &tempfile::TempDir) -> std::sync::Arc<TaskQueue> {
         let db = crate::db::Database::open(&temp.path().join("db.sqlite")).unwrap();
         let queue = TaskQueue::new(
             db,
