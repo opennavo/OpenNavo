@@ -38,6 +38,21 @@ func (s *Service) now() time.Time {
 func (s *Service) Fetch(ctx context.Context, id int64) (map[string]any, error) {
 	observed := map[string]any{"source_id": id}
 	stats, err := s.fetch(ctx, id, observed)
+	if _, known := observed["package_token"]; !known {
+		// Early exits (a source outside the fetchable scope such as sparkle/webpage, a missing package,
+		// a store error) still say which source and package it was when the row exists.
+		if identity, lookupErr := s.Store.ChangelogSourceIdentity(context.WithoutCancel(ctx), id); lookupErr == nil {
+			var settings map[string]any
+			_ = json.Unmarshal(identity.Config, &settings)
+			observed["attempt"], observed["source"], observed["package_token"] = identity.FailCount+1, identity.Type, identity.Token
+			observed["source_url"] = pipeline.SourceURL(identity.Type, settings)
+		}
+	}
+	for _, key := range []string{"package_token", "source_url", "attempt"} {
+		if _, set := observed[key]; !set {
+			observed[key] = nil
+		}
+	}
 	if stats == nil {
 		stats = map[string]any{}
 	}
@@ -66,20 +81,18 @@ func (s *Service) fetch(ctx context.Context, id int64, observed map[string]any) 
 	}
 	observed["attempt"] = state.FailCount + 1
 	observed["source"] = state.Type
-	if state.Excluded || !state.Enabled {
-		return map[string]any{"skipped": true, "reason": "excluded_or_disabled"}, nil
-	}
-	var settings map[string]any
-	if err := json.Unmarshal(state.Config, &settings); err != nil {
-		return nil, err
-	}
 	p, err := s.Store.ChangelogCandidate(ctx, state.PackageID)
 	if err != nil {
 		return nil, err
 	}
 	observed["package_token"] = p.Token
-	if target := pipeline.SourceURL(state.Type, settings); target != "" {
-		observed["source_url"] = target
+	var settings map[string]any
+	if err := json.Unmarshal(state.Config, &settings); err != nil {
+		return nil, err
+	}
+	observed["source_url"] = pipeline.SourceURL(state.Type, settings)
+	if state.Excluded || !state.Enabled {
+		return map[string]any{"skipped": true, "reason": "excluded_or_disabled"}, nil
 	}
 	source := pipeline.FetchSource{ID: state.ID, Type: state.Type, Config: settings}
 	if state.ETag != nil {
