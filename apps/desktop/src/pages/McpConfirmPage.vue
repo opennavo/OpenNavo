@@ -144,7 +144,7 @@ const unlisted = computed(() =>
         data-test="mcp-confirm-request"
       >
         <div class="flex items-baseline justify-between gap-12px">
-          <span class="min-w-0 break-words text-15px font-650">{{ view.name || summary }}</span>
+          <span class="min-w-0 break-words text-15px font-650">{{ fromApp ? view.name || summary : view.name }}</span>
           <span
             class="shrink-0 rounded-full px-8px py-2px text-11.5px font-600"
             :class="
@@ -201,8 +201,12 @@ const unlisted = computed(() =>
           </template>
         </dl>
         <template v-if="hasList">
-          <!-- Without a name the summary is already the heading. -->
-          <p v-if="view.name" class="m-0 mt-12px text-12.5px font-600 text-ink-primary" data-test="mcp-confirm-summary">
+          <!-- An app request without a name already shows the summary as its heading. -->
+          <p
+            v-if="view.name || !fromApp"
+            class="m-0 mt-12px text-12.5px font-600 text-ink-primary"
+            data-test="mcp-confirm-summary"
+          >
             {{ summary }}
           </p>
           <p v-if="view.permanent" class="m-0 mt-6px text-12px text-status-danger" data-test="mcp-confirm-permanent">
