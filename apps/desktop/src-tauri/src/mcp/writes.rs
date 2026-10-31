@@ -73,7 +73,7 @@ impl Writes {
         let locale = crate::confirmation::app_locale(&self.app);
         let message = dialog_message(locale, &plan, &identity).map_err(tool_error)?;
         let confirmation_request = ConfirmationRequest {
-            caller: "local mcp".into(),
+            caller: MCP_CALLER.into(),
             source: identity.caller.path.clone().unwrap_or_default(),
             action: request.tool().into(),
             target: request.object(),
@@ -98,6 +98,11 @@ impl Writes {
             Ok(grant) => grant,
             Err(error) if error.code == "E_BUSY" => {
                 return Err(ToolError::new("E_BUSY", BUSY_MESSAGE));
+            }
+            Err(error) if error.code == "E_CONFIRMATION_INVALIDATED" => {
+                entry.decision = AuditDecision::Invalidated;
+                let _ = self.audit.record(&entry, entry.at);
+                return Err(invalidated());
             }
             Err(error) => {
                 entry.decision = if error.code == "E_CONFIRMATION_TIMEOUT" {
@@ -124,10 +129,7 @@ impl Writes {
         if !(context.still_valid)() {
             entry.decision = AuditDecision::Invalidated;
             let _ = self.audit.record(&entry, audit::now_ms());
-            return Err(ToolError::new(
-                "E_CONFIRMATION_INVALIDATED",
-                "The approval was discarded because the connection closed or Local MCP was turned off.",
-            ));
+            return Err(invalidated());
         }
         entry.decision = AuditDecision::Allowed;
         self.audit
@@ -142,6 +144,13 @@ impl Writes {
             .audit
             .record_result(&entry.id, &result, audit::now_ms());
         outcome.map(|(_, value)| value)
+    }
+
+    /// A switch was turned off: withdraw the open Local MCP dialog, if any.
+    pub fn cancel(&self) {
+        if let Ok(service) = self.confirmation() {
+            service.revoke_caller(MCP_CALLER);
+        }
     }
 
     fn confirmation(&self) -> Result<Arc<ConfirmationService>, ToolError> {
@@ -396,6 +405,16 @@ fn item_name(item: &crate::model::CatalogItem) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|name| !name.is_empty())
         .map(str::to_owned)
+}
+
+/// Confirmation caller for every Local MCP write; switch-off revokes by it.
+const MCP_CALLER: &str = "local mcp";
+
+fn invalidated() -> ToolError {
+    ToolError::new(
+        "E_CONFIRMATION_INVALIDATED",
+        "The request was withdrawn because the connection closed or Local MCP writes were turned off.",
+    )
 }
 
 fn audit_unavailable() -> ToolError {

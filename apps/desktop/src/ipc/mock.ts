@@ -309,7 +309,7 @@ export function installMockIpc(
           id: 'audit-1',
           at: auditNow - 42 * 60_000,
           tool: 'install_app',
-          object: 'cask:iina',
+          object: 'cask/iina',
           caller: {
             path: '/opt/homebrew/bin/node',
             signer: null,

@@ -162,7 +162,9 @@ struct ActiveConfirmation {
     request: ConfirmationRequest,
     digest: String,
     timed_out: bool,
-    _cancel: oneshot::Sender<()>,
+    /// Set by [`ConfirmationService::revoke_caller`]: the request was withdrawn while its dialog was open.
+    revoked: bool,
+    _cancel: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Default)]
@@ -327,7 +329,11 @@ impl ConfirmationService {
                     Err(AppError::new("E_CONFIRMATION_TIMEOUT", "confirmation_timeout"))
                 }
             },
-            _ = pending.cancelled => Err(AppError::new("E_CONFIRMATION_DENIED", "confirmation_denied")),
+            _ = pending.cancelled => if self.is_revoked(id) {
+                Err(AppError::new("E_CONFIRMATION_INVALIDATED", "confirmation_invalidated"))
+            } else {
+                Err(AppError::new("E_CONFIRMATION_DENIED", "confirmation_denied"))
+            },
         }
     }
 
@@ -363,7 +369,8 @@ impl ConfirmationService {
             request,
             digest,
             timed_out: false,
-            _cancel: cancel,
+            revoked: false,
+            _cancel: Some(cancel),
         });
         Ok(pending)
     }
@@ -416,6 +423,40 @@ impl ConfirmationService {
         // statements, cancellation cannot win against an allow that has not been sent yet.
         reply(result);
         drop(active);
+    }
+
+    /// Withdraw the open confirmation from `caller` (Local MCP when a switch is turned off). The waiting
+    /// request ends at once with `E_CONFIRMATION_INVALIDATED` and its grants are revoked. The native dialog
+    /// cannot be dismissed programmatically, so, as with a timeout, the slot stays taken until it is
+    /// answered, and that late answer never produces a grant.
+    pub fn revoke_caller(&self, caller: &str) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let Some(active) = state
+            .active
+            .as_mut()
+            .filter(|active| active.request.caller == caller)
+        else {
+            return false;
+        };
+        active.timed_out = true;
+        active.revoked = true;
+        let id = active.id;
+        let cancel = active._cancel.take();
+        state.grants.retain(|_, grant| grant.confirmation_id != id);
+        drop(state);
+        drop(cancel);
+        true
+    }
+
+    fn is_revoked(&self, id: u64) -> bool {
+        self.state.lock().is_ok_and(|state| {
+            state
+                .active
+                .as_ref()
+                .is_some_and(|active| active.id == id && active.revoked)
+        })
     }
 
     /// A timed-out confirmation keeps the single slot until its native callback releases it, but its
@@ -1155,5 +1196,36 @@ mod tests {
                 assert!(!message.contains(field), "{locale:?}: {message}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn revoking_a_caller_ends_its_wait_and_never_grants() {
+        let service = std::sync::Arc::new(ConfirmationService::default());
+        let mut request = request("cask/iina");
+        request.caller = "local mcp".into();
+        let pending = service.begin(request.clone()).expect("begin");
+        let id = pending.id;
+        let (sender, receiver) = oneshot::channel();
+        let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(&service), id);
+        let waiting = {
+            let service = std::sync::Arc::clone(&service);
+            tokio::spawn(async move { service.wait_for_reply(pending, receiver, guard).await })
+        };
+        assert!(!service.revoke_caller("deep link"));
+        assert!(service.revoke_caller("local mcp"));
+        let result = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("ended")
+            .expect("join");
+        assert_eq!(
+            result.expect_err("revoked").code,
+            "E_CONFIRMATION_INVALIDATED"
+        );
+        // A late Allow on the still-visible dialog only frees the slot.
+        service.finish_reply(id, true, |late| {
+            assert!(late.is_err());
+            let _ = sender.send(late);
+        });
+        assert!(service.begin(request).is_ok());
     }
 }

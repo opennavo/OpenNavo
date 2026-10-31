@@ -76,6 +76,9 @@ pub trait ToolHost: Send + Sync {
     fn get_task(&self, id: &str) -> Result<Value, ToolError>;
     /// Run one write tool after the user confirms it in a native dialog.
     /// Hosts without write support keep the default, which refuses.
+    /// Withdraw a write in flight (its open dialog included) because a switch
+    /// was turned off. Hosts without write support have nothing to cancel.
+    fn cancel_writes(&self) {}
     fn write(&self, request: WriteRequest, context: WriteContext) -> Result<Value, ToolError> {
         let _ = (request, context);
         Err(ToolError::new(
@@ -769,5 +772,29 @@ mod tests {
                 .code,
             "E_TOOL_NOT_FOUND"
         );
+    }
+
+    #[test]
+    fn caller_supplied_confirmation_fields_are_rejected_not_trusted() {
+        for field in [
+            "confirmed",
+            "approved",
+            "grant",
+            "skipConfirmation",
+            "userApproved",
+        ] {
+            for (name, mut arguments) in [
+                ("install_app", json!({ "kind": "cask", "token": "iina" })),
+                ("uninstall_app", json!({ "path": "/Applications/IINA.app" })),
+            ] {
+                arguments[field] = json!(true);
+                let error = parse_write(name, arguments).expect_err("must reject");
+                assert_eq!(error.code, "E_INVALID_ARG", "{name} {field}");
+            }
+        }
+        // WriteRequest carries only the target; there is no field that could skip the dialog.
+        let request =
+            parse_write("install_app", json!({ "kind": "cask", "token": "iina" })).expect("ok");
+        assert_eq!(request.object(), "cask/iina");
     }
 }

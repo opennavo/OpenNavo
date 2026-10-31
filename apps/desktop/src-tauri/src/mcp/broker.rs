@@ -102,6 +102,9 @@ struct Inner {
 }
 
 /// Shared broker handle. Tauri manages `Arc<Broker>`.
+/// Longest a switch-off waits for an in-flight write to return.
+const WRITE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct Broker {
     data_dir: PathBuf,
     host: Option<Arc<dyn ToolHost>>,
@@ -143,6 +146,19 @@ impl Broker {
             && inner.enabled
             && inner.write_enabled
             && inner.connections.contains_key(&connection)
+    }
+
+    /// Withdraw any write in flight (including one whose dialog is still
+    /// open) and wait, bounded, until it has returned. Called after a switch
+    /// is turned off, with no broker lock held.
+    fn drain_writes(&self) {
+        if let Some(host) = &self.host {
+            host.cancel_writes();
+        }
+        let deadline = std::time::Instant::now() + WRITE_DRAIN_TIMEOUT;
+        while self.writing.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     /// The write audit log next to the persisted state.
@@ -190,7 +206,9 @@ impl Broker {
         if enabled {
             self.enable()
         } else {
-            self.disable()
+            self.disable()?;
+            self.drain_writes();
+            Ok(())
         }
     }
 
@@ -287,6 +305,14 @@ impl Broker {
     /// writes were allowed. The listener keeps running for read tools.
     pub fn set_write_enabled(&self, write_enabled: bool) -> Result<(), BrokerError> {
         let _transition = self.transition();
+        self.update_write_enabled(write_enabled)?;
+        if !write_enabled {
+            self.drain_writes();
+        }
+        Ok(())
+    }
+
+    fn update_write_enabled(&self, write_enabled: bool) -> Result<(), BrokerError> {
         let mut inner = self.lock();
         if !inner.enabled {
             return Err(BrokerError::new(
@@ -335,6 +361,7 @@ impl Broker {
             self.stop_runtime(&mut inner)
         };
         join(thread);
+        self.drain_writes();
     }
 
     /// Stop runtime resources and return the accept thread for joining after
@@ -910,6 +937,10 @@ impl ToolHost for LiveTools {
         Ok(json!({ "task": task }))
     }
 
+    fn cancel_writes(&self) {
+        self.writes.cancel();
+    }
+
     fn write(
         &self,
         request: super::tools::WriteRequest,
@@ -1349,6 +1380,7 @@ mod tests {
     struct WriteHost {
         entered: std::sync::mpsc::SyncSender<WriteContext>,
         release: Mutex<std::sync::mpsc::Receiver<()>>,
+        cancel: std::sync::mpsc::Sender<()>,
     }
 
     impl ToolHost for WriteHost {
@@ -1366,6 +1398,9 @@ mod tests {
         }
         fn get_task(&self, _: &str) -> Result<Value, ToolError> {
             Ok(json!({}))
+        }
+        fn cancel_writes(&self) {
+            let _ = self.cancel.send(());
         }
         fn write(&self, request: WriteRequest, context: WriteContext) -> Result<Value, ToolError> {
             assert_eq!(request.tool(), "install_app");
@@ -1404,6 +1439,7 @@ mod tests {
         let host: Arc<dyn ToolHost> = Arc::new(WriteHost {
             entered,
             release: Mutex::new(release),
+            cancel: release_tx.clone(),
         });
         let broker = Arc::new(Broker::with_host(dir.path().to_path_buf(), Some(host)));
         broker.set_enabled(true).expect("enable");
@@ -1486,5 +1522,56 @@ mod tests {
         assert!(!valid, "approval must not outlive its connection");
         release.send(()).expect("release");
         broker.shutdown();
+    }
+
+    #[test]
+    fn every_write_reaches_the_confirming_host_and_ignores_confirmed_flags() {
+        let dir = tempdir();
+        let (broker, entered, release) = write_broker(&dir);
+        let path = socket::path(dir.path()).path;
+        for id in ["1", "2", "3"] {
+            let mut call = install_call(id);
+            // Claims of prior approval anywhere in params change nothing.
+            call["params"]["confirmed"] = json!(true);
+            call["params"]["_meta"] = json!({ "approved": true });
+            let call_path = path.clone();
+            let thread = std::thread::spawn(move || request(&call_path, call));
+            entered
+                .recv_timeout(Duration::from_secs(5))
+                .expect("each write asks the host (dialog) again");
+            release.send(()).expect("release");
+            assert_eq!(thread.join().expect("join")["ok"], true);
+        }
+        let mut forged = install_call("4");
+        forged["params"]["arguments"]["confirmed"] = json!(true);
+        let response = request(&path, forged);
+        assert_eq!(response["error"]["code"], "E_INVALID_ARG");
+        assert!(entered.try_recv().is_err());
+        broker.shutdown();
+    }
+
+    #[test]
+    fn switching_off_drains_an_open_write_and_cancels_its_dialog() {
+        for master in [false, true] {
+            let dir = tempdir();
+            let (broker, entered, release) = write_broker(&dir);
+            let path = socket::path(dir.path()).path;
+            let call = std::thread::spawn(move || {
+                let _ = std::panic::catch_unwind(|| request(&path, install_call("1")));
+            });
+            let context = entered.recv_timeout(Duration::from_secs(5)).expect("write");
+            // Nothing releases the host except the broker's cancel_writes.
+            drop(release);
+            if master {
+                broker.set_enabled(false).expect("off");
+            } else {
+                broker.set_write_enabled(false).expect("write off");
+            }
+            // Returning means the write slot was drained, and the approval is void.
+            assert!(!broker.writing.load(Ordering::Acquire), "master {master}");
+            assert!(!(context.still_valid)());
+            let _ = call.join();
+            broker.shutdown();
+        }
     }
 }
