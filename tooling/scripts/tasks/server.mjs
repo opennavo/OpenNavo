@@ -92,6 +92,7 @@ export function runTask(task) {
         'redocly',
         'lint',
         'apps/server/api/public.openapi.yaml',
+        'apps/server/api/public-external.openapi.yaml',
         'apps/server/api/admin.openapi.yaml',
         '--config',
         'apps/server/api/redocly.yaml'

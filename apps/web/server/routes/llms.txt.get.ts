@@ -15,5 +15,5 @@ export default defineEventHandler(event => {
     setResponseStatus(event, 404);
     return siteMessage('en-US', 'error.notFoundTitle');
   }
-  return renderLlms(config.public.siteUrl);
+  return renderLlms(config.public.siteUrl, config.public.apiBase);
 });

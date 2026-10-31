@@ -28,7 +28,8 @@
     "themeSystem": "システムに合わせる",
     "themeLight": "ライト",
     "themeDark": "ダーク",
-    "skipToContent": "本文へ移動"
+    "skipToContent": "本文へ移動",
+    "developers": "開発者"
   },
   "sidebar": {
     "appLabel": "Macクライアント",
@@ -2052,5 +2053,37 @@
       "title": "次のアプリを見つけましょう。",
       "body": "OpenNavoは無料・オープンソースで、ウイルススキャン、クリーンアップ、システムモニタもすべて揃っています。macOS 13以降に対応。ウェブでアプリを探して、brewコマンドをコピーしてインストールすることもできます。"
     }
+  },
+  "developers": {
+    "title": "OpenNavoで開発する",
+    "metaTitle": "OpenNavo 開発者向け — 公開 API と MCP",
+    "description": "MCP または HTTP で、OpenNavo の公開された読み取り専用 Mac アプリカタログにツールを接続できます。",
+    "intro": "匿名で利用できる公開 MCP サーバーまたは読み取り専用 HTTP API を使って、カタログを検索し、アプリを確認し、リリースと依存関係を参照し、公開コレクションと記事を読むことができます。",
+    "mcpTitle": "公開 MCP",
+    "mcpDescription": "読み取り専用カタログツールを 9 個備えた、ストリーミング対応 HTTP MCP サーバーです。アカウントやトークンは必要ありません。",
+    "mcpEndpoint": "MCP エンドポイント",
+    "setupTitle": "MCP クライアントを接続",
+    "claudeDesktopTitle": "Claude Desktop",
+    "claudeCodeTitle": "Claude Code",
+    "cursorTitle": "Cursor",
+    "codexTitle": "Codex",
+    "apiTitle": "公開 HTTP API",
+    "apiDescription": "公開 API は、ベースパス /api/v1 の下で安定した匿名 GET エンドポイントを提供します。パラメーターとレスポンススキーマの正本は OpenAPI ドキュメントです。",
+    "apiSpec": "OpenAPI 仕様",
+    "apiCatalog": "API カタログ",
+    "curlTitle": "curl で検索",
+    "rateTitle": "レート制限",
+    "rateIntro": "制限は Redis をバックエンドとする GCRA リミッターでクライアント IP ごとに適用されます。レスポンスヘッダーで残りの容量を確認できます。",
+    "rateApi": "通常の読み取りエンドポイント：IP ごとに 60 秒あたり 300 リクエスト。",
+    "rateSearch": "検索：IP ごとに 60 秒あたり 60 リクエスト。",
+    "rateMcp": "公開 MCP：レート制限は IP ごとに 60 秒あたり 60 リクエストです。",
+    "rateHeaders": "HTTP 429 レスポンスには秒単位の Retry-After が含まれます。成功した API レスポンスには X-RateLimit-Limit と X-RateLimit-Remaining が含まれます。",
+    "termsTitle": "利用規約",
+    "termsIntro": "これらのインターフェースは、公開されている OpenNavo カタログデータへの有用で責任あるアクセスを提供します。",
+    "termsFairUse": "公正利用：リクエスト量を適切に保ち、可能な場合は結果をキャッシュしてください。",
+    "termsAttribution": "帰属表示：カタログデータや派生物を公開する場合は、opennavo.com の関連ページにリンクしてください。",
+    "termsSla": "SLA なし：サービスレベルの保証なく、インターフェースが変更、制限、または利用できなくなる場合があります。",
+    "termsScraping": "スクレイピング：公開された制限を超えてスクレイピングしたり、IP 単位の制御を回避したりしないでください。",
+    "termsReadOnly": "読み取り専用：公開 API と MCP は、アカウント、書き込み、管理操作を提供しません。"
   }
 }

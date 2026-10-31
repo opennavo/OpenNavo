@@ -28,7 +28,8 @@
     "themeSystem": "跟隨系統",
     "themeLight": "淺色",
     "themeDark": "深色",
-    "skipToContent": "跳到正文"
+    "skipToContent": "跳到正文",
+    "developers": "開發者"
   },
   "sidebar": {
     "appLabel": "Mac 客戶端",
@@ -2052,5 +2053,37 @@
       "title": "從下一個 App 開始。",
       "body": "OpenNavo 免費開源，病毒掃描、清理和監控都包含在內，支援 macOS 13 及以上。也可以先在網頁上瀏覽，複製 brew 命令來安裝。"
     }
+  },
+  "developers": {
+    "title": "用 OpenNavo 構建工具",
+    "metaTitle": "OpenNavo 開發者 — 公共 API 與 MCP",
+    "description": "透過 MCP 或 HTTP 連線 OpenNavo 的公開只讀 Mac 應用目錄。",
+    "intro": "你可以使用無需登入的公共 MCP，或只讀 HTTP API，搜尋目錄、檢視應用、瀏覽版本和依賴，並讀取公開的合集與文章。",
+    "mcpTitle": "公共 MCP",
+    "mcpDescription": "基於可流式 HTTP 的 MCP 服務，提供 9 個只讀目錄工具，無需帳號或令牌。",
+    "mcpEndpoint": "MCP 端點",
+    "setupTitle": "連線 MCP 客戶端",
+    "claudeDesktopTitle": "Claude Desktop",
+    "claudeCodeTitle": "Claude Code",
+    "cursorTitle": "Cursor",
+    "codexTitle": "Codex",
+    "apiTitle": "公共 HTTP API",
+    "apiDescription": "公共 API 在 /api/v1 下提供穩定的匿名端點，主要使用 GET。OpenAPI 文件是引數和響應結構的唯一依據。",
+    "apiSpec": "OpenAPI 規範",
+    "apiCatalog": "API 目錄",
+    "curlTitle": "用 curl 搜尋",
+    "rateTitle": "速率限制",
+    "rateIntro": "限制按客戶端 IP 使用 Redis GCRA 實現。響應頭會告訴你剩餘容量。",
+    "rateApi": "普通只讀端點：每個 IP 每 60 秒 300 次請求。",
+    "rateSearch": "搜尋：每個 IP 每 60 秒 60 次請求。",
+    "rateMcp": "公共 MCP：速率限制為每個 IP 每 60 秒 60 次請求。",
+    "rateHeaders": "HTTP 429 響應會在 Retry-After 中返回等待秒數。API 成功響應包含 X-RateLimit-Limit 和 X-RateLimit-Remaining。",
+    "termsTitle": "使用條款",
+    "termsIntro": "這些介面用於合理、負責地訪問 OpenNavo 的公開目錄資料。",
+    "termsFairUse": "合理使用：保持請求量適度，並在可行時快取結果。",
+    "termsAttribution": "署名：釋出目錄資料或衍生成果時，請連結回 opennavo.com 的相關頁面。",
+    "termsSla": "不提供 SLA：介面可能在沒有服務等級承諾的情況下變更、限流或暫時不可用。",
+    "termsScraping": "抓取：請勿超出公佈的限制抓取，也不要嘗試規避按 IP 的控制。",
+    "termsReadOnly": "只讀：公共 API 和 MCP 不提供帳號、寫入或管理操作。"
   }
 }

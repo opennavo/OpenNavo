@@ -28,7 +28,8 @@
     "themeSystem": "Wie das System",
     "themeLight": "Hell",
     "themeDark": "Dunkel",
-    "skipToContent": "Zum Inhalt springen"
+    "skipToContent": "Zum Inhalt springen",
+    "developers": "Entwickler"
   },
   "sidebar": {
     "appLabel": "Mac-App",
@@ -2052,5 +2053,37 @@
       "title": "Beginnen Sie mit Ihrer nächsten App.",
       "body": "OpenNavo ist kostenlos und Open Source – inklusive Malware-Scan, Aufräumen und Überwachung. Es läuft ab macOS 13. Sie können auch im Web stöbern und den brew-Befehl zum Installieren kopieren."
     }
+  },
+  "developers": {
+    "title": "Mit OpenNavo entwickeln",
+    "metaTitle": "OpenNavo für Entwickler — Öffentliche API und MCP",
+    "description": "Verbinden Sie Ihre Tools über MCP oder HTTP mit dem öffentlichen, schreibgeschützten Mac-App-Katalog von OpenNavo.",
+    "intro": "Nutzen Sie den anonymen öffentlichen MCP-Server oder die schreibgeschützte HTTP-API, um den Katalog zu durchsuchen, Apps anzusehen, Versionen und Abhängigkeiten zu prüfen sowie öffentliche Sammlungen und Artikel zu lesen.",
+    "mcpTitle": "Öffentliches MCP",
+    "mcpDescription": "Ein streambarer HTTP-MCP-Server mit 9 schreibgeschützten Katalogwerkzeugen. Kein Konto und kein Token erforderlich.",
+    "mcpEndpoint": "MCP-Endpunkt",
+    "setupTitle": "MCP-Client verbinden",
+    "claudeDesktopTitle": "Claude Desktop",
+    "claudeCodeTitle": "Claude Code",
+    "cursorTitle": "Cursor",
+    "codexTitle": "Codex",
+    "apiTitle": "Öffentliche HTTP-API",
+    "apiDescription": "Die öffentliche API stellt stabile, anonyme GET-Endpunkte unter dem Basispfad /api/v1 bereit. Das OpenAPI-Dokument ist die maßgebliche Quelle für Parameter und Antwortschemas.",
+    "apiSpec": "OpenAPI-Spezifikation",
+    "apiCatalog": "API-Katalog",
+    "curlTitle": "Mit curl suchen",
+    "rateTitle": "Ratenlimits",
+    "rateIntro": "Die Limits werden pro Client-IP durch einen Redis-gestützten GCRA-Limiter durchgesetzt. Die Antwort-Header zeigen, wie viel Kapazität noch verfügbar ist.",
+    "rateApi": "Normale Leseendpunkte: 300 Anfragen pro 60 Sekunden und IP.",
+    "rateSearch": "Suche: 60 Anfragen pro 60 Sekunden und IP.",
+    "rateMcp": "Öffentliches MCP: Das Ratenlimit beträgt 60 Anfragen pro 60 Sekunden und IP.",
+    "rateHeaders": "HTTP 429-Antworten enthalten Retry-After in Sekunden. Erfolgreiche API-Antworten enthalten X-RateLimit-Limit und X-RateLimit-Remaining.",
+    "termsTitle": "Nutzungsbedingungen",
+    "termsIntro": "Diese Schnittstellen ermöglichen einen nützlichen und verantwortungsvollen Zugriff auf öffentliche OpenNavo-Katalogdaten.",
+    "termsFairUse": "Faire Nutzung: Halten Sie Anfragen in einem angemessenen Rahmen und cachen Sie Ergebnisse, wenn es praktikabel ist.",
+    "termsAttribution": "Namensnennung: Verlinken Sie auf die entsprechende Seite auf opennavo.com, wenn Sie Katalogdaten oder abgeleitete Arbeiten veröffentlichen.",
+    "termsSla": "Kein SLA: Die Schnittstellen können ohne Service-Level-Verpflichtung geändert, eingeschränkt oder nicht verfügbar sein.",
+    "termsScraping": "Scraping: Scrapen Sie nicht über die veröffentlichten Limits hinaus und versuchen Sie nicht, IP-bezogene Kontrollen zu umgehen.",
+    "termsReadOnly": "Nur Lesen: Die öffentliche API und MCP bieten keine Konto-, Schreib- oder Verwaltungsfunktionen."
   }
 }
