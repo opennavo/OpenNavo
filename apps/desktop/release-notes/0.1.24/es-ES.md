@@ -6,5 +6,5 @@
 
 - Nueva página de detalles con una tarjeta «De un vistazo» que muestra el origen, el precio, los requisitos del sistema y las estrellas de GitHub. Las apps desactivadas por Homebrew muestran un aviso en lugar del comando de instalación.
 - «Otros nombres» ahora solo muestra nombres en tu idioma.
-- Las instalaciones iniciadas desde un enlace siempre piden confirmación en un cuadro de diálogo del sistema, con Denegar como opción predeterminada.
+- Las instalaciones iniciadas desde un enlace web y las alertas de conexión del cortafuegos ahora usan la ventana de confirmación propia de OpenNavo, con Denegar como opción predeterminada y protección contra clics accidentales.
 - Las apps instaladas que ya no aparecen en el catálogo público se pueden seguir abriendo y gestionando.

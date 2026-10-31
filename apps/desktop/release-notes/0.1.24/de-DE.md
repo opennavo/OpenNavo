@@ -6,5 +6,5 @@
 
 - Überarbeitete App-Details mit einer Karte „Auf einen Blick“, die Quelle, Preis, Systemanforderungen und GitHub-Sterne zeigt. Von Homebrew deaktivierte Apps zeigen einen Hinweis statt eines Installationsbefehls.
 - „Auch bekannt als“ zeigt jetzt nur Namen in deiner Sprache.
-- Installationen über einen Link werden immer in einem Systemdialog bestätigt, mit „Ablehnen“ als Standard.
+- Installationen über einen Weblink und Verbindungswarnungen der Firewall nutzen jetzt das eigene Bestätigungsfenster von OpenNavo – mit „Ablehnen“ als Standard und Schutz vor versehentlichen Klicks.
 - Installierte Apps, die nicht mehr im öffentlichen Katalog stehen, lassen sich weiterhin öffnen und verwalten.

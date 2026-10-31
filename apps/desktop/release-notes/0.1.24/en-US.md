@@ -6,5 +6,5 @@
 
 - Redesigned app details with an "At a glance" card showing source, price, system requirements and GitHub stars. Apps disabled by Homebrew show a notice instead of an install command.
 - "Also known as" names now only show names in your language.
-- Installs started from a link always ask for confirmation in a system dialog, with Deny as the default.
+- Installs started from a web link and firewall connection alerts now use OpenNavo's own confirmation window, with Deny as the default and protection against accidental clicks.
 - Installed apps that are no longer listed in the public catalog can still be opened and managed.

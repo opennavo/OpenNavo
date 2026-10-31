@@ -6,5 +6,5 @@
 
 - Page de détails repensée, avec une carte « En bref » indiquant la source, le prix, la configuration requise et les étoiles GitHub. Les apps désactivées par Homebrew affichent un avis au lieu de la commande d’installation.
 - « Autres noms » n’affiche plus que les noms dans votre langue.
-- Les installations lancées depuis un lien demandent toujours une confirmation dans une boîte de dialogue système, avec Refuser par défaut.
+- Les installations lancées depuis un lien web et les alertes de connexion du pare-feu utilisent désormais la fenêtre de confirmation d’OpenNavo, avec Refuser par défaut et une protection contre les clics accidentels.
 - Les apps installées qui ne figurent plus dans le catalogue public peuvent toujours être ouvertes et gérées.
