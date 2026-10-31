@@ -324,6 +324,16 @@ func (s *Store) ApplyCatalogBatchWithLifecycle(ctx context.Context, mutations []
 				if err := tx.WithContext(ctx).Raw("SELECT id FROM changelog_sources WHERE package_id=? AND enabled AND type='homebrew_commits'", id).Scan(&sources).Error; err != nil {
 					return err
 				}
+				var releaseSources []int64
+				if err := tx.WithContext(ctx).Raw("SELECT id FROM changelog_sources WHERE package_id=? AND enabled AND type='github_releases'", id).Scan(&releaseSources).Error; err != nil {
+					return err
+				}
+				// A new version usually has a new GitHub release; read it without waiting for the interval.
+				for _, sourceID := range releaseSources {
+					if err := addOutbox(ctx, tx, "changelog:fetch", "sourceId", sourceID); err != nil {
+						return err
+					}
+				}
 				if len(sources) == 0 {
 					if err := addOutbox(ctx, tx, "changelog:resolve", "packageId", id); err != nil {
 						return err

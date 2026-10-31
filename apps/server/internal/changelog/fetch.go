@@ -28,10 +28,15 @@ type BrewVersion struct {
 }
 type FetchResult struct {
 	Versions           []BrewVersion
+	Releases           []Release
 	NotModified        bool
 	ETag, LastModified string
 }
-type Fetcher struct{ HTTP *Resolver }
+type Fetcher struct {
+	HTTP  *Resolver
+	Now   func() time.Time
+	quota quotaGuard
+}
 
 func NewFetcher(agent string) *Fetcher               { return &Fetcher{HTTP: NewResolver(agent)} }
 func configText(m map[string]any, key string) string { v, _ := m[key].(string); return v }
@@ -55,7 +60,11 @@ func (f *Fetcher) Fetch(ctx context.Context, p Candidate, source FetchSource) (F
 	switch source.Type {
 	case "homebrew_commits":
 		return f.commits(ctx, p, source)
+	case "github_releases":
+		return f.releases(ctx, source)
 	default:
+		// sparkle and webpage remain schema values for manual sources, but no fetcher reads them yet:
+		// they stay unsupported until a dedicated PR implements and secures them.
 		return FetchResult{}, errors.New("unsupported changelog source")
 	}
 }

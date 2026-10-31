@@ -16,6 +16,8 @@ import (
 type Candidate struct {
 	ID                                                                           int64
 	Kind, Token, Tap, Homepage, DownloadURL, RepoURL, RubySourcePath, TapGitHead string
+	// GitHubRepo is the public repository the source facts job verified (package_source_facts.subject).
+	GitHubRepo string `gorm:"column:github_repo"`
 }
 type Source struct {
 	Type     string
@@ -115,7 +117,8 @@ func (r *Resolver) Get(ctx context.Context, target string, maximum int64, header
 	return r.readRequest(ctx, target, maximum, headers)
 }
 
-// Derive sources only from Homebrew definition paths; do not discover websites or upstream repositories over the network.
+// Derive sources from Homebrew definition paths and the GitHub repository already verified public by the
+// source facts job; do not discover websites or upstream repositories over the network.
 func (r *Resolver) Resolve(ctx context.Context, p Candidate) ([]Source, map[string]any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -126,5 +129,11 @@ func (r *Resolver) Resolve(ctx context.Context, p Candidate) ([]Source, map[stri
 			sources = append(sources, source)
 		}
 	}
-	return sources, map[string]any{"homebrew": len(sources) > 0}, nil
+	homebrew := len(sources) > 0
+	github := false
+	if source, ok := GitHubReleasesSource(p); ok {
+		sources = append(sources, source)
+		github = true
+	}
+	return sources, map[string]any{"homebrew": homebrew, "github": github}, nil
 }
