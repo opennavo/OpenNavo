@@ -948,13 +948,7 @@
     "pageLink": "{title}（{page} ページ目）",
     "bucketsLabel": "頭文字から探す",
     "leafMetaTitle": "{title}（A–Z 一覧） · OpenNavo",
-    "leafDescription": "{title}を名前順に一覧にしています（全 {count} 件）。それぞれに紹介、バージョン履歴、インストール方法を掲載しています。",
-    "directory": {
-      "kicker": "ディレクトリ",
-      "title": "ディレクトリから App を探す",
-      "body": "用途別のカテゴリや、編集部がまとめたコレクションから探せます。すべてのアプリと A–Z 一覧なら、どの App も見つかります。",
-      "category": "{name}アプリ"
-    }
+    "leafDescription": "{title}を名前順に一覧にしています（全 {count} 件）。それぞれに紹介、バージョン履歴、インストール方法を掲載しています。"
   },
   "feeds": {
     "subscribe": "更新情報を購読（RSS）",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { OnAppIcon, OnButton, OnIcon, OnSegmented } from '@opennavo/ui';
 import type { FirewallAction, FirewallReplyScope, FirewallRuleUntil } from '@/ipc/bindings';
@@ -10,13 +10,16 @@ import { useTrayWindowSize } from '@/composables/useTrayWindowSize';
 import { useFirewallStore } from '@/stores/firewall';
 
 // A connection waiting for an answer (firewall plan §4.4), in Rust's small always-on-top window. The oldest one shows;
-// the answer becomes a rule for the whole app or just this destination, forever or until the app quits. There is no
-// default button: a stray Return while typing elsewhere must not decide for the user. Held connections are let through
-// when nobody answers in time (TCP 2 minutes, UDP 5 seconds); the question stays, and a late answer still becomes a rule.
+// the answer becomes a rule for the whole app or just this destination, forever or until the app quits. Laid out like
+// OpenNavo's other confirmations: Block on the left with the focus, Allow on the right. Only a click answers
+// (Return and Space on the buttons are cancelled), and only after the question has been on screen for ANSWER_DELAY_MS;
+// Escape and closing never answer, because any answer becomes a rule. Held connections are let through when nobody
+// answers in time (TCP 2 minutes, UDP 5 seconds); the question stays, and a late answer still becomes a rule.
 const { t } = useI18n();
 const { errorText } = usePackageState();
 const store = useFirewallStore();
 const content = ref<HTMLElement | null>(null);
+const blockButton = ref<{ $el?: HTMLElement } | null>(null);
 useTrayWindowSize(content);
 
 const alert = computed(() => store.alerts[0] ?? null);
@@ -46,16 +49,32 @@ watch(
     scope.value = 'app';
     until.value = 'always';
     failure.value = null;
-    if (id) rearm();
+    if (id) {
+      rearm();
+      void nextTick(() => blockButton.value?.$el?.focus());
+    }
   },
   { immediate: true }
 );
+// As before this window was restyled, only a click answers: Return and Space on a focused Block or Allow button are
+// cancelled (Return activates on keydown, Space on keyup), so the default focus can never decide for the user.
+function onKey(event: KeyboardEvent) {
+  if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target?.closest('[data-alert-block], [data-alert-allow]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+window.addEventListener('keydown', onKey, true);
+window.addEventListener('keyup', onKey, true);
 const onVisibility = () => {
   if (document.visibilityState === 'visible') rearm();
 };
 document.addEventListener('visibilitychange', onVisibility);
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility);
+  window.removeEventListener('keydown', onKey, true);
+  window.removeEventListener('keyup', onKey, true);
   clearTimeout(arming);
 });
 
@@ -163,36 +182,38 @@ async function answer(action: FirewallAction) {
         <OnIcon name="triangle-alert" :size="13" class="mt-2px shrink-0" />{{ t(`firewall.alert.warning.${warning}`) }}
       </p>
 
-      <dl class="m-0 mt-12px grid grid-cols-[88px_minmax(0,1fr)] gap-x-10px gap-y-6px text-12.5px">
-        <dt class="text-ink-tertiary">{{ t('firewall.alert.to') }}</dt>
-        <dd class="m-0 min-w-0">
-          <span class="block truncate font-mono text-ink-primary" :title="alert.remoteHost ?? alert.remoteAddress">{{
-            alert.remoteHost ?? alert.remoteAddress
-          }}</span>
-          <span class="block truncate text-11.5px text-ink-tertiary">
-            <template v-if="alert.remoteHost">{{ alert.remoteAddress }} · </template
-            >{{ t('firewall.alert.port', { port: alert.port }) }} · {{ alert.protocol.toUpperCase() }}
-          </span>
-        </dd>
-        <dt class="text-ink-tertiary">{{ t('firewall.alert.path') }}</dt>
-        <dd class="m-0 min-w-0 select-text break-all font-mono text-11.5px text-ink-secondary">
-          {{ alert.app.bundlePath ?? alert.app.path }}
-        </dd>
-        <template v-if="chain">
-          <dt class="text-ink-tertiary">{{ t('firewall.alert.parents') }}</dt>
-          <dd class="m-0 min-w-0 break-all text-11.5px text-ink-secondary">{{ chain }}</dd>
-        </template>
-        <template v-if="args">
-          <dt class="text-ink-tertiary">{{ t('firewall.alert.args') }}</dt>
-          <dd
-            class="m-0 max-h-60px min-w-0 select-text overflow-y-auto break-all font-mono text-11.5px text-ink-secondary"
-          >
-            {{ args }}
+      <section class="mt-12px rounded-default border border-solid border-line-subtle bg-surface-raised px-12px py-10px">
+        <dl class="m-0 grid grid-cols-[88px_minmax(0,1fr)] gap-x-10px gap-y-6px text-12.5px">
+          <dt class="text-ink-tertiary">{{ t('firewall.alert.to') }}</dt>
+          <dd class="m-0 min-w-0">
+            <span class="block truncate font-mono text-ink-primary" :title="alert.remoteHost ?? alert.remoteAddress">{{
+              alert.remoteHost ?? alert.remoteAddress
+            }}</span>
+            <span class="block truncate text-11.5px text-ink-tertiary">
+              <template v-if="alert.remoteHost">{{ alert.remoteAddress }} · </template
+              >{{ t('firewall.alert.port', { port: alert.port }) }} · {{ alert.protocol.toUpperCase() }}
+            </span>
           </dd>
-        </template>
-      </dl>
+          <dt class="text-ink-tertiary">{{ t('firewall.alert.path') }}</dt>
+          <dd class="m-0 min-w-0 select-text break-all font-mono text-11.5px text-ink-secondary">
+            {{ alert.app.bundlePath ?? alert.app.path }}
+          </dd>
+          <template v-if="chain">
+            <dt class="text-ink-tertiary">{{ t('firewall.alert.parents') }}</dt>
+            <dd class="m-0 min-w-0 break-all text-11.5px text-ink-secondary">{{ chain }}</dd>
+          </template>
+          <template v-if="args">
+            <dt class="text-ink-tertiary">{{ t('firewall.alert.args') }}</dt>
+            <dd
+              class="m-0 max-h-60px min-w-0 select-text overflow-y-auto break-all font-mono text-11.5px text-ink-secondary"
+            >
+              {{ args }}
+            </dd>
+          </template>
+        </dl>
+      </section>
 
-      <div class="mt-14px flex flex-col gap-8px border-t border-t-solid border-line-subtle pt-12px">
+      <div class="mt-12px flex flex-col gap-8px">
         <div class="flex items-center gap-10px">
           <span class="w-88px shrink-0 text-12.5px text-ink-tertiary">{{ t('firewall.alert.scope') }}</span>
           <OnSegmented v-model="scope" :options="scopes" size="sm" :aria-label="t('firewall.alert.scope')" />
@@ -230,12 +251,21 @@ async function answer(action: FirewallAction) {
           }}</template>
           <template v-else-if="others">{{ t('firewall.alert.queue', { count: others }, { plural: others }) }}</template>
         </span>
-        <OnButton icon="ban" :loading="pending('block')" :disabled="pending('allow')" @click="answer('block')">{{
-          t('firewall.alert.block')
-        }}</OnButton>
         <OnButton
+          ref="blockButton"
           variant="primary"
+          icon="ban"
+          data-alert-block
+          :aria-disabled="!armed || undefined"
+          :loading="pending('block')"
+          :disabled="pending('allow')"
+          @click="answer('block')"
+          >{{ t('firewall.alert.block') }}</OnButton
+        >
+        <OnButton
           icon="check"
+          data-alert-allow
+          :aria-disabled="!armed || undefined"
           :loading="pending('allow')"
           :disabled="pending('block')"
           @click="answer('allow')"

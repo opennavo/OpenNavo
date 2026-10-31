@@ -12,7 +12,15 @@ import (
 	"gorm.io/gorm"
 )
 
-const candidateSQL = `SELECT p.id,p.kind,p.token,p.tap,COALESCE(p.homepage,'') homepage,COALESCE(p.download_url,'') download_url,COALESCE(m.repo_url,'') repo_url,COALESCE(p.raw->>'ruby_source_path','') ruby_source_path,COALESCE(p.raw->>'tap_git_head','') tap_git_head FROM packages p LEFT JOIN package_meta m ON m.package_id=p.id`
+const candidateSQL = `SELECT p.id,p.kind,p.token,p.tap,COALESCE(p.homepage,'') homepage,COALESCE(p.download_url,'') download_url,COALESCE(m.repo_url,'') repo_url,COALESCE(p.raw->>'ruby_source_path','') ruby_source_path,COALESCE(p.raw->>'tap_git_head','') tap_git_head,COALESCE(gf.subject,'') github_repo FROM packages p LEFT JOIN package_meta m ON m.package_id=p.id LEFT JOIN package_source_facts gf ON gf.package_id=p.id AND gf.source='github' AND gf.status IN ('found','none') AND gf.subject<>''`
+
+// changelogSourceScope keeps Homebrew commit history limited to casks (unchanged) and reads GitHub
+// releases for any package kind with a verified public repository. sparkle and webpage have no fetcher.
+// An auto github_releases source is read only while the source facts job still verifies its repository as
+// public (subject = config repo). When a repository turns private the facts job clears the subject and the
+// source stops being due or fetchable, so a token with access never publishes private release notes.
+// Manual sources are an editor's decision and are not gated.
+const changelogSourceScope = `((s.type='homebrew_commits' AND p.kind='cask') OR (s.type='github_releases' AND (s.resolved_by='manual' OR EXISTS(SELECT 1 FROM package_source_facts vf WHERE vf.package_id=s.package_id AND vf.source='github' AND vf.status IN ('found','none') AND vf.subject<>'' AND vf.subject=s.config->>'repo'))))`
 
 func (s *Store) ChangelogCandidate(ctx context.Context, id int64) (changelog.Candidate, error) {
 	var row changelog.Candidate
@@ -64,7 +72,7 @@ type ChangelogState struct {
 
 func (s *Store) ChangelogState(ctx context.Context, id int64) (ChangelogState, error) {
 	var row ChangelogState
-	r := s.DB.WithContext(ctx).Raw("SELECT s.id,s.package_id,s.enabled,COALESCE(m.changelog_excluded,false) excluded,s.type,s.config,s.etag,s.last_modified,s.last_fetched_at,s.last_status,s.fail_count,p.rank_30d,p.homepage,p.version current_version,v.brew_committed_at current_version_committed_at FROM changelog_sources s JOIN packages p ON p.id=s.package_id LEFT JOIN package_meta m ON m.package_id=p.id LEFT JOIN package_versions v ON v.package_id=p.id AND v.version=p.version WHERE s.id=? AND s.type='homebrew_commits' AND p.kind='cask' AND p.removed_at IS NULL", id).Scan(&row)
+	r := s.DB.WithContext(ctx).Raw("SELECT s.id,s.package_id,s.enabled,COALESCE(m.changelog_excluded,false) excluded,s.type,s.config,s.etag,s.last_modified,s.last_fetched_at,s.last_status,s.fail_count,p.rank_30d,p.homepage,p.version current_version,v.brew_committed_at current_version_committed_at FROM changelog_sources s JOIN packages p ON p.id=s.package_id LEFT JOIN package_meta m ON m.package_id=p.id LEFT JOIN package_versions v ON v.package_id=p.id AND v.version=p.version WHERE s.id=? AND "+changelogSourceScope+" AND p.removed_at IS NULL", id).Scan(&row)
 	if r.Error != nil {
 		return row, r.Error
 	}
@@ -75,7 +83,7 @@ func (s *Store) ChangelogState(ctx context.Context, id int64) (ChangelogState, e
 }
 func (s *Store) ChangelogDue(ctx context.Context, now time.Time) ([]int64, error) {
 	ids := []int64{}
-	err := s.DB.WithContext(ctx).Raw("SELECT s.id FROM changelog_sources s JOIN packages p ON p.id=s.package_id LEFT JOIN package_meta m ON m.package_id=p.id WHERE NOT COALESCE(m.changelog_excluded,false) AND s.enabled AND s.type='homebrew_commits' AND p.kind='cask' AND s.next_fetch_at<=? AND p.removed_at IS NULL AND NOT p.disabled ORDER BY p.popularity DESC,s.id LIMIT 1000", now).Scan(&ids).Error
+	err := s.DB.WithContext(ctx).Raw("SELECT s.id FROM changelog_sources s JOIN packages p ON p.id=s.package_id LEFT JOIN package_meta m ON m.package_id=p.id WHERE NOT COALESCE(m.changelog_excluded,false) AND s.enabled AND "+changelogSourceScope+" AND s.next_fetch_at<=? AND p.removed_at IS NULL AND NOT p.disabled ORDER BY p.popularity DESC,s.id LIMIT 1000", now).Scan(&ids).Error
 	return ids, err
 }
 
@@ -100,6 +108,11 @@ func (s *Store) SaveFetchedChangelogWithLifecycle(ctx context.Context, source Ch
 			return nil
 		}
 		changed = false
+		if source.Type == "github_releases" {
+			if changed, err = saveGitHubReleases(ctx, tx, source.PackageID, result.Releases, timeFetched); err != nil {
+				return err
+			}
+		}
 		for _, version := range result.Versions {
 			if version.CommittedAt.IsZero() || version.CommittedAt.After(timeFetched) || version.Version == "" || version.Version == "latest" {
 				continue
@@ -115,9 +128,12 @@ func (s *Store) SaveFetchedChangelogWithLifecycle(ctx context.Context, source Ch
 			}
 			changed = changed || r.RowsAffected > 0
 		}
-		stats, err = refreshStalePackages(ctx, tx, timeFetched, []int64{source.PackageID})
-		if err != nil {
-			return err
+		if source.Type == "homebrew_commits" {
+			// Lifecycle dates come from Homebrew version commits only.
+			stats, err = refreshStalePackages(ctx, tx, timeFetched, []int64{source.PackageID})
+			if err != nil {
+				return err
+			}
 		}
 		if changed {
 			if err := (&Store{DB: tx}).AppendContentChange(ctx, source.PackageID); err != nil {
@@ -161,8 +177,62 @@ func (s *Store) ChangelogFailure(ctx context.Context, id int64, status, message 
 	return s.DB.WithContext(ctx).Exec("UPDATE changelog_sources SET last_status=?,last_error=?,fail_count=fail_count+1,next_fetch_at=?,last_fetched_at=now(),updated_at=now() WHERE id=?", status, message, next, id).Error
 }
 
+// UnresolvedHomebrewSources lists packages missing a source they qualify for: official-tap casks without
+// homebrew_commits, and packages with a verified public GitHub repository without github_releases (or
+// whose repository changed since it was resolved).
 func (s *Store) UnresolvedHomebrewSources(ctx context.Context) ([]changelog.Candidate, error) {
 	var rows []changelog.Candidate
-	err := s.DB.WithContext(ctx).Raw(candidateSQL + ` WHERE NOT COALESCE(m.changelog_excluded,false) AND p.kind='cask' AND p.removed_at IS NULL AND NOT p.disabled AND p.ruby_source_path IS NOT NULL AND ` + OfficialTapSQL + ` AND NOT EXISTS(SELECT 1 FROM changelog_sources s WHERE s.package_id=p.id AND s.type='homebrew_commits') ORDER BY p.popularity DESC,p.id`).Scan(&rows).Error
+	err := s.DB.WithContext(ctx).Raw(candidateSQL + ` WHERE NOT COALESCE(m.changelog_excluded,false) AND p.removed_at IS NULL AND NOT p.disabled AND (
+ (p.kind='cask' AND p.ruby_source_path IS NOT NULL AND ` + OfficialTapSQL + ` AND NOT EXISTS(SELECT 1 FROM changelog_sources s WHERE s.package_id=p.id AND s.type='homebrew_commits'))
+ OR (gf.subject IS NOT NULL AND NOT p.is_font AND NOT EXISTS(SELECT 1 FROM changelog_sources s WHERE s.package_id=p.id AND s.type='github_releases' AND (s.resolved_by='manual' OR s.config->>'repo'=gf.subject)))
+) ORDER BY p.popularity DESC,p.id`).Scan(&rows).Error
 	return rows, err
+}
+
+const releaseVersionsSQL = `SELECT DISTINCT version_base FROM package_versions WHERE package_id=?`
+
+// saveGitHubReleases upserts published GitHub releases into the version history (releases, source
+// github_release, keyed by tag). A tag is stored under the package's own version_base when the two
+// normalize to the same version, so the timeline joins it to the Homebrew/link version. Rows edited or
+// hidden by editors keep their hidden flag and title; unchanged notes (same body hash) are not rewritten.
+func saveGitHubReleases(ctx context.Context, tx *gorm.DB, packageID int64, releases []changelog.Release, fetched time.Time) (bool, error) {
+	if len(releases) == 0 {
+		return false, nil
+	}
+	var bases []string
+	if err := tx.WithContext(ctx).Raw(releaseVersionsSQL, packageID).Scan(&bases).Error; err != nil {
+		return false, err
+	}
+	known := map[string]string{}
+	for _, base := range bases {
+		if key := changelog.VersionKey(base); key != "" {
+			if _, ok := known[key]; !ok {
+				known[key] = base
+			}
+		}
+	}
+	changed := false
+	for _, release := range releases {
+		version := release.Version
+		if base, ok := known[changelog.VersionKey(version)]; ok {
+			version = base
+		}
+		var body, hash, title any
+		if release.Body != "" {
+			body, hash = release.Body, release.BodyHash
+		}
+		if release.Title != "" {
+			title = release.Title
+		}
+		r := tx.WithContext(ctx).Exec(`INSERT INTO releases(package_id,source,source_key,version,title,published_at,source_url,body_markdown,body_hash,is_prerelease,fetched_at,updated_at,source_locale)
+ VALUES(?,'github_release',?,?,?,?,?,?,?,?,?,?,'en-US')
+ ON CONFLICT(package_id,source,source_key) DO UPDATE SET version=EXCLUDED.version,title=COALESCE(releases.title,EXCLUDED.title),published_at=EXCLUDED.published_at,source_url=EXCLUDED.source_url,body_markdown=EXCLUDED.body_markdown,body_hash=EXCLUDED.body_hash,is_prerelease=EXCLUDED.is_prerelease,fetched_at=EXCLUDED.fetched_at,updated_at=EXCLUDED.fetched_at
+ WHERE releases.version IS DISTINCT FROM EXCLUDED.version OR (releases.title IS NULL AND EXCLUDED.title IS NOT NULL) OR releases.published_at IS DISTINCT FROM EXCLUDED.published_at OR releases.source_url IS DISTINCT FROM EXCLUDED.source_url OR releases.body_hash IS DISTINCT FROM EXCLUDED.body_hash OR releases.is_prerelease IS DISTINCT FROM EXCLUDED.is_prerelease`,
+			packageID, release.Tag, version, title, release.PublishedAt, release.SourceURL, body, hash, release.Prerelease, fetched, fetched)
+		if r.Error != nil {
+			return false, r.Error
+		}
+		changed = changed || r.RowsAffected > 0
+	}
+	return changed, nil
 }

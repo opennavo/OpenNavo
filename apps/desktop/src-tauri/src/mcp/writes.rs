@@ -427,7 +427,7 @@ struct Identity {
     caller: AuditCaller,
 }
 
-fn item_name(item: &crate::model::CatalogItem) -> Option<String> {
+pub(crate) fn item_name(item: &crate::model::CatalogItem) -> Option<String> {
     serde_json::to_value(item)
         .ok()?
         .get("name")

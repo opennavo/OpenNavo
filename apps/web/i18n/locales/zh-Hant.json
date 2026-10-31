@@ -948,13 +948,7 @@
     "pageLink": "{title}，第 {page} 頁",
     "bucketsLabel": "按首字母瀏覽",
     "leafMetaTitle": "{title}（A–Z 索引）· OpenNavo",
-    "leafDescription": "{title}，按名稱排列，共 {count} 個，每個都有介紹、版本記錄和安裝方式。",
-    "directory": {
-      "kicker": "目錄",
-      "title": "按目錄找 App",
-      "body": "按用途瀏覽分類，看編輯整理的合集，或者在全部應用和 A–Z 索引裡找到每一個 App。",
-      "category": "{name}類應用"
-    }
+    "leafDescription": "{title}，按名稱排列，共 {count} 個，每個都有介紹、版本記錄和安裝方式。"
   },
   "feeds": {
     "subscribe": "訂閱更新（RSS）",

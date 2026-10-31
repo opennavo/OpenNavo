@@ -309,6 +309,13 @@ func (s *Store) ApplyCatalogBatchWithLifecycle(ctx context.Context, mutations []
 					return fmt.Errorf("record package alias: %w", err)
 				}
 			}
+			if versionChanged {
+				// The outbox below enqueues this package's changelog fetches; lease them like the schedule
+				// does (changelog.fetchLease) so a backlog cannot make the next tick enqueue them again.
+				if err := tx.WithContext(ctx).Exec("UPDATE changelog_sources SET next_fetch_at=GREATEST(next_fetch_at,now()+interval '2 hours') WHERE package_id=? AND enabled", id).Error; err != nil {
+					return fmt.Errorf("lease changelog sources: %w", err)
+				}
+			}
 			if isNew || versionChanged {
 				if err := tx.WithContext(ctx).Exec("INSERT INTO package_versions (package_id,version,version_base,first_seen_at) VALUES (?,?,?,now()) ON CONFLICT (package_id,version) DO NOTHING", id, item.Version, item.VersionBase).Error; err != nil {
 					return fmt.Errorf("record package version: %w", err)
@@ -323,6 +330,16 @@ func (s *Store) ApplyCatalogBatchWithLifecycle(ctx context.Context, mutations []
 				var sources []int64
 				if err := tx.WithContext(ctx).Raw("SELECT id FROM changelog_sources WHERE package_id=? AND enabled AND type='homebrew_commits'", id).Scan(&sources).Error; err != nil {
 					return err
+				}
+				var releaseSources []int64
+				if err := tx.WithContext(ctx).Raw("SELECT id FROM changelog_sources WHERE package_id=? AND enabled AND type='github_releases'", id).Scan(&releaseSources).Error; err != nil {
+					return err
+				}
+				// A new version usually has a new GitHub release; read it without waiting for the interval.
+				for _, sourceID := range releaseSources {
+					if err := addOutbox(ctx, tx, "changelog:fetch", "sourceId", sourceID); err != nil {
+						return err
+					}
 				}
 				if len(sources) == 0 {
 					if err := addOutbox(ctx, tx, "changelog:resolve", "packageId", id); err != nil {

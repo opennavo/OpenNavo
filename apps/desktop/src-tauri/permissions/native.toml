@@ -3,7 +3,7 @@ identifier = "native-main"
 description = "Main window access to the specified client commands"
 commands.allow = [
   "firewall_status", "firewall_enable", "firewall_disable", "firewall_uninstall", "firewall_open_approval", "firewall_app_identify",
-  "firewall_rules", "firewall_rule_save", "firewall_rule_delete", "firewall_alerts", "firewall_alert_reply", "firewall_alert_show",
+  "firewall_rules", "firewall_rule_save", "firewall_rule_delete", "firewall_alerts", "firewall_alert_show",
   "firewall_events", "firewall_events_clear", "firewall_blocklists", "firewall_blocklist_add", "firewall_blocklist_set", "firewall_blocklist_refresh", "firewall_blocklist_remove",
   "firewall_settings", "firewall_settings_set",
   "download_act",

@@ -40,7 +40,12 @@ fn firewall_ipc_exports_match_command_permissions_and_event_names() {
         "firewall_settings_set",
     ] {
         assert!(bindings.contains(&format!("__TAURI_INVOKE(\"{command}\"")));
-        assert!(main.contains(&format!("\"{command}\"")));
+        // Only the question window answers a question (the command also checks the window label).
+        assert_eq!(
+            main.contains(&format!("\"{command}\"")),
+            command != "firewall_alert_reply",
+            "{command}"
+        );
     }
     for (client, wire, payload) in [
         ("firewallStatus", "firewall:status", "FirewallStatusEvent"),

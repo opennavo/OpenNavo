@@ -877,7 +877,21 @@
     "allow": "Erlauben",
     "deny": "Ablehnen",
     "expired": "Diese Anfrage wartet nicht mehr.",
-    "failed": "Ihre Antwort konnte nicht gesendet werden. Versuchen Sie es erneut."
+    "failed": "Ihre Antwort konnte nicht gesendet werden. Versuchen Sie es erneut.",
+    "titleDeepLink": "Installation über einen Weblink bestätigen",
+    "introDeepLink": "Eine Webseite hat einen OpenNavo-Link geöffnet, um diese App zu installieren.",
+    "introCollection": "Eine Webseite hat einen OpenNavo-Link geöffnet, um diese Sammlung zu installieren.",
+    "collection": "Sammlung",
+    "webLink": "Ein Weblink (opennavo://)",
+    "source": "Quelle",
+    "collectionSummary": "{count} Apps: {install} werden installiert, {skip} übersprungen",
+    "skip": {
+      "disabled": "Deaktiviert, nicht eingereiht",
+      "installed": "Bereits installiert",
+      "queued": "Bereits in der Warteschlange",
+      "duplicate": "Doppelt aufgeführt",
+      "unsupported": "Nicht unterstützt"
+    }
   },
   "settings": {
     "title": "Einstellungen",

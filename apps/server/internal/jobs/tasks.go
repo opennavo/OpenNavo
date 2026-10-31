@@ -17,6 +17,8 @@ type Definition struct {
 	AdditionalCrons   []string
 	Retries           int
 	Ref               string
+	// RunLock bounds the uniqueness lock of an event job to about one run instead of a day.
+	RunLock bool
 }
 
 var Definitions = []Definition{
@@ -28,7 +30,9 @@ var Definitions = []Definition{
 
 	{Type: "changelog:schedule", Queue: "default", Cron: "*/10 * * * *", Retries: 3},
 	{Type: "changelog:resolve", Queue: "changelog", Retries: 3, Ref: "package"},
-	{Type: "changelog:fetch", Queue: "changelog", Retries: 3, Ref: "source"},
+	// Retries and backoff for a source live in changelog_sources.next_fetch_at (exponential, capped at
+	// 7 days; rate limits wait for the reset), so the task itself does not retry and its lock lasts one run.
+	{Type: "changelog:fetch", Queue: "changelog", Retries: 0, Ref: "source", RunLock: true},
 	{Type: "assets:download-size", Queue: "default", Cron: "0 5 * * *", Retries: 2, Ref: "package"},
 	{Type: "cleanup", Queue: "default", Cron: "0 4 * * *", Retries: 1},
 	{Type: "facts:sources", Queue: "default", Cron: "35 * * * *", Retries: 1},
@@ -120,6 +124,10 @@ func NewTask(taskType string, payload Payload) (*asynq.Task, []asynq.Option, err
 // never a full day.
 func uniqueTTL(definition Definition) time.Duration {
 	const shortest, longest = 20 * time.Minute, 23 * time.Hour
+	if definition.RunLock {
+		// The run timeout: a failed (archived) task must not hide the source from the next schedule tick.
+		return shortest
+	}
 	if definition.Cron == "" {
 		return 24 * time.Hour
 	}

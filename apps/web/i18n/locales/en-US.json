@@ -948,13 +948,7 @@
     "pageLink": "{title}, page {page}",
     "bucketsLabel": "Browse by first letter",
     "leafMetaTitle": "{title} (A–Z) · OpenNavo",
-    "leafDescription": "{title}, sorted by name: {count} in all, each with a description, release notes and install steps.",
-    "directory": {
-      "kicker": "Directory",
-      "title": "Find apps in the directory",
-      "body": "Browse categories by what apps do, open a hand-picked collection, or find any app in the full list or the A–Z index.",
-      "category": "{name} apps"
-    }
+    "leafDescription": "{title}, sorted by name: {count} in all, each with a description, release notes and install steps."
   },
   "feeds": {
     "subscribe": "Subscribe to updates (RSS)",

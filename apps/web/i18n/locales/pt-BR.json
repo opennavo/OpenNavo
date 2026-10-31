@@ -948,13 +948,7 @@
     "pageLink": "{title}, página {page}",
     "bucketsLabel": "Explorar pela letra inicial",
     "leafMetaTitle": "{title} (índice A–Z) · OpenNavo",
-    "leafDescription": "{title}, em ordem alfabética: {count} no total, com descrição, notas de versão e instruções de instalação para cada item.",
-    "directory": {
-      "kicker": "Diretório",
-      "title": "Encontre apps no diretório",
-      "body": "Navegue pelas categorias de uso, veja as coleções montadas pelos editores ou encontre qualquer app na lista completa e no índice A–Z.",
-      "category": "Apps de {name}"
-    }
+    "leafDescription": "{title}, em ordem alfabética: {count} no total, com descrição, notas de versão e instruções de instalação para cada item."
   },
   "feeds": {
     "subscribe": "Assinar atualizações (RSS)",

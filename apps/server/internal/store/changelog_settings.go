@@ -38,7 +38,7 @@ func (s *Store) SetPackageChangelogSettings(ctx context.Context, id int64, exclu
 		}
 		// Restoration affects only the next scheduled run; do not forcibly remove existing queue deduplication locks or historical failures.
 		if before.Excluded && !excluded {
-			if err := tx.Exec(`UPDATE changelog_sources SET next_fetch_at=now() WHERE package_id=? AND type='homebrew_commits'`, id).Error; err != nil {
+			if err := tx.Exec(`UPDATE changelog_sources SET next_fetch_at=now() WHERE package_id=? AND type IN ('homebrew_commits','github_releases')`, id).Error; err != nil {
 				return err
 			}
 		}

@@ -55,7 +55,7 @@ func (s *Service) Top(ctx context.Context, limit int) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	stats := map[string]any{"packages": len(rows), "homebrew": 0}
+	stats := map[string]any{"packages": len(rows), "homebrew": 0, "github": 0}
 	for _, p := range rows {
 		if err := ctx.Err(); err != nil {
 			return stats, err
@@ -71,7 +71,7 @@ func (s *Service) Top(ctx context.Context, limit int) (map[string]any, error) {
 				stats["upstreamErrors"] = true
 			}
 		}
-		for _, key := range []string{"homebrew"} {
+		for _, key := range []string{"homebrew", "github"} {
 			if value, ok := counts[key].(bool); ok && value {
 				stats[key] = stats[key].(int) + 1
 			}

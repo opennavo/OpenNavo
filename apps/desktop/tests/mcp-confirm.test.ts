@@ -96,3 +96,73 @@ describe('Local MCP confirmation window', () => {
     expect(source).not.toMatch(/v-html|innerHTML|<a\s|<iframe|<img\s|https?:\/\//);
   });
 });
+
+describe('Deep-link install confirmation window', () => {
+  it('Says the request came from a web link and shows the opennavo:// source', async () => {
+    const wrapper = await page('deeplink-confirm-install');
+    expect(wrapper.get('h1').text()).toBe('确认来自网页链接的安装');
+    expect(wrapper.text()).toContain('Ghostty');
+    expect(wrapper.text()).toContain('cask/ghostty');
+    expect(wrapper.get('[data-test="mcp-confirm-caller"]').text()).toBe('网页链接（opennavo://）');
+    expect(wrapper.get('[data-test="mcp-confirm-source"]').text()).toBe(
+      'opennavo://package/cask/ghostty?action=install'
+    );
+    expect(wrapper.find('[data-test="mcp-confirm-items"]').exists()).toBe(false);
+  });
+
+  it('Lists every app of a collection with the count, marking the skipped ones', async () => {
+    const wrapper = await page('deeplink-confirm-collection');
+    expect(wrapper.get('[data-test="mcp-confirm-summary"]').text()).toBe('共 6 个应用：安装 3 个，跳过 3 个');
+    const rows = wrapper.findAll('[data-test="mcp-confirm-items"] li');
+    expect(rows).toHaveLength(6);
+    const disabled = wrapper.get('[data-skip="disabled"]');
+    expect(disabled.text()).toContain('Legacy Tool');
+    expect(disabled.text()).toContain('已停用，不加入队列');
+    expect(wrapper.get('[data-skip="installed"]').text()).toContain('已安装');
+    expect(wrapper.get('[data-skip="unsupported"]').text()).toContain('不支持');
+  });
+
+  it('Keeps the same default: Deny focused on the left, Return and Escape deny, Allow waits', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const answer = vi.spyOn(commands, 'mcpConfirmAnswer');
+    const wrapper = await page('deeplink-confirm-collection');
+    const buttons = wrapper.findAll('footer button');
+    expect(buttons.map(button => button.attributes('data-test'))).toEqual(['mcp-confirm-deny', 'mcp-confirm-allow']);
+    expect(document.activeElement).toBe(buttons[0]!.element);
+    await buttons[1]!.trigger('click');
+    expect(answer).not.toHaveBeenCalled();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await flushPromises();
+    expect(answer).toHaveBeenCalledWith('confirm-4', false);
+    await vi.advanceTimersByTimeAsync(1000);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await flushPromises();
+    expect(answer.mock.calls.every(([, allow]) => allow === false)).toBe(true);
+  });
+});
+
+describe('Confirmation keyboard', () => {
+  for (const mock of ['mcp-confirm-install', 'deeplink-confirm-install', 'deeplink-confirm-collection']) {
+    it(`Never allows from the keyboard, even with Allow focused (${mock})`, async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const answer = vi.spyOn(commands, 'mcpConfirmAnswer');
+      const wrapper = await page(mock);
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      const allow = wrapper.get('[data-test="mcp-confirm-allow"]').element as HTMLButtonElement;
+      expect(allow.disabled).toBe(false);
+      allow.focus();
+      expect(document.activeElement).toBe(allow);
+      for (const key of ['Enter', ' ']) {
+        for (const type of ['keydown', 'keyup']) {
+          const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true });
+          allow.dispatchEvent(event);
+          expect(event.defaultPrevented, `${type} ${key}`).toBe(true);
+        }
+      }
+      await flushPromises();
+      expect(answer).toHaveBeenCalled();
+      expect(answer.mock.calls.every(([, value]) => value === false)).toBe(true);
+    });
+  }
+});

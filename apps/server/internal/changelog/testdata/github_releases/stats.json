@@ -1,0 +1,47 @@
+[
+  {
+    "tag_name": "v3.0.23",
+    "name": "v3.0.23",
+    "body": "## Bug fixes\r\n- fix: adjusted CPU stress tests on CPUs with super cores and hide unavailable core options (#3691)\r\n- fix: fixed CPU temperature averaging by excluding out-of-range sensor readings (#3692)\r\n- fix: fixed overlapping controls in StepperInput with a unit picker (#3687)\r\n\r\n## New features\r\n- feat: added persistent reader history with minute aggregation and 24-hour retention\r\n- feat: added an option to animate Icon widget (#3705)\r\n- feat: added Battery module to the Remote\r\n- feat: rebuilt lldb with Snappy compression to reduce history storage\r\n- feat: added text widget to the Battery module (#3685)",
+    "html_url": "https://github.com/exelban/stats/releases/tag/v3.0.23",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-25T11:10:46Z"
+  },
+  {
+    "tag_name": "v3.0.22",
+    "name": "v3.0.22",
+    "body": "## Bug fixes\r\n- fix: fixed authorization polling, device IDs and keychain access in the Remote installer (#3693, #3694, #3695)\r\n- fix: fixed oversized host_statistics64 count in RAM on older macOS versions (#3688)\r\n- fix: another try to fix feft-aligned sensors view in the Combined modules (#3652)\r\n- fix: fixed battery stats not updating when plugged in and fully charged (#3615)\r\n- fix: fixed external APFS disk I/O showing zero by resolving the actual storage driver (#3679)\r\n- fix: simplified issue templates\r\n- fix: fixed chart axes shifting when new values are added\r\n\r\n## New features\r\n- feat: added a top process to all previews (#3480)\r\n- feat: added issue templates\r\n- feat: redesigned the line chart tooltip design and positioning\r\n\r\n## Localization\r\n- lang: updated slovenian translations (#3683)",
+    "html_url": "https://github.com/exelban/stats/releases/tag/v3.0.22",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-18T09:39:05Z"
+  },
+  {
+    "tag_name": "v3.0.21",
+    "name": "v3.0.21",
+    "body": "## Bug fixes\r\n- fix: fixed incorrect Ethernet link speed on 10GbE adapters (#3510)\r\n- fix: fixed the Wi-Fi location permission prompt by adding the missing Location entitlement (#3675)\r\n- fix: fixed the Network popup briefly showing the interface as down during details refresh\r\n- fix: fixed the SMC helper authorization bypass when signing certificates are empty\r\n- fix: fixed SMC helper shutdown races and waited for fan restoration before uninstalling or reinstalling the helper\r\n- fix: fixed Remote popup refresh when fetching account order fails (#3666)\r\n- fix: adjusted Battery temperature reading on macOS 27 for some SoC (#3648)\r\n- fix: fixed stale Bluetooth device entries after removal or charging connection changes (#3591)\r\n\r\n## New features\r\n- feat: added a new Icon widget that allows to show module icon in the menu bar (#3646)\r\n- feat: added new m6 SoC support (#3668)\r\n\r\n## Localization\r\n- lang: added translations for the Icon widget",
+    "html_url": "https://github.com/exelban/stats/releases/tag/v3.0.21",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-11T10:15:12Z"
+  },
+  {
+    "tag_name": "v3.0.20",
+    "name": "v3.0.20",
+    "body": "## Bug fixes\r\n- fix: fixed the Sensors alignment in combined modules (#3652)\r\n- fix: stopped querying Wi-Fi SSID and BSSID without Location permission\r\n\r\n## New features\r\n- feat: added new workflow to build, sign, notarize and publish releases (not active for now)\r\n- feat: added new sensor mappings for MacPro5,1 (#3647)\r\n- feat: added an option to show only the Stats icon in the menu bar and open the combined popup (#3622)\r\n- feat: improved SMC caching and fan control reliability\r\n- feat: added caching for HID sensor discovery\r\n\r\n## Localization\r\n- lang: removed unused string\r\n- lang: added translations for the new Wi-Fi location permission strings",
+    "html_url": "https://github.com/exelban/stats/releases/tag/v3.0.20",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-04T10:53:13Z"
+  },
+  {
+    "tag_name": "v3.0.19",
+    "name": "v3.0.19",
+    "body": "**HOT FIX**\r\n\r\n## Bug fixes\r\n- fix: removed the Network system_profiler Wi-Fi fallback to prevent latency spikes and made location permission requests explicit (#3644)",
+    "html_url": "https://github.com/exelban/stats/releases/tag/v3.0.19",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-09-29T15:08:27Z"
+  }
+]
