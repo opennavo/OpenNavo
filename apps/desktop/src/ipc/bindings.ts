@@ -280,6 +280,8 @@ export const commands = {
 	 *  Install a Brewfile's ready casks after the user allows the whole list in OpenNavo's
 	 *  confirmation window. The file must still be the one `brewfile_preview` read (`digest`), and it
 	 *  is read and resolved again after Allow; any change refuses with `E_PLAN_CHANGED`.
+	 *  `decisions` carries the tap and adoption answers the main window already collected; they are
+	 *  part of the digest, and a tap nobody was asked about refuses the plan.
 	 */
 	brewfileInstall: (path: string, digest: string, decisions: BrewfileDecisions) => typedError<Task[], AppError>(__TAURI_INVOKE("brewfile_install", { path, digest, decisions })),
 	doctorRun: () => typedError<DoctorReport, AppError>(__TAURI_INVOKE("doctor_run")),
@@ -594,17 +596,6 @@ export type BrewInfo = {
 	version: string,
 };
 
-export type BrewfileEntry = {
-	line: number,
-	raw: string,
-	kind: Kind | null,
-	token: string | null,
-	status: BrewfileEntryStatus,
-	reason: string | null,
-};
-
-export type BrewfileEntryStatus = "ready" | "installed" | "skipped" | "unsupported" | "invalid" | "not_found";
-
 /**
  *  What the user already decided in the main window for a Brewfile restore, as for a single install:
  *  casks to adopt over an existing app, third-party taps they agreed to, and casks they declined
@@ -615,6 +606,17 @@ export type BrewfileDecisions = {
 	taps: string[],
 	declined: string[],
 };
+
+export type BrewfileEntry = {
+	line: number,
+	raw: string,
+	kind: Kind | null,
+	token: string | null,
+	status: BrewfileEntryStatus,
+	reason: string | null,
+};
+
+export type BrewfileEntryStatus = "ready" | "installed" | "skipped" | "unsupported" | "invalid" | "not_found";
 
 export type BrewfilePreview = {
 	entries: BrewfileEntry[],
