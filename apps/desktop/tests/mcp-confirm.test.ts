@@ -58,6 +58,14 @@ describe('Local MCP confirmation window', () => {
     expect(answer.mock.calls.every(([, allow]) => allow === false)).toBe(true);
   });
 
+  it('Puts Deny on the left, Allow on the right, with Deny first in Tab order', async () => {
+    const wrapper = await page('mcp-confirm-install');
+    const buttons = wrapper.findAll('footer button');
+    expect(buttons.map(b => b.attributes('data-test'))).toEqual(['mcp-confirm-deny', 'mcp-confirm-allow']);
+    expect(buttons.every(b => !b.attributes('tabindex') || b.attributes('tabindex') === '0')).toBe(true);
+    expect(document.activeElement).toBe(buttons[0]?.element);
+  });
+
   it('Allows only by a click after the delay', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const answer = vi.spyOn(commands, 'mcpConfirmAnswer');

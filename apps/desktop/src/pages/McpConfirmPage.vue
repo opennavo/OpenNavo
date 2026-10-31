@@ -142,9 +142,6 @@ const isInstall = computed(() => view.value?.action === 'install');
       </p>
 
       <footer class="mt-auto flex justify-end gap-8px pt-16px">
-        <OnButton :disabled="!armed || answering" data-test="mcp-confirm-allow" @click="answer(true)">{{
-          t('mcpConfirm.allow')
-        }}</OnButton>
         <OnButton
           ref="denyButton"
           variant="primary"
@@ -153,6 +150,9 @@ const isInstall = computed(() => view.value?.action === 'install');
           @click="answer(false)"
           >{{ t('mcpConfirm.deny') }}</OnButton
         >
+        <OnButton :disabled="!armed || answering" data-test="mcp-confirm-allow" @click="answer(true)">{{
+          t('mcpConfirm.allow')
+        }}</OnButton>
       </footer>
     </template>
     <p v-else-if="failure" class="m-0 my-auto text-center text-12.5px text-ink-tertiary" data-test="mcp-confirm-none">
