@@ -73,7 +73,7 @@ describe('Local MCP confirmation window', () => {
       const wrapper = await page('mcp-confirm-install');
       await vi.advanceTimersByTimeAsync(1100);
       expect(wrapper.get('[data-test="mcp-confirm-allow"]').attributes('disabled')).toBeUndefined();
-      wrapper.get('[data-test="mcp-confirm-allow"]').element.focus();
+      (wrapper.get('[data-test="mcp-confirm-allow"]').element as HTMLElement).focus();
       window.dispatchEvent(new KeyboardEvent('keydown', { key }));
       await flushPromises();
       expect(answer).toHaveBeenCalledTimes(1);
