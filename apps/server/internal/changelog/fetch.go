@@ -79,8 +79,11 @@ func checkStatus(status int, headers http.Header) error {
 		if epoch, err := strconv.ParseInt(headers.Get("X-Ratelimit-Reset"), 10, 64); err == nil && time.Unix(epoch, 0).After(time.Now()) {
 			reset = time.Unix(epoch, 0)
 		}
+		// With both headers, wait for the later of the two.
 		if seconds, err := strconv.Atoi(headers.Get("Retry-After")); err == nil && seconds > 0 {
-			reset = time.Now().Add(time.Duration(seconds) * time.Second)
+			if retry := time.Now().Add(time.Duration(seconds) * time.Second); headers.Get("X-Ratelimit-Reset") == "" || retry.After(reset) {
+				reset = retry
+			}
 		}
 		return &RateLimitError{Reset: reset}
 	}

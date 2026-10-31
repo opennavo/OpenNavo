@@ -132,4 +132,19 @@ func TestGitHubReleasesResolveFetchAndConditionalRefresh(t *testing.T) {
 	var homebrewSources int64
 	require.NoError(t, st.DB.Raw("SELECT count(*) FROM changelog_sources WHERE package_id=? AND type='homebrew_commits'", pid).Scan(&homebrewSources).Error)
 	require.EqualValues(t, 1, homebrewSources)
+
+	// The repository turns private: the facts job clears the subject. The auto source is no longer due
+	// and cannot be fetched, so no request (with the token) is made; a manual source stays readable.
+	require.NoError(t, st.DB.WithContext(ctx).Exec("UPDATE package_source_facts SET subject='',status='none' WHERE package_id=? AND source='github'", pid).Error)
+	due, err = st.ChangelogDue(ctx, time.Now().Add(30*24*time.Hour))
+	require.NoError(t, err)
+	require.NotContains(t, due, sid)
+	before := requests
+	_, err = svc.Fetch(ctx, sid)
+	require.Error(t, err)
+	require.Equal(t, before, requests, "no request for a repository no longer verified public")
+	require.NoError(t, st.DB.WithContext(ctx).Exec("UPDATE changelog_sources SET resolved_by='manual' WHERE id=?", sid).Error)
+	due, err = st.ChangelogDue(ctx, time.Now().Add(30*24*time.Hour))
+	require.NoError(t, err)
+	require.Contains(t, due, sid, "manual sources are not gated")
 }

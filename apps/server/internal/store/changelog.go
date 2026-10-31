@@ -16,7 +16,11 @@ const candidateSQL = `SELECT p.id,p.kind,p.token,p.tap,COALESCE(p.homepage,'') h
 
 // changelogSourceScope keeps Homebrew commit history limited to casks (unchanged) and reads GitHub
 // releases for any package kind with a verified public repository. sparkle and webpage have no fetcher.
-const changelogSourceScope = `((s.type='homebrew_commits' AND p.kind='cask') OR s.type='github_releases')`
+// An auto github_releases source is read only while the source facts job still verifies its repository as
+// public (subject = config repo). When a repository turns private the facts job clears the subject and the
+// source stops being due or fetchable, so a token with access never publishes private release notes.
+// Manual sources are an editor's decision and are not gated.
+const changelogSourceScope = `((s.type='homebrew_commits' AND p.kind='cask') OR (s.type='github_releases' AND (s.resolved_by='manual' OR EXISTS(SELECT 1 FROM package_source_facts vf WHERE vf.package_id=s.package_id AND vf.source='github' AND vf.status IN ('found','none') AND vf.subject<>'' AND vf.subject=s.config->>'repo'))))`
 
 func (s *Store) ChangelogCandidate(ctx context.Context, id int64) (changelog.Candidate, error) {
 	var row changelog.Candidate

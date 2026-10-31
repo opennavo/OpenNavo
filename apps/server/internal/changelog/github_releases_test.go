@@ -187,6 +187,11 @@ func TestForbiddenIsRateLimitOnlyWhenQuotaSpent(t *testing.T) {
 	require.True(t, errors.As(checkStatus(403, http.Header{"X-Ratelimit-Remaining": {"0"}, "X-Ratelimit-Reset": {reset}}), &rate))
 	require.True(t, errors.As(checkStatus(403, http.Header{"Retry-After": {"30"}}), &rate))
 	require.True(t, errors.As(checkStatus(429, http.Header{}), &rate))
+	soon := strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10)
+	require.True(t, errors.As(checkStatus(429, http.Header{"X-Ratelimit-Reset": {soon}, "Retry-After": {"600"}}), &rate))
+	require.WithinDuration(t, time.Now().Add(10*time.Minute), rate.Reset, 5*time.Second, "the later of reset and Retry-After")
+	require.True(t, errors.As(checkStatus(429, http.Header{"X-Ratelimit-Reset": {reset}, "Retry-After": {"5"}}), &rate))
+	require.WithinDuration(t, time.Now().Add(time.Hour), rate.Reset, 5*time.Second)
 }
 
 func TestResolveGitHubReleasesFromVerifiedRepo(t *testing.T) {
