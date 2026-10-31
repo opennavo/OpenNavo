@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { OnButton, OnCard, OnChip, OnConfirm, OnModal, OnSegmented, OnToggle } from '@opennavo/ui';
 import SettingRow from './SettingRow.vue';
@@ -7,7 +7,7 @@ import type { AuditCaller, AuditEntry, McpStatus } from '@/ipc/bindings';
 import { commands } from '@/ipc/client';
 import { useToasts } from '@/composables/useToasts';
 import { useAppLocale } from '@/composables/useAppLocale';
-import { MCP_CLIENTS, copiedMcpPath, mcpAppMoved, mcpConfig, rememberCopiedMcpPath } from '@/utils/mcpConfig';
+import { MCP_CLIENTS, copiedMcpPaths, mcpConfig, mcpMovedClients, rememberCopiedMcpPath } from '@/utils/mcpConfig';
 import type { McpClient } from '@/utils/mcpConfig';
 
 // Settings → Local MCP. The switches are never updated optimistically: every change shows the state the
@@ -22,12 +22,36 @@ const status = ref<McpStatus | null>(null);
 const busy = ref(false);
 const failure = ref<Failure | null>(null);
 const client = ref<McpClient>('claude');
-const copied = ref<string | null>(copiedMcpPath());
+const copied = ref(copiedMcpPaths());
+const loadFailed = ref(false);
 
 async function refresh() {
   status.value = await commands.mcpStatus();
 }
-onMounted(refresh);
+// The first read can fail (backend not ready, IPC error); show that with a retry instead of a blank page.
+async function load() {
+  try {
+    await refresh();
+    loadFailed.value = false;
+  } catch {
+    if (!status.value) loadFailed.value = true;
+  }
+}
+// The app may be moved, or another window may copy a configuration, while this page stays open.
+function recheck() {
+  if (document.visibilityState === 'hidden') return;
+  copied.value = copiedMcpPaths();
+  if (!busy.value) void load();
+}
+onMounted(() => {
+  void load();
+  window.addEventListener('focus', recheck);
+  document.addEventListener('visibilitychange', recheck);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', recheck);
+  document.removeEventListener('visibilitychange', recheck);
+});
 
 async function change(kind: 'enabled' | 'write', next: boolean) {
   if (busy.value || !status.value) return;
@@ -53,7 +77,11 @@ async function change(kind: 'enabled' | 'write', next: boolean) {
 const clients = computed(() => MCP_CLIENTS.map(value => ({ value, label: t(`settings.mcp.clients.${value}`) })));
 const commandPath = computed(() => status.value?.commandPath ?? null);
 const config = computed(() => (commandPath.value ? mcpConfig(client.value, commandPath.value) : ''));
-const moved = computed(() => mcpAppMoved(commandPath.value, copied.value));
+const movedClients = computed(() => mcpMovedClients(commandPath.value, copied.value));
+const movedLabels = computed(() => movedClients.value.map(value => t(`settings.mcp.clients.${value}`)).join(', '));
+// Writes need a listener that is actually up; an "on" switch with a failed bind accepts nothing.
+const serving = computed(() => !!status.value?.enabled && !!status.value?.running);
+const notRunning = computed(() => !!status.value?.enabled && !status.value.running);
 
 async function copyConfig() {
   if (!commandPath.value) return;
@@ -63,8 +91,7 @@ async function copyConfig() {
     toasts.push({ tone: 'danger', title: t('settings.mcp.copyFailed') });
     return;
   }
-  rememberCopiedMcpPath(commandPath.value);
-  copied.value = commandPath.value;
+  copied.value = rememberCopiedMcpPath(client.value, commandPath.value);
   toasts.push({
     tone: 'success',
     title: t('settings.mcp.copied', { client: t(`settings.mcp.clients.${client.value}`) })
@@ -121,6 +148,15 @@ function auditCaller(caller: AuditCaller) {
 </script>
 
 <template>
+  <div
+    v-if="!status && loadFailed"
+    role="alert"
+    class="flex flex-col items-start gap-8px text-12.5px text-status-danger"
+    data-test="mcp-load-failed"
+  >
+    {{ t('settings.mcp.statusFailed') }}
+    <OnButton size="sm" data-test="mcp-load-retry" @click="load">{{ t('common.retry') }}</OnButton>
+  </div>
   <div v-if="status" class="flex flex-col gap-16px">
     <OnCard padding="none">
       <SettingRow :label="t('settings.mcp.enable')" :hint="t('settings.mcp.enableHint')" label-id="setting-mcpEnabled">
@@ -145,20 +181,23 @@ function auditCaller(caller: AuditCaller) {
         >
         <OnToggle
           :model-value="status.writeEnabled"
-          :disabled="busy || !status.enabled"
+          :disabled="busy || (!serving && !status.writeEnabled)"
           aria-labelledby="setting-mcpWrite"
           data-test="mcp-write"
           @update:model-value="value => change('write', value)"
         />
       </SettingRow>
       <div
-        v-if="failure"
+        v-if="failure || status.error || notRunning"
         role="alert"
         class="border-t border-t-solid border-line-subtle px-18px py-12px text-12.5px text-status-danger"
         data-test="mcp-failure"
       >
-        {{ t(`settings.mcp.${failure}`) }}
-        <span v-if="status.error" class="mt-2px block font-mono text-11.5px text-ink-tertiary">{{ status.error }}</span>
+        <span v-if="failure" class="block">{{ t(`settings.mcp.${failure}`) }}</span>
+        <span v-if="notRunning" class="block" data-test="mcp-not-running">{{ t('settings.mcp.notRunning') }}</span>
+        <span v-if="status.error" data-test="mcp-error" class="mt-2px block font-mono text-11.5px text-ink-tertiary">{{
+          status.error
+        }}</span>
       </div>
     </OnCard>
 
@@ -168,8 +207,11 @@ function auditCaller(caller: AuditCaller) {
         <p class="m-0 mt-4px text-12.5px text-ink-tertiary">{{ t('settings.mcp.configHint') }}</p>
       </header>
       <div class="flex flex-col gap-12px px-18px py-14px">
-        <p v-if="moved" role="status" class="m-0 text-12.5px text-status-warning" data-test="mcp-moved">
+        <p v-if="movedClients.length" role="status" class="m-0 text-12.5px text-status-warning" data-test="mcp-moved">
           {{ t('settings.mcp.moved') }}
+          <span class="block" data-test="mcp-moved-clients">{{
+            t('settings.mcp.movedClients', { clients: movedLabels })
+          }}</span>
         </p>
         <div class="flex flex-wrap items-center justify-between gap-8px">
           <OnSegmented v-model="client" :options="clients" size="sm" :aria-label="t('settings.mcp.config')" />

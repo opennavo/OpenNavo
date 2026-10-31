@@ -304,7 +304,11 @@ impl Broker {
             return Err(failure);
         }
         inner.write_enabled = write_enabled;
-        inner.error = None;
+        // Only a running listener has nothing left to report; a failed start (bind/prepare) keeps its
+        // error visible until Local MCP actually runs.
+        if inner.running {
+            inner.error = None;
+        }
         if !write_enabled {
             for connection in inner.connections.values() {
                 let _ = connection.shutdown(std::net::Shutdown::Both);
@@ -978,6 +982,34 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         panic!("broker did not start");
+    }
+
+    #[test]
+    fn write_switch_keeps_start_error_while_not_running() {
+        let dir = tempdir();
+        let broker = Arc::new(Broker::new(dir.path().to_path_buf()));
+        {
+            let mut inner = broker.lock();
+            inner.enabled = true;
+            inner.error = Some("E_MCP_BROKER: bind failed".into());
+        }
+        broker
+            .set_write_enabled(true)
+            .expect("persist write switch");
+        let status = broker.status();
+        assert!(
+            status.enabled && status.write_enabled && !status.running,
+            "{status:?}"
+        );
+        assert_eq!(status.error.as_deref(), Some("E_MCP_BROKER: bind failed"));
+
+        // Once running, a successful write change clears a stale error.
+        broker.set_enabled(true).expect("enable");
+        wait_running(&broker);
+        broker.lock().error = Some("old".into());
+        broker.set_write_enabled(false).expect("write off");
+        assert!(broker.status().error.is_none());
+        broker.shutdown();
     }
 
     #[test]

@@ -983,6 +983,9 @@
       "copied": "{client} の設定をコピーしました",
       "copyFailed": "設定をコピーできませんでした。",
       "moved": "設定をコピーした後に OpenNavo が移動されました。AI アプリが見つけられるよう、もう一度コピーしてください。",
+      "notRunning": "ローカル MCP はオンですが動作していないため、AI アプリは接続できません。オフにしてからもう一度オンにして再試行してください。",
+      "statusFailed": "ローカル MCP の状態を読み取れませんでした。",
+      "movedClients": "まだ以前の場所を指しています：{clients}",
       "pathUnavailable": "OpenNavo のインストール場所が見つからないため、コピーできる設定がありません。",
       "clients": {
         "claude": "Claude Desktop",

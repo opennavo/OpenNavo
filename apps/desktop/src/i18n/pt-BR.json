@@ -983,6 +983,9 @@
       "copied": "Configuração do {client} copiada",
       "copyFailed": "Não foi possível copiar a configuração.",
       "moved": "O OpenNavo foi movido depois que você copiou a configuração. Copie de novo para que seus apps de IA continuem encontrando o OpenNavo.",
+      "notRunning": "O MCP local está ativado, mas não está em execução, então os apps de IA não conseguem se conectar. Desative e ative de novo para tentar outra vez.",
+      "statusFailed": "Não foi possível ler o status do MCP local.",
+      "movedClients": "Ainda aponta para o local antigo: {clients}",
       "pathUnavailable": "Não foi possível encontrar onde o OpenNavo está instalado, então não há configuração para copiar.",
       "clients": {
         "claude": "Claude Desktop",

@@ -5,7 +5,15 @@ import LocalMcpSettings from '@/components/settings/LocalMcpSettings.vue';
 import { i18n } from '@/i18n';
 import { commands } from '@/ipc/client';
 import { useToasts } from '@/composables/useToasts';
-import { MCP_COPIED_PATH_KEY, mcpAppMoved, mcpConfig } from '@/utils/mcpConfig';
+import {
+  MCP_COPIED_PATHS_KEY,
+  MCP_COPIED_PATH_KEY,
+  copiedMcpPaths,
+  mcpAppMoved,
+  mcpConfig,
+  mcpMovedClients,
+  normalizeMcpPath
+} from '@/utils/mcpConfig';
 import { setup } from './helpers';
 
 const APP = '/Applications/OpenNavo.app/Contents/MacOS/opennavo-desktop';
@@ -14,6 +22,7 @@ afterEach(() => {
   wrappers.splice(0).forEach(wrapper => wrapper.unmount());
   useToasts().clear();
   localStorage.removeItem(MCP_COPIED_PATH_KEY);
+  localStorage.removeItem(MCP_COPIED_PATHS_KEY);
   window.history.replaceState(null, '', '/');
   vi.restoreAllMocks();
 });
@@ -50,6 +59,26 @@ describe('Local MCP config presets', () => {
     expect(mcpAppMoved(APP, APP)).toBe(false);
     expect(mcpAppMoved(APP, '/Users/me/Downloads/OpenNavo.app/Contents/MacOS/opennavo-desktop')).toBe(true);
     expect(mcpAppMoved(null, APP)).toBe(false);
+  });
+
+  it('Ignores case, trailing and repeated slashes when comparing paths', () => {
+    expect(normalizeMcpPath('/Applications//OpenNavo.app/')).toBe('/applications/opennavo.app');
+    expect(mcpAppMoved(APP, APP.toUpperCase())).toBe(false);
+    expect(mcpAppMoved(APP, `${APP}/`)).toBe(false);
+    expect(mcpAppMoved(APP, APP.replace('/Contents/', '//Contents/'))).toBe(false);
+    // NFC and NFD spellings of the same folder name are one path.
+    expect(mcpAppMoved('/Users/me/Caf\u00e9/x', '/Users/me/Cafe\u0301/x')).toBe(false);
+  });
+
+  it('Tracks the copied path per client, reading the old single-slot key as every client', () => {
+    const OLD = '/Users/me/Downloads/OpenNavo.app/Contents/MacOS/opennavo-desktop';
+    localStorage.setItem(MCP_COPIED_PATH_KEY, OLD);
+    expect(mcpMovedClients(APP)).toEqual(['claude', 'cursor', 'codex', 'generic']);
+    localStorage.setItem(MCP_COPIED_PATHS_KEY, JSON.stringify({ claude: OLD, cursor: APP, codex: 7 }));
+    expect(copiedMcpPaths()).toEqual({ claude: OLD, cursor: APP });
+    expect(mcpMovedClients(APP)).toEqual(['claude']);
+    localStorage.setItem(MCP_COPIED_PATHS_KEY, '{not json');
+    expect(mcpMovedClients(APP)).toEqual([]);
   });
 });
 
@@ -108,6 +137,52 @@ describe('Settings: Local MCP switches', () => {
   });
 });
 
+describe('Settings: Local MCP errors', () => {
+  const stopped = {
+    enabled: true,
+    writeEnabled: false,
+    running: false,
+    socketPath: null,
+    error: 'E_MCP_BROKER: bind failed',
+    commandPath: APP
+  };
+
+  it('Shows a startup error and that Local MCP is not running, with writes unavailable', async () => {
+    vi.spyOn(commands, 'mcpStatus').mockResolvedValue(stopped);
+    const wrapper = await page();
+    const alert = wrapper.get('[data-test="mcp-failure"]');
+    expect(alert.attributes('role')).toBe('alert');
+    expect(wrapper.get('[data-test="mcp-not-running"]').text()).toBe(i18n.global.t('settings.mcp.notRunning'));
+    expect(wrapper.get('[data-test="mcp-error"]').text()).toBe('E_MCP_BROKER: bind failed');
+    expect(checked(wrapper, 'mcp-enabled')).toBe(true);
+    expect(wrapper.get('[data-test="mcp-write"]').attributes('disabled')).toBeDefined();
+  });
+
+  it('Still lets writes be turned off while Local MCP is not running', async () => {
+    vi.spyOn(commands, 'mcpStatus').mockResolvedValue({ ...stopped, writeEnabled: true });
+    const wrapper = await page();
+    expect(wrapper.get('[data-test="mcp-write"]').attributes('disabled')).toBeUndefined();
+  });
+
+  it('Shows no alert while Local MCP runs normally', async () => {
+    const wrapper = await page('mcp-on');
+    expect(wrapper.find('[data-test="mcp-failure"]').exists()).toBe(false);
+    expect(wrapper.get('[data-test="mcp-write"]').attributes('disabled')).toBeUndefined();
+  });
+
+  it('Offers a retry when the first status read fails', async () => {
+    const status = vi.spyOn(commands, 'mcpStatus').mockRejectedValueOnce(new Error('ipc down'));
+    const wrapper = await page();
+    expect(wrapper.get('[data-test="mcp-load-failed"]').text()).toContain(i18n.global.t('settings.mcp.statusFailed'));
+    expect(wrapper.find('[data-test="mcp-enabled"]').exists()).toBe(false);
+    await wrapper.get('[data-test="mcp-load-retry"]').trigger('click');
+    await flushPromises();
+    expect(status).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('[data-test="mcp-load-failed"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="mcp-enabled"]').exists()).toBe(true);
+  });
+});
+
 describe('Settings: Local MCP configuration', () => {
   it('Copies the selected preset and warns once the app has moved', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -117,13 +192,40 @@ describe('Settings: Local MCP configuration', () => {
     await wrapper.get('[data-test="mcp-copy"]').trigger('click');
     await flushPromises();
     expect(writeText).toHaveBeenCalledWith(mcpConfig('claude', APP));
-    expect(localStorage.getItem(MCP_COPIED_PATH_KEY)).toBe(APP);
+    expect(JSON.parse(localStorage.getItem(MCP_COPIED_PATHS_KEY) ?? '{}')).toEqual({ claude: APP });
     wrapper.unmount();
     wrappers.pop();
 
-    localStorage.setItem(MCP_COPIED_PATH_KEY, '/Users/me/Downloads/OpenNavo.app/Contents/MacOS/opennavo-desktop');
+    const OLD = '/Users/me/Downloads/OpenNavo.app/Contents/MacOS/opennavo-desktop';
+    localStorage.setItem(MCP_COPIED_PATHS_KEY, JSON.stringify({ claude: OLD, cursor: OLD }));
     const moved = await page();
-    expect(moved.get('[data-test="mcp-moved"]').text()).toBe(i18n.global.t('settings.mcp.moved'));
+    expect(moved.get('[data-test="mcp-moved"]').text()).toContain(i18n.global.t('settings.mcp.moved'));
+    const label = (client: string) => i18n.global.t(`settings.mcp.clients.${client}`);
+    expect(moved.get('[data-test="mcp-moved-clients"]').text()).toContain(`${label('claude')}, ${label('cursor')}`);
+    // Re-copying only Cursor leaves Claude Desktop flagged.
+    const cursor = moved.findAll('button').find(button => button.text() === label('cursor'));
+    await cursor!.trigger('click');
+    await moved.get('[data-test="mcp-copy"]').trigger('click');
+    await flushPromises();
+    expect(moved.get('[data-test="mcp-moved-clients"]').text()).toBe(
+      i18n.global.t('settings.mcp.movedClients', { clients: label('claude') })
+    );
+  });
+
+  it('Re-checks the copied paths when the window regains focus', async () => {
+    const wrapper = await page();
+    expect(wrapper.find('[data-test="mcp-moved"]').exists()).toBe(false);
+    localStorage.setItem(
+      MCP_COPIED_PATHS_KEY,
+      JSON.stringify({ codex: '/Volumes/Old/OpenNavo.app/Contents/MacOS/opennavo-desktop' })
+    );
+    const status = vi.spyOn(commands, 'mcpStatus');
+    window.dispatchEvent(new Event('focus'));
+    await flushPromises();
+    expect(status).toHaveBeenCalled();
+    expect(wrapper.get('[data-test="mcp-moved-clients"]').text()).toContain(
+      i18n.global.t('settings.mcp.clients.codex')
+    );
   });
 });
 
