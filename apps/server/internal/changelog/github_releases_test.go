@@ -15,13 +15,23 @@ import (
 
 // Fixtures are the first page (per_page=5) of GET /repos/{repo}/releases recorded anonymously on 2026-10-31,
 // trimmed to the fields the fetcher reads. They carry no credentials.
+// publicRepo answers the repository visibility check as public and passes release list requests on.
+func publicRepo(next func(*http.Request) (*http.Response, error)) roundTrip {
+	return roundTrip(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, "/releases") {
+			return reply(http.StatusOK, `{"private":false,"visibility":"public"}`), nil
+		}
+		return next(r)
+	})
+}
+
 func fixtureFetcher(t *testing.T, file string, header http.Header) (*Fetcher, *int) {
 	t.Helper()
 	body, err := os.ReadFile("testdata/github_releases/" + file) //nolint:gosec // file comes only from the fixed fixture names in this package.
 	require.NoError(t, err)
 	calls := 0
 	f := NewFetcher("test")
-	f.HTTP.Client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+	f.HTTP.Client.Transport = publicRepo(func(r *http.Request) (*http.Response, error) {
 		calls++
 		require.Equal(t, "api.github.com", r.URL.Host)
 		require.Equal(t, "100", r.URL.Query().Get("per_page"))
@@ -68,7 +78,7 @@ func TestGitHubReleasesRecordedApps(t *testing.T) {
 func TestGitHubReleasesSkipDraftsAndSanitize(t *testing.T) {
 	f := NewFetcher("test")
 	long := strings.Repeat("a", 300*1024)
-	f.HTTP.Client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+	f.HTTP.Client.Transport = publicRepo(func(r *http.Request) (*http.Response, error) {
 		return reply(200, `[{"tag_name":"v3.0","draft":true,"body":"secret"},
 {"tag_name":"v2.0-rc.1","prerelease":true,"name":"RC","body":"<script>alert(1)</script>**rc**","published_at":"2026-10-01T00:00:00Z","html_url":"https://evil.example/x"},
 {"tag_name":"nightly","body":"n"},
@@ -166,7 +176,7 @@ func TestPrereleaseTagsNeverJoinStableVersions(t *testing.T) {
 	require.Equal(t, VersionKey("3.0.0-RC1"), VersionKey("3.0-rc1"))
 
 	f := NewFetcher("test")
-	f.HTTP.Client.Transport = roundTrip(func(*http.Request) (*http.Response, error) {
+	f.HTTP.Client.Transport = publicRepo(func(*http.Request) (*http.Response, error) {
 		return reply(200, `[{"tag_name":"v1.0.0","prerelease":true,"body":"candidate"},{"tag_name":"v2.0","body":"new"},{"tag_name":"2.0.0","body":"old duplicate"},{"tag_name":"v3.0-RC1","prerelease":true,"body":"rc"}]`), nil
 	})
 	result, err := f.Fetch(context.Background(), Candidate{}, FetchSource{Type: "github_releases", Config: map[string]any{"repo": "owner/app"}})
@@ -212,4 +222,61 @@ func TestResolveGitHubReleasesFromVerifiedRepo(t *testing.T) {
 	sources, _, err = r.Resolve(context.Background(), Candidate{Kind: "link", Token: "x", GitHubRepo: "owner/app"})
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
+}
+
+func TestReleaseVersionWhitelist(t *testing.T) {
+	for tag, want := range map[string]string{
+		// Unknown suffixes stay in the version.
+		"v1.2.3-hotfix": "1.2.3-hotfix", "v1.2.3-patch1": "1.2.3-patch1", "1.1.1w": "1.1.1w", "OpenSSL_1.1.1w": "1.1.1w",
+		"2.0.0a": "2.0.0a", "v1.2.3+build.7": "1.2.3",
+		// Known pre-release suffixes, unchanged from the previous round.
+		"v3.0-RC1": "3.0-rc1", "v1.5.0-Beta2": "1.5.0-beta2", "v2.0b3": "2.0b3", "v1.0.0-pre.1": "1.0.0-pre.1",
+		"v1.0.0-prerelease": "1.0.0-prerelease",
+		// Not versions.
+		"3a4f9c1": "", "Beta-2": "", "rc-3": "", "latest": "", "1.2.3_x!": "",
+	} {
+		require.Equal(t, want, ReleaseVersion(tag, "owner/openssl"), tag)
+	}
+	for _, v := range []string{"1.2.3-hotfix", "1.2.3-patch1", "1.1.1w", "2.0.0a"} {
+		require.False(t, IsPrereleaseVersion(v), v)
+	}
+	for _, v := range []string{"3.0-rc1", "1.5.0-beta2", "2.0b3", "1.0.0-pre.1", "1.0.0-prerelease", "1.0a1"} {
+		require.True(t, IsPrereleaseVersion(v), v)
+	}
+	require.NotEqual(t, VersionKey("1.2.3"), VersionKey("1.2.3-hotfix"))
+	require.NotEqual(t, VersionKey("1.1.1v"), VersionKey("1.1.1w"))
+	require.NotEqual(t, VersionKey("1.0.0-prerelease"), VersionKey("1.0.0-pre"))
+	require.Equal(t, "", VersionKey("latest"))
+	require.Equal(t, "", VersionKey(""))
+}
+
+func TestGitHubReleasesKeepSuffixedReleasesApart(t *testing.T) {
+	f := NewFetcher("test")
+	f.HTTP.Client.Transport = publicRepo(func(*http.Request) (*http.Response, error) {
+		return reply(200, `[{"tag_name":"v1.2.3-hotfix","body":"hotfix"},{"tag_name":"v1.2.3","body":"real"},
+{"tag_name":"OpenSSL_1_1_1w","body":"underscored"},{"tag_name":"1.1.1w","body":"w"},{"tag_name":"1.1.1v","body":"v"},
+{"tag_name":"3a4f9c1","body":"hash"},{"tag_name":"Beta-2","body":"beta"}]`), nil
+	})
+	result, err := f.Fetch(context.Background(), Candidate{}, FetchSource{Type: "github_releases", Config: map[string]any{"repo": "owner/openssl"}})
+	require.NoError(t, err)
+	got := []string{}
+	for _, release := range result.Releases {
+		got = append(got, release.Version+"="+release.Body)
+	}
+	require.Equal(t, []string{"1.2.3-hotfix=hotfix", "1.2.3=real", "1.1.1w=w", "1.1.1v=v"}, got)
+}
+
+func TestGitHubReleasesSkipPrivateRepository(t *testing.T) {
+	f := NewFetcher("test")
+	f.HTTP.Client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/releases") {
+			return reply(200, `[{"tag_name":"v1.0","body":"private notes"}]`), nil
+		}
+		return reply(200, `{"private":true,"visibility":"private"}`), nil
+	})
+	result, err := f.Fetch(context.Background(), Candidate{}, FetchSource{Type: "github_releases", Config: map[string]any{"repo": "owner/app"}})
+	var status *StatusError
+	require.True(t, errors.As(err, &status))
+	require.Equal(t, http.StatusNotFound, status.Status)
+	require.Empty(t, result.Releases)
 }

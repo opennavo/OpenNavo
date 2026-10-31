@@ -148,6 +148,14 @@ func (f *Fetcher) releases(ctx context.Context, s FetchSource) (FetchResult, err
 	if err := json.Unmarshal(body, &batch); err != nil || batch == nil {
 		return out, &Error{Kind: "invalid_json"}
 	}
+	// The token can read private repositories, and the source facts job only notices a repository that turned
+	// private on its next run. Changed notes (a 200, not a 304) are written only after the repository itself
+	// still reports public; a private one answers like a missing one (404) and nothing is stored.
+	if private, err := f.repoPrivate(ctx, repo); err != nil {
+		return out, err
+	} else if private {
+		return FetchResult{Versions: []BrewVersion{}, Releases: []Release{}}, &StatusError{Status: http.StatusNotFound}
+	}
 	seen, versions := map[string]bool{}, map[string]bool{}
 	for _, item := range batch {
 		// Drafts are unpublished; prereleases are kept and flagged (releases.is_prerelease), which the
@@ -186,12 +194,44 @@ func (f *Fetcher) releases(ctx context.Context, s FetchSource) (FetchResult, err
 	return out, nil
 }
 
-// releaseVersionPattern keeps pre-release suffixes GitHub projects use: -rc1, -beta.2, -pre.1, -dev3,
-// .alpha, -preview, and the Python-style 2.0b3 / 1.0a1. Tags are lowercased first.
-var releaseVersionPattern = regexp.MustCompile(`\d+(?:\.\d+)*(?:[-._]?(?:alpha|beta|rc|preview|pre|dev)(?:[.-]?\d+)*|[ab]\d+(?:\.\d+)*)?`)
+// Version parsing is a whitelist. A tag is an optional word prefix (release-, desktop-v, the repository name)
+// and a numeric core (1.2.3), followed by at most one suffix:
+//   - a known pre-release suffix (-rc1, -beta.2, -pre.1, -prerelease, -dev3, .alpha, -preview, and the
+//     Python-style 2.0b3 / 1.0a1 directly after the core): kept, and the version counts as a pre-release;
+//   - "+build" metadata: dropped;
+//   - any other word after a separator (-hotfix, -patch1, _final) or a single letter directly after the core
+//     (OpenSSL-style 1.1.1w, 2.0.0a): kept verbatim, so it never merges into the base version.
+//
+// Anything else (hash-like 3a4f9c1, a prefix that is itself a pre-release word such as Beta-2) is not a
+// version: the release is skipped rather than attached to a guessed version.
+const prereleaseWord = `(?:alpha|beta|rc|preview|prerelease|pre|dev)`
+
+var (
+	releaseTagPattern     = regexp.MustCompile(`^((?:[a-z][a-z0-9]*[-_/])*)v?(\d+(?:\.\d+)*)(.*)$`)
+	prereleaseSuffix      = regexp.MustCompile(`^(?:[-._]?` + prereleaseWord + `(?:[.-]?\d+)*|[ab]\d+(?:\.\d+)*)$`)
+	otherSuffix           = regexp.MustCompile(`^(?:[-._][a-z][a-z0-9]*(?:[.-][a-z0-9]+)*|[a-z])$`)
+	prereleasePrefixWords = regexp.MustCompile(`(?:^|[-_/])` + prereleaseWord + `\d*[-_/]`)
+)
+
+// parseVersion splits a lowercased tag into prefix, numeric core and suffix ("+build" dropped).
+func parseVersion(tag string) (prefix, core, suffix string, ok bool) {
+	m := releaseTagPattern.FindStringSubmatch(tag)
+	if m == nil {
+		return "", "", "", false
+	}
+	prefix, core, suffix = m[1], m[2], m[3]
+	if i := strings.IndexByte(suffix, '+'); i >= 0 {
+		suffix = suffix[:i]
+	}
+	if suffix != "" && !prereleaseSuffix.MatchString(suffix) && !otherSuffix.MatchString(suffix) {
+		return "", "", "", false
+	}
+	return prefix, core, suffix, true
+}
 
 // ReleaseVersion normalizes a release tag to a package version: lowercased, "v", "release-" and repository
-// name prefixes stripped, pre-release suffixes kept (v3.0-RC1 -> 3.0-rc1, v2.0b3 -> 2.0b3).
+// name prefixes stripped, suffixes kept (v3.0-RC1 -> 3.0-rc1, v2.0b3 -> 2.0b3, v1.2.3-hotfix -> 1.2.3-hotfix,
+// 1.1.1w -> 1.1.1w). Tags that are not a version return "".
 func ReleaseVersion(tag, repo string) string {
 	tag = strings.ToLower(strings.TrimSpace(tag))
 	if tag == "tip" || tag == "nightly" || !strings.ContainsAny(tag, "0123456789") {
@@ -201,30 +241,38 @@ func ReleaseVersion(tag, repo string) string {
 	if parts := strings.Split(name, "/"); len(parts) > 1 {
 		name = parts[len(parts)-1]
 	}
-	for _, prefix := range []string{"release-", "release/", name + "-", name + "_", "v"} {
+	for _, prefix := range []string{"release-", "release/", name + "-", name + "_"} {
 		if prefix != "-" && prefix != "_" {
 			tag = strings.TrimPrefix(tag, prefix)
 		}
 	}
-	return releaseVersionPattern.FindString(tag)
+	prefix, core, suffix, ok := parseVersion(tag)
+	if !ok || prereleasePrefixWords.MatchString(prefix) {
+		return ""
+	}
+	return core + suffix
 }
 
-// IsPrereleaseVersion reports whether a normalized version carries a pre-release suffix.
+// IsPrereleaseVersion reports whether a normalized version carries a known pre-release suffix.
 func IsPrereleaseVersion(version string) bool {
-	core := strings.SplitN(version, ",", 2)[0]
-	return strings.TrimLeft(core, "0123456789.") != ""
+	_, _, suffix, ok := parseVersion(strings.ToLower(strings.TrimSpace(strings.SplitN(version, ",", 2)[0])))
+	return ok && suffix != "" && prereleaseSuffix.MatchString(suffix)
 }
 
 // VersionKey compares a release version with a package version: case-insensitive, build suffix after a
-// comma dropped (Homebrew "1.2,345"), trailing ".0" components ignored (tag 2.0 matches 2.0.0), pre-release
-// suffixes significant (3.0-rc1 never matches 3.0).
+// comma dropped (Homebrew "1.2,345"), trailing ".0" components ignored (tag 2.0 matches 2.0.0), every
+// suffix significant (3.0-rc1 never matches 3.0, -pre never matches -prerelease). Values without a
+// numeric version (Homebrew "latest") have no key and return "".
 func VersionKey(version string) string {
 	version = strings.ToLower(strings.TrimSpace(strings.SplitN(version, ",", 2)[0]))
-	if v := releaseVersionPattern.FindString(version); v != "" {
-		version = v
+	if i := strings.IndexByte(version, '+'); i >= 0 {
+		version = version[:i]
 	}
-	core := version
-	suffix := ""
+	version = strings.TrimPrefix(version, "v")
+	if version == "" || version[0] < '0' || version[0] > '9' {
+		return ""
+	}
+	core, suffix := version, ""
 	if i := strings.IndexFunc(version, func(r rune) bool { return (r < '0' || r > '9') && r != '.' }); i >= 0 {
 		core, suffix = version[:i], strings.TrimLeft(version[i:], "-._")
 	}
@@ -236,6 +284,28 @@ func VersionKey(version string) string {
 		return core + "-" + suffix
 	}
 	return core
+}
+
+// repoPrivate reads the repository's visibility with the same request path and quota guard as the release list.
+func (f *Fetcher) repoPrivate(ctx context.Context, repo string) (bool, error) {
+	body, status, headers, err := f.HTTP.readRequest(ctx, "https://api.github.com/repos/"+repo, 1<<20, http.Header{})
+	if headers != nil {
+		f.quota.observe(headers)
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := checkStatus(status, headers); err != nil {
+		return false, err
+	}
+	var meta struct {
+		Private    *bool  `json:"private"`
+		Visibility string `json:"visibility"`
+	}
+	if err := json.Unmarshal(body, &meta); err != nil || meta.Private == nil {
+		return false, &Error{Kind: "invalid_json"}
+	}
+	return *meta.Private || (meta.Visibility != "" && meta.Visibility != "public"), nil
 }
 
 func releaseURL(repo string, item githubRelease) string {

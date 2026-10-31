@@ -57,3 +57,18 @@ describe('third-party release note links', () => {
     }
   });
 });
+
+describe('own site links', () => {
+  it('keep noopener noreferrer without nofollow ugc', () => {
+    for (const href of ['/apps/maccy', '#notes', 'https://opennavo.com/apps', 'https://api.opennavo.com/v1']) {
+      expect(
+        parse(renderMarkdown(`[x](${href})`))
+          .querySelector('a')
+          ?.getAttribute('rel')
+      ).toBe('noopener noreferrer');
+    }
+    expect(parse(renderMarkdown('[x](https://evilopennavo.com/)')).querySelector('a')?.getAttribute('rel')).toBe(
+      'noopener noreferrer nofollow ugc'
+    );
+  });
+});

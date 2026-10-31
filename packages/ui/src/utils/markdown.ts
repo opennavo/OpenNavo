@@ -97,6 +97,18 @@ md.core.ruler.push('on_bot_links', state => {
 // Remote release/collection notes link to third-party pages: open them in new windows without opener access, and
 // mark them user-generated so search engines do not treat them as our endorsement.
 const EXTERNAL_REL = 'noopener noreferrer nofollow ugc';
+// Our own pages (relative links, opennavo.com and its subdomains) only need opener isolation, not nofollow ugc.
+const INTERNAL_REL = 'noopener noreferrer';
+const OWN_HOST = /^(?:[\w-]+\.)*opennavo\.com$/i;
+
+const linkRel = (href: string) => {
+  if (!/^[a-z][a-z\d+.-]*:|^\/\//i.test(href)) return INTERNAL_REL;
+  try {
+    return OWN_HOST.test(new URL(href, 'https://opennavo.com').hostname) ? INTERNAL_REL : EXTERNAL_REL;
+  } catch {
+    return EXTERNAL_REL;
+  }
+};
 
 // Open external links in new windows without opener access.
 md.core.ruler.push('on_link_target', state => {
@@ -104,7 +116,7 @@ md.core.ruler.push('on_link_target', state => {
     for (const token of block.children ?? []) {
       if (token.type !== 'link_open') continue;
       token.attrSet('target', '_blank');
-      token.attrSet('rel', EXTERNAL_REL);
+      token.attrSet('rel', linkRel(String(token.attrGet('href') ?? '')));
     }
   }
 });
@@ -119,7 +131,7 @@ md.renderer.rules.image = (tokens, index, options, env, self) => {
   const src = String(token?.attrGet('src') ?? '');
   const alt = self.renderInlineAsText(token?.children ?? [], options, env);
   const href = md.utils.escapeHtml(src);
-  return `<a href="${href}" target="_blank" rel="${EXTERNAL_REL}">${md.utils.escapeHtml(alt) || href}</a>`;
+  return `<a href="${href}" target="_blank" rel="${linkRel(src)}">${md.utils.escapeHtml(alt) || href}</a>`;
 };
 
 /** Markdown → sanitized HTML string. */

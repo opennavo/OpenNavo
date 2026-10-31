@@ -68,6 +68,9 @@ func TestGitHubReleasesResolveFetchAndConditionalRefresh(t *testing.T) {
 	status, etag, requests := http.StatusOK, `W/"r1"`, 0
 	fetcher := pipeline.NewFetcher("test")
 	fetcher.HTTP.Client = &http.Client{Transport: responseTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/repos/rxhanson/Rectangle" {
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"private":false,"visibility":"public"}`))}, nil
+		}
 		requests++
 		require.Equal(t, "/repos/rxhanson/Rectangle/releases", r.URL.Path)
 		if requests > 1 {
