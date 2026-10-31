@@ -218,6 +218,7 @@ pub fn parse_write(name: &str, arguments: Value) -> Result<WriteRequest, ToolErr
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || b"@._+-/".contains(&byte))
                 || token.starts_with('/')
+                || token.starts_with('-')
                 || token.contains("..")
             {
                 return Err(ToolError::invalid("token is not valid"));
@@ -730,6 +731,8 @@ mod tests {
             ("install_app", json!({ "kind": "cask", "token": "a b" })),
             ("install_app", json!({ "kind": "cask", "token": "../x" })),
             ("install_app", json!({ "kind": "cask", "token": "/etc" })),
+            ("install_app", json!({ "kind": "cask", "token": "--force" })),
+            ("install_app", json!({ "kind": "formula", "token": "-v" })),
             (
                 "install_app",
                 json!({ "kind": "cask", "token": "iina", "force": true }),

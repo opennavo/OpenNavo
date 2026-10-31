@@ -83,6 +83,10 @@ impl Writes {
             },
         };
         let service = self.confirmation()?;
+        // Planning can take a while; do not open a dialog for a request that is already void.
+        if !(context.still_valid)() {
+            return Err(invalidated());
+        }
         let decision =
             block_on(service.confirm_message(&self.app, confirmation_request.clone(), message));
         let mut entry = AuditEntry {
@@ -135,7 +139,7 @@ impl Writes {
         self.audit
             .record(&entry, audit::now_ms())
             .map_err(|_| audit_unavailable())?;
-        let outcome = block_on(self.execute(plan));
+        let outcome = block_on(self.execute(plan, &context));
         let result = match &outcome {
             Ok((label, _)) => label.clone(),
             Err(error) => error.code.clone(),
@@ -306,12 +310,20 @@ impl Writes {
         })
     }
 
-    async fn execute(&self, plan: Plan) -> Result<(String, Value), ToolError> {
+    async fn execute(
+        &self,
+        plan: Plan,
+        context: &WriteContext,
+    ) -> Result<(String, Value), ToolError> {
         match plan {
             Plan::Install { plan, .. } => {
                 crate::commands::deeplink::ensure_install_environment(&self.core)
                     .await
                     .map_err(tool_error)?;
+                // The environment check awaits; a switch may have gone off meanwhile.
+                if !(context.still_valid)() {
+                    return Err(invalidated());
+                }
                 let queue = self.core.queue.clone();
                 let task = crate::blocking(move || {
                     queue.enqueue_resolved_install(*plan, TaskTrigger::Mcp)
@@ -439,6 +451,8 @@ fn text(locale: Locale, key: &str) -> Result<String, AppError> {
 fn one_line(value: &str) -> String {
     let cleaned: String = value
         .chars()
+        // Bidi overrides and zero-width characters could reorder or hide text in the dialog.
+        .filter(|character| !is_invisible(*character))
         .map(|character| {
             if character.is_control() {
                 ' '
@@ -449,6 +463,18 @@ fn one_line(value: &str) -> String {
         .take(300)
         .collect();
     cleaned.trim().to_owned()
+}
+
+fn is_invisible(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061C}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
 }
 
 /// The main caller line: signer when signed, otherwise "Unsigned · path".
@@ -565,5 +591,10 @@ mod tests {
     fn one_line_strips_control_characters() {
         assert_eq!(one_line("evil\nAllowed: yes\u{7}"), "evil Allowed: yes");
         assert_eq!(one_line(&"x".repeat(400)).len(), 300);
+        assert_eq!(
+            one_line("IINA\u{202E}ppa.exe\u{200B}\u{FEFF}"),
+            "IINAppa.exe"
+        );
+        assert_eq!(one_line("a\u{2066}b\u{2069}c\u{200F}"), "abc");
     }
 }

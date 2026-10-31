@@ -114,6 +114,8 @@ pub struct Broker {
     lifecycle: Mutex<()>,
     /// Set while a write tool runs (including its dialog).
     writing: AtomicBool,
+    /// Executable a socket peer must run before it may call write tools.
+    trusted_client: Option<PathBuf>,
 }
 
 impl Broker {
@@ -135,7 +137,15 @@ impl Broker {
             }),
             lifecycle: Mutex::new(()),
             writing: AtomicBool::new(false),
+            // B1: clients run this same executable as `<app binary> mcp`.
+            trusted_client: std::env::current_exe().ok(),
         }
+    }
+
+    /// Replace the executable a write-capable peer must run (tests).
+    pub fn with_trusted_client(mut self, path: Option<PathBuf>) -> Self {
+        self.trusted_client = path;
+        self
     }
 
     /// Whether a write on `connection` may proceed: running, both switches
@@ -612,6 +622,17 @@ fn call_write(
         return Err(rpc_error(
             "E_MCP_WRITE_DISABLED",
             super::tools::WRITE_DISABLED_MESSAGE,
+        ));
+    }
+    // Only OpenNavo's own `mcp` subcommand may ask for writes; the dialog
+    // names that process's parent, which means nothing for an arbitrary peer.
+    let trusted = broker.trusted_client.as_deref().is_some_and(|expected| {
+        super::caller::peer_runs(&super::caller::SystemProcesses, peer_pid, expected)
+    });
+    if !trusted {
+        return Err(rpc_error(
+            "E_MCP_UNTRUSTED_CLIENT",
+            "Install and uninstall are only accepted through OpenNavo's own mcp command.",
         ));
     }
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -1573,5 +1594,35 @@ mod tests {
             let _ = call.join();
             broker.shutdown();
         }
+    }
+
+    #[test]
+    fn writes_from_a_peer_that_is_not_the_opennavo_binary_are_refused() {
+        let dir = tempdir();
+        let (entered, entered_rx) = std::sync::mpsc::sync_channel(4);
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let host: Arc<dyn ToolHost> = Arc::new(WriteHost {
+            entered,
+            release: Mutex::new(release),
+            cancel: release_tx,
+        });
+        let broker = Arc::new(
+            Broker::with_host(dir.path().to_path_buf(), Some(host))
+                .with_trusted_client(Some(PathBuf::from("/bin/sh"))),
+        );
+        broker.set_enabled(true).expect("enable");
+        broker.set_write_enabled(true).expect("write");
+        wait_running(&broker);
+        let path = socket::path(dir.path()).path;
+        let response = request(&path, install_call("1"));
+        assert_eq!(response["error"]["code"], "E_MCP_UNTRUSTED_CLIENT");
+        assert!(
+            entered_rx.try_recv().is_err(),
+            "no dialog for an untrusted peer"
+        );
+        // Read tools stay available to any same-user peer.
+        let list = request(&path, json!({"v":1,"id":"l","method":"tools/list"}));
+        assert_eq!(list["ok"], true);
+        broker.shutdown();
     }
 }

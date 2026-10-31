@@ -38,6 +38,23 @@ pub struct CallerProcess {
     pub may_come_from: Option<PathBuf>,
 }
 
+/// Whether the socket peer `peer_pid` runs exactly `expected` (both paths
+/// canonicalised). Writes are only accepted from OpenNavo's own `mcp`
+/// subcommand, so a same-user script talking to the socket directly cannot
+/// borrow its parent's signature for the confirmation dialog.
+pub fn peer_runs(table: &dyn ProcessTable, peer_pid: Option<i32>, expected: &Path) -> bool {
+    let Some(path) = peer_pid
+        .and_then(|pid| table.info(pid))
+        .and_then(|info| info.path)
+    else {
+        return false;
+    };
+    match (std::fs::canonicalize(path), std::fs::canonicalize(expected)) {
+        (Ok(actual), Ok(expected)) => actual == expected,
+        _ => false,
+    }
+}
+
 /// Resolve the parent and the nearest `.app` ancestor of `peer_pid`.
 pub fn resolve(table: &dyn ProcessTable, peer_pid: Option<i32>) -> CallerProcess {
     let Some(peer) = peer_pid.and_then(|pid| table.info(pid)) else {
@@ -266,5 +283,19 @@ mod tests {
             .expect("own process");
         assert!(me.ppid > 0);
         assert!(me.path.is_some_and(|path| path.is_absolute()));
+    }
+
+    #[test]
+    fn peer_must_run_the_expected_binary() {
+        let me = std::env::current_exe().expect("exe");
+        let pid = Some(std::process::id() as i32);
+        assert!(peer_runs(&SystemProcesses, pid, &me));
+        assert!(!peer_runs(&SystemProcesses, pid, Path::new("/bin/sh")));
+        assert!(!peer_runs(&SystemProcesses, None, &me));
+        assert!(!peer_runs(
+            &SystemProcesses,
+            pid,
+            Path::new("/nonexistent/opennavo")
+        ));
     }
 }

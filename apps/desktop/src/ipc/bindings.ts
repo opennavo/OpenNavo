@@ -395,7 +395,7 @@ export type AuditEntry = {
 	object: string,
 	caller: AuditCaller,
 	decision: AuditDecision,
-	/**  `queued:<task id>`, `trashed`, or an error code. `None` until known. */
+	/**  `queued:<task id>` (`queued` if no task id came back) or an error code. `None` until known. */
 	result: string | null,
 };
 
