@@ -66,6 +66,9 @@ func (s *Service) linkOperation(ctx context.Context, op string, in Input) (any, 
 		if err := input.Validate(); err != nil {
 			return nil, err
 		}
+		if err := manualVersion(in.Body, &input); err != nil {
+			return nil, err
+		}
 		if err := s.Store.LinkTokenAvailable(ctx, input.Token, in.ID); err != nil {
 			return nil, err
 		}
@@ -105,6 +108,9 @@ func (s *Service) linkOperation(ctx context.Context, op string, in Input) (any, 
 			if err := json.Unmarshal(body, &input); err != nil {
 				return nil, err
 			}
+			if err := manualVersion(in.Body, &input); err != nil {
+				return nil, err
+			}
 		}
 		id, err := st.WriteLinkApp(ctx, in.ID, input)
 		if err != nil {
@@ -126,4 +132,25 @@ func (s *Service) linkOperation(ctx context.Context, op string, in Input) (any, 
 		}
 		return result, err
 	})
+}
+
+// manualVersion keeps a version only when the request writes one: a version merged from the stored
+// row is cleared so edits never rewrite it. It rejects malformed versions and links whose GitHub or
+// Sparkle source owns the version.
+func manualVersion(body map[string]any, input *domain.LinkInput) error {
+	raw, ok := body["version"]
+	if !ok {
+		input.Version = nil
+		return nil
+	}
+	v, _ := raw.(string)
+	v = strings.TrimSpace(v)
+	if !domain.ValidLinkVersion(v) {
+		return domain.Rejected("version_invalid:version")
+	}
+	if input.HasReleaseSource() {
+		return domain.Rejected("version_managed_by_source:version")
+	}
+	input.Version = &v
+	return nil
 }
