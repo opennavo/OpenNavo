@@ -138,7 +138,14 @@ describe('Settings: Local MCP switches', () => {
 });
 
 describe('Settings: Local MCP errors', () => {
-  const stopped = { enabled: true, writeEnabled: false, running: false, socketPath: null, error: 'E_MCP_BROKER: bind failed', commandPath: APP };
+  const stopped = {
+    enabled: true,
+    writeEnabled: false,
+    running: false,
+    socketPath: null,
+    error: 'E_MCP_BROKER: bind failed',
+    commandPath: APP
+  };
 
   it('Shows a startup error and that Local MCP is not running, with writes unavailable', async () => {
     vi.spyOn(commands, 'mcpStatus').mockResolvedValue(stopped);
@@ -208,11 +215,16 @@ describe('Settings: Local MCP configuration', () => {
   it('Re-checks the copied paths when the window regains focus', async () => {
     const wrapper = await page();
     expect(wrapper.find('[data-test="mcp-moved"]').exists()).toBe(false);
-    localStorage.setItem(MCP_COPIED_PATHS_KEY, JSON.stringify({ codex: '/Volumes/Old/OpenNavo.app/Contents/MacOS/opennavo-desktop' }));
+    localStorage.setItem(
+      MCP_COPIED_PATHS_KEY,
+      JSON.stringify({ codex: '/Volumes/Old/OpenNavo.app/Contents/MacOS/opennavo-desktop' })
+    );
     const status = vi.spyOn(commands, 'mcpStatus');
     window.dispatchEvent(new Event('focus'));
     await flushPromises();
     expect(status).toHaveBeenCalled();
-    expect(wrapper.get('[data-test="mcp-moved-clients"]').text()).toContain(i18n.global.t('settings.mcp.clients.codex'));
+    expect(wrapper.get('[data-test="mcp-moved-clients"]').text()).toContain(
+      i18n.global.t('settings.mcp.clients.codex')
+    );
   });
 });

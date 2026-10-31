@@ -98,7 +98,12 @@ async function copyConfig() {
 </script>
 
 <template>
-  <div v-if="!status && loadFailed" role="alert" class="flex flex-col items-start gap-8px text-12.5px text-status-danger" data-test="mcp-load-failed">
+  <div
+    v-if="!status && loadFailed"
+    role="alert"
+    class="flex flex-col items-start gap-8px text-12.5px text-status-danger"
+    data-test="mcp-load-failed"
+  >
     {{ t('settings.mcp.statusFailed') }}
     <OnButton size="sm" data-test="mcp-load-retry" @click="load">{{ t('common.retry') }}</OnButton>
   </div>
@@ -140,7 +145,9 @@ async function copyConfig() {
       >
         <span v-if="failure" class="block">{{ t(`settings.mcp.${failure}`) }}</span>
         <span v-if="notRunning" class="block" data-test="mcp-not-running">{{ t('settings.mcp.notRunning') }}</span>
-        <span v-if="status.error" data-test="mcp-error" class="mt-2px block font-mono text-11.5px text-ink-tertiary">{{ status.error }}</span>
+        <span v-if="status.error" data-test="mcp-error" class="mt-2px block font-mono text-11.5px text-ink-tertiary">{{
+          status.error
+        }}</span>
       </div>
     </OnCard>
 
@@ -152,7 +159,9 @@ async function copyConfig() {
       <div class="flex flex-col gap-12px px-18px py-14px">
         <p v-if="movedClients.length" role="status" class="m-0 text-12.5px text-status-warning" data-test="mcp-moved">
           {{ t('settings.mcp.moved') }}
-          <span class="block" data-test="mcp-moved-clients">{{ t('settings.mcp.movedClients', { clients: movedLabels }) }}</span>
+          <span class="block" data-test="mcp-moved-clients">{{
+            t('settings.mcp.movedClients', { clients: movedLabels })
+          }}</span>
         </p>
         <div class="flex flex-wrap items-center justify-between gap-8px">
           <OnSegmented v-model="client" :options="clients" size="sm" :aria-label="t('settings.mcp.config')" />
