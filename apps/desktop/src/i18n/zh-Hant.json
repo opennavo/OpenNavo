@@ -883,6 +883,9 @@
       "copied": "已複製 {client} 配置",
       "copyFailed": "無法複製配置。",
       "moved": "複製配置後 OpenNavo 移動了位置，請重新複製，AI 應用才能繼續找到它。",
+      "notRunning": "本地 MCP 已開啟，但沒有在執行，AI 應用連不上。關掉再開啟可以重試。",
+      "statusFailed": "無法讀取本地 MCP 狀態。",
+      "movedClients": "仍指向舊位置：{clients}",
       "pathUnavailable": "找不到 OpenNavo 的安裝位置，暫無可複製的配置。",
       "clients": {
         "claude": "Claude Desktop",

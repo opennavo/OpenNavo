@@ -983,6 +983,9 @@
       "copied": "{client}-Konfiguration kopiert",
       "copyFailed": "Die Konfiguration konnte nicht kopiert werden.",
       "moved": "OpenNavo wurde verschoben, nachdem Sie die Konfiguration kopiert haben. Kopieren Sie sie erneut, damit Ihre KI-Apps OpenNavo weiterhin finden.",
+      "notRunning": "Lokales MCP ist eingeschaltet, läuft aber nicht. KI-Apps können sich nicht verbinden. Schalten Sie es aus und wieder ein, um es erneut zu versuchen.",
+      "statusFailed": "Der Status von lokalem MCP konnte nicht gelesen werden.",
+      "movedClients": "Zeigt noch auf den alten Ort: {clients}",
       "pathUnavailable": "Der Installationsort von OpenNavo wurde nicht gefunden, daher gibt es keine Konfiguration zum Kopieren.",
       "clients": {
         "claude": "Claude Desktop",

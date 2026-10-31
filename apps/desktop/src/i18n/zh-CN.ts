@@ -878,6 +878,9 @@ export default {
       copied: '已复制 {client} 配置',
       copyFailed: '无法复制配置。',
       moved: '复制配置后 OpenNavo 移动了位置，请重新复制，AI 应用才能继续找到它。',
+      notRunning: '本地 MCP 已打开，但没有在运行，AI 应用连不上。关掉再打开可以重试。',
+      statusFailed: '无法读取本地 MCP 状态。',
+      movedClients: '仍指向旧位置：{clients}',
       pathUnavailable: '找不到 OpenNavo 的安装位置，暂无可复制的配置。',
       clients: {
         claude: 'Claude Desktop',

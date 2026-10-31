@@ -8,8 +8,12 @@ export const MCP_CLIENTS: readonly McpClient[] = ['claude', 'cursor', 'codex', '
 /** Server name the presets register; one entry per Mac is enough. */
 export const MCP_SERVER_NAME = 'opennavo';
 
-/** localStorage key holding the binary path the last copied configuration pointed at. */
+/** localStorage key holding, per client, the binary path its last copied configuration pointed at. */
+export const MCP_COPIED_PATHS_KEY = 'opennavo.mcp.copiedPaths';
+/** Single-slot key from before per-client tracking; read once as "every client was copied with this path". */
 export const MCP_COPIED_PATH_KEY = 'opennavo.mcp.copiedPath';
+
+export type McpCopiedPaths = Partial<Record<McpClient, string>>;
 
 /** TOML basic string: escape backslashes, quotes and control characters. */
 function tomlString(value: string): string {
@@ -40,24 +44,56 @@ export function mcpConfig(client: McpClient, commandPath: string): string {
   }
 }
 
-/** The path the last copied configuration used, or null when nothing was copied (or storage is off). */
-export function copiedMcpPath(): string | null {
+/** Per-client paths the copied configurations used; empty when nothing was copied (or storage is off). */
+export function copiedMcpPaths(): McpCopiedPaths {
   try {
-    return localStorage.getItem(MCP_COPIED_PATH_KEY);
+    const raw = localStorage.getItem(MCP_COPIED_PATHS_KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      const out: McpCopiedPaths = {};
+      if (parsed && typeof parsed === 'object') {
+        for (const client of MCP_CLIENTS) {
+          const value = (parsed as Record<string, unknown>)[client];
+          if (typeof value === 'string') out[client] = value;
+        }
+      }
+      return out;
+    }
+    const legacy = localStorage.getItem(MCP_COPIED_PATH_KEY);
+    // The old key did not say which client was copied, so any client may still hold that path.
+    return legacy ? Object.fromEntries(MCP_CLIENTS.map(client => [client, legacy])) : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-export function rememberCopiedMcpPath(commandPath: string): void {
+export function rememberCopiedMcpPath(client: McpClient, commandPath: string): McpCopiedPaths {
+  const paths = { ...copiedMcpPaths(), [client]: commandPath };
   try {
-    localStorage.setItem(MCP_COPIED_PATH_KEY, commandPath);
+    localStorage.setItem(MCP_COPIED_PATHS_KEY, JSON.stringify(paths));
+    localStorage.removeItem(MCP_COPIED_PATH_KEY);
   } catch {
     /* Without storage the moved-app hint is simply unavailable. */
   }
+  return paths;
+}
+
+/**
+ * Comparable form of a binary path: Unicode NFC, no repeated or trailing slashes, and case-folded
+ * because macOS volumes are case-insensitive by default, so /Applications and /applications are the
+ * same app rather than a move.
+ */
+export function normalizeMcpPath(path: string): string {
+  const trimmed = path.trim().normalize('NFC').replace(/\/+/g, '/');
+  return (trimmed.length > 1 ? trimmed.replace(/\/$/, '') : trimmed).toLowerCase();
 }
 
 /** True when a configuration was copied for a different binary path: the app has moved since. */
-export function mcpAppMoved(commandPath: string | null, copied: string | null = copiedMcpPath()): boolean {
-  return commandPath !== null && copied !== null && copied !== commandPath;
+export function mcpAppMoved(commandPath: string | null, copied: string | null | undefined): boolean {
+  return commandPath !== null && !!copied && normalizeMcpPath(copied) !== normalizeMcpPath(commandPath);
+}
+
+/** Clients whose copied configuration still points at an old location, in display order. */
+export function mcpMovedClients(commandPath: string | null, copied: McpCopiedPaths = copiedMcpPaths()): McpClient[] {
+  return MCP_CLIENTS.filter(client => mcpAppMoved(commandPath, copied[client]));
 }
