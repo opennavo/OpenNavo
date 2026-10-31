@@ -493,10 +493,10 @@
     "repo": {
       "stars": "★",
       "starsBadge": "Étoiles GitHub : {count}",
+      "checked": "Données du dépôt vérifiées le {date}.",
       "updated": "Mis à jour il y a {days} jour | Mis à jour il y a {days} jours",
       "unmaintained": "La maintenance a peut-être cessé",
-      "archived": "Archivé",
-      "checked": "Données du dépôt vérifiées le {date}."
+      "archived": "Archivé"
     },
     "deps": {
       "macos": "Configuration requise",
@@ -886,12 +886,54 @@
     "webLink": "Un lien web (opennavo://)",
     "source": "Source",
     "collectionSummary": "{count} apps : {install} seront installées, {skip} ignorées",
+    "own": {
+      "summary": "{count} élément, {size} | {count} éléments, {size}",
+      "permanent": "Ces fichiers ne passent pas par la corbeille et ne pourront pas être récupérés.",
+      "more": "Et {count} autre | Et {count} autres",
+      "brewfileInstall": {
+        "title": "Confirmer l’installation depuis un Brewfile",
+        "intro": "OpenNavo va installer les apps listées dans ce Brewfile. Le fichier est vérifié à nouveau avant la mise en file.",
+        "badge": "Installer"
+      },
+      "cleanup": {
+        "title": "Confirmer le nettoyage",
+        "intro": "OpenNavo va supprimer les éléments ci-dessous. Si quelque chose a changé depuis l’analyse, rien n’est supprimé.",
+        "badge": "Nettoyer"
+      },
+      "uninstall": {
+        "title": "Confirmer la désinstallation",
+        "intro": "OpenNavo va placer ces éléments dans la corbeille. Vous pourrez les remettre en place tant qu’elle n’est pas vidée.",
+        "badge": "Placer dans la corbeille"
+      },
+      "uninstallDelete": {
+        "title": "Confirmer la désinstallation et la suppression",
+        "intro": "OpenNavo va supprimer ces éléments immédiatement, sans passer par la corbeille.",
+        "badge": "Supprimer"
+      },
+      "purge": {
+        "title": "Confirmer la suppression définitive",
+        "intro": "OpenNavo va supprimer définitivement ces éléments de la corbeille.",
+        "badge": "Supprimer définitivement"
+      },
+      "brewUninstall": {
+        "title": "Confirmer la désinstallation",
+        "intro": "OpenNavo va désinstaller cette app avec Homebrew puis réessayer.",
+        "badge": "Désinstaller"
+      },
+      "adopt": "Reprend l’app existante",
+      "footer": {
+        "trash": "Vous pourrez les remettre en place depuis la corbeille.",
+        "cleanup": "Les éléments placés dans la corbeille peuvent être remis en place tant qu’elle n’est pas vidée ; les nettoyages par commande sont définitifs.",
+        "brewfileInstall": "Les apps sont téléchargées depuis Homebrew ; une app existante n’est remplacée que si vous avez accepté de la reprendre."
+      }
+    },
     "skip": {
       "disabled": "Désactivée, non ajoutée à la file",
       "installed": "Déjà installée",
       "queued": "Déjà dans la file",
       "duplicate": "En double",
-      "unsupported": "Non prise en charge"
+      "unsupported": "Non prise en charge",
+      "declined": "Refusé"
     }
   },
   "settings": {
@@ -907,6 +949,60 @@
       "monitor": "Surveillance du système",
       "security": "Sécurité",
       "mcp": "MCP local"
+    },
+    "mcp": {
+      "enable": "Activer le MCP local",
+      "enableHint": "Permet aux apps d’IA de ce Mac, comme Claude Desktop, Cursor et Codex, de rechercher des apps et de lire la liste de vos apps installées. Désactivé par défaut ; tant qu’il est désactivé, aucune connexion n’est acceptée.",
+      "write": "Autoriser l’installation et la désinstallation",
+      "writeHint": "Les apps d’IA peuvent seulement le demander. Rien n’est exécuté tant que vous n’avez pas cliqué sur Autoriser dans OpenNavo.",
+      "stillOn": "Toujours activé",
+      "offFailed": "Impossible de désactiver le MCP local. Il est toujours activé et les apps d’IA peuvent encore se connecter. Réessayez.",
+      "writeOffFailed": "Impossible de désactiver l’installation et la désinstallation. Elles restent autorisées. Réessayez.",
+      "changeFailed": "Impossible de modifier le MCP local. Réessayez.",
+      "config": "Configuration du client",
+      "configHint": "Collez-la dans les réglages MCP de votre app d’IA. Elle pointe vers l’emplacement actuel d’OpenNavo.",
+      "copy": "Copier la configuration",
+      "copied": "Configuration de {client} copiée",
+      "copyFailed": "Impossible de copier la configuration.",
+      "moved": "OpenNavo a été déplacé depuis que vous avez copié la configuration. Copiez-la à nouveau pour que vos apps d’IA puissent le retrouver.",
+      "notRunning": "Le MCP local est activé mais ne fonctionne pas : les apps d’IA ne peuvent pas s’y connecter. Désactivez-le puis réactivez-le pour réessayer.",
+      "statusFailed": "Impossible de lire l’état du MCP local.",
+      "movedClients": "Pointe encore vers l’ancien emplacement : {clients}",
+      "pathUnavailable": "Impossible de trouver où OpenNavo est installé : aucune configuration à copier.",
+      "audit": {
+        "title": "Journal des demandes d’écriture",
+        "hint": "Demandes d’installation et de désinstallation venant d’apps d’IA. Conservées uniquement sur ce Mac pendant 90 jours.",
+        "view": "Afficher",
+        "clear": "Effacer",
+        "empty": "Aucune demande d’écriture pour l’instant.",
+        "loadFailed": "Impossible de lire le journal.",
+        "clearTitle": "Effacer le journal des demandes d’écriture ?",
+        "clearDescription": "Toutes les demandes enregistrées seront supprimées. Cette action est irréversible.",
+        "clearConfirm": "Effacer",
+        "cleared": "Journal effacé",
+        "clearFailed": "Impossible d’effacer le journal.",
+        "install": "Installation",
+        "uninstall": "Placement dans la corbeille",
+        "unsigned": "Non signé · {path}",
+        "unknownCaller": "Processus inconnu",
+        "mayComeFrom": "Provient peut-être de : {name} (non vérifié)",
+        "claims": "Se présente comme : {name}",
+        "result": "Résultat : {result}",
+        "noResult": "Aucun résultat enregistré",
+        "decisions": {
+          "allowed": "Autorisée",
+          "denied": "Refusée",
+          "timedOut": "Pas de réponse à temps",
+          "invalidated": "Annulée",
+          "rejected": "Refusée sans demander"
+        }
+      },
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Autre (JSON)"
+      }
     },
     "general": {
       "followSystem": "Langue du système ({language})",
@@ -1007,61 +1103,7 @@
       "catalog": "Catalogue local : {count} paquet, synchronisé {time} | Catalogue local : {count} paquets, synchronisé {time}",
       "sync": "Synchroniser"
     },
-    "saved": "Enregistré",
-    "mcp": {
-      "enable": "Activer le MCP local",
-      "enableHint": "Permet aux apps d’IA de ce Mac, comme Claude Desktop, Cursor et Codex, de rechercher des apps et de lire la liste de vos apps installées. Désactivé par défaut ; tant qu’il est désactivé, aucune connexion n’est acceptée.",
-      "write": "Autoriser l’installation et la désinstallation",
-      "writeHint": "Les apps d’IA peuvent seulement le demander. Rien n’est exécuté tant que vous n’avez pas cliqué sur Autoriser dans OpenNavo.",
-      "stillOn": "Toujours activé",
-      "offFailed": "Impossible de désactiver le MCP local. Il est toujours activé et les apps d’IA peuvent encore se connecter. Réessayez.",
-      "writeOffFailed": "Impossible de désactiver l’installation et la désinstallation. Elles restent autorisées. Réessayez.",
-      "changeFailed": "Impossible de modifier le MCP local. Réessayez.",
-      "config": "Configuration du client",
-      "configHint": "Collez-la dans les réglages MCP de votre app d’IA. Elle pointe vers l’emplacement actuel d’OpenNavo.",
-      "copy": "Copier la configuration",
-      "copied": "Configuration de {client} copiée",
-      "copyFailed": "Impossible de copier la configuration.",
-      "moved": "OpenNavo a été déplacé depuis que vous avez copié la configuration. Copiez-la à nouveau pour que vos apps d’IA puissent le retrouver.",
-      "notRunning": "Le MCP local est activé mais ne fonctionne pas : les apps d’IA ne peuvent pas s’y connecter. Désactivez-le puis réactivez-le pour réessayer.",
-      "statusFailed": "Impossible de lire l’état du MCP local.",
-      "movedClients": "Pointe encore vers l’ancien emplacement : {clients}",
-      "pathUnavailable": "Impossible de trouver où OpenNavo est installé : aucune configuration à copier.",
-      "clients": {
-        "claude": "Claude Desktop",
-        "cursor": "Cursor",
-        "codex": "Codex (TOML)",
-        "generic": "Autre (JSON)"
-      },
-      "audit": {
-        "title": "Journal des demandes d’écriture",
-        "hint": "Demandes d’installation et de désinstallation venant d’apps d’IA. Conservées uniquement sur ce Mac pendant 90 jours.",
-        "view": "Afficher",
-        "clear": "Effacer",
-        "empty": "Aucune demande d’écriture pour l’instant.",
-        "loadFailed": "Impossible de lire le journal.",
-        "clearTitle": "Effacer le journal des demandes d’écriture ?",
-        "clearDescription": "Toutes les demandes enregistrées seront supprimées. Cette action est irréversible.",
-        "clearConfirm": "Effacer",
-        "cleared": "Journal effacé",
-        "clearFailed": "Impossible d’effacer le journal.",
-        "install": "Installation",
-        "uninstall": "Placement dans la corbeille",
-        "unsigned": "Non signé · {path}",
-        "unknownCaller": "Processus inconnu",
-        "mayComeFrom": "Provient peut-être de : {name} (non vérifié)",
-        "claims": "Se présente comme : {name}",
-        "result": "Résultat : {result}",
-        "noResult": "Aucun résultat enregistré",
-        "decisions": {
-          "allowed": "Autorisée",
-          "denied": "Refusée",
-          "timedOut": "Pas de réponse à temps",
-          "invalidated": "Annulée",
-          "rejected": "Refusée sans demander"
-        }
-      }
-    }
+    "saved": "Enregistré"
   },
   "mirrors": {
     "official": "Source officielle",
@@ -1370,6 +1412,13 @@
     "E_MAS_OTHER_ACCOUNT": "Cette app a été achetée avec un autre compte Apple. Mettez-la à jour dans l’App Store",
     "E_MAS_REGION": "Cette app est indisponible dans la région actuelle de la boutique",
     "E_MAS_RATE_LIMITED": "Trop de requêtes vers l’App Store. Réessayez dans une minute",
+    "E_UPDATE_DIGEST": "La taille ou l’empreinte du fichier ne correspond pas au manifeste. Rien n’a été installé",
+    "E_UPDATE_SIGNATURE": "La signature du code de la mise à jour est invalide. Rien n’a été installé",
+    "E_UPDATE_FEED_SIGNATURE": "La vérification de la signature d’archive de l’éditeur a échoué. Rien n’a été installé",
+    "E_UPDATE_IDENTITY": "L’identifiant du paquet ne correspond pas à l’app cible. Rien n’a été installé",
+    "E_UPDATE_CHANGED": "L’app ou les fichiers ont changé après la vérification. Recherchez à nouveau les mises à jour",
+    "E_UPDATE_NOT_NEWER": "La version cible n’est pas plus récente. Choisissez Réinstaller dans le menu de l’app installée",
+    "E_UPDATE_CONFIRMATION": "L’installation nécessite votre confirmation. Consultez l’avertissement ou réessayez",
     "E_UPDATE_VERIFY_UNAVAILABLE": "macOS n’a pas pu terminer la vérification du développeur ; la mise à jour n’a pas été installée. Réessayez plus tard",
     "E_UPDATE_INTEGRITY": "Le téléchargement a échoué au contrôle d’intégrité ; la mise à jour n’a pas été installée",
     "E_UPDATE_PREPARE": "Impossible de préparer les fichiers de mise à jour. Vérifiez l’espace disque et les droits d’accès, puis réessayez",
@@ -1417,6 +1466,7 @@
     "E_CLEANUP_OVERSIZE": "Nettoyage interrompu : la sélection est plus volumineuse qu’affiché, rien n’a été supprimé au-delà de la taille affichée. Relancez l’analyse et réessayez.",
     "E_CLEANUP_SIZE_UNKNOWN": "La taille de cet élément n’a pas été entièrement mesurée, il ne peut pas être nettoyé. Relancez l’analyse et réessayez.",
     "E_PLAN_EXPIRED": "Les fichiers ont changé. Relancez l’analyse",
+    "E_PLAN_CHANGED": "La liste a changé après votre vérification, rien n’a été exécuté. Vérifiez-la à nouveau",
     "E_SCAN_CANCELED": "Analyse annulée",
     "E_RESTORE_UNAVAILABLE": "Certains fichiers ne sont plus dans la corbeille et n’ont pas pu être restaurés",
     "E_TRASH_FAILED": "Impossible de déplacer vers la corbeille",
@@ -1458,14 +1508,7 @@
     "E_FW_BLOCKLIST_FORMAT": "Aucun domaine ni IP exploitable dans le fichier",
     "E_FW_BLOCKLIST_TOO_LARGE": "Liste de blocage trop volumineuse : maximum 50 MB et 1 000 000 d’entrées",
     "E_FW_BLOCKLIST_LIMIT": "Limite des listes de blocage atteinte : 32 listes et 256 MB au total maximum",
-    "E_FW_BLOCKLIST_FILE": "Fichier introuvable ou illisible",
-    "E_UPDATE_DIGEST": "La taille ou l’empreinte du fichier ne correspond pas au manifeste. Rien n’a été installé",
-    "E_UPDATE_SIGNATURE": "La signature du code de la mise à jour est invalide. Rien n’a été installé",
-    "E_UPDATE_FEED_SIGNATURE": "La vérification de la signature d’archive de l’éditeur a échoué. Rien n’a été installé",
-    "E_UPDATE_IDENTITY": "L’identifiant du paquet ne correspond pas à l’app cible. Rien n’a été installé",
-    "E_UPDATE_CHANGED": "L’app ou les fichiers ont changé après la vérification. Recherchez à nouveau les mises à jour",
-    "E_UPDATE_NOT_NEWER": "La version cible n’est pas plus récente. Choisissez Réinstaller dans le menu de l’app installée",
-    "E_UPDATE_CONFIRMATION": "L’installation nécessite votre confirmation. Consultez l’avertissement ou réessayez"
+    "E_FW_BLOCKLIST_FILE": "Fichier introuvable ou illisible"
   },
   "installConfirm": {
     "title": "Prendre en charge {name} déjà installé ?",
@@ -1620,6 +1663,7 @@
     },
     "notices": {
       "rescanned": "Les fichiers ont changé ; une nouvelle analyse a été effectuée.",
+      "planChanged": "La liste a changé après votre confirmation, rien n’a été supprimé. Elle a été analysée à nouveau ; vérifiez-la et confirmez encore.",
       "appManagement": "Autorisez d’abord OpenNavo à gérer les apps pour supprimer celles qui n’ont pas été installées avec Homebrew.",
       "incomplete": "Sans Accès complet au disque, {count} emplacement n’a pas pu être vérifié : {paths}. Activez-le pour un nettoyage plus complet. | Sans Accès complet au disque, {count} emplacements n’ont pas pu être vérifiés : {paths}. Activez-le pour un nettoyage plus complet.",
       "running": "{names} est ouvert et quittera avant la désinstallation. | {names} sont ouverts et quitteront avant la désinstallation.",
@@ -1788,6 +1832,7 @@
     },
     "notices": {
       "rescanned": "Les résultats ont été actualisés. Confirmez à nouveau.",
+      "planChanged": "La liste a changé après votre confirmation, rien n’a été supprimé. Elle a été analysée à nouveau ; vérifiez-la et confirmez encore.",
       "services": "{count} élément d’arrière-plan des apps supprimées ({names}) se charge encore au démarrage, causant erreurs et consommation d’énergie. Nettoyage conseillé. | {count} éléments d’arrière-plan des apps supprimées ({names}) se chargent encore au démarrage, causant erreurs et consommation d’énergie. Nettoyage conseillé.",
       "incomplete": "Sans Accès complet au disque, ces emplacements n’ont pas été vérifiés : {paths}. Activez-le pour trouver davantage de fichiers."
     },
@@ -1941,7 +1986,8 @@
       "installers": "Téléchargements et Bureau",
       "xcodeArchive": "Archives Xcode",
       "deviceBackup": "Sauvegarde d’appareil",
-      "deviceBackupModel": "Sauvegarde d’appareil · {model}"
+      "deviceBackupModel": "Sauvegarde d’appareil · {model}",
+      "logs": "Journaux et rapports de plantage"
     },
     "skipReasonsBy": {
       "running": "{names} en cours d’exécution ; quittez pour nettoyer",

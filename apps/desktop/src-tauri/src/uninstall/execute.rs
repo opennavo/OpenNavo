@@ -177,8 +177,18 @@ impl Engine {
         {
             return Err(AppError::new("E_INVALID_ARG", "item_ids"));
         }
+        // Set by Rust when the task was queued from a confirmed plan: what it removes must still be
+        // exactly what the user allowed, both at enqueue and when the task starts.
+        if let Some(expected) = &options.plan_digest
+            && *expected != app_digest(&entry, &app, options)
+        {
+            return Err(crate::destructive::plan_changed());
+        }
         Ok((entry, app))
     }
+    /// Unconfirmed entry kept `pub` only for the integration tests in `tests/` (a separate crate);
+    /// no IPC command calls it. App commands use the `*_confirmed` path.
+    #[doc(hidden)]
     pub fn execute_choices(
         self: &Arc<Self>,
         queue: &TaskQueue,
@@ -200,6 +210,101 @@ impl Engine {
         only_selected: bool,
     ) -> Result<Vec<Task>, AppError> {
         let _guard = self.operation_lock.lock().map_err(poison)?;
+        let (_, requests) = self.prepare_choices(plan_id, choices, mode, only_selected)?;
+        Self::enqueue_prepared(queue, requests)
+    }
+
+    /// Digest and window content of an uninstall the user is about to confirm: every item that
+    /// will be removed, app by app, with its path and size.
+    pub fn confirm_plan(
+        self: &Arc<Self>,
+        plan_id: &str,
+        choices: Vec<UninstallChoice>,
+        mode: DeleteMode,
+    ) -> Result<(String, crate::confirmation::McpConfirmView), AppError> {
+        let (entry, requests) = self.prepare_choices(plan_id, choices, mode, false)?;
+        let mut rows = Vec::new();
+        let mut bytes = 0u64;
+        let mut count = 0usize;
+        let mut names = Vec::new();
+        for (_, options, app) in &requests {
+            names.push(app.name.clone());
+            for item in removed_items(app, options) {
+                count += 1;
+                bytes = bytes.saturating_add(item.size_bytes.unwrap_or(0));
+                if rows.len() < crate::destructive::MAX_LISTED_ITEMS {
+                    rows.push(crate::confirmation::ConfirmItemView::row(
+                        &app.name, &item.path,
+                    ));
+                }
+            }
+        }
+        let view = crate::confirmation::McpConfirmView::app_action(
+            if mode == DeleteMode::Delete {
+                "uninstallDelete"
+            } else {
+                "uninstall"
+            },
+            &names.join(", "),
+            rows,
+            count,
+            Some(bytes),
+        );
+        Ok((batch_digest(&entry, &requests), view))
+    }
+
+    /// Queue a confirmed uninstall: under the operation lock, the same choices must still produce
+    /// the digest the user allowed. Each task also carries its own app digest, checked again when it
+    /// starts.
+    pub fn execute_choices_confirmed(
+        self: &Arc<Self>,
+        queue: &TaskQueue,
+        plan_id: &str,
+        choices: Vec<UninstallChoice>,
+        mode: DeleteMode,
+        approved: &str,
+    ) -> Result<Vec<Task>, AppError> {
+        let _guard = self.operation_lock.lock().map_err(poison)?;
+        let (entry, requests) = self
+            .prepare_choices(plan_id, choices, mode, false)
+            .map_err(|error| {
+                if error.code == "E_INVALID_ARG" {
+                    crate::destructive::plan_changed()
+                } else {
+                    error
+                }
+            })?;
+        if batch_digest(&entry, &requests) != approved {
+            return Err(crate::destructive::plan_changed());
+        }
+        Self::enqueue_prepared(queue, requests)
+    }
+
+    fn enqueue_prepared(
+        queue: &TaskQueue,
+        requests: Vec<(TaskTarget, TaskOptions, AppPlan)>,
+    ) -> Result<Vec<Task>, AppError> {
+        requests
+            .into_iter()
+            .map(|(target, options, _)| {
+                queue.enqueue(
+                    TaskOp::Uninstall,
+                    Some(target),
+                    options,
+                    TaskTrigger::Manual,
+                )
+            })
+            .collect()
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn prepare_choices(
+        self: &Arc<Self>,
+        plan_id: &str,
+        choices: Vec<UninstallChoice>,
+        mode: DeleteMode,
+        only_selected: bool,
+    ) -> Result<(PlanEntry, Vec<(TaskTarget, TaskOptions, AppPlan)>), AppError> {
         if choices.is_empty()
             || choices.len() > 100
             || choices
@@ -242,7 +347,7 @@ impl Engine {
             {
                 return Err(AppError::new("E_INVALID_ARG", "duplicate_cask"));
             }
-            let options = TaskOptions {
+            let mut options = TaskOptions {
                 plan_id: Some(plan_id.to_owned()),
                 item_ids: Some(choice.item_ids),
                 delete_mode: Some(mode),
@@ -250,20 +355,11 @@ impl Engine {
                 only_selected,
                 ..Default::default()
             };
-            self.task_plan(TaskOp::Uninstall, Some(&target), &options)?;
-            requests.push((target, options));
+            let (checked, app) = self.task_plan(TaskOp::Uninstall, Some(&target), &options)?;
+            options.plan_digest = Some(app_digest(&checked, &app, &options));
+            requests.push((target, options, app));
         }
-        requests
-            .into_iter()
-            .map(|(target, options)| {
-                queue.enqueue(
-                    TaskOp::Uninstall,
-                    Some(target),
-                    options,
-                    TaskTrigger::Manual,
-                )
-            })
-            .collect()
+        Ok((entry, requests))
     }
     pub(crate) fn reserve(&self, plan: &str, app: &str) -> Result<(), AppError> {
         if !self
@@ -1646,4 +1742,65 @@ pub fn admin_entry() -> Option<i32> {
     {
         Some(1)
     }
+}
+
+/// The items one uninstall task removes: the chosen ones and, unless `only_selected`, the plan's
+/// required ones.
+fn removed_items<'a>(
+    app: &'a AppPlan,
+    options: &'a TaskOptions,
+) -> impl Iterator<Item = &'a PlanItem> {
+    let ids = options.item_ids.as_deref().unwrap_or_default();
+    app.items
+        .iter()
+        .filter(move |item| ids.contains(&item.id) || (item.required && !options.only_selected))
+}
+
+/// Digest of one uninstall task: the app as planned (path, bundle id, version, cask, identity),
+/// how it is removed, and every item it removes with its path, size and file snapshot.
+pub(crate) fn app_digest(entry: &PlanEntry, app: &AppPlan, options: &TaskOptions) -> String {
+    let record = entry.app_records.get(&app.app_id).map(|record| {
+        (
+            &record.app.path,
+            &record.app.bundle_id,
+            &record.app.version,
+            &record.app.cask,
+            format!("{:?}", record.identity),
+        )
+    });
+    let items: Vec<_> = removed_items(app, options)
+        .map(|item| {
+            (
+                &item.id,
+                &item.path,
+                format!("{:?}/{:?}", item.category, item.kind),
+                item.size_bytes,
+                entry.snapshots.get(&item.id),
+                entry
+                    .actions
+                    .get(&item.id)
+                    .map(|action| format!("{action:?}")),
+            )
+        })
+        .collect();
+    crate::destructive::digest(&(
+        "uninstall",
+        &entry.plan.plan_id,
+        &app.app_id,
+        record,
+        &options.item_ids,
+        options.delete_mode.map(|mode| format!("{mode:?}")),
+        options.quit_running,
+        options.only_selected,
+        items,
+    ))
+}
+
+/// Digest of a confirmed batch: the plan and the digest of every task, in order.
+fn batch_digest(entry: &PlanEntry, requests: &[(TaskTarget, TaskOptions, AppPlan)]) -> String {
+    let tasks: Vec<_> = requests
+        .iter()
+        .map(|(target, options, _)| (target, &options.plan_digest))
+        .collect();
+    crate::destructive::digest(&("uninstall batch", &entry.plan.plan_id, tasks))
 }

@@ -438,14 +438,32 @@ it('Does not swallow unavailable background restores or stop purge at the first 
   };
   vi.spyOn(commands, 'uninstallRestore').mockResolvedValue(failure);
   await expect(store.restore(['missing'])).rejects.toMatchObject({ code: 'E_RESTORE_UNAVAILABLE' });
-  const purge = vi
-    .spyOn(commands, 'uninstallPurge')
-    .mockResolvedValueOnce(failure)
-    .mockResolvedValue({ status: 'ok', data: 42 });
-  await expect(store.purge(['bad', 'good'])).rejects.toMatchObject({ code: 'E_RESTORE_UNAVAILABLE' });
-  expect(purge.mock.calls.map(args => args[0])).toEqual(['bad', 'good']);
-  await store.purge(['bad', 'good']);
-  expect(purge.mock.calls.map(args => args[0])).toEqual(['bad', 'good', 'bad']);
+  // One confirmation for the batch: Rust empties every task and lists the ones that failed.
+  const purge = vi.spyOn(commands, 'uninstallPurge').mockResolvedValueOnce({
+    status: 'error',
+    error: {
+      code: 'E_IO',
+      message: 'uninstall_purge_failed',
+      detail: JSON.stringify({ freedBytes: 42, failed: ['bad'], missing: [] })
+    }
+  });
+  await expect(store.purge(['bad', 'good'])).rejects.toMatchObject({ code: 'E_IO' });
+  expect(purge.mock.calls.map(args => args[0])).toEqual([['bad', 'good']]);
+  purge.mockResolvedValueOnce({ status: 'ok', data: 7 });
+  await expect(store.purge(['bad', 'good'])).resolves.toBe(7);
+  expect(purge.mock.calls[1]?.[0]).toEqual(['bad']);
+});
+
+it('A purge refused in the confirmation window empties nothing and raises no error', async () => {
+  await context();
+  const store = useUninstallStore();
+  const purge = vi.spyOn(commands, 'uninstallPurge').mockResolvedValue({
+    status: 'error',
+    error: { code: 'E_CONFIRMATION_DENIED', message: 'confirmation_denied', detail: null }
+  });
+  await expect(store.purge(['a', 'b'])).resolves.toBeNull();
+  expect(purge).toHaveBeenCalledTimes(1);
+  expect(store.error).toBeNull();
 });
 
 it.each(['failed', 'canceled'] as const)('Keeps partial %s outcomes available for restoration', async terminal => {

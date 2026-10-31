@@ -44,7 +44,14 @@ const names = (values: string[]) => formatList(values, { locale: appLocale.value
 const notices = computed<Notice[]>(() => {
   const list: Notice[] = [];
   const apps = store.included;
-  if (store.rescanned)
+  if (store.planChanged)
+    list.push({
+      key: 'planChanged',
+      tone: 'info',
+      icon: 'refresh-cw',
+      text: t('uninstall.notices.planChanged')
+    });
+  else if (store.rescanned)
     list.push({
       key: 'rescanned',
       tone: 'info',

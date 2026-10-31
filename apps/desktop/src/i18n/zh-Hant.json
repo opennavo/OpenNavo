@@ -886,12 +886,54 @@
     "webLink": "網頁連結（opennavo://）",
     "source": "來源",
     "collectionSummary": "共 {count} 個應用：安裝 {install} 個，跳過 {skip} 個",
+    "own": {
+      "summary": "{count} 項，共 {size}",
+      "permanent": "這些檔案不經過垃圾桶，刪除後無法恢復。",
+      "more": "還有 {count} 項",
+      "brewfileInstall": {
+        "title": "確認從 Brewfile 安裝",
+        "intro": "OpenNavo 將安裝這個 Brewfile 裡列出的應用。加入佇列前會再核對一次檔案。",
+        "badge": "安裝"
+      },
+      "cleanup": {
+        "title": "確認清理",
+        "intro": "OpenNavo 將刪除下面這些項目。掃描後如果有變化，就什麼都不刪。",
+        "badge": "清理"
+      },
+      "uninstall": {
+        "title": "確認解除安裝",
+        "intro": "OpenNavo 將把下面這些項目移到垃圾桶。清空垃圾桶之前都可以放回。",
+        "badge": "移到垃圾桶"
+      },
+      "uninstallDelete": {
+        "title": "確認解除安裝並直接刪除",
+        "intro": "下面這些項目會直接刪除，不進垃圾桶。",
+        "badge": "直接刪除"
+      },
+      "purge": {
+        "title": "確認從垃圾桶徹底刪除",
+        "intro": "OpenNavo 將從垃圾桶徹底刪除下面這些項目。",
+        "badge": "徹底刪除"
+      },
+      "brewUninstall": {
+        "title": "確認解除安裝",
+        "intro": "OpenNavo 將用 Homebrew 解除安裝這個應用，然後再試一次。",
+        "badge": "解除安裝"
+      },
+      "adopt": "接管已有的應用",
+      "footer": {
+        "trash": "移到垃圾桶後可以放回。",
+        "cleanup": "移到垃圾桶的項目在清空前可以放回；命令類清理無法撤銷。",
+        "brewfileInstall": "應用會從 Homebrew 下載安裝；已有的應用只有你同意接管時才會被替換。"
+      }
+    },
     "skip": {
       "disabled": "已停用，不加入佇列",
       "installed": "已安裝",
       "queued": "已在佇列中",
       "duplicate": "重複",
-      "unsupported": "不支援"
+      "unsupported": "不支援",
+      "declined": "你已拒絕"
     }
   },
   "settings": {
@@ -1424,6 +1466,7 @@
     "E_CLEANUP_OVERSIZE": "清理已中止：選中的項目實際比顯示的大，沒有刪除超出部分。請重新掃描後再試",
     "E_CLEANUP_SIZE_UNKNOWN": "這一項的大小沒有算完，不能清理。請重新掃描後再試",
     "E_PLAN_EXPIRED": "檔案有變化，請重新掃描",
+    "E_PLAN_CHANGED": "清單在你確認後有變化，沒有執行任何操作。請重新確認",
     "E_SCAN_CANCELED": "已取消掃描",
     "E_RESTORE_UNAVAILABLE": "有些檔案已經不在垃圾桶裡，沒能放回",
     "E_TRASH_FAILED": "沒能移到垃圾桶",
@@ -1620,6 +1663,7 @@
     },
     "notices": {
       "rescanned": "檔案有變化，已經重新掃描。",
+      "planChanged": "清單在你確認後有變化，什麼都沒刪。已經重新掃描，請再確認一次。",
       "appManagement": "需要先允許 OpenNavo 管理 App，才能刪除不是用 Homebrew 安裝的 App。",
       "incomplete": "沒有「完整磁碟取用權限」，{count} 個位置沒能檢查：{paths}。開啟後能清理得更乾淨。",
       "running": "{names} 正在執行，解除安裝前會先退出。",
@@ -1788,6 +1832,7 @@
     },
     "notices": {
       "rescanned": "結果已更新，請再確認一次。",
+      "planChanged": "清單在你確認後有變化，什麼都沒刪。已經重新掃描，請再確認一次。",
       "services": "已刪除的 App（{names}）還有 {count} 個背景項目在開機時載入，只會報錯、耗電，建議清理。",
       "incomplete": "沒有「完整磁碟取用權限」，這些位置沒檢查：{paths}。開啟後能找到更多。"
     },
@@ -1941,7 +1986,8 @@
       "installers": "下載和桌面",
       "xcodeArchive": "Xcode 歸檔",
       "deviceBackup": "裝置備份",
-      "deviceBackupModel": "裝置備份 · {model}"
+      "deviceBackupModel": "裝置備份 · {model}",
+      "logs": "日誌與崩潰報告"
     },
     "skipReasonsBy": {
       "running": "{names} 正在執行，退出後可以清理",

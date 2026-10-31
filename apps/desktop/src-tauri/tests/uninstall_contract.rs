@@ -75,6 +75,7 @@ fn new_commands_are_main_only() {
         "uninstall_plan_cancel",
         "uninstall_reveal",
         "uninstall_execute",
+        "uninstall_retry",
         "uninstall_restore",
         "uninstall_purge",
     ] {

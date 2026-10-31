@@ -185,13 +185,13 @@
     "emptyHint": "Tente outra palavra-chave ou busque pelo nome em inglês ou pela abreviação em pinyin",
     "alias": "Aliases: {name}",
     "prompt": "Digite um nome, finalidade ou comando para começar a busca",
+    "catalogIncomplete": "Não foi possível sincronizar os apps de terceiros. Os resultados podem estar incompletos.",
     "catalogEmpty": "Nenhum resultado no catálogo para “{q}”",
     "sources": {
       "label": "Origem dos resultados",
       "all": "Tudo",
       "catalog": "Catálogo"
-    },
-    "catalogIncomplete": "Não foi possível sincronizar os apps de terceiros. Os resultados podem estar incompletos."
+    }
   },
   "appStore": {
     "title": "App Store",
@@ -493,10 +493,10 @@
     "repo": {
       "stars": "★",
       "starsBadge": "Estrelas no GitHub: {count}",
+      "checked": "Dados do repositório verificados em {date}.",
       "updated": "Atualizado há {days} dia | Atualizado há {days} dias",
       "unmaintained": "Pode não receber mais manutenção",
-      "archived": "Arquivado",
-      "checked": "Dados do repositório verificados em {date}."
+      "archived": "Arquivado"
     },
     "deps": {
       "macos": "Requisitos do sistema",
@@ -739,6 +739,15 @@
     },
     "masSignedOut": "Na última atualização da App Store, não foi possível confirmar o estado da conta. Tente de novo ou conclua a atualização na App Store.",
     "failedSources": "Algumas verificações de {sources} não puderam ser concluídas. Os resultados disponíveis continuam sendo exibidos.",
+    "checkFailures": {
+      "summary": "Não foi possível verificar alguns apps ou fontes de atualização. Os resultados disponíveis continuam sendo exibidos.",
+      "details": "Ver detalhes da verificação",
+      "rulesUnavailable": "Não foi possível atualizar as regras de atualização. As regras em cache disponíveis foram usadas; verificações sem regras não puderam ser concluídas.",
+      "rateLimited": "O servidor de atualizações está recebendo solicitações demais. Tente novamente mais tarde.",
+      "invalidUrl": "O endereço de atualização é inválido. O desenvolvedor precisa corrigir a configuração de atualização do app.",
+      "network": "Não foi possível conectar ao servidor de atualizações. Tente novamente mais tarde.",
+      "failed": "Não foi possível concluir a verificação de atualizações."
+    },
     "openAppStore": "Abrir App Store",
     "major": {
       "titleOne": "{name} tem uma atualização principal",
@@ -834,15 +843,6 @@
       "skip": "{version} não será oferecida de novo até sair uma versão mais recente.",
       "confirm": "Reverter",
       "notQuit": "{name} não foi encerrado, então não foi revertido. Encerre o app e tente novamente."
-    },
-    "checkFailures": {
-      "summary": "Não foi possível verificar alguns apps ou fontes de atualização. Os resultados disponíveis continuam sendo exibidos.",
-      "details": "Ver detalhes da verificação",
-      "rulesUnavailable": "Não foi possível atualizar as regras de atualização. As regras em cache disponíveis foram usadas; verificações sem regras não puderam ser concluídas.",
-      "rateLimited": "O servidor de atualizações está recebendo solicitações demais. Tente novamente mais tarde.",
-      "invalidUrl": "O endereço de atualização é inválido. O desenvolvedor precisa corrigir a configuração de atualização do app.",
-      "network": "Não foi possível conectar ao servidor de atualizações. Tente novamente mais tarde.",
-      "failed": "Não foi possível concluir a verificação de atualizações."
     }
   },
   "history": {
@@ -886,12 +886,54 @@
     "webLink": "Um link da web (opennavo://)",
     "source": "Origem",
     "collectionSummary": "{count} apps: {install} serão instalados, {skip} ignorados",
+    "own": {
+      "summary": "{count} item, {size} | {count} itens, {size}",
+      "permanent": "Estes arquivos não passam pela Lixeira e não poderão ser recuperados.",
+      "more": "E mais {count} | E mais {count}",
+      "brewfileInstall": {
+        "title": "Confirmar instalação a partir de um Brewfile",
+        "intro": "O OpenNavo vai instalar os apps deste Brewfile. O arquivo é verificado de novo antes de entrar na fila.",
+        "badge": "Instalar"
+      },
+      "cleanup": {
+        "title": "Confirmar limpeza",
+        "intro": "O OpenNavo vai remover os itens abaixo. Se algo mudou desde a verificação, nada é removido.",
+        "badge": "Limpar"
+      },
+      "uninstall": {
+        "title": "Confirmar desinstalação",
+        "intro": "O OpenNavo vai mover estes itens para a Lixeira. Você pode restaurá-los até esvaziá-la.",
+        "badge": "Mover para a Lixeira"
+      },
+      "uninstallDelete": {
+        "title": "Confirmar desinstalação e exclusão",
+        "intro": "O OpenNavo vai apagar estes itens na hora, sem passar pela Lixeira.",
+        "badge": "Apagar"
+      },
+      "purge": {
+        "title": "Confirmar exclusão definitiva",
+        "intro": "O OpenNavo vai apagar estes itens da Lixeira de vez.",
+        "badge": "Apagar de vez"
+      },
+      "brewUninstall": {
+        "title": "Confirmar desinstalação",
+        "intro": "O OpenNavo vai desinstalar este app com o Homebrew e tentar de novo.",
+        "badge": "Desinstalar"
+      },
+      "adopt": "Substitui o app existente",
+      "footer": {
+        "trash": "Você pode restaurá-los pela Lixeira.",
+        "cleanup": "Itens movidos para a Lixeira podem ser restaurados até esvaziá-la; limpezas por comando não podem ser desfeitas.",
+        "brewfileInstall": "Os apps são baixados do Homebrew; um app existente só é substituído se você aceitou adotá-lo."
+      }
+    },
     "skip": {
       "disabled": "Desativado, não entra na fila",
       "installed": "Já instalado",
       "queued": "Já na fila",
       "duplicate": "Repetido",
-      "unsupported": "Não compatível"
+      "unsupported": "Não compatível",
+      "declined": "Você recusou"
     }
   },
   "settings": {
@@ -907,6 +949,60 @@
       "monitor": "Monitor do sistema",
       "security": "Segurança",
       "mcp": "MCP local"
+    },
+    "mcp": {
+      "enable": "Ativar MCP local",
+      "enableHint": "Permite que apps de IA neste Mac, como Claude Desktop, Cursor e Codex, pesquisem apps e leiam sua lista de apps instalados. Desativado por padrão; enquanto estiver desativado, nenhuma conexão é aceita.",
+      "write": "Permitir instalar e desinstalar",
+      "writeHint": "Os apps de IA só podem pedir. Nada é executado até você clicar em Permitir no OpenNavo.",
+      "stillOn": "Ainda ativado",
+      "offFailed": "Não foi possível desativar o MCP local. Ele continua ativado e os apps de IA ainda podem se conectar. Tente novamente.",
+      "writeOffFailed": "Não foi possível desativar a instalação e a desinstalação. Elas continuam permitidas. Tente novamente.",
+      "changeFailed": "Não foi possível alterar o MCP local. Tente novamente.",
+      "config": "Configuração do cliente",
+      "configHint": "Cole nas configurações de MCP do seu app de IA. Ela aponta para o local atual do OpenNavo.",
+      "copy": "Copiar configuração",
+      "copied": "Configuração do {client} copiada",
+      "copyFailed": "Não foi possível copiar a configuração.",
+      "moved": "O OpenNavo foi movido depois que você copiou a configuração. Copie de novo para que seus apps de IA continuem encontrando o OpenNavo.",
+      "notRunning": "O MCP local está ativado, mas não está em execução, então os apps de IA não conseguem se conectar. Desative e ative de novo para tentar outra vez.",
+      "statusFailed": "Não foi possível ler o status do MCP local.",
+      "movedClients": "Ainda aponta para o local antigo: {clients}",
+      "pathUnavailable": "Não foi possível encontrar onde o OpenNavo está instalado, então não há configuração para copiar.",
+      "audit": {
+        "title": "Registro de solicitações de escrita",
+        "hint": "Solicitações de instalação e desinstalação de apps de IA. Ficam só neste Mac, por 90 dias.",
+        "view": "Ver",
+        "clear": "Limpar",
+        "empty": "Ainda não há solicitações de escrita.",
+        "loadFailed": "Não foi possível ler o registro.",
+        "clearTitle": "Limpar o registro de solicitações de escrita?",
+        "clearDescription": "Todas as solicitações registradas serão apagadas. Não é possível desfazer.",
+        "clearConfirm": "Limpar",
+        "cleared": "Registro limpo",
+        "clearFailed": "Não foi possível limpar o registro.",
+        "install": "Instalar",
+        "uninstall": "Mover para a Lixeira",
+        "unsigned": "Sem assinatura · {path}",
+        "unknownCaller": "Processo desconhecido",
+        "mayComeFrom": "Pode vir de: {name} (não verificado)",
+        "claims": "Diz ser: {name}",
+        "result": "Resultado: {result}",
+        "noResult": "Nenhum resultado registrado",
+        "decisions": {
+          "allowed": "Permitida",
+          "denied": "Negada",
+          "timedOut": "Sem resposta a tempo",
+          "invalidated": "Anulada",
+          "rejected": "Recusada sem perguntar"
+        }
+      },
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Outro (JSON)"
+      }
     },
     "general": {
       "followSystem": "Seguir o sistema (atual: {language})",
@@ -1007,61 +1103,7 @@
       "catalog": "Catálogo local: {count} pacote, sincronizado {time} | Catálogo local: {count} pacotes, sincronizados {time}",
       "sync": "Sincronizar agora"
     },
-    "saved": "Salvo",
-    "mcp": {
-      "enable": "Ativar MCP local",
-      "enableHint": "Permite que apps de IA neste Mac, como Claude Desktop, Cursor e Codex, pesquisem apps e leiam sua lista de apps instalados. Desativado por padrão; enquanto estiver desativado, nenhuma conexão é aceita.",
-      "write": "Permitir instalar e desinstalar",
-      "writeHint": "Os apps de IA só podem pedir. Nada é executado até você clicar em Permitir no OpenNavo.",
-      "stillOn": "Ainda ativado",
-      "offFailed": "Não foi possível desativar o MCP local. Ele continua ativado e os apps de IA ainda podem se conectar. Tente novamente.",
-      "writeOffFailed": "Não foi possível desativar a instalação e a desinstalação. Elas continuam permitidas. Tente novamente.",
-      "changeFailed": "Não foi possível alterar o MCP local. Tente novamente.",
-      "config": "Configuração do cliente",
-      "configHint": "Cole nas configurações de MCP do seu app de IA. Ela aponta para o local atual do OpenNavo.",
-      "copy": "Copiar configuração",
-      "copied": "Configuração do {client} copiada",
-      "copyFailed": "Não foi possível copiar a configuração.",
-      "moved": "O OpenNavo foi movido depois que você copiou a configuração. Copie de novo para que seus apps de IA continuem encontrando o OpenNavo.",
-      "notRunning": "O MCP local está ativado, mas não está em execução, então os apps de IA não conseguem se conectar. Desative e ative de novo para tentar outra vez.",
-      "statusFailed": "Não foi possível ler o status do MCP local.",
-      "movedClients": "Ainda aponta para o local antigo: {clients}",
-      "pathUnavailable": "Não foi possível encontrar onde o OpenNavo está instalado, então não há configuração para copiar.",
-      "clients": {
-        "claude": "Claude Desktop",
-        "cursor": "Cursor",
-        "codex": "Codex (TOML)",
-        "generic": "Outro (JSON)"
-      },
-      "audit": {
-        "title": "Registro de solicitações de escrita",
-        "hint": "Solicitações de instalação e desinstalação de apps de IA. Ficam só neste Mac, por 90 dias.",
-        "view": "Ver",
-        "clear": "Limpar",
-        "empty": "Ainda não há solicitações de escrita.",
-        "loadFailed": "Não foi possível ler o registro.",
-        "clearTitle": "Limpar o registro de solicitações de escrita?",
-        "clearDescription": "Todas as solicitações registradas serão apagadas. Não é possível desfazer.",
-        "clearConfirm": "Limpar",
-        "cleared": "Registro limpo",
-        "clearFailed": "Não foi possível limpar o registro.",
-        "install": "Instalar",
-        "uninstall": "Mover para a Lixeira",
-        "unsigned": "Sem assinatura · {path}",
-        "unknownCaller": "Processo desconhecido",
-        "mayComeFrom": "Pode vir de: {name} (não verificado)",
-        "claims": "Diz ser: {name}",
-        "result": "Resultado: {result}",
-        "noResult": "Nenhum resultado registrado",
-        "decisions": {
-          "allowed": "Permitida",
-          "denied": "Negada",
-          "timedOut": "Sem resposta a tempo",
-          "invalidated": "Anulada",
-          "rejected": "Recusada sem perguntar"
-        }
-      }
-    }
+    "saved": "Salvo"
   },
   "mirrors": {
     "official": "Oficial",
@@ -1370,6 +1412,13 @@
     "E_MAS_OTHER_ACCOUNT": "Este app foi comprado com outra Conta Apple. Atualize-o na App Store",
     "E_MAS_REGION": "Este app não está disponível na região da loja atual",
     "E_MAS_RATE_LIMITED": "Muitas solicitações à App Store. Tente de novo em um minuto",
+    "E_UPDATE_DIGEST": "O tamanho ou resumo do arquivo não corresponde ao manifesto. Nada foi instalado",
+    "E_UPDATE_SIGNATURE": "A assinatura de código da atualização é inválida. Nada foi instalado",
+    "E_UPDATE_FEED_SIGNATURE": "A verificação da assinatura do arquivo do editor falhou. Nada foi instalado",
+    "E_UPDATE_IDENTITY": "O identificador do pacote não corresponde ao app de destino. Nada foi instalado",
+    "E_UPDATE_CHANGED": "O app ou os arquivos mudaram após a verificação. Verifique as atualizações novamente",
+    "E_UPDATE_NOT_NEWER": "A versão de destino não é mais recente. Escolha Reinstalar no menu do app instalado",
+    "E_UPDATE_CONFIRMATION": "A instalação precisa da sua confirmação. Revise o aviso ou tente novamente",
     "E_UPDATE_VERIFY_UNAVAILABLE": "O macOS não conseguiu concluir a verificação do desenvolvedor, então a atualização não foi instalada. Tente novamente mais tarde",
     "E_UPDATE_INTEGRITY": "O download falhou na verificação de integridade, então a atualização não foi instalada",
     "E_UPDATE_PREPARE": "Não foi possível preparar os arquivos de atualização. Verifique o espaço em disco e as permissões de acesso e tente novamente",
@@ -1417,6 +1466,7 @@
     "E_CLEANUP_OVERSIZE": "Limpeza interrompida: a seleção é maior do que o mostrado, e nada além do tamanho mostrado foi removido. Escaneie de novo e tente outra vez.",
     "E_CLEANUP_SIZE_UNKNOWN": "O tamanho deste item não foi medido por completo, então ele não pode ser limpo. Escaneie de novo e tente outra vez.",
     "E_PLAN_EXPIRED": "Os arquivos mudaram. Verifique de novo.",
+    "E_PLAN_CHANGED": "A lista mudou depois da sua revisão, então nada foi executado. Revise de novo",
     "E_SCAN_CANCELED": "Verificação cancelada",
     "E_RESTORE_UNAVAILABLE": "Alguns arquivos não estão mais no Lixo e não puderam ser restaurados",
     "E_TRASH_FAILED": "Não foi possível mover para o Lixo",
@@ -1458,14 +1508,7 @@
     "E_FW_BLOCKLIST_FORMAT": "Nenhum domínio ou IP utilizável foi encontrado no arquivo",
     "E_FW_BLOCKLIST_TOO_LARGE": "A lista de bloqueio é grande demais: no máximo 50 MB e um milhão de entradas",
     "E_FW_BLOCKLIST_LIMIT": "Limite de listas de bloqueio atingido: no máximo 32 listas e 256 MB no total",
-    "E_FW_BLOCKLIST_FILE": "O arquivo não foi encontrado ou não pode ser lido",
-    "E_UPDATE_DIGEST": "O tamanho ou resumo do arquivo não corresponde ao manifesto. Nada foi instalado",
-    "E_UPDATE_SIGNATURE": "A assinatura de código da atualização é inválida. Nada foi instalado",
-    "E_UPDATE_FEED_SIGNATURE": "A verificação da assinatura do arquivo do editor falhou. Nada foi instalado",
-    "E_UPDATE_IDENTITY": "O identificador do pacote não corresponde ao app de destino. Nada foi instalado",
-    "E_UPDATE_CHANGED": "O app ou os arquivos mudaram após a verificação. Verifique as atualizações novamente",
-    "E_UPDATE_NOT_NEWER": "A versão de destino não é mais recente. Escolha Reinstalar no menu do app instalado",
-    "E_UPDATE_CONFIRMATION": "A instalação precisa da sua confirmação. Revise o aviso ou tente novamente"
+    "E_FW_BLOCKLIST_FILE": "O arquivo não foi encontrado ou não pode ser lido"
   },
   "installConfirm": {
     "title": "Adotar o {name} existente?",
@@ -1620,6 +1663,7 @@
     },
     "notices": {
       "rescanned": "Os arquivos mudaram, então o OpenNavo verificou de novo.",
+      "planChanged": "A lista mudou depois da sua confirmação, então nada foi removido. Ela foi verificada de novo; revise e confirme outra vez.",
       "appManagement": "Primeiro permita que o OpenNavo gerencie apps. Isso é necessário para apagar apps não instalados com o Homebrew.",
       "incomplete": "Sem Acesso Total ao Disco, {count} local não pôde ser verificado: {paths}. Ative-o para limpar mais a fundo. | Sem Acesso Total ao Disco, {count} locais não puderam ser verificados: {paths}. Ative-o para limpar mais a fundo.",
       "running": "{names} está em execução e será encerrado antes de desinstalar. | {names} estão em execução e serão encerrados antes de desinstalar.",
@@ -1788,6 +1832,7 @@
     },
     "notices": {
       "rescanned": "Os resultados foram atualizados. Confira de novo.",
+      "planChanged": "A lista mudou depois da sua confirmação, então nada foi removido. Ela foi verificada de novo; revise e confirme outra vez.",
       "services": "{count} item em segundo plano de apps apagados ({names}) ainda é carregado no login. Ele só causa erros e gasta bateria, então vale limpar. | {count} itens em segundo plano de apps apagados ({names}) ainda são carregados no login. Eles só causam erros e gastam bateria, então vale limpar.",
       "incomplete": "Sem Acesso Total ao Disco, estes locais não foram verificados: {paths}. Ative para encontrar mais."
     },
@@ -1941,7 +1986,8 @@
       "installers": "Downloads e Mesa",
       "xcodeArchive": "Arquivos do Xcode",
       "deviceBackup": "Backup do dispositivo",
-      "deviceBackupModel": "Backup do dispositivo · {model}"
+      "deviceBackupModel": "Backup do dispositivo · {model}",
+      "logs": "Logs e relatórios de falhas"
     },
     "skipReasonsBy": {
       "running": "Em uso por {names}; dá para limpar depois de encerrar",
@@ -2390,6 +2436,10 @@
       "rateLimited": "O servidor oficial limitou temporariamente as atualizações do banco de dados. O OpenNavo vai tentar de novo mais tarde"
     },
     "scan": {
+      "forceLabel": "Verificar todos os arquivos novamente",
+      "forceHint": "Não reutiliza resultados limpos anteriores. Neste modo, a verificação completa permite até 5 minutos por arquivo.",
+      "performanceHint": "A verificação completa usa até dois processos e pode consumir mais memória. Normalmente cada arquivo tem um limite de 60 segundos; arquivos que ultrapassam esse tempo são informados como não verificados completamente.",
+      "cacheSummary": "Resultados limpos de {count} arquivos foram reutilizados após verificar o conteúdo e a versão da base de assinaturas.",
       "denied": "Sem permissão para ler {folders}, então não foram verificados. Você pode permitir o OpenNavo em Ajustes do Sistema → Privacidade e Segurança → Arquivos e Pastas",
       "folders": {
         "downloads": "Downloads",
@@ -2427,11 +2477,7 @@
         "tooLarge": "{count} arquivo passa do limite de verificação e não foi verificado por completo | {count} arquivos passam do limite de verificação e não foram verificados por completo",
         "unreadable": "Não foi possível ler {count} arquivo (sem permissão, criptografado ou em um formato sem suporte) | Não foi possível ler {count} arquivos (sem permissão, criptografados ou em um formato sem suporte)",
         "excluded": "{count} arquivo está excluído | {count} arquivos estão excluídos"
-      },
-      "forceLabel": "Verificar todos os arquivos novamente",
-      "forceHint": "Não reutiliza resultados limpos anteriores. Neste modo, a verificação completa permite até 5 minutos por arquivo.",
-      "performanceHint": "A verificação completa usa até dois processos e pode consumir mais memória. Normalmente cada arquivo tem um limite de 60 segundos; arquivos que ultrapassam esse tempo são informados como não verificados completamente.",
-      "cacheSummary": "Resultados limpos de {count} arquivos foram reutilizados após verificar o conteúdo e a versão da base de assinaturas."
+      }
     },
     "findings": {
       "title": "Ameaças encontradas ({count}) | Ameaças encontradas ({count})",

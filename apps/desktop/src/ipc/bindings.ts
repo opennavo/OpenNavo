@@ -95,6 +95,10 @@ export const commands = {
 	fanRestoreLast: () => typedError<FanState[], AppError>(__TAURI_INVOKE("fan_restore_last")),
 	cleanupScan: (requestId: string, categories: CleanupCategory[] | null) => typedError<CleanupReport, AppError>(__TAURI_INVOKE("cleanup_scan", { requestId, categories })),
 	cleanupCancel: (requestId: string) => typedError<null, AppError>(__TAURI_INVOKE("cleanup_cancel", { requestId })),
+	/**
+	 *  Clean the chosen items after the user allows it in OpenNavo's confirmation window; the queued
+	 *  task is bound to the exact list that window showed.
+	 */
 	cleanupExecute: (reportId: string, itemIds: string[]) => typedError<Task, AppError>(__TAURI_INVOKE("cleanup_execute", { reportId, itemIds })),
 	cleanupReveal: (reportId: string, itemId: string) => typedError<null, AppError>(__TAURI_INVOKE("cleanup_reveal", { reportId, itemId })),
 	cleanupSummary: () => typedError<CleanupSummary, AppError>(__TAURI_INVOKE("cleanup_summary")),
@@ -112,9 +116,20 @@ export const commands = {
 	uninstallPlan: (requestId: string, appIds: string[]) => typedError<UninstallPlan, AppError>(__TAURI_INVOKE("uninstall_plan", { requestId, appIds })),
 	uninstallPlanCancel: (requestId: string) => typedError<null, AppError>(__TAURI_INVOKE("uninstall_plan_cancel", { requestId })),
 	uninstallReveal: (planId: string, itemId: string) => typedError<null, AppError>(__TAURI_INVOKE("uninstall_reveal", { planId, itemId })),
+	/**
+	 *  Uninstall after the user allows it in OpenNavo's confirmation window; every queued task is bound
+	 *  to the exact items that window listed.
+	 */
 	uninstallExecute: (planId: string, choices: UninstallChoice[], mode: DeleteMode) => typedError<Task[], AppError>(__TAURI_INVOKE("uninstall_execute", { planId, choices, mode })),
+	/**
+	 *  Retry a failed Homebrew uninstall that had no plan (the Full Disk Access prompt, history), by
+	 *  task id only: Rust rebuilds its options from the stored task, asks in OpenNavo's confirmation
+	 *  window, and queues it only if that task still yields the same plan.
+	 */
+	uninstallRetry: (taskId: string) => typedError<Task, AppError>(__TAURI_INVOKE("uninstall_retry", { taskId })),
 	uninstallRestore: (taskId: string) => typedError<RestoreResult, AppError>(__TAURI_INVOKE("uninstall_restore", { taskId })),
-	uninstallPurge: (taskId: string) => typedError<number, AppError>(__TAURI_INVOKE("uninstall_purge", { taskId })),
+	/**  Delete these uninstalls' items from the Trash for good, after one confirmation for the batch. */
+	uninstallPurge: (taskIds: string[]) => typedError<number, AppError>(__TAURI_INVOKE("uninstall_purge", { taskIds })),
 	appInfo: () => typedError<AppInfo, AppError>(__TAURI_INVOKE("app_info")),
 	masStatus: () => typedError<MasStatus, AppError>(__TAURI_INVOKE("mas_status")),
 	masSearch: (term: string, limit: number) => typedError<MasApp[], AppError>(__TAURI_INVOKE("mas_search", { term, limit })),
@@ -206,7 +221,7 @@ export const commands = {
 	mcpConfirmGet: () => typedError<{
 	/**  One-time id the window answers with. */
 	id: string,
-	/**  `install`, `uninstall` or `installCollection`. */
+	/**  `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`, `brewUninstall`. */
 	action: string,
 	name: string,
 	/**  Catalog target (`cask/iina`) or the app path. */
@@ -223,7 +238,7 @@ export const commands = {
 	claimedName: string | null,
 	/**  Milliseconds until Allow is accepted. */
 	allowAfterMs: number,
-	/**  Who asked: `mcp` (an AI app over Local MCP) or `deepLink` (an opennavo:// web link). */
+	/**  Who asked: `mcp` (an AI app over Local MCP), `deepLink` (an opennavo:// web link) or `app` (OpenNavo itself). */
 	origin: string,
 	/**
 	 *  The opennavo:// link that asked (deep links only). macOS hands the app only the URL, so
@@ -234,6 +249,10 @@ export const commands = {
 	items: ConfirmItemView[],
 	/**  How many of `items` will be queued; the rest are skipped with their reason. */
 	installCount: number,
+	/**  Total size of what is removed (`cleanup`, `uninstall`, `uninstallDelete`, `purge`). */
+	bytes: number | null,
+	/**  Something is deleted for good instead of moved to the Trash. */
+	permanent: boolean,
 } | null, AppError>(__TAURI_INVOKE("mcp_confirm_get")),
 	/**  Answer the open Local MCP confirmation once; only the confirmation window may answer. */
 	mcpConfirmAnswer: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("mcp_confirm_answer", { id, allow })),
@@ -257,7 +276,14 @@ export const commands = {
 	deeplinkInstallConfirm: (pendingId: string) => typedError<DeepLinkInstallResult, AppError>(__TAURI_INVOKE("deeplink_install_confirm", { pendingId })),
 	brewfileExport: (path: string, targets: TaskTarget[] | null) => typedError<number, AppError>(__TAURI_INVOKE("brewfile_export", { path, targets })),
 	brewfilePreview: (path: string) => typedError<BrewfilePreview, AppError>(__TAURI_INVOKE("brewfile_preview", { path })),
-	brewfileInstall: (targets: TaskTarget[]) => typedError<Task[], AppError>(__TAURI_INVOKE("brewfile_install", { targets })),
+	/**
+	 *  Install a Brewfile's ready casks after the user allows the whole list in OpenNavo's
+	 *  confirmation window. The file must still be the one `brewfile_preview` read (`digest`), and it
+	 *  is read and resolved again after Allow; any change refuses with `E_PLAN_CHANGED`.
+	 *  `decisions` carries the tap and adoption answers the main window already collected; they are
+	 *  part of the digest, and a tap nobody was asked about refuses the plan.
+	 */
+	brewfileInstall: (path: string, digest: string, decisions: BrewfileDecisions) => typedError<Task[], AppError>(__TAURI_INVOKE("brewfile_install", { path, digest, decisions })),
 	doctorRun: () => typedError<DoctorReport, AppError>(__TAURI_INVOKE("doctor_run")),
 	appOpen: (target: TaskTarget) => typedError<null, AppError>(__TAURI_INVOKE("app_open", { target })),
 	appReveal: (target: TaskTarget) => typedError<null, AppError>(__TAURI_INVOKE("app_reveal", { target })),
@@ -570,6 +596,17 @@ export type BrewInfo = {
 	version: string,
 };
 
+/**
+ *  What the user already decided in the main window for a Brewfile restore, as for a single install:
+ *  casks to adopt over an existing app, third-party taps they agreed to, and casks they declined
+ *  (a tap or an adoption they said no to). Part of the confirmed plan digest.
+ */
+export type BrewfileDecisions = {
+	adopt: string[],
+	taps: string[],
+	declined: string[],
+};
+
 export type BrewfileEntry = {
 	line: number,
 	raw: string,
@@ -586,6 +623,8 @@ export type BrewfilePreview = {
 	ready: number,
 	installed: number,
 	unsupported: number,
+	/**  SHA-256 of the file as read for this preview; `brewfile_install` refuses a file that changed since. */
+	digest: string,
 };
 
 export type BtmFormat = "v16" | "v18" | "unknown";
@@ -813,10 +852,15 @@ export type ConfirmItemView = {
 	/**  `cask/token`, plus ` [owner/tap]` for a third-party tap. */
 	target: string,
 	/**
-	 *  Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate` or `unsupported`;
-	 *  `None` when it will be installed.
+	 *  Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate`, `unsupported` or
+	 *  `declined`; `None` when it will be installed.
 	 */
 	skip: string | null,
+	/**
+	 *  `adopt` when the install takes over an app that is already in /Applications;
+	 *  `cleanupGroup` when `name` is a group key the window translates (`temp`, `trash`, `installers`, `logs`).
+	 */
+	note: string | null,
 };
 
 /**
@@ -1494,7 +1538,7 @@ export type MatchReason = "app_bundle" | "brew_uninstall" | "zap_rule" | "bundle
 export type McpConfirmView = {
 	/**  One-time id the window answers with. */
 	id: string,
-	/**  `install`, `uninstall` or `installCollection`. */
+	/**  `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`, `brewUninstall`. */
 	action: string,
 	name: string,
 	/**  Catalog target (`cask/iina`) or the app path. */
@@ -1511,7 +1555,7 @@ export type McpConfirmView = {
 	claimedName: string | null,
 	/**  Milliseconds until Allow is accepted. */
 	allowAfterMs: number,
-	/**  Who asked: `mcp` (an AI app over Local MCP) or `deepLink` (an opennavo:// web link). */
+	/**  Who asked: `mcp` (an AI app over Local MCP), `deepLink` (an opennavo:// web link) or `app` (OpenNavo itself). */
 	origin: string,
 	/**
 	 *  The opennavo:// link that asked (deep links only). macOS hands the app only the URL, so
@@ -1522,6 +1566,10 @@ export type McpConfirmView = {
 	items: ConfirmItemView[],
 	/**  How many of `items` will be queued; the rest are skipped with their reason. */
 	installCount: number,
+	/**  Total size of what is removed (`cleanup`, `uninstall`, `uninstallDelete`, `purge`). */
+	bytes: number | null,
+	/**  Something is deleted for good instead of moved to the Trash. */
+	permanent: boolean,
 };
 
 /**  Broker status surfaced by `mcp_status`. */
@@ -2301,6 +2349,12 @@ export type TaskOptions = {
 	rollbackOf?: string | null,
 	/**  Uninstall only: remove exactly `item_ids`, without the plan's required items (Local MCP). */
 	onlySelected?: boolean,
+	/**
+	 *  Cleanup and uninstall only: digest of the plan the user allowed in the confirmation window.
+	 *  Set by Rust when the task is queued and checked again before anything is removed; the
+	 *  generic task commands refuse it from the UI.
+	 */
+	planDigest?: string | null,
 };
 
 export type TaskPhase = "scanning" | "preparing" | "fetching" | "downloading" | "installing" | "linking" | "cleaning" | "uninstalling" | "updating" | "finishing";

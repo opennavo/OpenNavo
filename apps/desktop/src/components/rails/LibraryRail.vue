@@ -35,6 +35,7 @@ const toasts = useToasts();
 const { errorText } = usePackageState();
 
 const restoreOpen = ref(false);
+const previewPath = ref<string | null>(null);
 const preview = ref<BrewfilePreview | null>(null);
 
 async function attempt<T>(operation: Promise<T>): Promise<T | undefined> {
@@ -110,6 +111,7 @@ async function restoreBrewfile() {
   const result = await attempt(unwrap(commands.brewfilePreview(path)));
   if (!result) return;
   preview.value = result;
+  previewPath.value = path;
   restoreOpen.value = true;
 }
 </script>
@@ -188,7 +190,7 @@ async function restoreBrewfile() {
         </div>
       </OnCard>
 
-      <BrewfileRestore v-model:open="restoreOpen" :preview="preview" />
+      <BrewfileRestore v-model:open="restoreOpen" :preview="preview" :path="previewPath" />
     </OnRailPanel>
   </PermissionGate>
 </template>

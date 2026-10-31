@@ -3,6 +3,7 @@ import { IpcError } from '@/ipc/client';
 import { updateChallenge, updateErrorKey } from '@/ipc/updateErrors';
 import { useUpdateReviewConfirmStore } from './updateReviewConfirm';
 import { retryOptions } from './permissionPrompt';
+import { confirmationRefused } from '@/ipc/confirmation';
 import { useToasts } from '@/composables/useToasts';
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
@@ -270,6 +271,55 @@ export const useTasksStore = defineStore('tasks', () => {
     return result;
   }
 
+  /**
+   * The main window's install checks for one Homebrew target: an app Homebrew already manages refreshes the lists
+   * and is skipped; a third-party tap asks every time; an app already in /Applications asks before adopting it.
+   * `null` when the target is skipped or the user said no.
+   */
+  async function installConsent(
+    target: TaskTarget,
+    trigger: TaskTrigger
+  ): Promise<{ adopt: boolean; tap: string | null } | null> {
+    const check = await unwrap(commands.installPreflight(target));
+    if (check.status === 'managed') {
+      await useLibraryStore().refresh();
+      await useUpdatesStore().load();
+      return null;
+    }
+    // Homebrew has not reviewed third-party taps; installing from one is the user's call every time.
+    if (check.tap) {
+      if (trigger === 'schedule') return null;
+      if (!(await useTapConfirmStore().ask({ name: check.name, tap: check.tap }))) return null;
+    }
+    let adopt = false;
+    if (check.status === 'conflict' || check.status === 'blocked') {
+      if (trigger === 'schedule') return null;
+      adopt = await useInstallConfirmStore().ask(check);
+      if (!adopt) return null;
+    }
+    return { adopt, tap: check.tap };
+  }
+
+  /**
+   * Retry a failed task with its original arguments. A failed Homebrew uninstall goes back to Rust by task id: it
+   * rebuilds the options (adding force after a Full Disk Access failure) and asks in OpenNavo's confirmation window.
+   * `null` when the user said no there.
+   */
+  async function retry(task: Task): Promise<Task | null> {
+    // Like every retry, no permission gate here: the failure prompt is the one that asked for the permission.
+    if (task.op === 'uninstall' && !task.options.planId) {
+      try {
+        const again = await unwrap(commands.uninstallRetry(task.id));
+        applyUpdate(again);
+        return again;
+      } catch (cause) {
+        if (confirmationRefused(cause)) return null;
+        throw cause;
+      }
+    }
+    return enqueue(task.op, task.target, 'retry', retryOptions(task));
+  }
+
   let installTail: Promise<unknown> = Promise.resolve();
   const installing = new Map<string, Promise<Task | null>>();
   function install(target: TaskTarget, trigger: TaskTrigger, options: TaskOptions): Promise<Task | null> {
@@ -295,23 +345,9 @@ export const useTasksStore = defineStore('tasks', () => {
               applyUpdate(task);
               return task;
             }
-            const check = await unwrap(commands.installPreflight(target));
-            if (check.status === 'managed') {
-              await useLibraryStore().refresh();
-              await useUpdatesStore().load();
-              return null;
-            }
-            // Homebrew has not reviewed third-party taps; installing from one is the user's call every time.
-            if (check.tap) {
-              if (trigger === 'schedule') return null;
-              if (!(await useTapConfirmStore().ask({ name: check.name, tap: check.tap }))) return null;
-            }
-            let adopt = false;
-            if (check.status === 'conflict' || check.status === 'blocked') {
-              if (trigger === 'schedule') return null;
-              adopt = await useInstallConfirmStore().ask(check);
-              if (!adopt) return null;
-            }
+            const consent = await installConsent(target, trigger);
+            if (!consent) return null;
+            const { adopt } = consent;
             // Old task arguments or caller-supplied adopt cannot replace consent for this action.
             if (!(await requireTaskPermission('install', [target], trigger))) return null;
             const task = await unwrap(commands.taskEnqueue('install', target, { ...options, adopt }, trigger));
@@ -391,6 +427,8 @@ export const useTasksStore = defineStore('tasks', () => {
     appendLog,
     enqueue,
     enqueueMany,
+    installConsent,
+    retry,
     cancel,
     clearHistory
   };

@@ -493,10 +493,10 @@
     "repo": {
       "stars": "★",
       "starsBadge": "Stelle su GitHub: {count}",
+      "checked": "Dati del repository verificati il {date}.",
       "updated": "Aggiornato {days} giorno fa | Aggiornato {days} giorni fa",
       "unmaintained": "La manutenzione potrebbe essere terminata",
-      "archived": "Archiviato",
-      "checked": "Dati del repository verificati il {date}."
+      "archived": "Archiviato"
     },
     "deps": {
       "macos": "Requisiti",
@@ -886,12 +886,54 @@
     "webLink": "Un link web (opennavo://)",
     "source": "Origine",
     "collectionSummary": "{count} app: {install} verranno installate, {skip} saltate",
+    "own": {
+      "summary": "{count} elemento, {size} | {count} elementi, {size}",
+      "permanent": "Questi file non passano dal Cestino e non si potranno recuperare.",
+      "more": "E altro {count} | E altri {count}",
+      "brewfileInstall": {
+        "title": "Conferma l’installazione da un Brewfile",
+        "intro": "OpenNavo installerà le app elencate in questo Brewfile. Il file viene ricontrollato prima di metterle in coda.",
+        "badge": "Installa"
+      },
+      "cleanup": {
+        "title": "Conferma la pulizia",
+        "intro": "OpenNavo rimuoverà gli elementi qui sotto. Se qualcosa è cambiato dopo la scansione, non viene rimosso nulla.",
+        "badge": "Pulisci"
+      },
+      "uninstall": {
+        "title": "Conferma la disinstallazione",
+        "intro": "OpenNavo sposterà questi elementi nel Cestino. Puoi ripristinarli finché non lo svuoti.",
+        "badge": "Sposta nel Cestino"
+      },
+      "uninstallDelete": {
+        "title": "Conferma disinstallazione ed eliminazione",
+        "intro": "OpenNavo eliminerà subito questi elementi invece di spostarli nel Cestino.",
+        "badge": "Elimina"
+      },
+      "purge": {
+        "title": "Conferma l’eliminazione definitiva",
+        "intro": "OpenNavo eliminerà definitivamente questi elementi dal Cestino.",
+        "badge": "Elimina definitivamente"
+      },
+      "brewUninstall": {
+        "title": "Conferma la disinstallazione",
+        "intro": "OpenNavo disinstallerà questa app con Homebrew e riproverà.",
+        "badge": "Disinstalla"
+      },
+      "adopt": "Sostituisce l’app esistente",
+      "footer": {
+        "trash": "Puoi ripristinarli dal Cestino.",
+        "cleanup": "Gli elementi nel Cestino si possono ripristinare finché non lo svuoti; le pulizie tramite comando non si possono annullare.",
+        "brewfileInstall": "Le app vengono scaricate da Homebrew; un’app esistente viene sostituita solo se hai accettato di adottarla."
+      }
+    },
     "skip": {
       "disabled": "Disattivata, non aggiunta alla coda",
       "installed": "Già installata",
       "queued": "Già in coda",
       "duplicate": "Duplicata",
-      "unsupported": "Non supportata"
+      "unsupported": "Non supportata",
+      "declined": "Rifiutato"
     }
   },
   "settings": {
@@ -907,6 +949,60 @@
       "monitor": "Monitoraggio del sistema",
       "security": "Sicurezza",
       "mcp": "MCP locale"
+    },
+    "mcp": {
+      "enable": "Attiva MCP locale",
+      "enableHint": "Consente alle app di IA su questo Mac, come Claude Desktop, Cursor e Codex, di cercare app e leggere l’elenco delle app installate. Disattivato per impostazione predefinita; finché è disattivato non viene accettata alcuna connessione.",
+      "write": "Consenti installazione e disinstallazione",
+      "writeHint": "Le app di IA possono solo chiederlo. Non viene eseguito nulla finché non fai clic su Consenti in OpenNavo.",
+      "stillOn": "Ancora attivo",
+      "offFailed": "Impossibile disattivare MCP locale. È ancora attivo e le app di IA possono ancora connettersi. Riprova.",
+      "writeOffFailed": "Impossibile disattivare installazione e disinstallazione. Sono ancora consentite. Riprova.",
+      "changeFailed": "Impossibile modificare MCP locale. Riprova.",
+      "config": "Configurazione del client",
+      "configHint": "Incollala nelle impostazioni MCP della tua app di IA. Punta alla posizione attuale di OpenNavo.",
+      "copy": "Copia configurazione",
+      "copied": "Configurazione di {client} copiata",
+      "copyFailed": "Impossibile copiare la configurazione.",
+      "moved": "OpenNavo è stato spostato dopo che hai copiato la configurazione. Copiala di nuovo perché le tue app di IA possano ancora trovarlo.",
+      "notRunning": "MCP locale è attivo ma non è in esecuzione, quindi le app di IA non possono connettersi. Disattivalo e riattivalo per riprovare.",
+      "statusFailed": "Impossibile leggere lo stato di MCP locale.",
+      "movedClients": "Punta ancora alla vecchia posizione: {clients}",
+      "pathUnavailable": "Impossibile trovare dove è installato OpenNavo, quindi non c’è nessuna configurazione da copiare.",
+      "audit": {
+        "title": "Registro delle richieste di scrittura",
+        "hint": "Richieste di installazione e disinstallazione dalle app di IA. Conservate solo su questo Mac per 90 giorni.",
+        "view": "Visualizza",
+        "clear": "Cancella",
+        "empty": "Nessuna richiesta di scrittura per ora.",
+        "loadFailed": "Impossibile leggere il registro.",
+        "clearTitle": "Cancellare il registro delle richieste di scrittura?",
+        "clearDescription": "Tutte le richieste registrate verranno eliminate. L’operazione non si può annullare.",
+        "clearConfirm": "Cancella",
+        "cleared": "Registro cancellato",
+        "clearFailed": "Impossibile cancellare il registro.",
+        "install": "Installazione",
+        "uninstall": "Spostamento nel Cestino",
+        "unsigned": "Non firmato · {path}",
+        "unknownCaller": "Processo sconosciuto",
+        "mayComeFrom": "Potrebbe provenire da: {name} (non verificato)",
+        "claims": "Si presenta come: {name}",
+        "result": "Risultato: {result}",
+        "noResult": "Nessun risultato registrato",
+        "decisions": {
+          "allowed": "Consentita",
+          "denied": "Negata",
+          "timedOut": "Nessuna risposta in tempo",
+          "invalidated": "Annullata",
+          "rejected": "Rifiutata senza chiedere"
+        }
+      },
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Altro (JSON)"
+      }
     },
     "general": {
       "followSystem": "Lingua di sistema (attuale: {language})",
@@ -1007,61 +1103,7 @@
       "catalog": "Catalogo locale: {count} pacchetto, sincronizzato {time} | Catalogo locale: {count} pacchetti, sincronizzato {time}",
       "sync": "Sincronizza ora"
     },
-    "saved": "Salvato",
-    "mcp": {
-      "enable": "Attiva MCP locale",
-      "enableHint": "Consente alle app di IA su questo Mac, come Claude Desktop, Cursor e Codex, di cercare app e leggere l’elenco delle app installate. Disattivato per impostazione predefinita; finché è disattivato non viene accettata alcuna connessione.",
-      "write": "Consenti installazione e disinstallazione",
-      "writeHint": "Le app di IA possono solo chiederlo. Non viene eseguito nulla finché non fai clic su Consenti in OpenNavo.",
-      "stillOn": "Ancora attivo",
-      "offFailed": "Impossibile disattivare MCP locale. È ancora attivo e le app di IA possono ancora connettersi. Riprova.",
-      "writeOffFailed": "Impossibile disattivare installazione e disinstallazione. Sono ancora consentite. Riprova.",
-      "changeFailed": "Impossibile modificare MCP locale. Riprova.",
-      "config": "Configurazione del client",
-      "configHint": "Incollala nelle impostazioni MCP della tua app di IA. Punta alla posizione attuale di OpenNavo.",
-      "copy": "Copia configurazione",
-      "copied": "Configurazione di {client} copiata",
-      "copyFailed": "Impossibile copiare la configurazione.",
-      "moved": "OpenNavo è stato spostato dopo che hai copiato la configurazione. Copiala di nuovo perché le tue app di IA possano ancora trovarlo.",
-      "notRunning": "MCP locale è attivo ma non è in esecuzione, quindi le app di IA non possono connettersi. Disattivalo e riattivalo per riprovare.",
-      "statusFailed": "Impossibile leggere lo stato di MCP locale.",
-      "movedClients": "Punta ancora alla vecchia posizione: {clients}",
-      "pathUnavailable": "Impossibile trovare dove è installato OpenNavo, quindi non c’è nessuna configurazione da copiare.",
-      "clients": {
-        "claude": "Claude Desktop",
-        "cursor": "Cursor",
-        "codex": "Codex (TOML)",
-        "generic": "Altro (JSON)"
-      },
-      "audit": {
-        "title": "Registro delle richieste di scrittura",
-        "hint": "Richieste di installazione e disinstallazione dalle app di IA. Conservate solo su questo Mac per 90 giorni.",
-        "view": "Visualizza",
-        "clear": "Cancella",
-        "empty": "Nessuna richiesta di scrittura per ora.",
-        "loadFailed": "Impossibile leggere il registro.",
-        "clearTitle": "Cancellare il registro delle richieste di scrittura?",
-        "clearDescription": "Tutte le richieste registrate verranno eliminate. L’operazione non si può annullare.",
-        "clearConfirm": "Cancella",
-        "cleared": "Registro cancellato",
-        "clearFailed": "Impossibile cancellare il registro.",
-        "install": "Installazione",
-        "uninstall": "Spostamento nel Cestino",
-        "unsigned": "Non firmato · {path}",
-        "unknownCaller": "Processo sconosciuto",
-        "mayComeFrom": "Potrebbe provenire da: {name} (non verificato)",
-        "claims": "Si presenta come: {name}",
-        "result": "Risultato: {result}",
-        "noResult": "Nessun risultato registrato",
-        "decisions": {
-          "allowed": "Consentita",
-          "denied": "Negata",
-          "timedOut": "Nessuna risposta in tempo",
-          "invalidated": "Annullata",
-          "rejected": "Rifiutata senza chiedere"
-        }
-      }
-    }
+    "saved": "Salvato"
   },
   "mirrors": {
     "official": "Fonte ufficiale",
@@ -1370,6 +1412,13 @@
     "E_MAS_OTHER_ACCOUNT": "Questa app è stata acquistata con un altro account Apple. Aggiornala nell’App Store",
     "E_MAS_REGION": "Questa app non è disponibile nella regione attuale dello store",
     "E_MAS_RATE_LIMITED": "Troppe richieste all’App Store. Riprova tra un minuto",
+    "E_UPDATE_DIGEST": "La dimensione o il digest del file non corrisponde al manifesto. Nulla è stato installato",
+    "E_UPDATE_SIGNATURE": "La firma del codice dell’aggiornamento non è valida. Nulla è stato installato",
+    "E_UPDATE_FEED_SIGNATURE": "La verifica della firma dell’archivio dell’editore è fallita. Nulla è stato installato",
+    "E_UPDATE_IDENTITY": "L’identificatore del pacchetto non corrisponde all’app di destinazione. Nulla è stato installato",
+    "E_UPDATE_CHANGED": "L’app o i file sono cambiati dopo la verifica. Cerca nuovamente gli aggiornamenti",
+    "E_UPDATE_NOT_NEWER": "La versione di destinazione non è più recente. Scegli Reinstalla dal menu dell’app installata",
+    "E_UPDATE_CONFIRMATION": "L’installazione richiede conferma. Controlla l’avviso o riprova",
     "E_UPDATE_VERIFY_UNAVAILABLE": "macOS non ha potuto completare la verifica dello sviluppatore; aggiornamento non installato. Riprova più tardi",
     "E_UPDATE_INTEGRITY": "L’aggiornamento scaricato non ha superato la verifica di integrità e non è stato installato",
     "E_UPDATE_PREPARE": "Impossibile preparare i file di aggiornamento. Controlla lo spazio su disco e i permessi di accesso, poi riprova",
@@ -1417,6 +1466,7 @@
     "E_CLEANUP_OVERSIZE": "Pulizia interrotta: la selezione è più grande di quanto mostrato, non è stato rimosso nulla oltre la dimensione mostrata. Ripeti la scansione e riprova.",
     "E_CLEANUP_SIZE_UNKNOWN": "La dimensione di questo elemento non è stata misurata del tutto, quindi non può essere pulito. Ripeti la scansione e riprova.",
     "E_PLAN_EXPIRED": "I file sono cambiati. Ripeti la scansione",
+    "E_PLAN_CHANGED": "L’elenco è cambiato dopo che l’hai controllato, quindi non è stato eseguito nulla. Controllalo di nuovo",
     "E_SCAN_CANCELED": "Scansione annullata",
     "E_RESTORE_UNAVAILABLE": "Alcuni file non sono più nel Cestino e non è stato possibile ripristinarli",
     "E_TRASH_FAILED": "Impossibile spostare nel Cestino",
@@ -1458,14 +1508,7 @@
     "E_FW_BLOCKLIST_FORMAT": "Nessun dominio o IP utilizzabile trovato nel file",
     "E_FW_BLOCKLIST_TOO_LARGE": "Elenco di blocco troppo grande: massimo 50 MB e un milione di voci",
     "E_FW_BLOCKLIST_LIMIT": "Limite degli elenchi di blocco raggiunto: massimo 32 elenchi e 256 MB in totale",
-    "E_FW_BLOCKLIST_FILE": "Impossibile trovare o leggere il file",
-    "E_UPDATE_DIGEST": "La dimensione o il digest del file non corrisponde al manifesto. Nulla è stato installato",
-    "E_UPDATE_SIGNATURE": "La firma del codice dell’aggiornamento non è valida. Nulla è stato installato",
-    "E_UPDATE_FEED_SIGNATURE": "La verifica della firma dell’archivio dell’editore è fallita. Nulla è stato installato",
-    "E_UPDATE_IDENTITY": "L’identificatore del pacchetto non corrisponde all’app di destinazione. Nulla è stato installato",
-    "E_UPDATE_CHANGED": "L’app o i file sono cambiati dopo la verifica. Cerca nuovamente gli aggiornamenti",
-    "E_UPDATE_NOT_NEWER": "La versione di destinazione non è più recente. Scegli Reinstalla dal menu dell’app installata",
-    "E_UPDATE_CONFIRMATION": "L’installazione richiede conferma. Controlla l’avviso o riprova"
+    "E_FW_BLOCKLIST_FILE": "Impossibile trovare o leggere il file"
   },
   "installConfirm": {
     "title": "Gestire l’app {name} esistente?",
@@ -1620,6 +1663,7 @@
     },
     "notices": {
       "rescanned": "I file sono cambiati. Scansione ripetuta.",
+      "planChanged": "L’elenco è cambiato dopo la conferma, quindi non è stato rimosso nulla. È stato scansionato di nuovo; controllalo e conferma ancora.",
       "appManagement": "Consenti prima a OpenNavo di gestire le app per eliminare quelle non installate con Homebrew.",
       "incomplete": "Senza Accesso completo al disco non è stato possibile verificare {count} posizione: {paths}. Attivalo per una pulizia più completa. | Senza Accesso completo al disco non è stato possibile verificare {count} posizioni: {paths}. Attivalo per una pulizia più completa.",
       "running": "{names} è in esecuzione e verrà chiusa prima della disinstallazione. | {names} sono in esecuzione e verranno chiuse prima della disinstallazione.",
@@ -1788,6 +1832,7 @@
     },
     "notices": {
       "rescanned": "Risultati aggiornati. Conferma di nuovo.",
+      "planChanged": "L’elenco è cambiato dopo la conferma, quindi non è stato rimosso nulla. È stato scansionato di nuovo; controllalo e conferma ancora.",
       "services": "{count} elemento in background di app eliminate ({names}) viene ancora caricato all’avvio. Causa solo errori e consumo energetico; si consiglia la pulizia. | {count} elementi in background di app eliminate ({names}) vengono ancora caricati all’avvio. Causano solo errori e consumo energetico; si consiglia la pulizia.",
       "incomplete": "Senza Accesso completo al disco queste posizioni non sono state verificate: {paths}. Attivalo per trovare altri file."
     },
@@ -1941,7 +1986,8 @@
       "installers": "Download e Scrivania",
       "xcodeArchive": "Archivi Xcode",
       "deviceBackup": "Backup del dispositivo",
-      "deviceBackupModel": "Backup del dispositivo · {model}"
+      "deviceBackupModel": "Backup del dispositivo · {model}",
+      "logs": "Log e rapporti sugli arresti anomali"
     },
     "skipReasonsBy": {
       "running": "{names} in esecuzione; chiudi per pulire",

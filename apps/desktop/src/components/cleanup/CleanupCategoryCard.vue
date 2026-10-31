@@ -93,8 +93,11 @@ function skipReason(group: SkippedGroup) {
 /** These categories hold one folder-level group (the temp folder, the Trash, Downloads and Desktop) that Rust names
  *  by key; the title comes from here. */
 const FOLDER_GROUPS: readonly CleanupCategory[] = ['temp', 'trash', 'installers'];
+/** Rust names a few groups by key instead of by app: the log folders nobody owns (`logs`). */
+const KEY_TITLES: readonly string[] = ['logs'];
+const keyTitle = (title: string) => (KEY_TITLES.includes(title) ? t(`cleanup.groups.${title}`) : title);
 const title = (group: CleanupGroup) =>
-  FOLDER_GROUPS.includes(props.category.key) ? t(`cleanup.groups.${props.category.key}`) : group.title;
+  FOLDER_GROUPS.includes(props.category.key) ? t(`cleanup.groups.${props.category.key}`) : keyTitle(group.title);
 const groupSize = (group: CleanupGroup) => format(group.items.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0));
 /** Leftovers show how long ago the app's files last changed and whether its background items still load. */
 function subtitle(group: CleanupGroup) {
@@ -243,7 +246,7 @@ const entry = (group: CleanupGroup, item: CleanupGroup['items'][number]): Cleanu
           class="flex items-center gap-10px py-5px pl-28px text-12px text-ink-tertiary"
         >
           <OnAppIcon v-bind="icon({ appId: group.appId, bundleId: null, title: group.title })" :size="20" />
-          <span class="text-ink-secondary">{{ group.title }}</span>
+          <span class="text-ink-secondary">{{ keyTitle(group.title) }}</span>
           <span class="min-w-0 flex-1 truncate">{{ skipReason(group) }}</span>
           <span v-if="group.bytes" class="shrink-0 tabular-nums">{{ format(group.bytes) }}</span>
         </div>

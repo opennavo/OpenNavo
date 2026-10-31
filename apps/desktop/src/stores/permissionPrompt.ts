@@ -11,14 +11,13 @@ export const PERMISSION_ERRORS: Readonly<Record<string, GuidePane>> = {
 };
 
 /**
- * Retry arguments: an uninstall blocked by Full Disk Access already moved the app, leaving a Caskroom backup; add force to finish (06 §6.3). Otherwise retain the original arguments.
+ * Retry arguments: the original ones, plus the verification challenge for a direct app update. A failed uninstall is
+ * retried by Rust from its task id (`tasks.retry`), which adds force after a Full Disk Access failure (06 §6.3).
  */
 export function retryOptions(task: Task): TaskOptions {
   if (task.op === 'upgrade' && task.target?.kind === 'app')
     return { ...task.options, verification: updateChallenge(task.error) };
-  return !task.options.planId && task.op === 'uninstall' && task.error?.code === 'E_FULL_DISK_ACCESS'
-    ? { ...task.options, force: true }
-    : task.options;
+  return task.options;
 }
 
 /** Consumed plans require a fresh scan and user confirmation, including after restart. */

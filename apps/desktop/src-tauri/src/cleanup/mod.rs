@@ -172,6 +172,7 @@ impl Engine {
                 != (TaskOptions {
                     plan_id: Some(id.into()),
                     item_ids: options.item_ids.clone(),
+                    plan_digest: options.plan_digest.clone(),
                     ..Default::default()
                 })
         {
@@ -190,8 +191,84 @@ impl Engine {
                 "cleanup_size_unknown",
             ));
         }
+        // Checked when the task is queued and again when it starts, before anything is removed.
+        if let Some(expected) = &options.plan_digest
+            && *expected != selection_digest(&entry, ids)
+        {
+            return Err(crate::destructive::plan_changed());
+        }
         Ok(entry)
     }
+    /// Digest and window content of a cleanup the user is about to confirm: every selected item,
+    /// in order, with its path, kind, action and size.
+    pub fn confirm_plan(
+        &self,
+        report_id: &str,
+        ids: &[String],
+    ) -> Result<(String, crate::confirmation::McpConfirmView), AppError> {
+        let entry = self.cached(report_id, uninstall::now())?;
+        let unique: std::collections::BTreeSet<_> = ids.iter().collect();
+        if ids.is_empty()
+            || unique.len() != ids.len()
+            || ids.iter().any(|id| !entry.items.contains_key(id))
+        {
+            return Err(AppError::new("E_INVALID_ARG", "item_ids"));
+        }
+        let mut bytes = 0u64;
+        let mut permanent = false;
+        let mut rows = Vec::new();
+        for id in ids {
+            let item = &entry.items[id];
+            bytes = bytes.saturating_add(item.item.size_bytes.unwrap_or(0));
+            permanent |= item.item.delete_mode == DeleteMode::Delete;
+            if rows.len() < crate::destructive::MAX_LISTED_ITEMS {
+                let target = match (&item.item.kind, &item.item.command) {
+                    (CleanupItemKind::Command, Some(command)) => command.clone(),
+                    _ => item.item.path.clone(),
+                };
+                let mut row = crate::confirmation::ConfirmItemView::row(&item.title, &target);
+                // Groups Rust names by key (see collect.rs); the window shows them translated.
+                if matches!(
+                    item.title.as_str(),
+                    "temp" | "trash" | "installers" | "logs"
+                ) {
+                    row.note = Some("cleanupGroup".into());
+                }
+                rows.push(row);
+            }
+        }
+        let mut view = crate::confirmation::McpConfirmView::app_action(
+            "cleanup",
+            "",
+            rows,
+            ids.len(),
+            Some(bytes),
+        );
+        // Items cleaned with "delete" never reach the Trash; the window says so.
+        view.permanent = permanent;
+        Ok((selection_digest(&entry, ids), view))
+    }
+    /// Queue a confirmed cleanup: under the same lock as [`Self::enqueue`], the selection must still
+    /// have the digest the user allowed.
+    pub fn enqueue_confirmed(
+        &self,
+        queue: &TaskQueue,
+        report_id: &str,
+        ids: Vec<String>,
+        approved: &str,
+    ) -> Result<Task, AppError> {
+        let _operation = self.operation.lock().map_err(poison)?;
+        let entry = self.cached(report_id, uninstall::now())?;
+        if ids.iter().any(|id| !entry.items.contains_key(id))
+            || selection_digest(&entry, &ids) != approved
+        {
+            return Err(crate::destructive::plan_changed());
+        }
+        self.enqueue_locked(queue, report_id, ids, approved.to_owned())
+    }
+    /// Unconfirmed entry kept `pub` only for the integration tests in `tests/` (a separate crate);
+    /// no IPC command calls it. App commands use the `*_confirmed` path.
+    #[doc(hidden)]
     pub fn enqueue(
         &self,
         queue: &TaskQueue,
@@ -199,6 +276,20 @@ impl Engine {
         ids: Vec<String>,
     ) -> Result<Task, AppError> {
         let _operation = self.operation.lock().map_err(poison)?;
+        let entry = self.cached(report_id, uninstall::now())?;
+        if ids.iter().any(|id| !entry.items.contains_key(id)) {
+            return Err(AppError::new("E_INVALID_ARG", "item_ids"));
+        }
+        let digest = selection_digest(&entry, &ids);
+        self.enqueue_locked(queue, report_id, ids, digest)
+    }
+    fn enqueue_locked(
+        &self,
+        queue: &TaskQueue,
+        report_id: &str,
+        ids: Vec<String>,
+        digest: String,
+    ) -> Result<Task, AppError> {
         let mut consumed = self.consumed.lock().map_err(poison)?;
         if consumed.contains(report_id) {
             return Err(cached_error());
@@ -212,6 +303,7 @@ impl Engine {
             TaskOptions {
                 plan_id: Some(report_id.into()),
                 item_ids: Some(ids),
+                plan_digest: Some(digest),
                 ..Default::default()
             },
             TaskTrigger::Manual,
@@ -268,6 +360,25 @@ fn summary(report: &CleanupReport) -> CleanupSummary {
             })
             .collect(),
     }
+}
+/// Digest of the items a cleanup removes, in order: the cached scan result of each (path, kind,
+/// size, reason, action) and how it is removed.
+pub(crate) fn selection_digest(entry: &Entry, ids: &[String]) -> String {
+    let items: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            entry.items.get(id).map(|item| {
+                (
+                    id,
+                    &item.item,
+                    &item.title,
+                    format!("{:?}", item.action),
+                    format!("{:?}", item.docker_endpoint),
+                )
+            })
+        })
+        .collect();
+    crate::destructive::digest(&("cleanup", &entry.report.report_id, items))
 }
 pub(crate) fn reconcile(entry: &mut Entry) {
     for category in &mut entry.report.categories {
@@ -335,5 +446,144 @@ mod expiry_tests {
         );
         assert!(queue.active().unwrap().is_empty());
         assert!(queue.database.tasks().unwrap().is_empty());
+    }
+
+    fn queue_with_entry(temp: &tempfile::TempDir) -> std::sync::Arc<TaskQueue> {
+        let db = crate::db::Database::open(&temp.path().join("db.sqlite")).unwrap();
+        let queue = TaskQueue::new(
+            db,
+            Arc::new(std::sync::RwLock::new(Settings::default())),
+            temp.path().join("logs"),
+            temp.path().join("askpass"),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        let item = |id: &str, path: &str| EntryItem {
+            item: CleanupItem {
+                id: id.into(),
+                path: path.into(),
+                kind: CleanupItemKind::File,
+                command: None,
+                size_bytes: Some(10),
+                size_complete: true,
+                kept_open_files: 0,
+                modified_at: None,
+                reason: CleanupReason::LogFile,
+                selected: true,
+                delete_mode: DeleteMode::Trash,
+                needs_admin: false,
+                note: None,
+            },
+            owner: owner::Owner::default(),
+            title: "Logs".into(),
+            tree: None,
+            action: ItemAction::Path {
+                empty_only: false,
+                bootout: None,
+            },
+            docker_endpoint: None,
+        };
+        let report = CleanupReport {
+            report_id: "report".into(),
+            scanned_at: uninstall::now(),
+            expires_at: uninstall::now() + 600_000,
+            volume: CleanupVolume {
+                name: "synthetic".into(),
+                total_bytes: 0,
+                free_bytes: 0,
+            },
+            categories: vec![],
+            incomplete: vec![],
+        };
+        queue.cleanup_engine.reports.lock().unwrap().insert(
+            "report".into(),
+            Entry {
+                category_millis: BTreeMap::new(),
+                report,
+                items: BTreeMap::from([
+                    ("a".into(), item("a", "/Users/me/Library/Logs/a.log")),
+                    ("b".into(), item("b", "/Users/me/Library/Logs/b.log")),
+                ]),
+            },
+        );
+        queue
+    }
+
+    #[test]
+    fn a_confirmed_cleanup_runs_only_the_allowed_list() {
+        let temp = tempfile::tempdir().unwrap();
+        let queue = queue_with_entry(&temp);
+        let engine = &queue.cleanup_engine;
+        let (digest, view) = engine.confirm_plan("report", &["a".into()]).unwrap();
+        assert_eq!(view.origin, "app");
+        assert_eq!(view.action, "cleanup");
+        assert_eq!(view.items.len(), 1);
+        assert_eq!(view.items[0].target, "/Users/me/Library/Logs/a.log");
+        assert_eq!(
+            (view.install_count, view.bytes, view.permanent),
+            (1, Some(10), false)
+        );
+        // A different selection, or a forged digest, is not what the user allowed.
+        for (ids, approved) in [
+            (vec!["a".to_owned(), "b".to_owned()], digest.as_str()),
+            (vec!["b".to_owned()], digest.as_str()),
+            (vec!["a".to_owned()], "forged"),
+        ] {
+            assert_eq!(
+                engine
+                    .enqueue_confirmed(&queue, "report", ids, approved)
+                    .unwrap_err()
+                    .code,
+                "E_PLAN_CHANGED"
+            );
+        }
+        assert!(queue.database.tasks().unwrap().is_empty());
+        let task = engine
+            .enqueue_confirmed(&queue, "report", vec!["a".into()], &digest)
+            .unwrap();
+        assert_eq!(task.options.plan_digest.as_deref(), Some(digest.as_str()));
+    }
+
+    #[test]
+    fn a_cleanup_whose_plan_changed_after_it_was_queued_does_not_start() {
+        let temp = tempfile::tempdir().unwrap();
+        let queue = queue_with_entry(&temp);
+        let engine = &queue.cleanup_engine;
+        let (digest, _) = engine.confirm_plan("report", &["a".into()]).unwrap();
+        let task = engine
+            .enqueue_confirmed(&queue, "report", vec!["a".into()], &digest)
+            .unwrap();
+        engine
+            .validate_task(task.target.as_ref(), &task.options)
+            .unwrap();
+        // The cached item now points somewhere else: the task refuses before removing anything.
+        engine
+            .reports
+            .lock()
+            .unwrap()
+            .get_mut("report")
+            .unwrap()
+            .items
+            .get_mut("a")
+            .unwrap()
+            .item
+            .path = "/Users/me/Documents".into();
+        assert_eq!(
+            engine
+                .validate_task(task.target.as_ref(), &task.options)
+                .unwrap_err()
+                .code,
+            "E_PLAN_CHANGED"
+        );
+        // A task carrying a digest the user never allowed is refused when queued.
+        let mut forged = task.options.clone();
+        forged.plan_digest = Some("forged".into());
+        assert_eq!(
+            engine
+                .validate_task(task.target.as_ref(), &forged)
+                .unwrap_err()
+                .code,
+            "E_PLAN_CHANGED"
+        );
     }
 }

@@ -880,12 +880,54 @@ export default {
     webLink: '网页链接（opennavo://）',
     source: '来源',
     collectionSummary: '共 {count} 个应用：安装 {install} 个，跳过 {skip} 个',
+    own: {
+      summary: '{count} 项，共 {size}',
+      permanent: '这些文件不经过废纸篓，删除后无法恢复。',
+      more: '还有 {count} 项',
+      brewfileInstall: {
+        title: '确认从 Brewfile 安装',
+        intro: 'OpenNavo 将安装这个 Brewfile 里列出的应用。加入队列前会再核对一次文件。',
+        badge: '安装'
+      },
+      cleanup: {
+        title: '确认清理',
+        intro: 'OpenNavo 将删除下面这些项目。扫描后如果有变化，就什么都不删。',
+        badge: '清理'
+      },
+      uninstall: {
+        title: '确认卸载',
+        intro: 'OpenNavo 将把下面这些项目移到废纸篓。清空废纸篓之前都可以放回。',
+        badge: '移到废纸篓'
+      },
+      uninstallDelete: {
+        title: '确认卸载并直接删除',
+        intro: '下面这些项目会直接删除，不进废纸篓。',
+        badge: '直接删除'
+      },
+      purge: {
+        title: '确认从废纸篓彻底删除',
+        intro: 'OpenNavo 将从废纸篓彻底删除下面这些项目。',
+        badge: '彻底删除'
+      },
+      brewUninstall: {
+        title: '确认卸载',
+        intro: 'OpenNavo 将用 Homebrew 卸载这个应用，然后再试一次。',
+        badge: '卸载'
+      },
+      adopt: '接管已有的应用',
+      footer: {
+        trash: '移到废纸篓后可以放回。',
+        cleanup: '移到废纸篓的项目在清空前可以放回；命令类清理无法撤销。',
+        brewfileInstall: '应用会从 Homebrew 下载安装；已有的应用只有你同意接管时才会被替换。'
+      }
+    },
     skip: {
       disabled: '已停用，不加入队列',
       installed: '已安装',
       queued: '已在队列中',
       duplicate: '重复',
-      unsupported: '不支持'
+      unsupported: '不支持',
+      declined: '你已拒绝'
     }
   },
   settings: {
@@ -1421,6 +1463,7 @@ export default {
     E_CLEANUP_OVERSIZE: '清理已中止：选中的项目实际比显示的大，没有删除超出部分。请重新扫描后再试',
     E_CLEANUP_SIZE_UNKNOWN: '这一项的大小没有算完，不能清理。请重新扫描后再试',
     E_PLAN_EXPIRED: '文件有变化，请重新扫描',
+    E_PLAN_CHANGED: '清单在你确认后有变化，没有执行任何操作。请重新确认',
     E_SCAN_CANCELED: '已取消扫描',
     E_RESTORE_UNAVAILABLE: '有些文件已经不在废纸篓里，没能放回',
     E_TRASH_FAILED: '没能移到废纸篓',
@@ -1617,6 +1660,7 @@ export default {
     },
     notices: {
       rescanned: '文件有变化，已经重新扫描。',
+      planChanged: '清单在你确认后有变化，什么都没删。已经重新扫描，请再确认一次。',
       appManagement: '需要先允许 OpenNavo 管理 App，才能删除不是用 Homebrew 安装的 App。',
       incomplete: '没有「完全磁盘访问权限」，{count} 个位置没能检查：{paths}。开启后能清理得更干净。',
       running: '{names} 正在运行，卸载前会先退出。',
@@ -1786,6 +1830,7 @@ export default {
     },
     notices: {
       rescanned: '结果已更新，请再确认一次。',
+      planChanged: '清单在你确认后有变化，什么都没删。已经重新扫描，请再确认一次。',
       services: '已删除的 App（{names}）还有 {count} 个后台项目在开机时加载，只会报错、耗电，建议清理。',
       incomplete: '没有「完全磁盘访问权限」，这些位置没检查：{paths}。开启后能找到更多。'
     },
@@ -1941,7 +1986,8 @@ export default {
       installers: '下载和桌面',
       xcodeArchive: 'Xcode 归档',
       deviceBackup: '设备备份',
-      deviceBackupModel: '设备备份 · {model}'
+      deviceBackupModel: '设备备份 · {model}',
+      logs: '日志与崩溃报告'
     },
     skipReasonsBy: {
       running: '{names} 正在运行，退出后可以清理',

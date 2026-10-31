@@ -115,7 +115,7 @@ pub const ALLOW_ARM_DELAY: Duration = Duration::from_millis(1000);
 pub struct McpConfirmView {
     /// One-time id the window answers with.
     pub id: String,
-    /// `install`, `uninstall` or `installCollection`.
+    /// `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`, `brewUninstall`.
     pub action: String,
     pub name: String,
     /// Catalog target (`cask/iina`) or the app path.
@@ -132,7 +132,7 @@ pub struct McpConfirmView {
     pub claimed_name: Option<String>,
     /// Milliseconds until Allow is accepted.
     pub allow_after_ms: u32,
-    /// Who asked: `mcp` (an AI app over Local MCP) or `deepLink` (an opennavo:// web link).
+    /// Who asked: `mcp` (an AI app over Local MCP), `deepLink` (an opennavo:// web link) or `app` (OpenNavo itself).
     pub origin: String,
     /// The opennavo:// link that asked (deep links only). macOS hands the app only the URL, so
     /// there is no referring page to show.
@@ -141,6 +141,10 @@ pub struct McpConfirmView {
     pub items: Vec<ConfirmItemView>,
     /// How many of `items` will be queued; the rest are skipped with their reason.
     pub install_count: u32,
+    /// Total size of what is removed (`cleanup`, `uninstall`, `uninstallDelete`, `purge`).
+    pub bytes: Option<u64>,
+    /// Something is deleted for good instead of moved to the Trash.
+    pub permanent: bool,
 }
 
 /// One app of a collection confirmation, filtered for display.
@@ -150,9 +154,12 @@ pub struct ConfirmItemView {
     pub name: String,
     /// `cask/token`, plus ` [owner/tap]` for a third-party tap.
     pub target: String,
-    /// Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate` or `unsupported`;
-    /// `None` when it will be installed.
+    /// Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate`, `unsupported` or
+    /// `declined`; `None` when it will be installed.
     pub skip: Option<String>,
+    /// `adopt` when the install takes over an app that is already in /Applications;
+    /// `cleanupGroup` when `name` is a group key the window translates (`temp`, `trash`, `installers`, `logs`).
+    pub note: Option<String>,
 }
 
 impl McpConfirmView {
@@ -183,7 +190,38 @@ impl McpConfirmView {
             source: None,
             items: Vec::new(),
             install_count: 0,
+            bytes: None,
+            permanent: false,
         }
+    }
+
+    /// A destructive command of OpenNavo's own window (`brewfileInstall`, `cleanup`, `uninstall`,
+    /// `uninstallDelete`, `purge` or `brewUninstall`): the complete list of what runs, in order, and its total size.
+    pub fn app_action(
+        action: &str,
+        name: &str,
+        items: Vec<ConfirmItemView>,
+        install_count: usize,
+        bytes: Option<u64>,
+    ) -> Self {
+        Self {
+            origin: "app".into(),
+            items,
+            install_count: u32::try_from(install_count).unwrap_or(u32::MAX),
+            bytes,
+            permanent: matches!(action, "uninstallDelete" | "purge" | "brewUninstall"),
+            ..Self::new(action, name, "", None, None, None, None, None)
+        }
+        .without_empty_name(name)
+    }
+
+    /// OpenNavo's own requests have no target line, and some (cleanup, purge) no single name.
+    fn without_empty_name(mut self, name: &str) -> Self {
+        self.target = String::new();
+        if name.trim().is_empty() {
+            self.name = String::new();
+        }
+        self
     }
 
     /// A deep-link install of one app.
@@ -231,8 +269,20 @@ impl McpConfirmView {
     }
 }
 
+impl ConfirmItemView {
+    /// One row of a destructive confirmation: what it is and the path that is removed.
+    pub fn row(name: &str, target: &str) -> Self {
+        Self {
+            name: display_value(name),
+            target: display_value(target),
+            skip: None,
+            note: None,
+        }
+    }
+}
+
 impl ConfirmationListItem {
-    fn skip_reason(&self) -> Option<&'static str> {
+    pub(crate) fn skip_reason(&self) -> Option<&'static str> {
         if self.disabled {
             Some("disabled")
         } else if self.installed {
@@ -248,7 +298,7 @@ impl ConfirmationListItem {
         }
     }
 
-    fn view(&self) -> ConfirmItemView {
+    pub(crate) fn view(&self) -> ConfirmItemView {
         let identity = format!("{}/{}", self.kind, self.token);
         ConfirmItemView {
             name: display_value(&self.name),
@@ -259,6 +309,7 @@ impl ConfirmationListItem {
                     .map_or(identity.clone(), |tap| format!("{identity} [{tap}]")),
             ),
             skip: self.skip_reason().map(str::to_owned),
+            note: None,
         }
     }
 }
@@ -318,20 +369,45 @@ impl ConfirmationService {
         request: ConfirmationRequest,
         view: McpConfirmView,
     ) -> Result<ConfirmationGrant, AppError> {
+        let service = std::sync::Arc::clone(self);
+        self.confirm_prompt(
+            request,
+            view,
+            DIALOG_TIMEOUT,
+            |dialog_id, tall| confirm_window::open(app, service, dialog_id, tall),
+            || confirm_window::close(app),
+        )
+        .await
+    }
+
+    /// The window-independent part of [`Self::confirm_window`]: `open` shows the prompt, `close`
+    /// removes it. Tests drive the same prompt through [`Self::window_view`] and
+    /// [`Self::answer_window`] without creating a window.
+    pub(crate) async fn confirm_prompt(
+        self: &std::sync::Arc<Self>,
+        request: ConfirmationRequest,
+        view: McpConfirmView,
+        timeout: Duration,
+        open: impl FnOnce(u64, bool) -> Result<(), AppError>,
+        close: impl FnOnce(),
+    ) -> Result<ConfirmationGrant, AppError> {
         let pending = self.begin(request)?;
         let dialog_id = pending.id;
         let tall = !view.items.is_empty();
         let receiver = self.open_prompt(dialog_id, view)?;
         let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        let result = match confirm_window::open(app, std::sync::Arc::clone(self), dialog_id, tall) {
-            Ok(()) => self.wait_for_reply(pending, receiver, guard).await,
+        let result = match open(dialog_id, tall) {
+            Ok(()) => {
+                self.wait_for_reply_within(pending, receiver, guard, timeout)
+                    .await
+            }
             Err(error) => {
                 drop(guard);
                 Err(error)
             }
         };
         // Close before freeing the slot so a later request's window is never the one destroyed.
-        confirm_window::close(app);
+        close();
         self.release_prompt(dialog_id);
         result
     }
@@ -350,6 +426,7 @@ impl ConfirmationService {
         self.confirm_window(app, request, view).await
     }
 
+    #[cfg(test)]
     async fn wait_for_reply(
         &self,
         pending: PendingConfirmation,
@@ -679,6 +756,16 @@ impl ConfirmationService {
     fn prune_grants(state: &mut State) {
         let now = Instant::now();
         state.grants.retain(|_, grant| grant.expires_at > now);
+    }
+
+    /// Tests only: pretend the window has shown its prompt for longer than [`ALLOW_ARM_DELAY`].
+    #[cfg(test)]
+    pub(crate) fn test_arm(&self) {
+        if let Ok(mut state) = self.state.lock()
+            && let Some(prompt) = state.prompt.as_mut()
+        {
+            prompt.shown_at = Some(Instant::now() - ALLOW_ARM_DELAY);
+        }
     }
 
     #[cfg(test)]

@@ -760,7 +760,8 @@ impl Collector<'_> {
                         ..Default::default()
                     }
                 };
-                self.add(path, owner, "Logs".into(), CleanupReason::LogFile, Some(7))?;
+                // Named by key like temp, trash and installers; the window translates it.
+                self.add(path, owner, "logs".into(), CleanupReason::LogFile, Some(7))?;
             }
         }
         let root = self.engine.uninstall.roots.home.join(".npm/_logs");

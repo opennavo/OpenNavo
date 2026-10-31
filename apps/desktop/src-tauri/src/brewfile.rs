@@ -16,6 +16,12 @@ pub fn read(path: &Path) -> Result<String, AppError> {
     String::from_utf8(bytes).map_err(|_| AppError::new("E_INVALID_ARG", "brewfile_utf8"))
 }
 
+/// SHA-256 of the Brewfile text a preview or an install read.
+pub fn content_digest(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(content.as_bytes()))
+}
+
 fn without_comment(line: &str) -> String {
     let mut quote = None;
     let mut escaped = false;
@@ -56,6 +62,7 @@ pub fn parse(
         ready: 0,
         installed: 0,
         unsupported: 0,
+        digest: content_digest(content),
     };
     let mut seen = HashSet::new();
     for (number, line) in content.lines().enumerate() {
