@@ -125,3 +125,43 @@ export function repoMaintenanceStatus(
 export function repoSignalDays(signals: Pick<PackageRepoSignals, 'pushedAt'>, now: number): number | null {
   return signals.pushedAt ? repoAgeDays(signals.pushedAt, now) : null;
 }
+
+export interface PackageStarBadge {
+  /** Raw star count, for the full-number accessible label. */
+  stars: number;
+  /** Compact count from formatRepoStars, e.g. 1.2K or 1M. */
+  label: string;
+  /** https://github.com/<owner>/<repo> */
+  href: string;
+}
+
+function githubRepoUrl(value: unknown): string | undefined {
+  const raw = stringValue(value);
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com') return undefined;
+    const [owner, repo] = url.pathname.split('/').filter(Boolean);
+    return owner && repo ? `https://github.com/${owner}/${repo.replace(/\.git$/i, '')}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Header star chip (detail page tag row): only when the package has a GitHub repository and a star count.
+ * The repository URL comes from `repository.url`, then `openSource.url`, then a link app's `link.github.repo`.
+ */
+export function toPackageStarBadge(input: unknown, locale: SiteLocale = 'en-US'): PackageStarBadge | null {
+  const source = record(input);
+  if (!source) return null;
+  const stars = numberValue(record(source.repository)?.stars);
+  if (stars === undefined) return null;
+  const linkRepo = stringValue(record(record(source.link)?.github)?.repo);
+  const href =
+    githubRepoUrl(record(source.repository)?.url) ??
+    githubRepoUrl(record(source.openSource)?.url) ??
+    (linkRepo ? githubRepoUrl(`https://github.com/${linkRepo}`) : undefined);
+  if (!href) return null;
+  return { stars, label: formatRepoStars(stars, locale), href };
+}

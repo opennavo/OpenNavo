@@ -500,6 +500,7 @@ const messages: MessageSchema = {
     },
     repo: {
       stars: 'Stars',
+      starsBadge: 'GitHub stars {count}',
       checked: 'Repository data checked {date}.',
       updated: 'Updated {days} day ago | Updated {days} days ago',
       unmaintained: 'May no longer be maintained',

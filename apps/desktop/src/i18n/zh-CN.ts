@@ -486,6 +486,7 @@ export default {
     },
     repo: {
       stars: '星标数',
+      starsBadge: 'GitHub 星标 {count}',
       checked: '仓库数据核查于 {date}。',
       updated: '{days} 天前更新',
       unmaintained: '可能已停止维护',
