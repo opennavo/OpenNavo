@@ -49,7 +49,10 @@ describe('Links to GitHub bot accounts', () => {
 
 describe('third-party release note links', () => {
   it('are marked nofollow ugc in Markdown and vendor HTML', () => {
-    for (const html of [renderMarkdown('[notes](https://example.com/notes)'), sanitizeReleaseHtml('<a href="https://example.com/notes">notes</a>')]) {
+    for (const html of [
+      renderMarkdown('[notes](https://example.com/notes)'),
+      sanitizeReleaseHtml('<a href="https://example.com/notes">notes</a>')
+    ]) {
       expect(parse(html).querySelector('a')?.getAttribute('rel')).toBe('noopener noreferrer nofollow ugc');
     }
   });
