@@ -843,9 +843,14 @@ mod tests {
             inner.enabled = true;
             inner.error = Some("E_MCP_BROKER: bind failed".into());
         }
-        broker.set_write_enabled(true).expect("persist write switch");
+        broker
+            .set_write_enabled(true)
+            .expect("persist write switch");
         let status = broker.status();
-        assert!(status.enabled && status.write_enabled && !status.running, "{status:?}");
+        assert!(
+            status.enabled && status.write_enabled && !status.running,
+            "{status:?}"
+        );
         assert_eq!(status.error.as_deref(), Some("E_MCP_BROKER: bind failed"));
 
         // Once running, a successful write change clears a stale error.
