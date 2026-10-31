@@ -1725,7 +1725,8 @@ else:
         assert!(queue.database.tasks().unwrap().is_empty());
     }
     async fn terminal(queue: &TaskQueue, id: &str) -> Task {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        // Generous bound: retrying scenarios on loaded CI runners can exceed 5 s (#101).
+        tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 let task = queue
                     .database
@@ -2183,15 +2184,25 @@ else:
                     "Initial attempt plus three retries"
                 );
             }
-            {
-                let events = events.lock().expect("events");
-                assert!(events.iter().any(|e| matches!(e, CoreEvent::Log(_))));
-                assert!(
-                    events
-                        .iter()
-                        .any(|e| matches!(e,CoreEvent::Task(t) if t.state==result.state))
-                );
-            }
+            // `finish()` persists the terminal state before emitting the task event,
+            // so `terminal()` can observe it slightly before the event lands (#101).
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    {
+                        let events = events.lock().expect("events");
+                        if events.iter().any(|e| matches!(e, CoreEvent::Log(_)))
+                            && events.iter().any(
+                                |e| matches!(e, CoreEvent::Task(t) if t.id == task.id && t.state == result.state),
+                            )
+                        {
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{scenario}: log and terminal task events"));
             if scenario == "checksum_fail" {
                 queue
                     .extra_env
