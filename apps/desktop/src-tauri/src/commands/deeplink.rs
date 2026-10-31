@@ -186,11 +186,7 @@ async fn confirm_single(
     {
         Ok(grant) => grant,
         Err(error) => {
-            if error.code == "E_BUSY" {
-                context.router.release_install(context.pending_id);
-            } else {
-                context.router.cancel_install(context.pending_id);
-            }
+            settle_refused(context.router, context.pending_id, &error);
             return Err(error);
         }
     };
@@ -217,6 +213,16 @@ async fn confirm_single(
         return Err(error);
     }
     Ok(DeepLinkInstallResult { tasks: vec![task] })
+}
+
+/// A confirmation that never produced a grant: a busy slot keeps the pending link for a retry,
+/// anything else (denied, timed out, or a list whose counts don't match the plan) drops it.
+fn settle_refused(router: &Router, pending_id: &str, error: &AppError) {
+    if error.code == "E_BUSY" {
+        router.release_install(pending_id);
+    } else {
+        router.cancel_install(pending_id);
+    }
 }
 
 fn single_install_request(source: String, plan: &ResolvedInstallPlan) -> ConfirmationRequest {
@@ -275,11 +281,7 @@ async fn confirm_collection(
     {
         Ok(grant) => grant,
         Err(error) => {
-            if error.code == "E_BUSY" {
-                context.router.release_install(context.pending_id);
-            } else {
-                context.router.cancel_install(context.pending_id);
-            }
+            settle_refused(context.router, context.pending_id, &error);
             return Err(error);
         }
     };
@@ -537,6 +539,59 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = crate::db::Database::open(&directory.path().join("test.db")).unwrap();
         build_collection_plan(&database, detail, installed, active)
+    }
+
+    #[test]
+    fn collection_count_mismatch_cancels_the_pending_link() {
+        use crate::{
+            confirmation::{ConfirmationListItem, McpConfirmView},
+            events::CoreEvent,
+        };
+        use std::sync::Mutex;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let router = Router::new(
+            Arc::new(move |event| sink.lock().unwrap().push(event)),
+            Arc::new(|| {}),
+        );
+        router.ready();
+        router.receive("opennavo://collection/dev-setup?action=install");
+        let pending_id = match &events.lock().unwrap()[0] {
+            CoreEvent::Deeplink(event) => event.pending_id.clone().unwrap(),
+            _ => panic!("expected deep link"),
+        };
+        assert!(matches!(
+            router.begin_install(&pending_id).unwrap(),
+            InstallStep::ResolveCollection { .. }
+        ));
+        let request = ConfirmationRequest {
+            caller: "deep link".into(),
+            source: "opennavo://collection/dev-setup?action=install".into(),
+            action: "install collection".into(),
+            target: "collection/dev-setup".into(),
+            plan_digest: None,
+        };
+        let installed = ConfirmationListItem {
+            name: "Zed".into(),
+            kind: "cask".into(),
+            token: "zed".into(),
+            tap: None,
+            disabled: false,
+            installed: true,
+            already_queued: false,
+            unsupported: false,
+            duplicate: false,
+        };
+        // One install planned for a list whose only app is skipped: refused before any window opens.
+        let error = McpConfirmView::deep_link_collection(&request, "dev-setup", &[installed], 1)
+            .unwrap_err();
+        assert_eq!(error.code, "E_INVALID_ARG");
+        settle_refused(&router, &pending_id, &error);
+        assert_eq!(
+            router.begin_install(&pending_id).unwrap_err().code,
+            "E_INVALID_ARG",
+            "the pending link is gone, not left reserved"
+        );
     }
 
     #[test]

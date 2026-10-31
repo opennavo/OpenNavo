@@ -51,21 +51,24 @@ async function answer(allow: boolean) {
   }
 }
 
-// Return and Escape never approve, wherever the focus is.
+// Return, Space and Escape never approve, wherever the focus is (Tab onto Allow included): they deny. The browser
+// activates a focused button on Return keydown and Space keyup, so both phases are cancelled before it can.
+const ANSWER_KEYS = new Set(['Enter', 'Escape', ' ', 'Spacebar']);
 function onKey(event: KeyboardEvent) {
-  if (event.key === 'Enter' || event.key === 'Escape') {
-    event.preventDefault();
-    event.stopPropagation();
-    void answer(false);
-  }
+  if (!ANSWER_KEYS.has(event.key)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.type === 'keydown') void answer(false);
 }
 
 onMounted(() => {
   window.addEventListener('keydown', onKey, true);
+  window.addEventListener('keyup', onKey, true);
   void load();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey, true);
+  window.removeEventListener('keyup', onKey, true);
   clearTimeout(arming);
 });
 

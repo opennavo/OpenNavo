@@ -883,6 +883,33 @@ describe('Question window', () => {
     expect(wrapper.find('[data-alert-deadline]').exists()).toBe(true);
   });
 
+  it('Answers only by click: Return and Space on a focused button decide nothing, even once armed', async () => {
+    const reply = vi.spyOn(commands, 'firewallAlertReply');
+    const wrapper = await openAlerts();
+    await armed();
+    for (const selector of ['[data-alert-block]', '[data-alert-allow]']) {
+      const element = wrapper.get(selector).element as HTMLButtonElement;
+      element.focus();
+      for (const key of ['Enter', ' ']) {
+        for (const type of ['keydown', 'keyup']) {
+          const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true });
+          element.dispatchEvent(event);
+          // Cancelled before the browser turns it into a click.
+          expect(event.defaultPrevented, `${selector} ${type} ${key}`).toBe(true);
+        }
+      }
+    }
+    await settle();
+    expect(reply).not.toHaveBeenCalled();
+    // The scope and until defaults are unchanged.
+    expect(radio(wrapper, '这个 App 的所有连接').attributes('aria-checked')).toBe('true');
+    expect(radio(wrapper, '永久').attributes('aria-checked')).toBe('true');
+    // Keys elsewhere (the segmented controls) are left alone.
+    const other = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    radio(wrapper, '永久').element.dispatchEvent(other);
+    expect(other.defaultPrevented).toBe(false);
+  });
+
   it('Treats a connection already answered elsewhere as done', async () => {
     const wrapper = await openAlerts();
     vi.spyOn(commands, 'firewallAlertReply').mockResolvedValueOnce({

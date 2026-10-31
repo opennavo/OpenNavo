@@ -140,3 +140,29 @@ describe('Deep-link install confirmation window', () => {
     expect(answer.mock.calls.every(([, allow]) => allow === false)).toBe(true);
   });
 });
+
+describe('Confirmation keyboard', () => {
+  for (const mock of ['mcp-confirm-install', 'deeplink-confirm-install', 'deeplink-confirm-collection']) {
+    it(`Never allows from the keyboard, even with Allow focused (${mock})`, async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const answer = vi.spyOn(commands, 'mcpConfirmAnswer');
+      const wrapper = await page(mock);
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      const allow = wrapper.get('[data-test="mcp-confirm-allow"]').element as HTMLButtonElement;
+      expect(allow.disabled).toBe(false);
+      allow.focus();
+      expect(document.activeElement).toBe(allow);
+      for (const key of ['Enter', ' ']) {
+        for (const type of ['keydown', 'keyup']) {
+          const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true });
+          allow.dispatchEvent(event);
+          expect(event.defaultPrevented, `${type} ${key}`).toBe(true);
+        }
+      }
+      await flushPromises();
+      expect(answer).toHaveBeenCalled();
+      expect(answer.mock.calls.every(([, value]) => value === false)).toBe(true);
+    });
+  }
+});

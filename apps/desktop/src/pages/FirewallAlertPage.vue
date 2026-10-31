@@ -11,8 +11,8 @@ import { useFirewallStore } from '@/stores/firewall';
 
 // A connection waiting for an answer (firewall plan §4.4), in Rust's small always-on-top window. The oldest one shows;
 // the answer becomes a rule for the whole app or just this destination, forever or until the app quits. Laid out like
-// OpenNavo's other confirmations: Block on the left with the focus, Allow on the right. Neither answers until the
-// question has been on screen for ANSWER_DELAY_MS, so a stray Return (or a click as the window pops up) decides nothing;
+// OpenNavo's other confirmations: Block on the left with the focus, Allow on the right. Only a click answers
+// (Return and Space on the buttons are cancelled), and only after the question has been on screen for ANSWER_DELAY_MS;
 // Escape and closing never answer, because any answer becomes a rule. Held connections are let through when nobody
 // answers in time (TCP 2 minutes, UDP 5 seconds); the question stays, and a late answer still becomes a rule.
 const { t } = useI18n();
@@ -56,12 +56,25 @@ watch(
   },
   { immediate: true }
 );
+// As before this window was restyled, only a click answers: Return and Space on a focused Block or Allow button are
+// cancelled (Return activates on keydown, Space on keyup), so the default focus can never decide for the user.
+function onKey(event: KeyboardEvent) {
+  if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target?.closest('[data-alert-block], [data-alert-allow]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+window.addEventListener('keydown', onKey, true);
+window.addEventListener('keyup', onKey, true);
 const onVisibility = () => {
   if (document.visibilityState === 'visible') rearm();
 };
 document.addEventListener('visibilitychange', onVisibility);
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility);
+  window.removeEventListener('keydown', onKey, true);
+  window.removeEventListener('keyup', onKey, true);
   clearTimeout(arming);
 });
 
