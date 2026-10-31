@@ -90,7 +90,7 @@ defineSlots<{
   >
     <div
       v-if="hasLead"
-      class="flex min-w-0 flex-col gap-14px lg:col-start-1 lg:row-start-1"
+      class="order-1 flex min-w-0 flex-col gap-14px lg:order-none lg:col-start-1 lg:row-start-1"
       data-testid="package-overview-lead"
     >
       <slot name="top" />
@@ -104,47 +104,73 @@ defineSlots<{
     </div>
     <OnAboutSection
       v-if="hasAbout"
-      class="min-w-0 lg:col-start-1"
+      class="order-2 min-w-0 lg:order-none lg:col-start-1"
       :class="leadRow"
       data-testid="package-overview-about"
     >
       <slot name="about" />
     </OnAboutSection>
-    <!-- PR3 mobile order: the spec card follows the description, so it stays before the side-column wrapper. -->
-    <div v-if="$slots.spec" class="min-w-0 lg:col-start-2 lg:row-start-2">
-      <slot name="spec" />
-    </div>
-    <div class="flex min-w-0 flex-col gap-14px lg:col-start-2 lg:row-start-1">
-      <slot name="download" />
-      <section
-        v-if="command || installNotice"
-        class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px"
-        data-testid="package-install-command"
-      >
-        <p
-          v-if="installNotice"
-          role="note"
-          class="m-0 rounded-default border border-solid px-12px py-10px text-12.5px leading-[1.6]"
-          :class="[
-            installNotice.disabled
-              ? 'border-status-danger text-status-danger'
-              : 'border-status-warning text-status-warning',
-            command && !installNotice.disabled ? 'mb-12px' : ''
-          ]"
-        >
-          {{ installNotice.text }}
-        </p>
-        <OnInstallCommand
-          v-if="command && !installNotice?.disabled"
-          :command="command"
-          @copied="emit('copied', $event)"
-          @copy-failed="emit('copyFailed', $event)"
-        />
-      </section>
-    </div>
-    <!-- The main column spans to the last row so the side column stacks independently beside it (no empty sidebar). -->
+    <!--
+      Side column: one wrapper spanning every row so its cards stack with a fixed gap and never share row
+      heights with the main column (#112). Below lg it is `display: contents`, and `order` keeps the PR3
+      mobile order: lead → introduction → spec → install command → main → aside.
+    -->
     <div
-      class="flex min-w-0 flex-col gap-16px lg:col-start-1 lg:row-end-5"
+      class="contents lg:col-start-2 lg:row-start-1 lg:row-end-5 lg:flex lg:min-w-0 lg:flex-col lg:gap-14px"
+      data-testid="package-overview-side"
+    >
+      <div class="order-4 flex min-w-0 flex-col gap-14px lg:order-none">
+        <slot name="download" />
+        <section
+          v-if="command || installNotice"
+          class="rounded-big border border-solid border-line-subtle bg-surface-card px-16px py-14px"
+          data-testid="package-install-command"
+        >
+          <p
+            v-if="installNotice"
+            role="note"
+            class="m-0 rounded-default border border-solid px-12px py-10px text-12.5px leading-[1.6]"
+            :class="[
+              installNotice.disabled
+                ? 'border-status-danger text-status-danger'
+                : 'border-status-warning text-status-warning',
+              command && !installNotice.disabled ? 'mb-12px' : ''
+            ]"
+          >
+            {{ installNotice.text }}
+          </p>
+          <OnInstallCommand
+            v-if="command && !installNotice?.disabled"
+            :command="command"
+            @copied="emit('copied', $event)"
+            @copy-failed="emit('copyFailed', $event)"
+          />
+        </section>
+      </div>
+      <div v-if="$slots.spec" class="order-3 min-w-0 lg:order-none">
+        <slot name="spec" />
+      </div>
+      <div class="order-6 flex min-w-0 flex-col gap-14px lg:order-none">
+        <div v-if="$slots.aside" class="flex min-w-0 flex-col gap-14px">
+          <slot name="aside" />
+        </div>
+        <div v-if="!relatedInMain" class="min-w-0">
+          <OnRelatedPackages
+            :related="related"
+            :related-title="relatedTitle"
+            :related-more-href="relatedMoreHref"
+            :related-more-label="relatedMoreLabel"
+            :link-as="linkAs"
+          />
+        </div>
+        <div v-if="$slots.asideEnd" class="min-w-0">
+          <slot name="asideEnd" />
+        </div>
+      </div>
+    </div>
+    <!-- The main column spans to the last row; the side column above is a single stack beside it. -->
+    <div
+      class="order-5 flex min-w-0 flex-col gap-16px lg:order-none lg:col-start-1 lg:row-end-5"
       :class="mainRow"
       data-testid="package-overview-main"
     >
@@ -166,23 +192,6 @@ defineSlots<{
           :text="caveats"
         /></pre>
       </section>
-    </div>
-    <div class="flex min-w-0 flex-col gap-14px lg:col-start-2 lg:row-start-3">
-      <div v-if="$slots.aside" class="flex min-w-0 flex-col gap-14px">
-        <slot name="aside" />
-      </div>
-      <div v-if="!relatedInMain" class="min-w-0">
-        <OnRelatedPackages
-          :related="related"
-          :related-title="relatedTitle"
-          :related-more-href="relatedMoreHref"
-          :related-more-label="relatedMoreLabel"
-          :link-as="linkAs"
-        />
-      </div>
-      <div v-if="$slots.asideEnd" class="min-w-0">
-        <slot name="asideEnd" />
-      </div>
     </div>
   </div>
 </template>
