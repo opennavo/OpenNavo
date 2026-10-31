@@ -877,7 +877,21 @@
     "allow": "允許",
     "deny": "拒絕",
     "expired": "這個請求已不再等待回答。",
-    "failed": "回答沒有發出去，請重試。"
+    "failed": "回答沒有發出去，請重試。",
+    "titleDeepLink": "確認來自網頁連結的安裝",
+    "introDeepLink": "網頁開啟了一個 OpenNavo 連結，要安裝這個應用。",
+    "introCollection": "網頁開啟了一個 OpenNavo 連結，要安裝這個合集。",
+    "collection": "合集",
+    "webLink": "網頁連結（opennavo://）",
+    "source": "來源",
+    "collectionSummary": "共 {count} 個應用：安裝 {install} 個，跳過 {skip} 個",
+    "skip": {
+      "disabled": "已停用，不加入佇列",
+      "installed": "已安裝",
+      "queued": "已在佇列中",
+      "duplicate": "重複",
+      "unsupported": "不支援"
+    }
   },
   "settings": {
     "title": "設定",

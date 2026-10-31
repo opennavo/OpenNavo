@@ -871,7 +871,21 @@ export default {
     allow: '允许',
     deny: '拒绝',
     expired: '这个请求已不再等待回答。',
-    failed: '回答没有发出去，请重试。'
+    failed: '回答没有发出去，请重试。',
+    titleDeepLink: '确认来自网页链接的安装',
+    introDeepLink: '网页打开了一个 OpenNavo 链接，要安装这个应用。',
+    introCollection: '网页打开了一个 OpenNavo 链接，要安装这个合集。',
+    collection: '合集',
+    webLink: '网页链接（opennavo://）',
+    source: '来源',
+    collectionSummary: '共 {count} 个应用：安装 {install} 个，跳过 {skip} 个',
+    skip: {
+      disabled: '已停用，不加入队列',
+      installed: '已安装',
+      queued: '已在队列中',
+      duplicate: '重复',
+      unsupported: '不支持'
+    }
   },
   settings: {
     title: '设置',

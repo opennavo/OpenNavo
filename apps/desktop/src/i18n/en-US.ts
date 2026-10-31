@@ -896,7 +896,21 @@ const messages: MessageSchema = {
     allow: 'Allow',
     deny: 'Deny',
     expired: 'This request is no longer waiting.',
-    failed: "Couldn't send your answer. Try again."
+    failed: "Couldn't send your answer. Try again.",
+    titleDeepLink: 'Confirm an install from a web link',
+    introDeepLink: 'A web page opened an OpenNavo link asking to install this app.',
+    introCollection: 'A web page opened an OpenNavo link asking to install this collection.',
+    collection: 'Collection',
+    webLink: 'A web link (opennavo://)',
+    source: 'Source',
+    collectionSummary: '{count} apps: {install} will be installed, {skip} skipped',
+    skip: {
+      disabled: 'Disabled, not queued',
+      installed: 'Already installed',
+      queued: 'Already queued',
+      duplicate: 'Listed twice',
+      unsupported: 'Not supported'
+    }
   },
   settings: {
     title: 'Settings',

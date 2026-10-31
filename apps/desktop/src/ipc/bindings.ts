@@ -206,7 +206,7 @@ export const commands = {
 	mcpConfirmGet: () => typedError<{
 	/**  One-time id the window answers with. */
 	id: string,
-	/**  `install` or `uninstall`. */
+	/**  `install`, `uninstall` or `installCollection`. */
 	action: string,
 	name: string,
 	/**  Catalog target (`cask/iina`) or the app path. */
@@ -223,6 +223,17 @@ export const commands = {
 	claimedName: string | null,
 	/**  Milliseconds until Allow is accepted. */
 	allowAfterMs: number,
+	/**  Who asked: `mcp` (an AI app over Local MCP) or `deepLink` (an opennavo:// web link). */
+	origin: string,
+	/**
+	 *  The opennavo:// link that asked (deep links only). macOS hands the app only the URL, so
+	 *  there is no referring page to show.
+	 */
+	source: string | null,
+	/**  Every app of a collection, in plan order (`installCollection` only). */
+	items: ConfirmItemView[],
+	/**  How many of `items` will be queued; the rest are skipped with their reason. */
+	installCount: number,
 } | null, AppError>(__TAURI_INVOKE("mcp_confirm_get")),
 	/**  Answer the open Local MCP confirmation once; only the confirmation window may answer. */
 	mcpConfirmAnswer: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("mcp_confirm_answer", { id, allow })),
@@ -782,6 +793,18 @@ export type CleanupVolume = {
 	name: string,
 	totalBytes: number,
 	freeBytes: number,
+};
+
+/**  One app of a collection confirmation, filtered for display. */
+export type ConfirmItemView = {
+	name: string,
+	/**  `cask/token`, plus ` [owner/tap]` for a third-party tap. */
+	target: string,
+	/**
+	 *  Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate` or `unsupported`;
+	 *  `None` when it will be installed.
+	 */
+	skip: string | null,
 };
 
 /**
@@ -1459,7 +1482,7 @@ export type MatchReason = "app_bundle" | "brew_uninstall" | "zap_rule" | "bundle
 export type McpConfirmView = {
 	/**  One-time id the window answers with. */
 	id: string,
-	/**  `install` or `uninstall`. */
+	/**  `install`, `uninstall` or `installCollection`. */
 	action: string,
 	name: string,
 	/**  Catalog target (`cask/iina`) or the app path. */
@@ -1476,6 +1499,17 @@ export type McpConfirmView = {
 	claimedName: string | null,
 	/**  Milliseconds until Allow is accepted. */
 	allowAfterMs: number,
+	/**  Who asked: `mcp` (an AI app over Local MCP) or `deepLink` (an opennavo:// web link). */
+	origin: string,
+	/**
+	 *  The opennavo:// link that asked (deep links only). macOS hands the app only the URL, so
+	 *  there is no referring page to show.
+	 */
+	source: string | null,
+	/**  Every app of a collection, in plan order (`installCollection` only). */
+	items: ConfirmItemView[],
+	/**  How many of `items` will be queued; the rest are skipped with their reason. */
+	installCount: number,
 };
 
 /**  Broker status surfaced by `mcp_status`. */

@@ -1,12 +1,11 @@
-//! Native confirmation gate for deep-link-initiated installs (and future MCP callers).
+//! Confirmation gate for deep-link installs and Local MCP writes, answered in OpenNavo's own window.
 //!
 //! Requests made by the app's own UI do not pass through this gate. The service deliberately keeps
-//! the policy state separate from the dialog adapter. That makes the one-dialog rule and grant
-//! lifecycle testable without creating an AppKit window in a libtest worker, while confirm always
-//! delegates rendering to the dialog plugin, which marshals the dialog to Tauri's main thread on
-//! desktop.
+//! the policy state separate from the window adapter (`confirm_window`). That makes the one-slot rule
+//! and grant lifecycle testable without creating a window in a libtest worker; the window itself is
+//! created and destroyed on Tauri's main thread.
 
-use crate::{AppError, model::Locale, native_i18n};
+use crate::AppError;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -14,69 +13,14 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
-use tauri::{Manager, Runtime};
+use tauri::Runtime;
 use tokio::sync::oneshot;
-
-/// Show a native confirmation whose default button (Return) is the refusal. Approving always takes a
-/// deliberate click: the approve button has no key equivalent, and Escape never approves. If the dialog
-/// cannot be shown, `on_reply` is dropped and the waiting request ends as denied.
-fn show_confirmation<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    title: String,
-    message: String,
-    approve: String,
-    refuse: String,
-    on_reply: impl FnOnce(bool) + Send + 'static,
-) {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = app.run_on_main_thread(move || {
-            on_reply(run_alert(&title, &message, &approve, &refuse));
-        });
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-        // Plugin dialogs make the first button the default, so it is the refusal; `true` means it was chosen.
-        app.dialog()
-            .message(message)
-            .title(title)
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(refuse, approve))
-            .show(move |refused| on_reply(!refused));
-    }
-}
-
-/// AppKit alert: refusal added first (default, Return), approval second with no key equivalent.
-#[cfg(target_os = "macos")]
-fn run_alert(title: &str, message: &str, approve: &str, refuse: &str) -> bool {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSAlert, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication};
-    use objc2_foundation::NSString;
-
-    let Some(mtm) = MainThreadMarker::new() else {
-        return false;
-    };
-    #[allow(deprecated)]
-    NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
-    let alert = NSAlert::new(mtm);
-    alert.setAlertStyle(NSAlertStyle::Warning);
-    alert.setMessageText(&NSString::from_str(title));
-    alert.setInformativeText(&NSString::from_str(message));
-    let refuse_button = alert.addButtonWithTitle(&NSString::from_str(refuse));
-    refuse_button.setKeyEquivalent(&NSString::from_str("\r"));
-    let approve_button = alert.addButtonWithTitle(&NSString::from_str(approve));
-    approve_button.setKeyEquivalent(&NSString::from_str(""));
-    alert.runModal() == NSAlertSecondButtonReturn
-}
 
 const DIALOG_TIMEOUT: Duration = Duration::from_secs(60);
 const GRANT_TTL: Duration = Duration::from_secs(30);
 
-// tauri-plugin-dialog's async `MessageDialogBuilder::show` returns no dialog handle (rfd exposes only `show`), so
-// a timeout cannot programmatically dismiss the native dialog. A timeout revokes that confirmation's grants but
-// keeps the single slot occupied until the native callback arrives; a late click only releases the slot and never
-// produces a grant.
+// Every confirmation is shown in OpenNavo's own window (see `confirm_window`). A timeout revokes that
+// confirmation's grants; the window is then closed and the slot released, and a late click never produces a grant.
 
 /// A deep-link install request presented to the user. Install callers bind an immutable resolved
 /// execution plan; future non-UI callers may bind their own plan digest.
@@ -89,7 +33,7 @@ pub struct ConfirmationRequest {
     pub plan_digest: Option<String>,
 }
 
-/// One row in a collection confirmation. The native dialog owns the complete list so the user approves the
+/// One row in a collection confirmation. The confirmation window shows the complete list so the user approves the
 /// same ordered collection that the guarded command will enqueue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmationListItem {
@@ -117,85 +61,6 @@ impl ConfirmationRequest {
         .expect("confirmation request fields are serializable");
         format!("{:x}", Sha256::digest(canonical))
     }
-
-    fn message(&self, locale: Locale) -> Result<String, AppError> {
-        let caller = if self.caller == "deep link" {
-            text(locale, "deepLink")?
-        } else {
-            self.caller.clone()
-        };
-        let action = match self.action.as_str() {
-            "install" => text(locale, "install")?,
-            "install collection" => text(locale, "installCollection")?,
-            _ => self.action.clone(),
-        };
-        Ok(text(locale, "request")?
-            .replace("{caller}", &display_value(&caller))
-            .replace("{source}", &display_value(&self.source))
-            .replace("{action}", &display_value(&action))
-            .replace("{target}", &display_value(&self.target)))
-    }
-
-    fn collection_message(
-        &self,
-        items: &[ConfirmationListItem],
-        install_count: usize,
-        locale: Locale,
-    ) -> Result<String, AppError> {
-        let skip_count = items
-            .len()
-            .checked_sub(install_count)
-            .ok_or_else(|| AppError::new("E_INVALID_ARG", "collection_counts"))?;
-        let mut message = self.message(locale)?;
-        message.push_str("\n\n");
-        message.push_str(
-            &text(locale, "collection")?
-                .replace("{install}", &install_count.to_string())
-                .replace("{skip}", &skip_count.to_string()),
-        );
-        for item in items {
-            message.push_str("• ");
-            message.push_str(&display_value(&item.name));
-            message.push_str(&format!(
-                " [{}/{}]",
-                display_value(&item.kind),
-                display_value(&item.token)
-            ));
-            if let Some(tap) = &item.tap {
-                message.push_str(&format!(" [{}]", display_value(tap)));
-            }
-            let status = if item.disabled {
-                Some("disabled")
-            } else if item.installed {
-                Some("installed")
-            } else if item.already_queued {
-                Some("queued")
-            } else if item.duplicate {
-                Some("duplicate")
-            } else if item.unsupported {
-                Some("unsupported")
-            } else {
-                None
-            };
-            if let Some(status) = status {
-                message.push_str(&format!(" ({})", text(locale, status)?));
-            }
-            message.push('\n');
-        }
-        message.push('\n');
-        message.push_str(&text(locale, "footer")?);
-        Ok(message)
-    }
-}
-
-fn text(locale: Locale, key: &str) -> Result<String, AppError> {
-    native_i18n::text(locale, &format!("confirmation.{key}"))
-}
-
-pub(crate) fn app_locale<R: Runtime>(app: &tauri::AppHandle<R>) -> Locale {
-    app.try_state::<std::sync::Arc<crate::core::DesktopCore>>()
-        .and_then(|core| core.current_settings().ok())
-        .map_or(Locale::EnUs, |settings| settings.locale)
 }
 
 /// A grant is intentionally opaque to callers. It can only be consumed through this service, and consumption
@@ -250,7 +115,7 @@ pub const ALLOW_ARM_DELAY: Duration = Duration::from_millis(1000);
 pub struct McpConfirmView {
     /// One-time id the window answers with.
     pub id: String,
-    /// `install` or `uninstall`.
+    /// `install`, `uninstall` or `installCollection`.
     pub action: String,
     pub name: String,
     /// Catalog target (`cask/iina`) or the app path.
@@ -267,6 +132,27 @@ pub struct McpConfirmView {
     pub claimed_name: Option<String>,
     /// Milliseconds until Allow is accepted.
     pub allow_after_ms: u32,
+    /// Who asked: `mcp` (an AI app over Local MCP) or `deepLink` (an opennavo:// web link).
+    pub origin: String,
+    /// The opennavo:// link that asked (deep links only). macOS hands the app only the URL, so
+    /// there is no referring page to show.
+    pub source: Option<String>,
+    /// Every app of a collection, in plan order (`installCollection` only).
+    pub items: Vec<ConfirmItemView>,
+    /// How many of `items` will be queued; the rest are skipped with their reason.
+    pub install_count: u32,
+}
+
+/// One app of a collection confirmation, filtered for display.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmItemView {
+    pub name: String,
+    /// `cask/token`, plus ` [owner/tap]` for a third-party tap.
+    pub target: String,
+    /// Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate` or `unsupported`;
+    /// `None` when it will be installed.
+    pub skip: Option<String>,
 }
 
 impl McpConfirmView {
@@ -293,11 +179,91 @@ impl McpConfirmView {
             may_come_from: may_come_from.map(display_value),
             claimed_name: claimed_name.map(display_value),
             allow_after_ms: 0,
+            origin: "mcp".into(),
+            source: None,
+            items: Vec::new(),
+            install_count: 0,
+        }
+    }
+
+    /// A deep-link install of one app.
+    pub fn deep_link_install(request: &ConfirmationRequest, name: &str) -> Self {
+        Self {
+            origin: "deepLink".into(),
+            source: Some(display_value(&request.source)),
+            ..Self::new(
+                "install",
+                name,
+                &request.target,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+    }
+
+    /// A deep-link collection install: every app is listed with its skip reason, and the counts
+    /// must add up to the list the grant binds.
+    pub fn deep_link_collection(
+        request: &ConfirmationRequest,
+        name: &str,
+        items: &[ConfirmationListItem],
+        install_count: usize,
+    ) -> Result<Self, AppError> {
+        let installable = items
+            .iter()
+            .filter(|item| item.skip_reason().is_none())
+            .count();
+        if install_count > items.len() || installable != install_count {
+            return Err(AppError::new("E_INVALID_ARG", "collection_counts"));
+        }
+        Ok(Self {
+            items: items.iter().map(ConfirmationListItem::view).collect(),
+            install_count: u32::try_from(install_count)
+                .map_err(|_| AppError::new("E_INVALID_ARG", "collection_counts"))?,
+            ..Self {
+                action: "installCollection".into(),
+                ..Self::deep_link_install(request, name)
+            }
+        })
+    }
+}
+
+impl ConfirmationListItem {
+    fn skip_reason(&self) -> Option<&'static str> {
+        if self.disabled {
+            Some("disabled")
+        } else if self.installed {
+            Some("installed")
+        } else if self.already_queued {
+            Some("queued")
+        } else if self.duplicate {
+            Some("duplicate")
+        } else if self.unsupported {
+            Some("unsupported")
+        } else {
+            None
+        }
+    }
+
+    fn view(&self) -> ConfirmItemView {
+        let identity = format!("{}/{}", self.kind, self.token);
+        ConfirmItemView {
+            name: display_value(&self.name),
+            target: display_value(
+                &self
+                    .tap
+                    .as_ref()
+                    .map_or(identity.clone(), |tap| format!("{identity} [{tap}]")),
+            ),
+            skip: self.skip_reason().map(str::to_owned),
         }
     }
 }
 
-/// Single-slot native confirmation service. Keep this in app state so the later MCP broker can reuse the same
+/// Single-slot confirmation service. Keep this in app state so the later MCP broker can reuse the same
 /// gate instead of adding another dialog or grant implementation.
 #[derive(Default)]
 pub struct ConfirmationService {
@@ -307,12 +273,11 @@ pub struct ConfirmationService {
 #[derive(Debug)]
 struct PendingConfirmation {
     id: u64,
-    request: ConfirmationRequest,
     cancelled: oneshot::Receiver<()>,
 }
 
 /// Clears the single active slot when the command future is cancelled (for example when its webview is
-/// destroyed). Native dialog callbacks can arrive later; `finish` checks the id and ignores those stale clicks.
+/// destroyed). Window answers can arrive later; `finish` checks the id and ignores those stale clicks.
 struct ConfirmationDropGuard {
     service: std::sync::Arc<ConfirmationService>,
     id: u64,
@@ -331,32 +296,16 @@ impl Drop for ConfirmationDropGuard {
 }
 
 impl ConfirmationService {
-    /// Show a native dialog and return a grant only after the user explicitly allows it.
+    /// Ask about a deep-link install of one app in OpenNavo's confirmation window; a grant comes
+    /// back only after the user explicitly allows it.
     pub async fn confirm<R: Runtime>(
         self: &std::sync::Arc<Self>,
         app: &tauri::AppHandle<R>,
         request: ConfirmationRequest,
+        name: &str,
     ) -> Result<ConfirmationGrant, AppError> {
-        let locale = app_locale(app);
-        let pending = self.begin(request)?;
-        let (sender, receiver) = oneshot::channel();
-        let service = std::sync::Arc::clone(self);
-        let dialog_id = pending.id;
-        let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        show_confirmation(
-            app,
-            text(locale, "title")?,
-            pending.request.message(locale)?,
-            text(locale, "allow")?,
-            text(locale, "deny")?,
-            move |allowed| {
-                service.finish_reply(dialog_id, allowed, |result| {
-                    let _ = sender.send(result);
-                });
-            },
-        );
-
-        self.wait_for_reply(pending, receiver, guard).await
+        let view = McpConfirmView::deep_link_install(&request, name);
+        self.confirm_window(app, request, view).await
     }
 
     /// Ask in OpenNavo's own confirmation window (Local MCP writes). The window is created here, in
@@ -371,9 +320,10 @@ impl ConfirmationService {
     ) -> Result<ConfirmationGrant, AppError> {
         let pending = self.begin(request)?;
         let dialog_id = pending.id;
+        let tall = !view.items.is_empty();
         let receiver = self.open_prompt(dialog_id, view)?;
         let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        let result = match confirm_window::open(app, std::sync::Arc::clone(self), dialog_id) {
+        let result = match confirm_window::open(app, std::sync::Arc::clone(self), dialog_id, tall) {
             Ok(()) => self.wait_for_reply(pending, receiver, guard).await,
             Err(error) => {
                 drop(guard);
@@ -386,35 +336,18 @@ impl ConfirmationService {
         result
     }
 
-    /// Show one native dialog for a collection. The request's plan digest binds the displayed plan to the
-    /// ordered execution plans that the caller enqueues after the grant is consumed.
+    /// Ask about a whole collection in one confirmation window. The request's plan digest binds the
+    /// displayed list to the ordered execution plans that the caller enqueues after the grant is consumed.
     pub async fn confirm_collection<R: Runtime>(
         self: &std::sync::Arc<Self>,
         app: &tauri::AppHandle<R>,
         request: ConfirmationRequest,
+        name: &str,
         items: Vec<ConfirmationListItem>,
         install_count: usize,
     ) -> Result<ConfirmationGrant, AppError> {
-        let locale = app_locale(app);
-        let pending = self.begin(request.clone())?;
-        let (sender, receiver) = oneshot::channel();
-        let service = std::sync::Arc::clone(self);
-        let dialog_id = pending.id;
-        let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        show_confirmation(
-            app,
-            text(locale, "title")?,
-            request.collection_message(&items, install_count, locale)?,
-            text(locale, "installAll")?,
-            text(locale, "cancel")?,
-            move |allowed| {
-                service.finish_reply(dialog_id, allowed, |result| {
-                    let _ = sender.send(result);
-                });
-            },
-        );
-
-        self.wait_for_reply(pending, receiver, guard).await
+        let view = McpConfirmView::deep_link_collection(&request, name, &items, install_count)?;
+        self.confirm_window(app, request, view).await
     }
 
     async fn wait_for_reply(
@@ -453,8 +386,8 @@ impl ConfirmationService {
         }
     }
 
-    /// A destroyed webview cannot keep a command waiting on a native callback. Clearing the slot also
-    /// drops timed-out confirmations on purpose: once the window is gone, any later native interaction
+    /// A destroyed webview cannot keep a command waiting on a window answer. Clearing the slot also
+    /// drops timed-out confirmations on purpose: once the window is gone, any later interaction
     /// is invalid.
     pub fn cancel_active(&self) {
         if let Ok(mut state) = self.state.lock() {
@@ -477,7 +410,6 @@ impl ConfirmationService {
         let (cancel, cancelled) = oneshot::channel();
         let pending = PendingConfirmation {
             id: state.next_id,
-            request: request.clone(),
             cancelled,
         };
         state.active = Some(ActiveConfirmation {
@@ -652,9 +584,9 @@ impl ConfirmationService {
     }
 
     /// Withdraw the open confirmation from `caller` (Local MCP when a switch is turned off). The waiting
-    /// request ends at once with `E_CONFIRMATION_INVALIDATED` and its grants are revoked. The native dialog
-    /// cannot be dismissed programmatically, so, as with a timeout, the slot stays taken until it is
-    /// answered, and that late answer never produces a grant.
+    /// request ends at once with `E_CONFIRMATION_INVALIDATED` and its grants are revoked. The window is then
+    /// closed by the waiting `confirm_window`, which frees the slot; an answer that still arrives never
+    /// produces a grant.
     pub fn revoke_caller(&self, caller: &str) -> bool {
         let Ok(mut state) = self.state.lock() else {
             return false;
@@ -685,8 +617,8 @@ impl ConfirmationService {
         })
     }
 
-    /// A timed-out confirmation keeps the single slot until its native callback releases it, but its
-    /// already-issued grants must not stay usable.
+    /// A timed-out confirmation keeps the single slot until its window is closed and the slot
+    /// released (or a late answer arrives), but its already-issued grants must not stay usable.
     fn timeout(&self, id: u64) {
         if let Ok(mut state) = self.state.lock() {
             if let Some(active) = state.active.as_mut()
@@ -833,6 +765,7 @@ mod confirm_window {
         app: &tauri::AppHandle<R>,
         service: Arc<ConfirmationService>,
         dialog_id: u64,
+        tall: bool,
     ) -> Result<(), AppError> {
         let handle = app.clone();
         app.run_on_main_thread(move || {
@@ -845,7 +778,7 @@ mod confirm_window {
                 WebviewUrl::App("index.html#/mcp-confirm".into()),
             )
             .title("OpenNavo")
-            .inner_size(480.0, 460.0)
+            .inner_size(480.0, if tall { 620.0 } else { 460.0 })
             .resizable(false)
             .minimizable(false)
             .maximizable(false)
@@ -859,12 +792,9 @@ mod confirm_window {
             match built {
                 Ok(window) => {
                     let events = Arc::clone(&service);
+                    let focused_once = std::sync::atomic::AtomicBool::new(false);
                     window.on_window_event(move |event| {
-                        if matches!(
-                            event,
-                            tauri::WindowEvent::CloseRequested { .. }
-                                | tauri::WindowEvent::Destroyed
-                        ) {
+                        if denies(event, &focused_once) {
                             events.deny_window(dialog_id);
                         }
                     });
@@ -877,6 +807,25 @@ mod confirm_window {
             }
         })
         .map_err(|_| AppError::new("E_UNKNOWN", "confirmation_window"))
+    }
+
+    /// Closing the window is a refusal, and so is leaving it once it had focus: the user turned to
+    /// something else without allowing. Losing focus before it was ever focused (the window opened
+    /// behind another app) is not an answer.
+    pub(super) fn denies(
+        event: &tauri::WindowEvent,
+        focused_once: &std::sync::atomic::AtomicBool,
+    ) -> bool {
+        use std::sync::atomic::Ordering;
+        match event {
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => true,
+            tauri::WindowEvent::Focused(true) => {
+                focused_once.store(true, Ordering::SeqCst);
+                false
+            }
+            tauri::WindowEvent::Focused(false) => focused_once.load(Ordering::SeqCst),
+            _ => false,
+        }
     }
 
     pub(super) fn close<R: Runtime>(app: &tauri::AppHandle<R>) {
@@ -928,19 +877,6 @@ mod tests {
     }
 
     #[test]
-    fn native_prompt_contains_caller_source_action_and_target() {
-        let prompt = request("cask/ghostty").message(Locale::EnUs).unwrap();
-        for value in [
-            "Caller: deep link",
-            "Source: opennavo://package/cask/ghostty?action=install",
-            "Action: install",
-            "Target: cask/ghostty",
-        ] {
-            assert!(prompt.contains(value), "missing {value}");
-        }
-    }
-
-    #[test]
     fn stale_dialog_callback_does_not_clear_a_new_confirmation() {
         let service = ConfirmationService::default();
         let first = service.test_begin(request("cask/ghostty")).unwrap();
@@ -954,124 +890,106 @@ mod tests {
         assert!(service.test_finish(second.id, true).is_ok());
     }
 
-    #[test]
-    fn collection_prompt_counts_planned_installs_and_marks_every_skip_reason() {
-        let request = request("collection/dev-setup");
-        let message = request
-            .collection_message(
-                &[
-                    ConfirmationListItem {
-                        name: "Ghostty".into(),
-                        kind: "cask".into(),
-                        token: "fixture".into(),
-                        tap: None,
-                        disabled: false,
-                        installed: false,
-                        already_queued: false,
-                        unsupported: false,
-                        duplicate: false,
-                    },
-                    ConfirmationListItem {
-                        name: "Legacy app".into(),
-                        kind: "cask".into(),
-                        token: "fixture".into(),
-                        tap: None,
-                        disabled: true,
-                        installed: false,
-                        already_queued: false,
-                        unsupported: false,
-                        duplicate: false,
-                    },
-                    ConfirmationListItem {
-                        name: "Installed app".into(),
-                        kind: "cask".into(),
-                        token: "fixture".into(),
-                        tap: None,
-                        disabled: false,
-                        installed: true,
-                        already_queued: false,
-                        unsupported: false,
-                        duplicate: false,
-                    },
-                    ConfirmationListItem {
-                        name: "Queued app".into(),
-                        kind: "cask".into(),
-                        token: "fixture".into(),
-                        tap: None,
-                        disabled: false,
-                        installed: false,
-                        already_queued: true,
-                        unsupported: false,
-                        duplicate: false,
-                    },
-                    ConfirmationListItem {
-                        name: "Duplicate app".into(),
-                        kind: "cask".into(),
-                        token: "fixture".into(),
-                        tap: None,
-                        disabled: false,
-                        installed: false,
-                        already_queued: false,
-                        unsupported: false,
-                        duplicate: true,
-                    },
-                    ConfirmationListItem {
-                        name: "Formula".into(),
-                        kind: "formula".into(),
-                        token: "ripgrep".into(),
-                        tap: None,
-                        disabled: false,
-                        installed: false,
-                        already_queued: false,
-                        unsupported: true,
-                        duplicate: false,
-                    },
-                ],
-                1,
-                Locale::EnUs,
-            )
-            .unwrap();
-        assert!(message.contains("will install 1, skip 5"));
-        assert!(message.contains("Ghostty"));
-        assert!(message.contains("Legacy app [cask/fixture] (disabled)"));
-        assert!(message.contains("Installed app [cask/fixture] (already installed)"));
-        assert!(message.contains("Queued app [cask/fixture] (already queued)"));
-        assert!(message.contains("Duplicate app [cask/fixture] (duplicate)"));
-        assert!(message.contains("Formula [formula/ripgrep] (not a cask)"));
-    }
-
-    #[test]
-    fn collection_prompt_handles_zero_and_all_installable_targets() {
-        let request = request("collection/dev-setup");
-        let item = ConfirmationListItem {
-            name: "Ghostty".into(),
+    fn item(name: &str, token: &str) -> ConfirmationListItem {
+        ConfirmationListItem {
+            name: name.into(),
             kind: "cask".into(),
-            token: "fixture".into(),
+            token: token.into(),
             tap: None,
             disabled: false,
             installed: false,
             already_queued: false,
             unsupported: false,
             duplicate: false,
-        };
-        for (items, install_count, summary) in [
-            (vec![], 0, "will install 0, skip 0"),
-            (vec![item.clone(); 2], 2, "will install 2, skip 0"),
-            (
-                vec![ConfirmationListItem {
-                    installed: true,
-                    ..item
-                }],
-                0,
-                "will install 0, skip 1",
-            ),
-        ] {
-            let message = request
-                .collection_message(&items, install_count, Locale::EnUs)
-                .unwrap();
-            assert!(message.contains(summary), "{message}");
         }
-        assert!(request.collection_message(&[], 1, Locale::EnUs).is_err());
+    }
+
+    #[test]
+    fn deep_link_view_names_the_web_link_and_target() {
+        let request = request("cask/ghostty");
+        let view = McpConfirmView::deep_link_install(&request, "Ghostty\u{202e}");
+        assert_eq!(view.origin, "deepLink");
+        assert_eq!(view.action, "install");
+        assert_eq!(
+            view.name, "Ghostty",
+            "display_value strips hidden characters"
+        );
+        assert_eq!(view.target, "cask/ghostty");
+        assert_eq!(view.source.as_deref(), Some(request.source.as_str()));
+        assert!(view.items.is_empty() && view.signer.is_none());
+    }
+
+    #[test]
+    fn collection_view_lists_every_app_with_its_skip_reason_and_counts() {
+        let mut request = request("collection/dev-setup");
+        request.action = "install collection".into();
+        let items = vec![
+            item("Ghostty", "ghostty"),
+            ConfirmationListItem {
+                disabled: true,
+                ..item("Legacy app", "legacy")
+            },
+            ConfirmationListItem {
+                installed: true,
+                ..item("Installed app", "installed")
+            },
+            ConfirmationListItem {
+                already_queued: true,
+                ..item("Queued app", "queued")
+            },
+            ConfirmationListItem {
+                duplicate: true,
+                ..item("Duplicate app", "dup")
+            },
+            ConfirmationListItem {
+                unsupported: true,
+                kind: "formula".into(),
+                ..item("Formula", "ripgrep")
+            },
+            ConfirmationListItem {
+                tap: Some("owner/third-party".into()),
+                ..item("Same App", "different")
+            },
+        ];
+        let view = McpConfirmView::deep_link_collection(&request, "Dev setup", &items, 2).unwrap();
+        assert_eq!(view.action, "installCollection");
+        assert_eq!(view.install_count, 2);
+        let rows: Vec<_> = view
+            .items
+            .iter()
+            .map(|item| (item.target.as_str(), item.skip.as_deref()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("cask/ghostty", None),
+                ("cask/legacy", Some("disabled")),
+                ("cask/installed", Some("installed")),
+                ("cask/queued", Some("queued")),
+                ("cask/dup", Some("duplicate")),
+                ("formula/ripgrep", Some("unsupported")),
+                ("cask/different [owner/third-party]", None),
+            ]
+        );
+        // Counts must match the list the grant binds.
+        for (items, count) in [(&items[..], 3), (&items[..0], 1), (&items[..1], 0)] {
+            assert!(McpConfirmView::deep_link_collection(&request, "x", items, count).is_err());
+        }
+        assert!(McpConfirmView::deep_link_collection(&request, "x", &[], 0).is_ok());
+    }
+
+    #[test]
+    fn leaving_the_window_after_focusing_it_denies() {
+        use std::sync::atomic::AtomicBool;
+        let focused = AtomicBool::new(false);
+        let denies = |event| confirm_window::denies(&event, &focused);
+        assert!(
+            !denies(tauri::WindowEvent::Focused(false)),
+            "never focused: not an answer"
+        );
+        assert!(!denies(tauri::WindowEvent::Focused(true)));
+        assert!(denies(tauri::WindowEvent::Focused(false)));
+        assert!(denies(tauri::WindowEvent::Destroyed));
     }
 
     #[test]
@@ -1397,37 +1315,6 @@ mod tests {
         service.consume(&grant, &request).unwrap();
     }
 
-    #[test]
-    fn collection_prompt_distinguishes_same_name_with_different_tokens_and_taps() {
-        let mut request = request("collection/dev-setup");
-        request.source = "opennavo://collection/dev-setup?action=install".into();
-        request.action = "install collection".into();
-        let first = ConfirmationListItem {
-            name: "Same App".into(),
-            kind: "cask".into(),
-            token: "official".into(),
-            tap: None,
-            disabled: false,
-            installed: false,
-            already_queued: false,
-            unsupported: false,
-            duplicate: false,
-        };
-        let second = ConfirmationListItem {
-            token: "different".into(),
-            tap: Some("owner/third-party".into()),
-            ..first.clone()
-        };
-        let message = request
-            .collection_message(&[first, second], 2, Locale::EnUs)
-            .unwrap();
-        let (header, rows) = message.split_once('•').unwrap();
-        assert!(header.contains("collection/dev-setup"));
-        assert!(header.contains("will install 2, skip 0"));
-        assert!(rows.contains("Same App [cask/official]\n"));
-        assert!(rows.contains("Same App [cask/different] [owner/third-party]\n"));
-    }
-
     #[tokio::test]
     async fn completed_native_reply_wins_over_closed_cancellation_channel() {
         let service = std::sync::Arc::new(ConfirmationService::default());
@@ -1441,58 +1328,6 @@ mod tests {
             .await
             .unwrap();
         service.consume(&grant, &request).unwrap();
-    }
-
-    #[test]
-    fn native_confirmation_copy_is_complete_in_all_ten_locales() {
-        assert_eq!(crate::locales_gen::LOCALES.len(), 10);
-        for locale in crate::locales_gen::LOCALES {
-            for key in [
-                "title",
-                "allow",
-                "deny",
-                "installAll",
-                "cancel",
-                "disabled",
-                "installed",
-                "queued",
-                "duplicate",
-                "unsupported",
-                "deepLink",
-                "install",
-                "installCollection",
-            ] {
-                assert!(!text(locale, key).unwrap().trim().is_empty());
-            }
-            let request = request("cask/ghostty");
-            let message = request.message(locale).unwrap();
-            assert!(message.contains(&request.source));
-            assert!(message.contains("cask/ghostty"));
-            for field in ["{caller}", "{source}", "{action}", "{target}"] {
-                assert!(!message.contains(field));
-            }
-            let items = vec![
-                ConfirmationListItem {
-                    name: "Fixture".into(),
-                    kind: "cask".into(),
-                    token: "fixture".into(),
-                    tap: None,
-                    disabled: false,
-                    installed: false,
-                    already_queued: false,
-                    unsupported: false,
-                    duplicate: false,
-                };
-                12
-            ];
-            let message = request.collection_message(&items, 7, locale).unwrap();
-            assert!(message.contains('7'), "{locale:?}: {message}");
-            assert!(message.contains('5'), "{locale:?}: {message}");
-            assert!(!message.contains("12"), "{locale:?}: {message}");
-            for field in ["{install}", "{skip}", "{count}"] {
-                assert!(!message.contains(field), "{locale:?}: {message}");
-            }
-        }
     }
 
     #[tokio::test]

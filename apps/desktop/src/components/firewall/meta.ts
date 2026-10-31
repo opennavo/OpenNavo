@@ -37,7 +37,7 @@ export function stepState(status: FirewallStatus, step: SetupStep): 'done' | 'ac
  * The question window ignores its buttons this long after another question appears or the window shows up: the window
  * can pop up under the cursor, and the second click of a double click would answer the next app's question.
  */
-export const ANSWER_DELAY_MS = 600;
+export const ANSWER_DELAY_MS = 1000;
 
 /** Icon Rust exported into the asset-protocol cache; browser mode (dev:web) falls back to letter tiles. */
 export const appIcon = (app: FirewallApp | null) => (app?.iconPath && isTauri() ? convertFileSrc(app.iconPath) : null);
