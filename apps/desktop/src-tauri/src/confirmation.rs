@@ -115,7 +115,7 @@ pub const ALLOW_ARM_DELAY: Duration = Duration::from_millis(1000);
 pub struct McpConfirmView {
     /// One-time id the window answers with.
     pub id: String,
-    /// `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`.
+    /// `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`, `brewUninstall`.
     pub action: String,
     pub name: String,
     /// Catalog target (`cask/iina`) or the app path.
@@ -154,9 +154,12 @@ pub struct ConfirmItemView {
     pub name: String,
     /// `cask/token`, plus ` [owner/tap]` for a third-party tap.
     pub target: String,
-    /// Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate` or `unsupported`;
-    /// `None` when it will be installed.
+    /// Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate`, `unsupported` or
+    /// `declined`; `None` when it will be installed.
     pub skip: Option<String>,
+    /// `adopt` when the install takes over an app that is already in /Applications;
+    /// `cleanupGroup` when `name` is a group key the window translates (`temp`, `trash`, `installers`, `logs`).
+    pub note: Option<String>,
 }
 
 impl McpConfirmView {
@@ -193,7 +196,7 @@ impl McpConfirmView {
     }
 
     /// A destructive command of OpenNavo's own window (`brewfileInstall`, `cleanup`, `uninstall`,
-    /// `uninstallDelete` or `purge`): the complete list of what runs, in order, and its total size.
+    /// `uninstallDelete`, `purge` or `brewUninstall`): the complete list of what runs, in order, and its total size.
     pub fn app_action(
         action: &str,
         name: &str,
@@ -206,7 +209,7 @@ impl McpConfirmView {
             items,
             install_count: u32::try_from(install_count).unwrap_or(u32::MAX),
             bytes,
-            permanent: matches!(action, "uninstallDelete" | "purge"),
+            permanent: matches!(action, "uninstallDelete" | "purge" | "brewUninstall"),
             ..Self::new(action, name, "", None, None, None, None, None)
         }
         .without_empty_name(name)
@@ -273,6 +276,7 @@ impl ConfirmItemView {
             name: display_value(name),
             target: display_value(target),
             skip: None,
+            note: None,
         }
     }
 }
@@ -305,6 +309,7 @@ impl ConfirmationListItem {
                     .map_or(identity.clone(), |tap| format!("{identity} [{tap}]")),
             ),
             skip: self.skip_reason().map(str::to_owned),
+            note: None,
         }
     }
 }

@@ -244,8 +244,9 @@ const CATEGORIES: CategorySpec[] = [
         items: [{ path: '~/Library/Logs/Adobe', size: 84 * MB, daysAgo: 21, reason: 'log_file' }]
       },
       {
+        // Rust names the log folders no app owns by key (`logs`); the window translates it.
         id: 'crash',
-        title: 'DiagnosticReports',
+        title: 'logs',
         items: [
           {
             path: '~/Library/Logs/DiagnosticReports',

@@ -118,6 +118,18 @@ const summary = computed(() => {
   const size = formatBytes(current.bytes ?? 0, { locale: appLocale.value });
   return t('mcpConfirm.own.summary', { count: current.installCount, size }, { plural: current.installCount });
 });
+// Local MCP and deep links keep their line. OpenNavo's own requests say what happens to the files instead; when the red
+// "can't be recovered" line is already shown, it says it once.
+const footer = computed(() => {
+  const current = view.value;
+  if (!current) return '';
+  if (!fromApp.value) return t('mcpConfirm.footer');
+  if (current.permanent) return '';
+  if (current.action === 'uninstall') return t('mcpConfirm.own.footer.trash');
+  if (current.action === 'cleanup') return t('mcpConfirm.own.footer.cleanup');
+  if (current.action === 'brewfileInstall') return t('mcpConfirm.own.footer.brewfileInstall');
+  return '';
+});
 // Rust lists at most 200 rows; the count above still covers everything.
 const unlisted = computed(() =>
   fromApp.value && !isBrewfile.value && view.value ? Math.max(0, view.value.installCount - view.value.items.length) : 0
@@ -154,7 +166,10 @@ const unlisted = computed(() =>
             >{{ badge }}</span
           >
         </div>
-        <dl class="m-0 mt-10px grid grid-cols-[96px_minmax(0,1fr)] gap-x-10px gap-y-6px text-12.5px">
+        <dl
+          v-if="!fromApp || view.path"
+          class="m-0 mt-10px grid grid-cols-[96px_minmax(0,1fr)] gap-x-10px gap-y-6px text-12.5px"
+        >
           <template v-if="view.action === 'install'">
             <dt class="text-ink-tertiary">{{ t('mcpConfirm.target') }}</dt>
             <dd class="m-0 min-w-0 break-all font-mono text-12px text-ink-secondary">{{ view.target }}</dd>
@@ -163,13 +178,8 @@ const unlisted = computed(() =>
             <dt class="text-ink-tertiary">{{ t('mcpConfirm.path') }}</dt>
             <dd class="m-0 min-w-0 break-all font-mono text-12px text-ink-secondary">{{ view.path }}</dd>
           </template>
-          <template v-if="fromApp">
-            <dt class="text-ink-tertiary">{{ t('mcpConfirm.requestedBy') }}</dt>
-            <dd class="m-0 min-w-0 text-ink-primary" data-test="mcp-confirm-caller">
-              {{ t('mcpConfirm.own.requester') }}
-            </dd>
-          </template>
-          <template v-else-if="deepLink">
+          <!-- OpenNavo's own requests have no caller line: the title already says what this window does. -->
+          <template v-if="deepLink">
             <dt class="text-ink-tertiary">{{ t('mcpConfirm.requestedBy') }}</dt>
             <dd class="m-0 min-w-0 text-ink-primary" data-test="mcp-confirm-caller">{{ t('mcpConfirm.webLink') }}</dd>
             <dt class="text-ink-tertiary">{{ t('mcpConfirm.source') }}</dt>
@@ -177,7 +187,7 @@ const unlisted = computed(() =>
               {{ view.source }}
             </dd>
           </template>
-          <template v-else>
+          <template v-else-if="!fromApp">
             <dt class="text-ink-tertiary">{{ t('mcpConfirm.requestedBy') }}</dt>
             <dd class="m-0 min-w-0 break-all text-ink-primary" data-test="mcp-confirm-caller">{{ caller }}</dd>
           </template>
@@ -223,12 +233,18 @@ const unlisted = computed(() =>
               :data-skip="item.skip ?? undefined"
             >
               <span class="min-w-0" :class="item.skip ? 'text-ink-tertiary' : 'text-ink-primary'">
-                {{ item.name }}
+                {{ item.note === 'cleanupGroup' ? t(`cleanup.groups.${item.name}`) : item.name }}
                 <span class="ml-4px break-all font-mono text-11.5px text-ink-tertiary">{{ item.target }}</span>
               </span>
               <span v-if="item.skip" class="shrink-0 text-11.5px text-status-warning">{{
                 t(`mcpConfirm.skip.${item.skip}`)
               }}</span>
+              <span
+                v-else-if="item.note === 'adopt'"
+                class="shrink-0 text-11.5px text-ink-secondary"
+                data-test="mcp-confirm-adopt"
+                >{{ t('mcpConfirm.own.adopt') }}</span
+              >
             </li>
             <li v-if="unlisted" class="py-6px text-12px text-ink-tertiary" data-test="mcp-confirm-unlisted">
               {{ t('mcpConfirm.own.more', { count: unlisted }, { plural: unlisted }) }}
@@ -237,8 +253,8 @@ const unlisted = computed(() =>
         </template>
       </section>
 
-      <p class="m-0 mt-14px text-12.5px font-600 text-ink-primary" data-test="mcp-confirm-footer">
-        {{ t('mcpConfirm.footer') }}
+      <p v-if="footer" class="m-0 mt-14px text-12.5px font-600 text-ink-primary" data-test="mcp-confirm-footer">
+        {{ footer }}
       </p>
       <p v-if="failure" role="alert" class="m-0 mt-8px text-12px text-status-danger">
         {{ t(`mcpConfirm.${failure}`) }}

@@ -58,7 +58,8 @@ const MIRROR_INSTALLER = 'https://mirrors.ustc.edu.cn/misc/brew-install.sh';
 
 /**
  * OpenNavo's own destructive confirmations (#77), as Rust builds them: `?mock=own-confirm-brewfile`,
- * `own-confirm-cleanup`, `own-confirm-uninstall`, `own-confirm-delete`, `own-confirm-purge`.
+ * `own-confirm-cleanup`, `own-confirm-uninstall`, `own-confirm-delete`, `own-confirm-purge`,
+ * `own-confirm-brew-uninstall`.
  */
 function ownConfirm(flags: ReadonlySet<string>): McpConfirmView | null {
   const base = {
@@ -84,25 +85,27 @@ function ownConfirm(flags: ReadonlySet<string>): McpConfirmView | null {
       name: 'Brewfile',
       path: `${home}/Documents/Brewfile`,
       items: [
-        { name: 'ghostty', target: 'cask/ghostty', skip: null },
-        { name: 'zed', target: 'cask/zed', skip: null },
-        { name: 'raycast', target: 'cask/raycast', skip: null },
-        { name: 'visual-studio-code', target: 'cask/visual-studio-code', skip: 'installed' },
-        { name: 'git', target: 'formula/git', skip: 'unsupported' },
-        { name: 'mas "Xcode", id: 497799835', target: 'Brewfile:7', skip: 'unsupported' }
+        { name: 'ghostty', target: 'cask/ghostty', skip: null, note: null },
+        { name: 'zed', target: 'cask/zed', skip: null, note: 'adopt' },
+        { name: 'raycast', target: 'cask/raycast', skip: null, note: null },
+        { name: 'font-maple-mono', target: 'cask/font-maple-mono [subframe7536/tap]', skip: null, note: null },
+        { name: 'iina', target: 'cask/iina', skip: 'declined', note: null },
+        { name: 'visual-studio-code', target: 'cask/visual-studio-code', skip: 'installed', note: null },
+        { name: 'git', target: 'formula/git', skip: 'unsupported', note: null },
+        { name: 'mas "Xcode", id: 497799835', target: 'Brewfile:7', skip: 'unsupported', note: null }
       ],
-      installCount: 3
+      installCount: 4
     };
   if (flags.has('own-confirm-cleanup'))
     return {
       ...base,
       action: 'cleanup',
       items: [
-        { name: 'Xcode DerivedData', target: `${home}/Library/Developer/Xcode/DerivedData`, skip: null },
-        { name: 'npm', target: `${home}/.npm/_cacache`, skip: null },
-        { name: 'Google Chrome', target: `${home}/Library/Caches/Google/Chrome`, skip: null },
-        { name: 'Logs', target: `${home}/Library/Logs/DiagnosticReports`, skip: null },
-        { name: 'Homebrew', target: 'brew cleanup --prune=all', skip: null }
+        { name: 'Xcode DerivedData', target: `${home}/Library/Developer/Xcode/DerivedData`, skip: null, note: null },
+        { name: 'npm', target: `${home}/.npm/_cacache`, skip: null, note: null },
+        { name: 'Google Chrome', target: `${home}/Library/Caches/Google/Chrome`, skip: null, note: null },
+        { name: 'logs', target: `${home}/Library/Logs/DiagnosticReports`, skip: null, note: 'cleanupGroup' },
+        { name: 'Homebrew', target: 'brew cleanup --prune=all', skip: null, note: null }
       ],
       installCount: 5,
       bytes: 18_640_000_000
@@ -114,27 +117,43 @@ function ownConfirm(flags: ReadonlySet<string>): McpConfirmView | null {
       action: remove ? 'uninstallDelete' : 'uninstall',
       name: 'Rectangle',
       items: [
-        { name: 'Rectangle', target: '/Applications/Rectangle.app', skip: null },
-        { name: 'Rectangle', target: `${home}/Library/Application Support/Rectangle`, skip: null },
-        { name: 'Rectangle', target: `${home}/Library/Preferences/com.knollsoft.Rectangle.plist`, skip: null },
-        { name: 'Rectangle', target: `${home}/Library/Caches/com.knollsoft.Rectangle`, skip: null }
+        { name: 'Rectangle', target: '/Applications/Rectangle.app', skip: null, note: null },
+        { name: 'Rectangle', target: `${home}/Library/Application Support/Rectangle`, skip: null, note: null },
+        {
+          name: 'Rectangle',
+          target: `${home}/Library/Preferences/com.knollsoft.Rectangle.plist`,
+          skip: null,
+          note: null
+        },
+        { name: 'Rectangle', target: `${home}/Library/Caches/com.knollsoft.Rectangle`, skip: null, note: null }
       ],
       installCount: 4,
       bytes: 24_310_000,
       permanent: remove
     };
   }
+  // A failed Homebrew uninstall retried from the Full Disk Access prompt or history (Rust rebuilds it from the task).
+  if (flags.has('own-confirm-brew-uninstall'))
+    return {
+      ...base,
+      action: 'brewUninstall',
+      name: 'Rectangle',
+      items: [{ name: 'rectangle', target: 'cask/rectangle', skip: null, note: null }],
+      installCount: 1,
+      permanent: true
+    };
   if (flags.has('own-confirm-purge'))
     return {
       ...base,
       action: 'purge',
       items: [
-        { name: 'Rectangle.app', target: '/Applications/Rectangle.app', skip: null },
-        { name: 'Rectangle', target: `${home}/Library/Application Support/Rectangle`, skip: null },
+        { name: 'Rectangle.app', target: '/Applications/Rectangle.app', skip: null, note: null },
+        { name: 'Rectangle', target: `${home}/Library/Application Support/Rectangle`, skip: null, note: null },
         {
           name: 'com.knollsoft.Rectangle.plist',
           target: `${home}/Library/Preferences/com.knollsoft.Rectangle.plist`,
-          skip: null
+          skip: null,
+          note: null
         }
       ],
       installCount: 3,
@@ -142,6 +161,17 @@ function ownConfirm(flags: ReadonlySet<string>): McpConfirmView | null {
       permanent: true
     };
   return null;
+}
+
+/** As Rust's generic task IPC: uninstalls and cleanups need their confirmed commands; no window sends reinstall --zap. */
+// `?mock=legacy-uninstall` still accepts a plain Homebrew uninstall, standing in for one queued by an older version, so the
+// Full Disk Access and history retry paths have a failed task to start from.
+function rejectUnconfirmed(op: Task['op'], options: Task['options'], flags: ReadonlySet<string>) {
+  if (op === 'clean') throw { code: 'E_INVALID_ARG', message: 'cleanup_execute_required', detail: null };
+  const legacy = flags.has('legacy-uninstall') && op === 'uninstall' && !options?.planId && !options?.planDigest;
+  if (options?.planDigest || (op === 'uninstall' && !legacy) || (op === 'remove_leftovers' && options?.planId))
+    throw { code: 'E_INVALID_ARG', message: 'uninstall_execute_required', detail: null };
+  if (op === 'reinstall' && options?.zap) throw { code: 'E_INVALID_ARG', message: 'reinstall_zap', detail: null };
 }
 
 function ipcTaskTrigger(trigger: Task['trigger']): Task['trigger'] {
@@ -493,12 +523,12 @@ export function installMockIpc(
               origin: 'deepLink',
               source: 'opennavo://collection/dev-setup?action=install',
               items: [
-                { name: 'Ghostty', target: 'cask/ghostty', skip: null },
-                { name: 'Visual Studio Code', target: 'cask/visual-studio-code', skip: null },
-                { name: 'Rectangle', target: 'cask/rectangle', skip: 'installed' },
-                { name: 'Legacy Tool', target: 'cask/legacy-tool', skip: 'disabled' },
-                { name: 'Raycast', target: 'cask/raycast', skip: null },
-                { name: 'ripgrep', target: 'formula/ripgrep', skip: 'unsupported' }
+                { name: 'Ghostty', target: 'cask/ghostty', skip: null, note: null },
+                { name: 'Visual Studio Code', target: 'cask/visual-studio-code', skip: null, note: null },
+                { name: 'Rectangle', target: 'cask/rectangle', skip: 'installed', note: null },
+                { name: 'Legacy Tool', target: 'cask/legacy-tool', skip: 'disabled', note: null },
+                { name: 'Raycast', target: 'cask/raycast', skip: null, note: null },
+                { name: 'ripgrep', target: 'formula/ripgrep', skip: 'unsupported', note: null }
               ],
               installCount: 3,
               bytes: null,
@@ -941,6 +971,15 @@ export function installMockIpc(
       const trigger = ipcTaskTrigger(args.trigger as Task['trigger']);
       if ((args.target as TaskTarget | null)?.kind === 'link')
         throw { code: 'E_NOT_INSTALLABLE', message: 'link_app', detail: null };
+      // As Rust: RestorePrompt's Continue re-sends a task still queued from before the restart; that is no new work.
+      const resumes = state.history.some(
+        task =>
+          task.state === 'queued' &&
+          task.op === args.op &&
+          JSON.stringify(task.target) === JSON.stringify(args.target ?? null) &&
+          JSON.stringify(task.options) === JSON.stringify(args.options)
+      );
+      if (!resumes) rejectUnconfirmed(args.op as Task['op'], args.options as Task['options'], flags);
       return runner.enqueue(
         args.op as Task['op'],
         (args.target as TaskTarget | null) ?? null,
@@ -950,9 +989,18 @@ export function installMockIpc(
     },
     task_enqueue_many: args => {
       const trigger = ipcTaskTrigger(args.trigger as Task['trigger']);
+      rejectUnconfirmed(args.op as Task['op'], args.options as Task['options'], flags);
       return (args.targets as TaskTarget[]).map(target =>
         runner.enqueue(args.op as Task['op'], target, args.options as Task['options'], trigger)
       );
+    },
+    // Rust rebuilds a failed uninstall from its task id and asks in its window; the simulation allows it.
+    uninstall_retry: args => {
+      const task = state.history.find(item => item.id === args.taskId);
+      if (!task || task.op !== 'uninstall' || task.options.planId || !task.target)
+        throw { code: 'E_INVALID_ARG', message: 'uninstall_retry', detail: null };
+      const force = task.error?.code === 'E_FULL_DISK_ACCESS' || task.options.force;
+      return runner.enqueue('uninstall', task.target, { ...task.options, force }, 'retry');
     },
     // The approve switch is intentionally compile-time dev-only: Vite removes this branch from release bundles.
     deeplink_install_confirm: () => {

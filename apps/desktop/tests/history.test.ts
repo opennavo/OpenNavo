@@ -279,7 +279,9 @@ it.each(['install', 'upgrade', 'uninstall'] as const)('Keeps ordinary Homebrew %
     options: { zap: false },
     error: null
   };
-  const enqueue = vi.spyOn(useTasksStore(), 'enqueue').mockResolvedValue(null);
+  const enqueue = vi.spyOn(commands, 'taskEnqueue');
+  const retry = vi.spyOn(commands, 'uninstallRetry');
+  const generic = vi.spyOn(useTasksStore(), 'retry');
   const wrapper = mount(HistoryList, {
     props: { tasks: [task] },
     global: { plugins: [context.pinia, context.router, i18n] }
@@ -288,7 +290,15 @@ it.each(['install', 'upgrade', 'uninstall'] as const)('Keeps ordinary Homebrew %
     .findAll('button')
     .find(button => button.text() === '重试')!
     .trigger('click');
-  expect(enqueue).toHaveBeenCalledWith(op, task.target, 'retry', task.options);
+  await flushPromises();
+  // A failed uninstall goes back to Rust by id, which asks in its window; the others keep the generic queue.
+  if (op === 'uninstall') {
+    expect(retry).toHaveBeenCalledWith(task.id);
+    expect(enqueue).not.toHaveBeenCalled();
+  } else {
+    expect(generic).toHaveBeenCalledWith(task);
+    expect(retry).not.toHaveBeenCalled();
+  }
   wrapper.unmount();
 });
 

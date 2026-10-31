@@ -28,6 +28,8 @@ pub async fn brewfile_preview(
 /// Install a Brewfile's ready casks after the user allows the whole list in OpenNavo's
 /// confirmation window. The file must still be the one `brewfile_preview` read (`digest`), and it
 /// is read and resolved again after Allow; any change refuses with `E_PLAN_CHANGED`.
+/// `decisions` carries the tap and adoption answers the main window already collected; they are
+/// part of the digest, and a tap nobody was asked about refuses the plan.
 #[tauri::command]
 #[specta::specta]
 pub async fn brewfile_install(
@@ -36,12 +38,21 @@ pub async fn brewfile_install(
     confirmation: State<'_, Arc<crate::confirmation::ConfirmationService>>,
     path: String,
     digest: String,
+    decisions: crate::model::BrewfileDecisions,
 ) -> Result<Vec<Task>, AppError> {
     crate::commands::deeplink::ensure_install_environment(&state).await?;
     let core = state.inner().clone();
     let plan = {
-        let (core, path, digest) = (core.clone(), path.clone(), digest.clone());
-        crate::blocking(move || crate::destructive::brewfile_plan(&core, &path, &digest)).await?
+        let (core, path, digest, decisions) = (
+            core.clone(),
+            path.clone(),
+            digest.clone(),
+            decisions.clone(),
+        );
+        crate::blocking(move || {
+            crate::destructive::brewfile_plan(&core, &path, &digest, &decisions)
+        })
+        .await?
     };
     let name = std::path::Path::new(&path)
         .file_name()
@@ -64,7 +75,7 @@ pub async fn brewfile_install(
         |approved| async move {
             crate::commands::deeplink::ensure_install_environment(&core).await?;
             crate::blocking(move || {
-                let again = crate::destructive::brewfile_plan(&core, &path, &digest)?;
+                let again = crate::destructive::brewfile_plan(&core, &path, &digest, &decisions)?;
                 if again.digest != approved {
                     return Err(crate::destructive::plan_changed());
                 }

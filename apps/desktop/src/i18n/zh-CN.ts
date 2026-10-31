@@ -881,7 +881,6 @@ export default {
     source: '来源',
     collectionSummary: '共 {count} 个应用：安装 {install} 个，跳过 {skip} 个',
     own: {
-      requester: '本机的 OpenNavo',
       summary: '{count} 项，共 {size}',
       permanent: '这些文件不经过废纸篓，删除后无法恢复。',
       more: '还有 {count} 项',
@@ -909,6 +908,17 @@ export default {
         title: '确认从废纸篓彻底删除',
         intro: 'OpenNavo 将从废纸篓彻底删除下面这些项目。',
         badge: '彻底删除'
+      },
+      brewUninstall: {
+        title: '确认卸载',
+        intro: 'OpenNavo 将用 Homebrew 卸载这个应用，然后再试一次。',
+        badge: '卸载'
+      },
+      adopt: '接管已有的应用',
+      footer: {
+        trash: '移到废纸篓后可以放回。',
+        cleanup: '移到废纸篓的项目在清空前可以放回；命令类清理无法撤销。',
+        brewfileInstall: '应用会从 Homebrew 下载安装；已有的应用只有你同意接管时才会被替换。'
       }
     },
     skip: {
@@ -916,7 +926,8 @@ export default {
       installed: '已安装',
       queued: '已在队列中',
       duplicate: '重复',
-      unsupported: '不支持'
+      unsupported: '不支持',
+      declined: '你已拒绝'
     }
   },
   settings: {
@@ -1975,7 +1986,8 @@ export default {
       installers: '下载和桌面',
       xcodeArchive: 'Xcode 归档',
       deviceBackup: '设备备份',
-      deviceBackupModel: '设备备份 · {model}'
+      deviceBackupModel: '设备备份 · {model}',
+      logs: '日志与崩溃报告'
     },
     skipReasonsBy: {
       running: '{names} 正在运行，退出后可以清理',

@@ -906,7 +906,6 @@ const messages: MessageSchema = {
     source: 'Source',
     collectionSummary: '{count} apps: {install} will be installed, {skip} skipped',
     own: {
-      requester: 'OpenNavo on this Mac',
       summary: '{count} item, {size} | {count} items, {size}',
       permanent: 'These files skip the Trash and can’t be recovered.',
       more: 'And {count} more | And {count} more',
@@ -935,6 +934,18 @@ const messages: MessageSchema = {
         title: 'Confirm deleting from the Trash',
         intro: 'OpenNavo will delete these items from the Trash for good.',
         badge: 'Delete'
+      },
+      brewUninstall: {
+        title: 'Confirm uninstall',
+        intro: 'OpenNavo will uninstall this app with Homebrew and try again.',
+        badge: 'Uninstall'
+      },
+      adopt: 'Takes over the existing app',
+      footer: {
+        trash: 'You can put these back from the Trash.',
+        cleanup: 'Items moved to the Trash can be put back until it is emptied; command cleanups can’t be undone.',
+        brewfileInstall:
+          'Apps are downloaded from Homebrew; an existing app is replaced only where you agreed to take it over.'
       }
     },
     skip: {
@@ -942,7 +953,8 @@ const messages: MessageSchema = {
       installed: 'Already installed',
       queued: 'Already queued',
       duplicate: 'Listed twice',
-      unsupported: 'Not supported'
+      unsupported: 'Not supported',
+      declined: 'You declined'
     }
   },
   settings: {
@@ -2040,7 +2052,8 @@ const messages: MessageSchema = {
       installers: 'Downloads and Desktop',
       xcodeArchive: 'Xcode archives',
       deviceBackup: 'Device backup',
-      deviceBackupModel: 'Device backup · {model}'
+      deviceBackupModel: 'Device backup · {model}',
+      logs: 'Logs and crash reports'
     },
     skipReasonsBy: {
       running: 'In use by {names}; it can be cleaned up after quitting',

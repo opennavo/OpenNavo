@@ -143,12 +143,12 @@ describe('Deep-link install confirmation window', () => {
 });
 
 describe("OpenNavo's own destructive confirmations (#77)", () => {
-  for (const flag of ['brewfile', 'cleanup', 'uninstall', 'delete', 'purge'])
-    it(`${flag}: says OpenNavo asked, lists what will run, and keeps the same safe default`, async () => {
+  for (const flag of ['brewfile', 'cleanup', 'uninstall', 'delete', 'purge', 'brew-uninstall'])
+    it(`${flag}: lists what will run without a caller line, and keeps the same safe default`, async () => {
       const answer = vi.spyOn(commands, 'mcpConfirmAnswer');
       const wrapper = await page(`own-confirm-${flag}`);
       expect(wrapper.text()).not.toContain('未验证');
-      expect(wrapper.text()).toContain('OpenNavo');
+      expect(wrapper.find('[data-test="mcp-confirm-caller"]').exists()).toBe(false);
       expect(wrapper.findAll('li').length).toBeGreaterThan(0);
       const buttons = wrapper.findAll('footer button');
       expect(buttons.map(b => b.attributes('data-test'))).toEqual(['mcp-confirm-deny', 'mcp-confirm-allow']);
@@ -172,10 +172,33 @@ describe("OpenNavo's own destructive confirmations (#77)", () => {
     expect(deleted.find('[data-test="mcp-confirm-permanent"]').exists()).toBe(true);
   });
 
-  it('Lists a Brewfile by its path, marking entries that will be skipped', async () => {
+  it('Lists a Brewfile by its path, with taps, adoptions and the entries that will be skipped', async () => {
     const wrapper = await page('own-confirm-brewfile');
     expect(wrapper.text()).toContain('/Users/mock/Documents/Brewfile');
-    expect(wrapper.text()).toContain('visual-studio-code');
+    expect(wrapper.text()).toContain('cask/font-maple-mono [subframe7536/tap]');
+    expect(wrapper.get('[data-test="mcp-confirm-adopt"]').text()).toBe('接管已有的应用');
+    expect(wrapper.get('[data-skip="declined"]').text()).toContain('你已拒绝');
+  });
+
+  it('Says what happens to the files instead of the MCP line, and says "can\'t be recovered" only once', async () => {
+    const footer = async (flag: string) => {
+      const wrapper = await page(`own-confirm-${flag}`);
+      const text = wrapper.find('[data-test="mcp-confirm-footer"]');
+      const result = [text.exists() ? text.text() : null, wrapper.find('[data-test="mcp-confirm-permanent"]').exists()];
+      wrapper.unmount();
+      wrappers.splice(0);
+      return result;
+    };
+    expect(await footer('uninstall')).toEqual(['移到废纸篓后可以放回。', false]);
+    expect(await footer('cleanup')).toEqual(['移到废纸篓的项目在清空前可以放回；命令类清理无法撤销。', false]);
+    expect((await footer('brewfile'))[0]).toContain('Homebrew');
+    for (const flag of ['delete', 'purge', 'brew-uninstall']) expect(await footer(flag)).toEqual([null, true]);
+  });
+
+  it('Translates the cleanup groups Rust names by key', async () => {
+    const wrapper = await page('own-confirm-cleanup');
+    expect(wrapper.text()).toContain('日志与崩溃报告');
+    expect(wrapper.text()).not.toMatch(/\blogs\b/);
   });
 });
 

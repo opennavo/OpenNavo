@@ -16,7 +16,7 @@ import { useLocalAppsStore, useTasksStore } from '@/stores';
 import { useSecurityStore } from '@/stores/security';
 import { useUpdatesStore } from '@/stores/updates';
 import { isDeferredUpdate } from '@/stores/runningApps';
-import { recheckRoute, retryOptions } from '@/stores/permissionPrompt';
+import { recheckRoute } from '@/stores/permissionPrompt';
 
 // Local history (mockup 05, 06 §8: completed tasks), grouped by day; failures show reasons, logs, and retry (trigger=retry).
 const props = defineProps<{ tasks: readonly Task[] }>();
@@ -180,7 +180,7 @@ async function retry(task: Task) {
   try {
     const route = recheckRoute(task);
     if (route) await router.push(route);
-    else await queue.enqueue(task.op, task.target, 'retry', retryOptions(task));
+    else await queue.retry(task);
   } catch (error) {
     toasts.push({ tone: 'danger', title: t('errors.actionFailed'), description: errorText(error) });
   }

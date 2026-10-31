@@ -887,7 +887,6 @@
     "source": "Origem",
     "collectionSummary": "{count} apps: {install} serão instalados, {skip} ignorados",
     "own": {
-      "requester": "OpenNavo neste Mac",
       "summary": "{count} item, {size} | {count} itens, {size}",
       "permanent": "Estes arquivos não passam pela Lixeira e não poderão ser recuperados.",
       "more": "E mais {count} | E mais {count}",
@@ -915,6 +914,17 @@
         "title": "Confirmar exclusão definitiva",
         "intro": "O OpenNavo vai apagar estes itens da Lixeira de vez.",
         "badge": "Apagar de vez"
+      },
+      "brewUninstall": {
+        "title": "Confirmar desinstalação",
+        "intro": "O OpenNavo vai desinstalar este app com o Homebrew e tentar de novo.",
+        "badge": "Desinstalar"
+      },
+      "adopt": "Substitui o app existente",
+      "footer": {
+        "trash": "Você pode restaurá-los pela Lixeira.",
+        "cleanup": "Itens movidos para a Lixeira podem ser restaurados até esvaziá-la; limpezas por comando não podem ser desfeitas.",
+        "brewfileInstall": "Os apps são baixados do Homebrew; um app existente só é substituído se você aceitou adotá-lo."
       }
     },
     "skip": {
@@ -922,7 +932,8 @@
       "installed": "Já instalado",
       "queued": "Já na fila",
       "duplicate": "Repetido",
-      "unsupported": "Não compatível"
+      "unsupported": "Não compatível",
+      "declined": "Você recusou"
     }
   },
   "settings": {
@@ -1975,7 +1986,8 @@
       "installers": "Downloads e Mesa",
       "xcodeArchive": "Arquivos do Xcode",
       "deviceBackup": "Backup do dispositivo",
-      "deviceBackupModel": "Backup do dispositivo · {model}"
+      "deviceBackupModel": "Backup do dispositivo · {model}",
+      "logs": "Logs e relatórios de falhas"
     },
     "skipReasonsBy": {
       "running": "Em uso por {names}; dá para limpar depois de encerrar",

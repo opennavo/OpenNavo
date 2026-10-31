@@ -887,7 +887,6 @@
     "source": "來源",
     "collectionSummary": "共 {count} 個應用：安裝 {install} 個，跳過 {skip} 個",
     "own": {
-      "requester": "本機的 OpenNavo",
       "summary": "{count} 項，共 {size}",
       "permanent": "這些檔案不經過垃圾桶，刪除後無法恢復。",
       "more": "還有 {count} 項",
@@ -915,6 +914,17 @@
         "title": "確認從垃圾桶徹底刪除",
         "intro": "OpenNavo 將從垃圾桶徹底刪除下面這些項目。",
         "badge": "徹底刪除"
+      },
+      "brewUninstall": {
+        "title": "確認解除安裝",
+        "intro": "OpenNavo 將用 Homebrew 解除安裝這個應用，然後再試一次。",
+        "badge": "解除安裝"
+      },
+      "adopt": "接管已有的應用",
+      "footer": {
+        "trash": "移到垃圾桶後可以放回。",
+        "cleanup": "移到垃圾桶的項目在清空前可以放回；命令類清理無法撤銷。",
+        "brewfileInstall": "應用會從 Homebrew 下載安裝；已有的應用只有你同意接管時才會被替換。"
       }
     },
     "skip": {
@@ -922,7 +932,8 @@
       "installed": "已安裝",
       "queued": "已在佇列中",
       "duplicate": "重複",
-      "unsupported": "不支援"
+      "unsupported": "不支援",
+      "declined": "你已拒絕"
     }
   },
   "settings": {
@@ -1975,7 +1986,8 @@
       "installers": "下載和桌面",
       "xcodeArchive": "Xcode 歸檔",
       "deviceBackup": "裝置備份",
-      "deviceBackupModel": "裝置備份 · {model}"
+      "deviceBackupModel": "裝置備份 · {model}",
+      "logs": "日誌與崩潰報告"
     },
     "skipReasonsBy": {
       "running": "{names} 正在執行，退出後可以清理",

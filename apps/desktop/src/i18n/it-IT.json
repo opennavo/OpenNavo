@@ -887,7 +887,6 @@
     "source": "Origine",
     "collectionSummary": "{count} app: {install} verranno installate, {skip} saltate",
     "own": {
-      "requester": "OpenNavo su questo Mac",
       "summary": "{count} elemento, {size} | {count} elementi, {size}",
       "permanent": "Questi file non passano dal Cestino e non si potranno recuperare.",
       "more": "E altro {count} | E altri {count}",
@@ -915,6 +914,17 @@
         "title": "Conferma l’eliminazione definitiva",
         "intro": "OpenNavo eliminerà definitivamente questi elementi dal Cestino.",
         "badge": "Elimina definitivamente"
+      },
+      "brewUninstall": {
+        "title": "Conferma la disinstallazione",
+        "intro": "OpenNavo disinstallerà questa app con Homebrew e riproverà.",
+        "badge": "Disinstalla"
+      },
+      "adopt": "Sostituisce l’app esistente",
+      "footer": {
+        "trash": "Puoi ripristinarli dal Cestino.",
+        "cleanup": "Gli elementi nel Cestino si possono ripristinare finché non lo svuoti; le pulizie tramite comando non si possono annullare.",
+        "brewfileInstall": "Le app vengono scaricate da Homebrew; un’app esistente viene sostituita solo se hai accettato di adottarla."
       }
     },
     "skip": {
@@ -922,7 +932,8 @@
       "installed": "Già installata",
       "queued": "Già in coda",
       "duplicate": "Duplicata",
-      "unsupported": "Non supportata"
+      "unsupported": "Non supportata",
+      "declined": "Rifiutato"
     }
   },
   "settings": {
@@ -1975,7 +1986,8 @@
       "installers": "Download e Scrivania",
       "xcodeArchive": "Archivi Xcode",
       "deviceBackup": "Backup del dispositivo",
-      "deviceBackupModel": "Backup del dispositivo · {model}"
+      "deviceBackupModel": "Backup del dispositivo · {model}",
+      "logs": "Log e rapporti sugli arresti anomali"
     },
     "skipReasonsBy": {
       "running": "{names} in esecuzione; chiudi per pulire",

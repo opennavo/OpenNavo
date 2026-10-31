@@ -887,7 +887,6 @@
     "source": "送信元",
     "collectionSummary": "{count} 個のアプリ：{install} 個をインストール、{skip} 個をスキップ",
     "own": {
-      "requester": "この Mac の OpenNavo",
       "summary": "{count}項目・{size}",
       "permanent": "これらのファイルはゴミ箱を経由せず、元に戻せません。",
       "more": "ほか{count}項目",
@@ -915,6 +914,17 @@
         "title": "ゴミ箱からの完全削除を確認",
         "intro": "以下の項目をゴミ箱から完全に削除します。",
         "badge": "完全に削除"
+      },
+      "brewUninstall": {
+        "title": "アンインストールを確認",
+        "intro": "Homebrew でこの App をアンインストールし、もう一度実行します。",
+        "badge": "アンインストール"
+      },
+      "adopt": "既存の App を引き継ぐ",
+      "footer": {
+        "trash": "ゴミ箱から元に戻せます。",
+        "cleanup": "ゴミ箱に移動した項目は空にするまで戻せます。コマンドによるクリーンアップは元に戻せません。",
+        "brewfileInstall": "App は Homebrew からダウンロードされます。既存の App は引き継ぎに同意したものだけ置き換えます。"
       }
     },
     "skip": {
@@ -922,7 +932,8 @@
       "installed": "インストール済み",
       "queued": "キューに追加済み",
       "duplicate": "重複",
-      "unsupported": "非対応"
+      "unsupported": "非対応",
+      "declined": "拒否済み"
     }
   },
   "settings": {
@@ -1975,7 +1986,8 @@
       "installers": "ダウンロードとデスクトップ",
       "xcodeArchive": "Xcodeアーカイブ",
       "deviceBackup": "デバイスのバックアップ",
-      "deviceBackupModel": "デバイスのバックアップ · {model}"
+      "deviceBackupModel": "デバイスのバックアップ · {model}",
+      "logs": "ログとクラッシュレポート"
     },
     "skipReasonsBy": {
       "running": "{names}が実行中です。終了するとクリーンアップできます",

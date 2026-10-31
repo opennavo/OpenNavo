@@ -5,6 +5,7 @@ import InstallConfirm from '@/components/shell/InstallConfirm.vue';
 import { i18n } from '@/i18n';
 import { commands } from '@/ipc/client';
 import { useTasksStore } from '@/stores/tasks';
+import { useTapConfirmStore } from '@/stores/tapConfirm';
 import { useInstallConfirmStore } from '@/stores/installConfirm';
 import { setup } from './helpers';
 
@@ -130,24 +131,21 @@ describe('Pre-install adoption confirmation', () => {
     expect(useInstallConfirmStore().pending).toBeNull();
   });
 
-  it('Brewfile imports go through Rust confirmation, never generic installs, and a refusal queues nothing', async () => {
-    const context = await init();
-    const wrapper = mount(BrewfileRestore, {
+  function brewfile(context: Awaited<ReturnType<typeof init>>, tokens: string[]) {
+    return mount(BrewfileRestore, {
       props: {
         open: true,
         path: '/Users/mock/Brewfile',
         preview: {
-          entries: [
-            {
-              line: 1,
-              raw: 'cask "notion"',
-              kind: 'cask',
-              token: 'notion',
-              status: 'ready',
-              reason: null
-            }
-          ],
-          ready: 1,
+          entries: tokens.map((token, index) => ({
+            line: index + 1,
+            raw: `cask "${token}"`,
+            kind: 'cask' as const,
+            token,
+            status: 'ready' as const,
+            reason: null
+          })),
+          ready: tokens.length,
           installed: 0,
           unsupported: 0,
           digest: 'preview-digest'
@@ -156,21 +154,67 @@ describe('Pre-install adoption confirmation', () => {
       global: { plugins: [context.pinia, i18n, context.router] },
       attachTo: document.body
     });
+  }
+  const clickInstall = () =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes('安装'))?.click();
+
+  it('Brewfile restore asks before adopting an app that is already installed, and Rust gets that answer', async () => {
+    const context = await init();
+    const wrapper = brewfile(context, ['notion']);
     const enqueue = vi.spyOn(commands, 'taskEnqueue');
+    const install = vi.spyOn(commands, 'brewfileInstall').mockResolvedValue({ status: 'ok', data: [] });
+    clickInstall();
+    await flushPromises();
+    // The same adoption prompt as a single install, before OpenNavo's confirmation window.
+    expect(useInstallConfirmStore().pending?.status).toBe('conflict');
+    expect(install).not.toHaveBeenCalled();
+    useInstallConfirmStore().choose(true);
+    await flushPromises();
+    expect(install).toHaveBeenCalledWith('/Users/mock/Brewfile', 'preview-digest', {
+      adopt: ['notion'],
+      taps: [],
+      declined: []
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('Brewfile restore marks a declined adoption as skipped and never asks Rust when nothing is left', async () => {
+    const context = await init();
+    const wrapper = brewfile(context, ['notion']);
+    const install = vi.spyOn(commands, 'brewfileInstall');
+    clickInstall();
+    await flushPromises();
+    useInstallConfirmStore().choose(false);
+    await flushPromises();
+    expect(install).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('Brewfile restore asks for a missing third-party tap first; Rust adds the tap as part of the plan', async () => {
+    const context = await init('');
+    vi.spyOn(commands, 'installPreflight').mockResolvedValue({
+      status: 'ok',
+      data: { name: 'Notion', paths: [], status: 'ready', tap: 'example-dev/tap' }
+    });
+    const wrapper = brewfile(context, ['notion', 'zed']);
     const install = vi.spyOn(commands, 'brewfileInstall').mockResolvedValue({
       status: 'error',
       error: { code: 'E_CONFIRMATION_DENIED', message: 'confirmation_denied', detail: null }
     });
-    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b =>
-      b.textContent?.includes('安装')
-    );
-    expect(button).toBeDefined();
-    button?.click();
+    clickInstall();
     await flushPromises();
-    // Rust gets the file path and the digest of the file the preview read; it re-reads and asks in its own window.
-    expect(install).toHaveBeenCalledWith('/Users/mock/Brewfile', 'preview-digest');
-    expect(enqueue).not.toHaveBeenCalled();
-    // Deny in the window: quiet, no toast, nothing queued.
+    expect(useTapConfirmStore().pending).toEqual({ name: 'Notion', tap: 'example-dev/tap' });
+    useTapConfirmStore().choose(true);
+    await flushPromises();
+    useTapConfirmStore().choose(false);
+    await flushPromises();
+    expect(install).toHaveBeenCalledWith('/Users/mock/Brewfile', 'preview-digest', {
+      adopt: [],
+      taps: ['example-dev/tap'],
+      declined: ['zed']
+    });
+    // Deny in OpenNavo's window: quiet, nothing queued.
     expect(document.body.textContent).not.toContain('E_CONFIRMATION_DENIED');
     wrapper.unmount();
   });

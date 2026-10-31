@@ -186,6 +186,9 @@ impl Engine {
         }
         Ok((entry, app))
     }
+    /// Unconfirmed entry kept `pub` only for the integration tests in `tests/` (a separate crate);
+    /// no IPC command calls it. App commands use the `*_confirmed` path.
+    #[doc(hidden)]
     pub fn execute_choices(
         self: &Arc<Self>,
         queue: &TaskQueue,

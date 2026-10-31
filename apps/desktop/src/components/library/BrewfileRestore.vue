@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { OnButton, OnChip, OnModal } from '@opennavo/ui';
 import type { OnChipTone } from '@opennavo/ui';
-import type { BrewfileEntryStatus, BrewfilePreview } from '@/ipc/bindings';
+import type { BrewfileDecisions, BrewfileEntryStatus, BrewfilePreview } from '@/ipc/bindings';
 import { commands, unwrap } from '@/ipc/client';
 import { confirmationRefused } from '@/ipc/confirmation';
 import { usePermissionGateStore } from '@/stores/permissionGate';
@@ -45,7 +45,19 @@ async function install() {
   installing.value = true;
   try {
     open.value = false;
-    const queued = await unwrap(commands.brewfileInstall(props.path, props.preview.digest));
+    // The same checks as a single install, one cask at a time: taps ask every time, existing apps ask before
+    // adopting. Rust lists the answers in its window and binds them to the plan.
+    const decisions: BrewfileDecisions = { adopt: [], taps: [], declined: [] };
+    for (const target of targets) {
+      const consent = await tasks.installConsent(target, 'bundle');
+      if (!consent) decisions.declined.push(target.token);
+      else {
+        if (consent.adopt) decisions.adopt.push(target.token);
+        if (consent.tap && !decisions.taps.includes(consent.tap)) decisions.taps.push(consent.tap);
+      }
+    }
+    if (decisions.declined.length === targets.length) return;
+    const queued = await unwrap(commands.brewfileInstall(props.path, props.preview.digest, decisions));
     queued.forEach(task => tasks.applyUpdate(task));
     if (!queued.length) return;
     toasts.push({

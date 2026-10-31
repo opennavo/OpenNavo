@@ -887,7 +887,6 @@
     "source": "Source",
     "collectionSummary": "{count} apps : {install} seront installées, {skip} ignorées",
     "own": {
-      "requester": "OpenNavo sur ce Mac",
       "summary": "{count} élément, {size} | {count} éléments, {size}",
       "permanent": "Ces fichiers ne passent pas par la corbeille et ne pourront pas être récupérés.",
       "more": "Et {count} autre | Et {count} autres",
@@ -915,6 +914,17 @@
         "title": "Confirmer la suppression définitive",
         "intro": "OpenNavo va supprimer définitivement ces éléments de la corbeille.",
         "badge": "Supprimer définitivement"
+      },
+      "brewUninstall": {
+        "title": "Confirmer la désinstallation",
+        "intro": "OpenNavo va désinstaller cette app avec Homebrew puis réessayer.",
+        "badge": "Désinstaller"
+      },
+      "adopt": "Reprend l’app existante",
+      "footer": {
+        "trash": "Vous pourrez les remettre en place depuis la corbeille.",
+        "cleanup": "Les éléments placés dans la corbeille peuvent être remis en place tant qu’elle n’est pas vidée ; les nettoyages par commande sont définitifs.",
+        "brewfileInstall": "Les apps sont téléchargées depuis Homebrew ; une app existante n’est remplacée que si vous avez accepté de la reprendre."
       }
     },
     "skip": {
@@ -922,7 +932,8 @@
       "installed": "Déjà installée",
       "queued": "Déjà dans la file",
       "duplicate": "En double",
-      "unsupported": "Non prise en charge"
+      "unsupported": "Non prise en charge",
+      "declined": "Refusé"
     }
   },
   "settings": {
@@ -1975,7 +1986,8 @@
       "installers": "Téléchargements et Bureau",
       "xcodeArchive": "Archives Xcode",
       "deviceBackup": "Sauvegarde d’appareil",
-      "deviceBackupModel": "Sauvegarde d’appareil · {model}"
+      "deviceBackupModel": "Sauvegarde d’appareil · {model}",
+      "logs": "Journaux et rapports de plantage"
     },
     "skipReasonsBy": {
       "running": "{names} en cours d’exécution ; quittez pour nettoyer",

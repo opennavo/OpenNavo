@@ -231,6 +231,9 @@ impl Engine {
         }
         Ok(result)
     }
+    /// Unconfirmed entry kept `pub` only for the integration tests in `tests/` (a separate crate);
+    /// no IPC command calls it. App commands use the `*_confirmed` path.
+    #[doc(hidden)]
     pub fn purge(&self, task_id: &str) -> Result<u64, AppError> {
         let _guard = self.operation_lock.lock().map_err(poison)?;
         self.purge_locked(task_id)

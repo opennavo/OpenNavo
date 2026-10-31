@@ -151,6 +151,63 @@ pub async fn uninstall_execute(
     )
     .await
 }
+/// Retry a failed Homebrew uninstall that had no plan (the Full Disk Access prompt, history), by
+/// task id only: Rust rebuilds its options from the stored task, asks in OpenNavo's confirmation
+/// window, and queues it only if that task still yields the same plan.
+#[tauri::command]
+#[specta::specta]
+pub async fn uninstall_retry(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<DesktopCore>>,
+    confirmation: State<'_, Arc<crate::confirmation::ConfirmationService>>,
+    task_id: String,
+) -> Result<Task, AppError> {
+    let core = state.inner().clone();
+    let load = |core: Arc<DesktopCore>, id: String| {
+        crate::blocking(move || {
+            let task = core
+                .database
+                .task(&id)?
+                .ok_or_else(|| AppError::new("E_NOT_FOUND", "task"))?;
+            crate::destructive::uninstall_retry_plan(&task)
+        })
+    };
+    let (target, _, digest) = load(core.clone(), task_id.clone()).await?;
+    let kind = match target.kind {
+        TaskKind::Formula => "formula",
+        _ => "cask",
+    };
+    let mut view = crate::confirmation::McpConfirmView::app_action(
+        "brewUninstall",
+        &target.token,
+        vec![crate::confirmation::ConfirmItemView::row(
+            &target.token,
+            &format!("{kind}/{}", target.token),
+        )],
+        1,
+        None,
+    );
+    let service = confirmation.inner().clone();
+    let request =
+        crate::destructive::request("uninstall retry", &format!("task/{task_id}"), digest);
+    crate::destructive::confirmed(
+        &service,
+        request,
+        |request| service.confirm_window(&app, request, view),
+        |approved| async move {
+            let (target, options, again) = load(core.clone(), task_id).await?;
+            if again != approved {
+                return Err(crate::destructive::plan_changed());
+            }
+            let queue = core.queue.clone();
+            crate::blocking(move || {
+                queue.enqueue(TaskOp::Uninstall, Some(target), options, TaskTrigger::Retry)
+            })
+            .await
+        },
+    )
+    .await
+}
 #[tauri::command]
 #[specta::specta]
 pub async fn uninstall_restore(

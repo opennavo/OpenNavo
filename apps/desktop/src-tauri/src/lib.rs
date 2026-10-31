@@ -144,6 +144,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::uninstall::uninstall_plan_cancel,
             commands::uninstall::uninstall_reveal,
             commands::uninstall::uninstall_execute,
+            commands::uninstall::uninstall_retry,
             commands::uninstall::uninstall_restore,
             commands::uninstall::uninstall_purge,
             commands::app::app_info,

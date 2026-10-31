@@ -10,7 +10,7 @@ import { usePackageState } from '@/composables/usePackageState';
 import { useToasts } from '@/composables/useToasts';
 import { usePermissionPromptStore, usePermissionsStore, useTasksStore } from '@/stores';
 import { paneDone } from '@/stores/permissions';
-import { recheckRoute, retryOptions } from '@/stores/permissionPrompt';
+import { recheckRoute } from '@/stores/permissionPrompt';
 
 // Permission guidance (06 §12.3, §12.6) for E_PERMISSION (App Management) or E_FULL_DISK_ACCESS (zap data removal).
 // List blocked apps; Enable opens System Settings/guidance; Retry re-enqueues with trigger=retry after authorization.
@@ -69,7 +69,7 @@ async function retry() {
   retrying.value = true;
   try {
     for (const task of list) {
-      const queued = await tasks.enqueue(task.op, task.target, 'retry', retryOptions(task));
+      const queued = await tasks.retry(task);
       if (!queued) continue;
       tasks.applyUpdate(queued);
       // Remove only failures successfully re-enqueued; retain new permission failures received while waiting.

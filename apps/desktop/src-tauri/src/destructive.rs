@@ -20,7 +20,9 @@ use crate::{
     AppError,
     confirmation::{ConfirmItemView, ConfirmationRequest, ConfirmationService},
     core::DesktopCore,
-    model::{BrewfileEntryStatus, Kind, TaskKind, TaskTarget},
+    model::{
+        BrewfileEntryStatus, Kind, Task, TaskKind, TaskOp, TaskOptions, TaskState, TaskTarget,
+    },
     queue::{ResolvedInstallPlan, ordered_install_plans_digest},
 };
 
@@ -76,6 +78,30 @@ where
     execute(approved).await
 }
 
+/// Retrying a failed Homebrew uninstall that had no plan (for example one blocked by Full Disk
+/// Access): Rust takes the target and options from the stored task, never from the caller, adds
+/// `--force` after a Full Disk Access failure (the app was moved, Caskroom kept a backup), and binds
+/// the digest to the task id, target and final options.
+pub fn uninstall_retry_plan(task: &Task) -> Result<(TaskTarget, TaskOptions, String), AppError> {
+    let target = task
+        .target
+        .clone()
+        .filter(|_| task.op == TaskOp::Uninstall && task.options.plan_id.is_none())
+        .filter(|_| matches!(task.state, TaskState::Failed | TaskState::Canceled))
+        .ok_or_else(|| AppError::new("E_INVALID_ARG", "uninstall_retry"))?;
+    let mut options = task.options.clone();
+    options.plan_digest = None;
+    if task
+        .error
+        .as_ref()
+        .is_some_and(|error| error.code == "E_FULL_DISK_ACCESS")
+    {
+        options.force = true;
+    }
+    let digest = digest(&("uninstall retry", &task.id, &target, &options));
+    Ok((target, options, digest))
+}
+
 /// What a Brewfile install queues, as shown in the window.
 pub struct BrewfilePlan {
     pub plans: Vec<ResolvedInstallPlan>,
@@ -90,6 +116,7 @@ pub fn brewfile_plan(
     core: &DesktopCore,
     path: &str,
     file_digest: &str,
+    decisions: &crate::model::BrewfileDecisions,
 ) -> Result<BrewfilePlan, AppError> {
     let content = crate::brewfile::read(std::path::Path::new(path))?;
     if crate::brewfile::content_digest(&content) != file_digest {
@@ -123,14 +150,43 @@ pub fn brewfile_plan(
             kind: TaskKind::Cask,
             token: token.to_owned(),
         };
+        let owned = token.to_owned();
         row.skip = match entry.status {
+            BrewfileEntryStatus::Ready
+                if entry.kind == Some(Kind::Cask) && decisions.declined.contains(&owned) =>
+            {
+                Some("declined".into())
+            }
             BrewfileEntryStatus::Ready if entry.kind == Some(Kind::Cask) => {
                 if crate::commands::deeplink::target_available(&target, &library, &active) {
-                    plans.push(ResolvedInstallPlan::resolve(
+                    let adopt = decisions.adopt.contains(&owned);
+                    let plan = ResolvedInstallPlan::resolve(
                         &core.database,
                         target,
-                        Default::default(),
-                    )?);
+                        crate::model::TaskOptions {
+                            adopt,
+                            ..Default::default()
+                        },
+                    )?;
+                    // A third-party tap is the user's call every time: one they were not asked about
+                    // means the catalog changed after the main window checked it.
+                    if let Some(tap) = plan.tap()
+                        && !decisions.taps.iter().any(|approved| approved == tap)
+                    {
+                        return Err(plan_changed());
+                    }
+                    // Show the identity the digest binds: the resolved Homebrew token and its tap.
+                    let identity = format!("cask/{}", plan.command_target().token);
+                    row = ConfirmItemView::row(
+                        token,
+                        &plan
+                            .tap()
+                            .map_or(identity.clone(), |tap| format!("{identity} [{tap}]")),
+                    );
+                    if adopt {
+                        row.note = Some("adopt".into());
+                    }
+                    plans.push(plan);
                     None
                 } else {
                     Some("queued".into())
@@ -151,7 +207,17 @@ pub fn brewfile_plan(
     if plans.len() > 200 {
         return Err(AppError::new("E_INVALID_ARG", "too_many_targets"));
     }
-    let digest = digest(&(path, file_digest, ordered_install_plans_digest(&plans)));
+    let mut decided = decisions.clone();
+    for list in [&mut decided.adopt, &mut decided.taps, &mut decided.declined] {
+        list.sort();
+        list.dedup();
+    }
+    let digest = digest(&(
+        path,
+        file_digest,
+        &decided,
+        ordered_install_plans_digest(&plans),
+    ));
     Ok(BrewfilePlan {
         plans,
         rows,
@@ -162,6 +228,74 @@ pub fn brewfile_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn failed_uninstall(code: &str, options: TaskOptions) -> Task {
+        Task {
+            target_name: None,
+            outcome: None,
+            id: "task-1".into(),
+            op: TaskOp::Uninstall,
+            target: Some(TaskTarget {
+                kind: TaskKind::Cask,
+                token: "rectangle".into(),
+            }),
+            options,
+            trigger: crate::model::TaskTrigger::Manual,
+            state: TaskState::Failed,
+            phase: None,
+            percent: None,
+            bytes_done: None,
+            bytes_total: None,
+            speed_bps: None,
+            step_index: None,
+            step_count: None,
+            from_version: None,
+            to_version: None,
+            error: Some(AppError::new(code, "failed")),
+            exit_code: None,
+            log_path: None,
+            created_at: 0,
+            started_at: None,
+            finished_at: None,
+        }
+    }
+
+    #[test]
+    fn an_uninstall_retry_takes_its_options_from_the_stored_task() {
+        let zap = TaskOptions {
+            zap: true,
+            ..TaskOptions::default()
+        };
+        let (target, options, digest) =
+            uninstall_retry_plan(&failed_uninstall("E_FULL_DISK_ACCESS", zap.clone())).unwrap();
+        assert_eq!(target.token, "rectangle");
+        // Full Disk Access: the app is already moved; Rust adds --force, the caller cannot.
+        assert!(options.zap && options.force);
+        let (_, other, other_digest) =
+            uninstall_retry_plan(&failed_uninstall("E_IO", zap)).unwrap();
+        assert!(!other.force);
+        assert_ne!(digest, other_digest);
+        // A forged digest from an older task never matches the plan of this one.
+        let mut changed = failed_uninstall("E_FULL_DISK_ACCESS", TaskOptions::default());
+        changed.id = "task-2".into();
+        assert_ne!(uninstall_retry_plan(&changed).unwrap().2, digest);
+    }
+
+    #[test]
+    fn only_a_finished_unplanned_uninstall_can_be_retried() {
+        let mut planned = failed_uninstall("E_IO", TaskOptions::default());
+        planned.options.plan_id = Some("plan".into());
+        let mut running = failed_uninstall("E_IO", TaskOptions::default());
+        running.state = TaskState::Running;
+        let mut reinstall = failed_uninstall("E_IO", TaskOptions::default());
+        reinstall.op = TaskOp::Reinstall;
+        for task in [planned, running, reinstall] {
+            assert_eq!(
+                uninstall_retry_plan(&task).unwrap_err().message,
+                "uninstall_retry"
+            );
+        }
+    }
     use crate::confirmation::McpConfirmView;
     use std::{
         sync::{

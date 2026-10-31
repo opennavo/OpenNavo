@@ -887,7 +887,6 @@
     "source": "Origen",
     "collectionSummary": "{count} apps: se instalarán {install} y se omitirán {skip}",
     "own": {
-      "requester": "OpenNavo en este Mac",
       "summary": "{count} elemento, {size} | {count} elementos, {size}",
       "permanent": "Estos archivos no pasan por la Papelera y no se podrán recuperar.",
       "more": "Y {count} más | Y {count} más",
@@ -915,6 +914,17 @@
         "title": "Confirmar la eliminación definitiva",
         "intro": "OpenNavo eliminará definitivamente estos elementos de la Papelera.",
         "badge": "Eliminar definitivamente"
+      },
+      "brewUninstall": {
+        "title": "Confirmar la desinstalación",
+        "intro": "OpenNavo desinstalará esta app con Homebrew y lo intentará de nuevo.",
+        "badge": "Desinstalar"
+      },
+      "adopt": "Sustituye la app existente",
+      "footer": {
+        "trash": "Puedes devolverlos desde la Papelera.",
+        "cleanup": "Lo que vaya a la Papelera se puede devolver hasta vaciarla; las limpiezas por comando no se pueden deshacer.",
+        "brewfileInstall": "Las apps se descargan de Homebrew; una app existente solo se sustituye si aceptaste adoptarla."
       }
     },
     "skip": {
@@ -922,7 +932,8 @@
       "installed": "Ya instalada",
       "queued": "Ya en la cola",
       "duplicate": "Repetida",
-      "unsupported": "No compatible"
+      "unsupported": "No compatible",
+      "declined": "Rechazado"
     }
   },
   "settings": {
@@ -1975,7 +1986,8 @@
       "installers": "Descargas y Escritorio",
       "xcodeArchive": "Archivos de Xcode",
       "deviceBackup": "Copia de seguridad del dispositivo",
-      "deviceBackupModel": "Copia de seguridad del dispositivo · {model}"
+      "deviceBackupModel": "Copia de seguridad del dispositivo · {model}",
+      "logs": "Registros e informes de fallos"
     },
     "skipReasonsBy": {
       "running": "En uso por {names}; se puede limpiar después de salir",

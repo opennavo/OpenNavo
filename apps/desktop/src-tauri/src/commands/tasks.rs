@@ -20,10 +20,17 @@ fn validate_ipc_options(op: TaskOp, options: &TaskOptions) -> Result<(), AppErro
     if op == TaskOp::Clean {
         return Err(AppError::new("E_INVALID_ARG", "cleanup_execute_required"));
     }
+    // Every uninstall from the main window is planned and confirmed (`uninstall_execute`); a
+    // failed one is retried by id (`uninstall_retry`), never re-sent with caller options.
     if options.plan_digest.is_some()
-        || (matches!(op, TaskOp::Uninstall | TaskOp::RemoveLeftovers) && options.plan_id.is_some())
+        || op == TaskOp::Uninstall
+        || (op == TaskOp::RemoveLeftovers && options.plan_id.is_some())
     {
         return Err(AppError::new("E_INVALID_ARG", "uninstall_execute_required"));
+    }
+    // No window sends a reinstall that also deletes app data.
+    if op == TaskOp::Reinstall && options.zap {
+        return Err(AppError::new("E_INVALID_ARG", "reinstall_zap"));
     }
     Ok(())
 }
@@ -38,9 +45,31 @@ pub async fn task_enqueue(
     trigger: TaskTrigger,
 ) -> Result<Task, AppError> {
     validate_ipc_trigger(trigger)?;
-    validate_ipc_options(op, &options)?;
     let queue = state.queue.clone();
-    crate::blocking(move || queue.enqueue(op, target, options, trigger)).await
+    crate::blocking(move || {
+        // RestorePrompt's Continue re-sends a task that is still queued from before the restart;
+        // the queue returns that same task and starts again. Anything new must pass the checks.
+        if !resumes_queued(&queue, op, target.as_ref(), &options)? {
+            validate_ipc_options(op, &options)?;
+        }
+        queue.enqueue(op, target, options, trigger)
+    })
+    .await
+}
+
+/// Whether this request is exactly a task already waiting in the queue (no new work is created).
+fn resumes_queued(
+    queue: &crate::queue::TaskQueue,
+    op: TaskOp,
+    target: Option<&TaskTarget>,
+    options: &TaskOptions,
+) -> Result<bool, AppError> {
+    Ok(queue.active()?.iter().any(|task| {
+        task.state == crate::model::TaskState::Queued
+            && task.op == op
+            && task.target.as_ref() == target
+            && &task.options == options
+    }))
 }
 #[tauri::command]
 #[specta::specta]
@@ -217,6 +246,29 @@ mod tests {
                     planned.clone(),
                     "uninstall_execute_required",
                 ),
+                // Unplanned uninstalls, with or without --zap, need the plan and the window too.
+                (
+                    TaskOp::Uninstall,
+                    TaskOptions::default(),
+                    "uninstall_execute_required",
+                ),
+                (
+                    TaskOp::Uninstall,
+                    TaskOptions {
+                        zap: true,
+                        force: true,
+                        ..TaskOptions::default()
+                    },
+                    "uninstall_execute_required",
+                ),
+                (
+                    TaskOp::Reinstall,
+                    TaskOptions {
+                        zap: true,
+                        ..TaskOptions::default()
+                    },
+                    "reinstall_zap",
+                ),
                 (
                     TaskOp::Upgrade,
                     TaskOptions {
@@ -236,6 +288,54 @@ mod tests {
             }
         }
         assert!(core.database.tasks().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn continue_after_restart_resumes_a_queued_uninstall_but_never_creates_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(tmp.path());
+        let target = TaskTarget {
+            kind: TaskKind::Cask,
+            token: "fixture-0".into(),
+        };
+        let queued = core
+            .queue
+            .enqueue(
+                TaskOp::Uninstall,
+                Some(target.clone()),
+                TaskOptions::default(),
+                TaskTrigger::Manual,
+            )
+            .unwrap();
+        drop(core);
+        let core = open_core(tmp.path());
+        let app = tauri::test::mock_app();
+        app.manage(core.clone());
+        let resumed = task_enqueue(
+            app.state(),
+            TaskOp::Uninstall,
+            Some(target.clone()),
+            TaskOptions::default(),
+            TaskTrigger::Manual,
+        )
+        .await
+        .unwrap();
+        assert_eq!(resumed.id, queued.id);
+        // Different options (here --zap) are a new uninstall: refused.
+        let error = task_enqueue(
+            app.state(),
+            TaskOp::Uninstall,
+            Some(target),
+            TaskOptions {
+                zap: true,
+                ..TaskOptions::default()
+            },
+            TaskTrigger::Manual,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.message, "uninstall_execute_required");
+        assert_eq!(core.database.tasks().unwrap().len(), 1);
     }
 
     #[tokio::test]

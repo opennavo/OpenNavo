@@ -121,6 +121,12 @@ export const commands = {
 	 *  to the exact items that window listed.
 	 */
 	uninstallExecute: (planId: string, choices: UninstallChoice[], mode: DeleteMode) => typedError<Task[], AppError>(__TAURI_INVOKE("uninstall_execute", { planId, choices, mode })),
+	/**
+	 *  Retry a failed Homebrew uninstall that had no plan (the Full Disk Access prompt, history), by
+	 *  task id only: Rust rebuilds its options from the stored task, asks in OpenNavo's confirmation
+	 *  window, and queues it only if that task still yields the same plan.
+	 */
+	uninstallRetry: (taskId: string) => typedError<Task, AppError>(__TAURI_INVOKE("uninstall_retry", { taskId })),
 	uninstallRestore: (taskId: string) => typedError<RestoreResult, AppError>(__TAURI_INVOKE("uninstall_restore", { taskId })),
 	/**  Delete these uninstalls' items from the Trash for good, after one confirmation for the batch. */
 	uninstallPurge: (taskIds: string[]) => typedError<number, AppError>(__TAURI_INVOKE("uninstall_purge", { taskIds })),
@@ -215,7 +221,7 @@ export const commands = {
 	mcpConfirmGet: () => typedError<{
 	/**  One-time id the window answers with. */
 	id: string,
-	/**  `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`. */
+	/**  `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`, `brewUninstall`. */
 	action: string,
 	name: string,
 	/**  Catalog target (`cask/iina`) or the app path. */
@@ -275,7 +281,7 @@ export const commands = {
 	 *  confirmation window. The file must still be the one `brewfile_preview` read (`digest`), and it
 	 *  is read and resolved again after Allow; any change refuses with `E_PLAN_CHANGED`.
 	 */
-	brewfileInstall: (path: string, digest: string) => typedError<Task[], AppError>(__TAURI_INVOKE("brewfile_install", { path, digest })),
+	brewfileInstall: (path: string, digest: string, decisions: BrewfileDecisions) => typedError<Task[], AppError>(__TAURI_INVOKE("brewfile_install", { path, digest, decisions })),
 	doctorRun: () => typedError<DoctorReport, AppError>(__TAURI_INVOKE("doctor_run")),
 	appOpen: (target: TaskTarget) => typedError<null, AppError>(__TAURI_INVOKE("app_open", { target })),
 	appReveal: (target: TaskTarget) => typedError<null, AppError>(__TAURI_INVOKE("app_reveal", { target })),
@@ -599,6 +605,17 @@ export type BrewfileEntry = {
 
 export type BrewfileEntryStatus = "ready" | "installed" | "skipped" | "unsupported" | "invalid" | "not_found";
 
+/**
+ *  What the user already decided in the main window for a Brewfile restore, as for a single install:
+ *  casks to adopt over an existing app, third-party taps they agreed to, and casks they declined
+ *  (a tap or an adoption they said no to). Part of the confirmed plan digest.
+ */
+export type BrewfileDecisions = {
+	adopt: string[],
+	taps: string[],
+	declined: string[],
+};
+
 export type BrewfilePreview = {
 	entries: BrewfileEntry[],
 	ready: number,
@@ -833,10 +850,15 @@ export type ConfirmItemView = {
 	/**  `cask/token`, plus ` [owner/tap]` for a third-party tap. */
 	target: string,
 	/**
-	 *  Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate` or `unsupported`;
-	 *  `None` when it will be installed.
+	 *  Why the app is skipped: `disabled`, `installed`, `queued`, `duplicate`, `unsupported` or
+	 *  `declined`; `None` when it will be installed.
 	 */
 	skip: string | null,
+	/**
+	 *  `adopt` when the install takes over an app that is already in /Applications;
+	 *  `cleanupGroup` when `name` is a group key the window translates (`temp`, `trash`, `installers`, `logs`).
+	 */
+	note: string | null,
 };
 
 /**
@@ -1514,7 +1536,7 @@ export type MatchReason = "app_bundle" | "brew_uninstall" | "zap_rule" | "bundle
 export type McpConfirmView = {
 	/**  One-time id the window answers with. */
 	id: string,
-	/**  `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`. */
+	/**  `install`, `uninstall`, `installCollection`, or `brewfileInstall`, `cleanup`, `uninstallDelete`, `purge`, `brewUninstall`. */
 	action: string,
 	name: string,
 	/**  Catalog target (`cask/iina`) or the app path. */

@@ -83,7 +83,11 @@ describe('Task queue simulation (06 §9)', () => {
     '%s remains blocked when App Management is granted but pending relaunch',
     async op => {
       // Working Full Disk Access also lets OpenNavo change apps, so this case turns it off too.
-      window.history.replaceState(null, '', '/?mock=no-app-management,no-full-disk-access,permission-relaunch');
+      window.history.replaceState(
+        null,
+        '',
+        '/?mock=no-app-management,no-full-disk-access,permission-relaunch,legacy-uninstall'
+      );
       await setup('/updates', { tickMs: 10 });
       const updates: Task[] = [];
       await events.taskUpdated.listen(event => updates.push(event.payload));

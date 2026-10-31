@@ -16,7 +16,7 @@ const APP_TITLE = '需要允许 OpenNavo 管理 App';
 const DISK_TITLE = '需要完全磁盘访问权限';
 
 async function open(flags = 'no-app-management') {
-  window.history.replaceState(null, '', `/?mock=${flags},no-full-disk-access`);
+  window.history.replaceState(null, '', `/?mock=${flags},no-full-disk-access,legacy-uninstall`);
   const context = await setup('/updates', { tickMs: 5 });
   await startLocalState();
   mount(PermissionPrompt, {
@@ -75,15 +75,16 @@ describe('Permission prompt', () => {
     await vi.waitFor(() => expect(text()).toContain(DISK_TITLE), { timeout: 3000 });
     expect(text()).toContain('应用数据还没删');
 
+    // Rust retries the failed task by id (adding --force) after its own confirmation window; the main window never
+    // sends the uninstall options itself.
     const enqueue = vi.spyOn(commands, 'taskEnqueue');
+    const retry = vi.spyOn(commands, 'uninstallRetry');
+    const failed = usePermissionPromptStore().blocked[0]!;
     button('重试')?.click();
     await flushPromises();
-    expect(enqueue).toHaveBeenCalledWith(
-      'uninstall',
-      { kind: 'cask', token: 'ghostty' },
-      { zap: true, force: true },
-      'retry'
-    );
+    expect(retry).toHaveBeenCalledWith(failed.id);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect((await retry.mock.results[0]!.value).data.options).toMatchObject({ zap: true, force: true });
     expect(text()).not.toContain(DISK_TITLE);
   });
 
@@ -168,7 +169,7 @@ describe('Permission prompt', () => {
         finish = () => resolve(queued);
       });
       const enqueue = vi
-        .spyOn(tasks, 'enqueue')
+        .spyOn(tasks, 'retry')
         .mockReturnValueOnce(pending)
         .mockResolvedValueOnce({ ...queued, id: 'retry-second', target: second.target });
 
@@ -218,7 +219,7 @@ describe('Permission prompt', () => {
       trigger: 'retry'
     };
     const enqueue = vi
-      .spyOn(tasks, 'enqueue')
+      .spyOn(tasks, 'retry')
       .mockResolvedValueOnce(queued)
       .mockRejectedValueOnce({ code: 'E_NETWORK', detail: null });
 
@@ -235,10 +236,7 @@ describe('Permission prompt', () => {
       .mockResolvedValueOnce({ ...queued, id: 'retry-third', target: third.target });
     button('全部重试')?.click();
     await flushPromises();
-    expect(enqueue.mock.calls).toEqual([
-      [second.op, second.target, 'retry', second.options],
-      [third.op, third.target, 'retry', third.options]
-    ]);
+    expect(enqueue.mock.calls).toEqual([[second], [third]]);
     expect(store.blocked).toEqual([]);
     expect(text()).not.toContain(APP_TITLE);
   });

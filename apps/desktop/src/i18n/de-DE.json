@@ -887,7 +887,6 @@
     "source": "Quelle",
     "collectionSummary": "{count} Apps: {install} werden installiert, {skip} übersprungen",
     "own": {
-      "requester": "OpenNavo auf diesem Mac",
       "summary": "{count} Objekt, {size} | {count} Objekte, {size}",
       "permanent": "Diese Dateien landen nicht im Papierkorb und lassen sich nicht wiederherstellen.",
       "more": "Und {count} weiteres | Und {count} weitere",
@@ -915,6 +914,17 @@
         "title": "Endgültiges Löschen aus dem Papierkorb bestätigen",
         "intro": "OpenNavo löscht diese Objekte endgültig aus dem Papierkorb.",
         "badge": "Endgültig löschen"
+      },
+      "brewUninstall": {
+        "title": "Deinstallation bestätigen",
+        "intro": "OpenNavo deinstalliert diese App mit Homebrew und versucht es erneut.",
+        "badge": "Deinstallieren"
+      },
+      "adopt": "Übernimmt die vorhandene App",
+      "footer": {
+        "trash": "Sie können diese Objekte aus dem Papierkorb zurücklegen.",
+        "cleanup": "Objekte im Papierkorb können Sie bis zum Leeren zurücklegen; Bereinigungen per Befehl lassen sich nicht rückgängig machen.",
+        "brewfileInstall": "Die Apps werden von Homebrew geladen; eine vorhandene App wird nur ersetzt, wenn Sie der Übernahme zugestimmt haben."
       }
     },
     "skip": {
@@ -922,7 +932,8 @@
       "installed": "Bereits installiert",
       "queued": "Bereits in der Warteschlange",
       "duplicate": "Doppelt aufgeführt",
-      "unsupported": "Nicht unterstützt"
+      "unsupported": "Nicht unterstützt",
+      "declined": "Von Ihnen abgelehnt"
     }
   },
   "settings": {
@@ -1975,7 +1986,8 @@
       "installers": "Downloads und Schreibtisch",
       "xcodeArchive": "Xcode-Archive",
       "deviceBackup": "Gerätebackup",
-      "deviceBackupModel": "Gerätebackup · {model}"
+      "deviceBackupModel": "Gerätebackup · {model}",
+      "logs": "Protokolle und Absturzberichte"
     },
     "skipReasonsBy": {
       "running": "{names} läuft; nach Beenden bereinigbar",

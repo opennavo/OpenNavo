@@ -847,6 +847,17 @@ pub struct BrewfilePreview {
     pub digest: String,
 }
 
+/// What the user already decided in the main window for a Brewfile restore, as for a single install:
+/// casks to adopt over an existing app, third-party taps they agreed to, and casks they declined
+/// (a tap or an adoption they said no to). Part of the confirmed plan digest.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrewfileDecisions {
+    pub adopt: Vec<String>,
+    pub taps: Vec<String>,
+    pub declined: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DoctorWarning {

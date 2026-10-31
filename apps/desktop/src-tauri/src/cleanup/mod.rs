@@ -226,10 +226,15 @@ impl Engine {
                     (CleanupItemKind::Command, Some(command)) => command.clone(),
                     _ => item.item.path.clone(),
                 };
-                rows.push(crate::confirmation::ConfirmItemView::row(
-                    &item.title,
-                    &target,
-                ));
+                let mut row = crate::confirmation::ConfirmItemView::row(&item.title, &target);
+                // Groups Rust names by key (see collect.rs); the window shows them translated.
+                if matches!(
+                    item.title.as_str(),
+                    "temp" | "trash" | "installers" | "logs"
+                ) {
+                    row.note = Some("cleanupGroup".into());
+                }
+                rows.push(row);
             }
         }
         let mut view = crate::confirmation::McpConfirmView::app_action(
@@ -261,6 +266,9 @@ impl Engine {
         }
         self.enqueue_locked(queue, report_id, ids, approved.to_owned())
     }
+    /// Unconfirmed entry kept `pub` only for the integration tests in `tests/` (a separate crate);
+    /// no IPC command calls it. App commands use the `*_confirmed` path.
+    #[doc(hidden)]
     pub fn enqueue(
         &self,
         queue: &TaskQueue,
