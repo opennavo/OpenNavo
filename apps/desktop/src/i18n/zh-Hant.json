@@ -1421,6 +1421,8 @@
     "E_PROTECTED": "這個 App 受保護，不能解除安裝",
     "E_APP_MANAGEMENT": "需要先允許 OpenNavo 管理 App",
     "E_UNINSTALL_INCOMPLETE": "應用仍然存在，解除安裝未完成；請檢視日誌後重試",
+    "E_CLEANUP_OVERSIZE": "清理已中止：選中的項目實際比顯示的大，沒有刪除超出部分。請重新掃描後再試",
+    "E_CLEANUP_SIZE_UNKNOWN": "這一項的大小沒有算完，不能清理。請重新掃描後再試",
     "E_PLAN_EXPIRED": "檔案有變化，請重新掃描",
     "E_SCAN_CANCELED": "已取消掃描",
     "E_RESTORE_UNAVAILABLE": "有些檔案已經不在垃圾桶裡，沒能放回",
@@ -1829,6 +1831,7 @@
       "admin": "需要管理員密碼",
       "reveal": "在訪達中顯示",
       "protect": "始終保留",
+      "partial": "只算出了一部分大小，不能直接刪除。重新掃描後再試",
       "keptOpen": "保留 {count} 個正在使用的檔案"
     },
     "footer": {
@@ -1844,6 +1847,7 @@
       "count": "共 {count} 項",
       "delete": "{size} 直接刪除：快取、日誌、開發工具快取等，刪了會自動重建，無法撤銷。",
       "trash": "{size} 移到垃圾桶：已刪除 App 的殘留等，完成後可以撤銷。",
+      "partial": "{count} 項只算出了部分大小（至少 {size}），沒有選中，不會刪除。",
       "emptyTrash": "你勾選了「垃圾桶」：裡面現有的東西會被清空，無法恢復。",
       "admin": "其中 {count} 項是系統級的背景項目，會請求一次管理員密碼。",
       "cancel": "取消",

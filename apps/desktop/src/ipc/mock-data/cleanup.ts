@@ -62,6 +62,8 @@ interface ItemSpec {
   keptOpen?: number;
   /** Hidden without Full Disk Access. */
   fda?: boolean;
+  /** Measured only partly (time or entry limit): shown as "at least", never selectable (#116). */
+  incomplete?: boolean;
   /** A single file (installers, things in the Trash) rather than a folder. */
   file?: boolean;
   /** Fixed by Rust for the category (installers and backups go to the Trash, project output is deleted). */
@@ -827,6 +829,9 @@ export function createCleanupMock({
   enqueue
 }: CleanupMockOptions) {
   const scheduler = createMockScheduler();
+  /** ?mock=cleanup-incomplete: DerivedData was only partly measured (#116). */
+  const partial = (item: ItemSpec) =>
+    Boolean(item.incomplete) || (flags.has('cleanup-incomplete') && Boolean(item.path?.endsWith('DerivedData')));
   const reports = new Map<string, { report: CleanupReport; items: Map<string, CleanupItem> }>();
   const canceled = new Set<string>();
   const executions = new Map<string, { reportId: string; items: CleanupItem[] }>();
@@ -920,9 +925,10 @@ export function createCleanupMock({
             kind: item.command ? 'command' : item.file ? 'file' : 'dir',
             command: item.command ?? null,
             sizeBytes: item.command === 'brew cleanup' ? state.cacheBytes : item.size,
+            sizeComplete: !partial(item),
             modifiedAt: now - item.daysAgo * DAY,
             reason: item.reason,
-            selected: item.selected ?? spec.risk === 'rebuildable',
+            selected: !partial(item) && (item.selected ?? spec.risk === 'rebuildable'),
             deleteMode: item.deleteMode ?? (spec.risk === 'rebuildable' || item.command ? 'delete' : deleteMode()),
             needsAdmin: Boolean(item.admin),
             note: item.note ?? null,
@@ -1036,7 +1042,13 @@ export function createCleanupMock({
       trashed: moved.length,
       deleted: deleted.length,
       skipped,
-      restorable: moved.length > 0
+      restorable: moved.length > 0,
+      planned: execution.items.map(item => ({
+        itemId: item.id,
+        path: item.path || (item.command ?? ''),
+        sizeBytes: item.sizeBytes,
+        sizeComplete: item.sizeComplete
+      }))
     };
     const report = reports.get(execution.reportId)?.report;
     if (report) publish({ ...summarize(build()), scannedAt: report.scannedAt });
@@ -1084,6 +1096,7 @@ export function createCleanupMock({
       const ids = args.itemIds as string[];
       const items = ids.map(id => entry.items.get(id));
       if (!ids.length || items.some(item => !item)) throw appError('E_INVALID_ARG', 'item_ids');
+      if (items.some(item => !item?.sizeComplete)) throw appError('E_CLEANUP_SIZE_UNKNOWN', 'cleanup_size_unknown');
       const task = enqueue('clean', { kind: 'app', token: reportId }, { planId: reportId, itemIds: ids }, null);
       executions.set(task.id, { reportId, items: items as CleanupItem[] });
       return task;

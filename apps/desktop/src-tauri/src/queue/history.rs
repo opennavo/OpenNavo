@@ -109,6 +109,7 @@ mod tests {
                 deleted: 0,
                 skipped: vec![],
                 restorable,
+                planned: vec![],
             }),
             id: id.into(),
             op,

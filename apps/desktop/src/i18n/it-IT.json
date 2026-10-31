@@ -1414,6 +1414,8 @@
     "E_PROTECTED": "Questa app è protetta e non può essere disinstallata",
     "E_APP_MANAGEMENT": "Consenti prima a OpenNavo di gestire le app",
     "E_UNINSTALL_INCOMPLETE": "L’app è ancora presente. Disinstallazione incompleta; consulta il registro e riprova",
+    "E_CLEANUP_OVERSIZE": "Pulizia interrotta: la selezione è più grande di quanto mostrato, non è stato rimosso nulla oltre la dimensione mostrata. Ripeti la scansione e riprova.",
+    "E_CLEANUP_SIZE_UNKNOWN": "La dimensione di questo elemento non è stata misurata del tutto, quindi non può essere pulito. Ripeti la scansione e riprova.",
     "E_PLAN_EXPIRED": "I file sono cambiati. Ripeti la scansione",
     "E_SCAN_CANCELED": "Scansione annullata",
     "E_RESTORE_UNAVAILABLE": "Alcuni file non sono più nel Cestino e non è stato possibile ripristinarli",
@@ -1829,6 +1831,7 @@
       "admin": "Richiede la password di amministratore",
       "reveal": "Mostra nel Finder",
       "protect": "Conserva sempre",
+      "partial": "Misurato solo in parte: non può essere eliminato direttamente. Ripeti la scansione e riprova.",
       "keptOpen": "Conserva {count} file in uso | Conserva {count} file in uso"
     },
     "footer": {
@@ -1844,6 +1847,7 @@
       "count": "{count} elemento in totale | {count} elementi in totale",
       "delete": "{size} eliminati definitivamente: cache, registri, cache degli strumenti di sviluppo e altri file ricreati automaticamente. L’operazione non può essere annullata.",
       "trash": "{size} nel Cestino: residui di app eliminate e file simili. Potrai annullare l’operazione.",
+      "partial": "{count} elementi misurati solo in parte (almeno {size}). Non sono selezionati e non verranno rimossi.",
       "emptyTrash": "Hai selezionato il Cestino: tutto il suo contenuto attuale verrà eliminato senza possibilità di recupero.",
       "admin": "{count} elemento in background è a livello di sistema e richiederà una volta la password di amministratore. | {count} elementi in background sono a livello di sistema e richiederanno una volta la password di amministratore.",
       "cancel": "Annulla",

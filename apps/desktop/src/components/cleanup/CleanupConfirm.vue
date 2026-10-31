@@ -39,6 +39,17 @@ const lines = computed(() => {
       tone: 'bg-status-danger-subtle',
       text: t('cleanup.confirm.emptyTrash')
     });
+  // #116: partly measured items are never selected; say so with their lower bound.
+  if (store.partial.length)
+    list.push({
+      key: 'partial',
+      icon: 'circle-alert',
+      tone: 'bg-status-warning-subtle',
+      text: t('cleanup.confirm.partial', {
+        count: store.partial.length,
+        size: format(store.partial.reduce((sum, entry) => sum + (entry.item.sizeBytes ?? 0), 0))
+      })
+    });
   if (totals.value.admin)
     list.push({
       key: 'admin',

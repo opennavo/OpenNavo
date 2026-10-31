@@ -24,6 +24,30 @@ use tokio::sync::Notify;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 /// Progress weight of a tool command (Homebrew, Docker): roughly a few seconds of removing files.
 const COMMAND_WEIGHT: u64 = 50_000;
+/// Slack on top of 110% of what one item showed before its removal stops (#116).
+pub const ITEM_SLACK_BYTES: u64 = 64 << 20;
+/// Slack on top of 110% of the selected total before the whole run stops (#116).
+pub const TOTAL_SLACK_BYTES: u64 = 256 << 20;
+/// The most one item may free: shown × 1.1 + 64 MB. Shown size, re-measured size and freed bytes all use the same
+/// metric (allocated blocks × 512 of single-link files), so APFS clones, whose shared blocks are counted once per
+/// file, inflate all three alike and cannot trip the limit on their own.
+pub fn item_limit(shown: u64) -> u64 {
+    shown
+        .saturating_add(shown / 10)
+        .saturating_add(ITEM_SLACK_BYTES)
+}
+/// The most a whole run may free: selected total × 1.1 + 256 MB.
+pub fn total_limit(shown: u64) -> u64 {
+    shown
+        .saturating_add(shown / 10)
+        .saturating_add(TOTAL_SLACK_BYTES)
+}
+fn oversize(detail: String) -> AppError {
+    AppError::new("E_CLEANUP_OVERSIZE", "cleanup_oversize").with_detail(detail)
+}
+fn size_unknown(detail: String) -> AppError {
+    AppError::new("E_CLEANUP_SIZE_UNKNOWN", "cleanup_size_unknown").with_detail(detail)
+}
 
 pub async fn run(
     queue: Arc<TaskQueue>,
@@ -45,7 +69,19 @@ pub async fn run(
         deleted: 0,
         skipped: vec![],
         restorable: false,
+        planned: ids
+            .iter()
+            .filter_map(|id| entry.items.get(id))
+            .map(|item| CleanupPlannedItem {
+                item_id: item.item.id.clone(),
+                path: display(item).to_owned(),
+                size_bytes: item.item.size_bytes,
+                size_complete: item.item.size_complete,
+            })
+            .collect(),
     };
+    // What the user saw is stored before anything is touched, so the task can be audited afterwards (#116).
+    queue.store_uninstall_outcome(&task.id, &outcome)?;
     queue.uninstall_progress(
         &task.id,
         TaskPhase::Preparing,
@@ -58,10 +94,34 @@ pub async fn run(
     let mut report = Report::new(&entry, ids);
     let mut removed = vec![];
     let mut command_failure = None;
+    // Re-measure the whole selection before the first removal: an item that is no longer fully measurable, or larger
+    // than shown beyond the tolerance, stops the run with nothing removed.
+    let shown_total = report.selected_bytes;
+    let mut abort = {
+        let (engine, entry, ids, flag, activities) = (
+            engine.clone(),
+            entry.clone(),
+            ids.clone(),
+            flag.clone(),
+            activities.clone(),
+        );
+        let (lines, abort) =
+            crate::blocking(move || engine.preflight(&entry, &ids, &flag, &activities)).await?;
+        for line in lines {
+            report.line(line);
+        }
+        abort
+    };
     for id in ids {
-        if flag.load(Ordering::Acquire) {
+        if flag.load(Ordering::Acquire) || abort.is_some() {
             break;
         }
+        // Each item may free its own limit, and never more than what is left of the run's limit.
+        let budget = {
+            let item = entry.items.get(id).ok_or_else(super::cached_error)?;
+            item_limit(item.item.size_bytes.unwrap_or(0))
+                .min(total_limit(shown_total).saturating_sub(outcome.freed_bytes))
+        };
         let item = entry.items.get(id).ok_or_else(super::cached_error)?.clone();
         report.start(&item);
         let meter = Arc::new(tree::Meter::default());
@@ -83,8 +143,10 @@ pub async fn run(
                 let item = item.clone();
                 let activities = activities.clone();
                 let meter = meter.clone();
-                crate::blocking(move || engine.act(&task_id, &item, &flag, &activities, &meter))
-                    .await
+                crate::blocking(move || {
+                    engine.act(&task_id, &item, &flag, &activities, &meter, budget)
+                })
+                .await
             }
         };
         let result = await_with_progress(work, &flag, || {
@@ -96,7 +158,11 @@ pub async fn run(
                 outcome.deleted += 1;
                 outcome.freed_bytes = outcome.freed_bytes.saturating_add(bytes);
                 removed.push(id.clone());
-                report.line(format!("deleted {}", display(&item)));
+                report.line(format!(
+                    "deleted {} ({bytes} bytes, shown {} bytes)",
+                    display(&item),
+                    item.item.size_bytes.unwrap_or(0)
+                ));
             }
             Ok(Act::Trashed) => {
                 let bytes = item.item.size_bytes.unwrap_or(0);
@@ -105,17 +171,39 @@ pub async fn run(
                 outcome.trashed += 1;
                 outcome.restorable = true;
                 removed.push(id.clone());
-                report.line(format!("trashed {}", display(&item)));
+                report.line(format!("trashed {} ({bytes} bytes)", display(&item)));
             }
             Ok(Act::Skipped(reason)) => skip(&mut report, &mut outcome, &item, reason),
             Err(error) => {
+                // A removal that stops part-way has already unlinked files: they are counted in the outcome, the log
+                // and the result page like any other freed byte, so an aborted run reports what was really removed
+                // instead of under-reporting it (#117).
+                let freed = meter.bytes.load(Ordering::Relaxed);
+                if freed > 0 {
+                    outcome.freed_bytes = outcome.freed_bytes.saturating_add(freed);
+                    report.line(format!(
+                        "freed {freed} bytes before {} stopped ({})",
+                        display(&item),
+                        error.code
+                    ));
+                }
                 if error.code == "E_BREW_CLEANUP" {
                     command_failure = Some(error.clone());
+                }
+                if error.code == "E_CLEANUP_OVERSIZE" {
+                    report.line(format!(
+                        "abort: {} reached its limit of {budget} bytes (shown {} bytes, freed {freed} bytes); cleanup stopped",
+                        display(&item),
+                        item.item.size_bytes.unwrap_or(0)
+                    ));
+                    abort = Some(error.clone());
                 }
                 let reason = match error.code.as_str() {
                     "E_PROTECTED" => SkippedItemReason::Protected,
                     "E_DOCKER_PRUNE" | "E_DOCKER_UNAVAILABLE" => SkippedItemReason::ToolUnavailable,
-                    "E_PLAN_EXPIRED" => SkippedItemReason::Changed,
+                    "E_PLAN_EXPIRED" | "E_CLEANUP_OVERSIZE" | "E_CLEANUP_SIZE_UNKNOWN" => {
+                        SkippedItemReason::Changed
+                    }
                     "E_NOT_FOUND" => SkippedItemReason::Missing,
                     "E_APP_RUNNING" | "E_CANCELED" => SkippedItemReason::InUse,
                     _ => SkippedItemReason::Permission,
@@ -124,6 +212,17 @@ pub async fn run(
             }
         }
         report.done();
+        if abort.is_none() && outcome.freed_bytes > total_limit(shown_total) {
+            report.line(format!(
+                "abort: {} bytes freed, over the limit of {} bytes for {shown_total} bytes shown; cleanup stopped",
+                outcome.freed_bytes,
+                total_limit(shown_total)
+            ));
+            abort = Some(oversize(format!(
+                "freed {} of {shown_total} shown",
+                outcome.freed_bytes
+            )));
+        }
         // Persisted per item; the next progress event carries it to the window.
         queue.store_uninstall_outcome(&task.id, &outcome)?;
         report.emit(&queue, &task.id, &outcome, None, false)?;
@@ -132,7 +231,12 @@ pub async fn run(
     for id in ids {
         if !removed.contains(id) && !outcome.skipped.iter().any(|s| &s.item_id == id) {
             let item = &entry.items[id];
-            skip(&mut report, &mut outcome, item, SkippedItemReason::InUse);
+            let reason = if abort.is_some() {
+                SkippedItemReason::Changed
+            } else {
+                SkippedItemReason::InUse
+            };
+            skip(&mut report, &mut outcome, item, reason);
         }
     }
     outcome.restorable = manifest::entries(&engine.uninstall.database, &task.id)?
@@ -142,6 +246,9 @@ pub async fn run(
     queue.set_uninstall_outcome(&task.id, outcome.clone())?;
     engine.executed(&removed, &entry)?;
     report.finish(&queue, &task.id, &outcome)?;
+    if let Some(error) = abort {
+        return Err(error);
+    }
     if let Some(error) = command_failure {
         return Err(error);
     }
@@ -178,6 +285,118 @@ async fn await_with_progress<T>(
     }
 }
 
+/// The path still names the object that was scanned: it is its own canonical form (no symbolic link on the way, no
+/// `.` or `..`), it is not a link itself, and device and inode are unchanged.
+pub(crate) fn same_identity(path: &Path, scanned: &uninstall::rules::Snapshot) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    !metadata.file_type().is_symlink()
+        && std::fs::canonicalize(path).is_ok_and(|canonical| canonical == path)
+        && metadata.dev() == scanned.device
+        && metadata.ino() == scanned.inode
+}
+impl Engine {
+    /// Measures every selected path item again, with a fresh time budget per item. Returns log lines and, when the
+    /// run must not start, the reason: a size that cannot be fully measured, one item over `item_limit`, or the
+    /// total over `total_limit`. Tool commands re-check their own estimate right before they run.
+    pub fn preflight(
+        &self,
+        entry: &super::Entry,
+        ids: &[String],
+        flag: &AtomicBool,
+        activities: &Activities,
+    ) -> Result<(Vec<String>, Option<AppError>), AppError> {
+        let mut lines = vec![];
+        let (mut shown, mut measured) = (0u64, 0u64);
+        for id in ids {
+            let item = entry.items.get(id).ok_or_else(super::cached_error)?;
+            let size = item.item.size_bytes.unwrap_or(0);
+            if !item.item.size_complete {
+                lines.push(format!(
+                    "abort: the size of {} was not fully measured; nothing was removed",
+                    display(item)
+                ));
+                return Ok((lines, Some(size_unknown(display(item).to_owned()))));
+            }
+            shown = shown.saturating_add(size);
+            if item.item.kind == CleanupItemKind::Command
+                || item.item.delete_mode != DeleteMode::Delete
+            {
+                measured = measured.saturating_add(size);
+                continue;
+            }
+            let path = Path::new(&item.item.path);
+            if std::fs::symlink_metadata(path).is_err() {
+                continue;
+            }
+            // The removal keeps files that are open somewhere; measuring them here would report a size the removal
+            // can never reach and stop the whole run with nothing removed (#117).
+            let reading = activities.get(self);
+            let open: Vec<_> = reading
+                .as_ref()
+                .as_ref()
+                .ok()
+                .map(|activity| {
+                    activity
+                        .open_under(path)
+                        .map(|(open, _)| open.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let now = match tree::estimate(
+                path,
+                flag,
+                Instant::now() + self.category_timeout,
+                self.max_tree_nodes,
+                |_| false,
+                &open,
+            ) {
+                Ok(tree) => tree,
+                Err(error) if error.code == "E_CANCELED" => return Err(error),
+                // Refused (a link, another owner, a changed root): the item itself is skipped as changed.
+                Err(_) => continue,
+            };
+            if now.incomplete.is_some() {
+                lines.push(format!(
+                    "abort: {} could not be measured again in full; nothing was removed",
+                    display(item)
+                ));
+                return Ok((lines, Some(size_unknown(display(item).to_owned()))));
+            }
+            if now.bytes > item_limit(size) {
+                lines.push(format!(
+                    "abort: {} now measures {} bytes, shown {size} bytes (limit {}); nothing was removed",
+                    display(item),
+                    now.bytes,
+                    item_limit(size)
+                ));
+                return Ok((
+                    lines,
+                    Some(oversize(format!(
+                        "{} {} > {size}",
+                        display(item),
+                        now.bytes
+                    ))),
+                ));
+            }
+            measured = measured.saturating_add(now.bytes);
+        }
+        if measured > total_limit(shown) {
+            lines.push(format!(
+                "abort: the selection now measures {measured} bytes, shown {shown} bytes (limit {}); nothing was removed",
+                total_limit(shown)
+            ));
+            return Ok((lines, Some(oversize(format!("{measured} > {shown}")))));
+        }
+        lines.push(format!(
+            "checked: {shown} bytes shown, {measured} bytes measured again, limit {}",
+            total_limit(shown)
+        ));
+        Ok((lines, None))
+    }
+}
 fn display(item: &EntryItem) -> &str {
     item.item.command.as_deref().unwrap_or(&item.item.path)
 }
@@ -338,6 +557,10 @@ impl Engine {
         if before == 0 {
             return Ok(Act::Deleted(0));
         }
+        // Docker reports more reclaimable space than was shown: the prune would remove more than the user saw.
+        if before > item_limit(item.item.size_bytes.unwrap_or(0)) {
+            return Ok(Act::Skipped(SkippedItemReason::Changed));
+        }
         if !endpoint.valid() {
             return Ok(Act::Skipped(SkippedItemReason::Changed));
         }
@@ -364,6 +587,7 @@ impl Engine {
         let after = measure(&AtomicBool::new(false)).unwrap_or(0);
         Ok(Act::Deleted(before.saturating_sub(after)))
     }
+    #[allow(clippy::too_many_arguments)]
     fn delete_cache(
         &self,
         item: &EntryItem,
@@ -372,6 +596,7 @@ impl Engine {
         partial: bool,
         activity: &Result<Activity, AppError>,
         meter: &tree::Meter,
+        budget: u64,
     ) -> Result<Act, AppError> {
         let path = Path::new(&item.item.path);
         if let Some(reason) = item.owner.status_in(activity) {
@@ -408,6 +633,7 @@ impl Engine {
             &open,
             tree::parallel_workers(item.tree.as_ref().is_some_and(|tree| tree.compact)),
             meter,
+            budget,
         )?;
         if bytes == 0 && !open.is_empty() {
             return Ok(Act::Skipped(SkippedItemReason::InUse));
@@ -421,9 +647,14 @@ impl Engine {
         flag: &AtomicBool,
         activities: &Activities,
         meter: &tree::Meter,
+        budget: u64,
     ) -> Result<Act, AppError> {
         let _operation = self.operation.lock().map_err(poison)?;
         let path = Path::new(&item.item.path);
+        // A size that was only a lower bound is never acted on (#116); the scan does not offer it either.
+        if !item.item.size_complete {
+            return Err(size_unknown(item.item.path.clone()));
+        }
         if item.owner.protected
             || protect::is_protected(&self.protected_list()?, path, item.owner.bundle.as_deref())
             || rules::root_blocked(
@@ -462,6 +693,12 @@ impl Engine {
         let Some(before) = &item.tree else {
             return Err(super::cached_error());
         };
+        // Exactly the folder or file the user saw: same canonical path (no link anywhere on the way) and the same
+        // device and inode as at scan time.
+        let root_snapshot = before.snapshots.get(path).ok_or_else(super::cached_error)?;
+        if !same_identity(path, root_snapshot) {
+            return Ok(Act::Skipped(SkippedItemReason::Changed));
+        }
         if (before.compact || partial)
             && matches!(
                 item.item.reason,
@@ -506,7 +743,7 @@ impl Engine {
                     }
                 }
             }
-            return self.delete_cache(item, snapshot, flag, partial, activity, meter);
+            return self.delete_cache(item, snapshot, flag, partial, activity, meter, budget);
         }
         // Moving an installer, a backup or an archive to the Trash is one rename of its root, and a wrong pick can be
         // put back. A large one is not walked again: its root identity is checked below, and a protection rule on
@@ -593,7 +830,13 @@ impl Engine {
             // Directories go through the descriptor-based remover: no symlink traversal, identity checks on every
             // entry, and read-only directories we own (Go's module cache) can still be emptied.
             if snapshot.kind == 1 && !*empty_only {
-                return self.delete_cache(item, snapshot, flag, partial, &reading, meter);
+                return self.delete_cache(item, snapshot, flag, partial, &reading, meter, budget);
+            }
+            if current.bytes > budget {
+                return Err(oversize(format!(
+                    "{} measures {} bytes, limit {budget}",
+                    item.item.path, current.bytes
+                )));
             }
             uninstall::execute::remove(path, *empty_only)?;
             return Ok(Act::Deleted(current.bytes));
@@ -729,6 +972,9 @@ async fn run_brew(
     .await?;
     estimate.success()?;
     let estimate = crate::maintenance::cleanup(&estimate.text);
+    if estimate.bytes > item_limit(item.item.size_bytes.unwrap_or(0)) {
+        return Ok(Act::Skipped(SkippedItemReason::Changed));
+    }
     let args = brew::args::write_args(TaskOp::Cleanup, None, &TaskOptions::default())?;
     let mut env = brew::env::construct(
         &settings,

@@ -345,6 +345,12 @@ impl Collector<'_> {
         if fs::symlink_metadata(&path).is_err() {
             return Ok(());
         }
+        // Once the category's time is up nothing new is listed: the location is reported as not scanned (#116).
+        if Instant::now() >= self.deadline {
+            self.result
+                .incomplete(&path, SkippedLocationReason::Timeout);
+            return Ok(());
+        }
         self.progress(Some(&path));
         let home = &self.engine.uninstall.roots.home;
         if owner.protected
@@ -401,10 +407,12 @@ impl Collector<'_> {
                 .skip(&owner, title, Some(bytes), reason, processes);
             return Ok(());
         }
+        // Each item gets its own measuring budget: a shared category deadline left later items with a near-zero
+        // lower bound that still deleted the whole tree (#116).
         let captured = match tree::estimate(
             &path,
             self.flag,
-            self.deadline,
+            Instant::now() + self.engine.category_timeout,
             self.engine.max_tree_nodes,
             blocked,
             &open,
@@ -428,6 +436,10 @@ impl Collector<'_> {
         };
         if let Some(reason) = captured.incomplete {
             self.result.incomplete(&path, reason);
+            // Nothing measured and not finished: a row of "0 bytes" would say nothing true.
+            if captured.bytes == 0 {
+                return Ok(());
+            }
         }
         if captured.snapshots.keys().any(|p| blocked(p)) {
             self.result.skip(
@@ -470,6 +482,7 @@ impl Collector<'_> {
             },
             command: None,
             size_bytes: Some(captured.bytes),
+            size_complete: captured.incomplete.is_none(),
             kept_open_files: captured.kept_open_files,
             modified_at: Some(
                 if matches!(
@@ -484,15 +497,17 @@ impl Collector<'_> {
             reason,
             // Unchecked by default: the newest device support version, anything downloaded again, installers whose
             // app is not installed, the Trash (emptying it cannot be undone) and personal backups and archives.
-            selected: !matches!(
-                reason,
-                CleanupReason::DeviceSupportLatest
-                    | CleanupReason::ToolDownloadCache
-                    | CleanupReason::Installer
-                    | CleanupReason::Trash
-                    | CleanupReason::DeviceBackup
-                    | CleanupReason::XcodeArchive
-            ),
+            // A lower-bound size is never offered: the whole tree would be removed while far less was shown.
+            selected: captured.incomplete.is_none()
+                && !matches!(
+                    reason,
+                    CleanupReason::DeviceSupportLatest
+                        | CleanupReason::ToolDownloadCache
+                        | CleanupReason::Installer
+                        | CleanupReason::Trash
+                        | CleanupReason::DeviceBackup
+                        | CleanupReason::XcodeArchive
+                ),
             // Installers, backups and archives go to the Trash so a wrong pick can be put back.
             delete_mode: if matches!(
                 reason,
@@ -1598,6 +1613,7 @@ impl Engine {
                 kind: CleanupItemKind::Command,
                 command: Some(format!("docker {}", args.join(" "))),
                 size_bytes: Some(bytes),
+                size_complete: true,
                 kept_open_files: 0,
                 modified_at: None,
                 reason: *reason,
@@ -1723,6 +1739,7 @@ impl Engine {
                     kind: CleanupItemKind::Command,
                     command: Some("brew cleanup --prune=all".into()),
                     size_bytes: Some(estimate.bytes),
+                    size_complete: true,
                     kept_open_files: 0,
                     modified_at: None,
                     reason: CleanupReason::BrewCleanup,
@@ -1892,6 +1909,9 @@ impl Engine {
                 };
                 if let Some(reason) = captured.incomplete {
                     result.incomplete(&path, reason);
+                    if captured.bytes == 0 {
+                        continue;
+                    }
                 }
                 // Keep the original scan's identity. A replacement during conversion must not acquire permission to delete.
                 if plan
@@ -1936,6 +1956,7 @@ impl Engine {
                     },
                     command: None,
                     size_bytes: Some(captured.bytes),
+                    size_complete: captured.incomplete.is_none(),
                     kept_open_files: 0,
                     modified_at: Some(captured.modified_at),
                     reason: if active {
@@ -1943,10 +1964,10 @@ impl Engine {
                     } else {
                         CleanupReason::Orphan
                     },
-                    selected: active
-                        || (captured.incomplete.is_none()
-                            && old.confidence == PlanItemConfidence::High
-                            && captured.modified_at <= uninstall::now() - 30 * 86_400_000),
+                    selected: captured.incomplete.is_none()
+                        && (active
+                            || (old.confidence == PlanItemConfidence::High
+                                && captured.modified_at <= uninstall::now() - 30 * 86_400_000)),
                     delete_mode: settings.cleanup_delete_mode,
                     needs_admin: false,
                     note: old.note,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { IpcError } from '@/ipc/client';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatBytes } from '@opennavo/shared';
@@ -114,7 +115,7 @@ async function purge() {
       <p class="m-0 mt-6px text-13px text-ink-tertiary">
         {{
           failedTask?.error
-            ? errorText(failedTask.error)
+            ? errorText(new IpcError(failedTask.error))
             : pending
               ? t('cleanup.result.trashPending', { size: format(trashBytes) })
               : t('cleanup.result.rebuilds')

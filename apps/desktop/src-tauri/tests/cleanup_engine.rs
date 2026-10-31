@@ -19,13 +19,13 @@ use opennavo_desktop_lib::{
 };
 use std::{
     fs,
-    os::unix::fs::symlink,
+    os::unix::fs::{MetadataExt, symlink},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 #[derive(Default)]
 struct Apps {
@@ -704,8 +704,8 @@ async fn an_incomplete_activity_reading_is_not_reused() {
     let ids = items(&report).iter().map(|i| i.id.clone()).collect();
     let task = f.execute(&report, ids).await;
     assert_eq!(task.outcome.unwrap().deleted, 5);
-    // Checked when each item starts and again right before it is removed.
-    assert_eq!(f.processes.open_reads.load(Ordering::Acquire) - reads, 10);
+    // Checked by the preflight, when each item starts and again right before it is removed.
+    assert_eq!(f.processes.open_reads.load(Ordering::Acquire) - reads, 15);
 }
 
 #[tokio::test]
@@ -2123,8 +2123,20 @@ async fn incomplete_measurements_keep_all_candidates_and_latest_selection() {
             }
         }
         let report = f.scan(&[CleanupCategory::DevCaches]).await;
+        if timeout.is_zero() {
+            // #116: past the category deadline nothing new is listed, and nothing is selectable.
+            assert!(items(&report).is_empty());
+            assert!(report.categories.iter().all(|c| !c.complete));
+            continue;
+        }
         assert_eq!(items(&report).len(), 20);
         assert!(!report.categories[0].complete);
+        // #116: a lower bound is never selected or deletable.
+        assert!(
+            items(&report)
+                .iter()
+                .all(|i| !i.selected && !i.size_complete)
+        );
         let entry = f.engine.cached(&report.report_id, 0).unwrap();
         assert!(
             entry
@@ -2929,3 +2941,436 @@ async fn docker_socket_replaced_after_scan_is_not_pruned() {
     assert!(!outcome.skipped.is_empty());
     assert!(!f.home.join(".fake-docker/calls").exists());
 }
+
+// ---- #116: never remove more than was shown -------------------------------------------------------------------
+// These two tests compile against desktop-v0.1.24 unchanged and fail there (the whole tree is removed).
+
+/// Like [`tree_allocated`], for a tree another thread is emptying: vanished entries count as gone.
+fn tree_allocated_lenient(root: &Path) -> u64 {
+    let mut total = 0;
+    let mut pending = vec![root.to_owned()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.is_dir() {
+                pending.push(path);
+            } else if metadata.nlink() == 1 {
+                total += metadata.blocks() * 512;
+            }
+        }
+    }
+    total
+}
+fn tree_allocated(root: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    let mut total = 0;
+    let mut pending = vec![root.to_owned()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let metadata = fs::symlink_metadata(&path).unwrap();
+            if metadata.is_dir() {
+                pending.push(path);
+            } else if metadata.nlink() == 1 {
+                total += metadata.blocks() * 512;
+            }
+        }
+    }
+    total
+}
+/// shown × 1.1 + 64 MB, written out so this file also builds on 0.1.24.
+fn shown_limit(shown: u64) -> u64 {
+    shown + shown / 10 + (64 << 20)
+}
+async fn wait(f: &Fixture, id: &str) -> Task {
+    f.queue.start();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let done = f
+                .queue
+                .database
+                .tasks()
+                .unwrap()
+                .into_iter()
+                .find(|t| t.id == id)
+                .unwrap();
+            if !matches!(done.state, TaskState::Queued | TaskState::Running) {
+                break done;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+/// 1600 files of 64 KiB (about 100 MiB) under a fixed developer cache root.
+fn big_cache(f: &Fixture, files: usize) -> PathBuf {
+    for i in 0..files {
+        f.file(&format!(".npm/_cacache/content-v2/{:02}/f{i:05}", i % 32));
+    }
+    f.home.join(".npm/_cacache")
+}
+/// `files` small files under a fixed cache root, spread over 32 folders.
+fn small_cache(f: &Fixture, relative: &str, files: usize) -> PathBuf {
+    for i in 0..files {
+        let path = f.home.join(format!("{relative}/{:02}/f{i:05}", i % 32));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, vec![3u8; 4096]).unwrap();
+    }
+    f.home.join(relative)
+}
+
+#[tokio::test]
+async fn p0_116_incomplete_estimate_never_deletes_more_than_shown() {
+    // A tiny entry limit stops the measurement early, as the category deadline or the 2M-node limit did on a real
+    // machine: the item can only show a lower bound.
+    let f = Fixture::limits(Duration::from_secs(30), 64);
+    let cache = big_cache(&f, 1600);
+    let actual = tree_allocated(&cache);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let item = items(&report)
+        .into_iter()
+        .find(|i| i.path.ends_with("_cacache"))
+        .expect("the cache is listed")
+        .clone();
+    let shown = item.size_bytes.unwrap();
+    assert!(
+        shown_limit(shown) < actual,
+        "fixture must be larger than the tolerance: shown {shown}, actual {actual}"
+    );
+    let freed = match f
+        .engine
+        .enqueue(&f.queue, &report.report_id, vec![item.id.clone()])
+    {
+        // Fixed: a lower-bound size can not be selected for removal at all.
+        Err(error) => {
+            assert_eq!(error.code, "E_CLEANUP_SIZE_UNKNOWN");
+            0
+        }
+        Ok(task) => {
+            let done = wait(&f, &task.id).await;
+            done.outcome.map_or(0, |o| o.freed_bytes)
+        }
+    };
+    let left = if cache.exists() {
+        tree_allocated(&cache)
+    } else {
+        0
+    };
+    println!("#116 repro: actual {actual} shown {shown} freed {freed} left {left}");
+    assert!(
+        freed <= shown_limit(shown) && actual - left <= shown_limit(shown),
+        "removed more than shown: shown {shown}, freed {freed}, actual {actual}, left {left}"
+    );
+}
+
+#[tokio::test]
+async fn p0_116_tree_that_grew_after_the_scan_is_not_removed() {
+    // Fully measured (more than 256 entries, so only the root identity is kept), then it grows by ~100 MiB.
+    let f = Fixture::new();
+    let cache = big_cache(&f, 300);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let item = items(&report)
+        .into_iter()
+        .find(|i| i.path.ends_with("_cacache"))
+        .expect("the cache is listed")
+        .clone();
+    let shown = item.size_bytes.unwrap();
+    for i in 300..1900 {
+        f.file(&format!(".npm/_cacache/content-v2/{:02}/f{i:05}", i % 32));
+    }
+    let actual = tree_allocated(&cache);
+    assert!(shown_limit(shown) < actual);
+    let task = f
+        .engine
+        .enqueue(&f.queue, &report.report_id, vec![item.id.clone()])
+        .unwrap();
+    let done = wait(&f, &task.id).await;
+    let freed = done.outcome.as_ref().map_or(0, |o| o.freed_bytes);
+    let left = if cache.exists() {
+        tree_allocated(&cache)
+    } else {
+        0
+    };
+    println!("#116 grown: shown {shown} actual {actual} freed {freed} left {left}");
+    assert!(
+        freed <= shown_limit(shown) && actual - left <= shown_limit(shown),
+        "removed more than shown: shown {shown}, freed {freed}, actual {actual}, left {left}"
+    );
+}
+
+// FIXED-ONLY BEGIN (uses fields added by the #116 fix)
+#[tokio::test]
+async fn p0_116_selection_is_recorded_and_log_lines_carry_bytes() {
+    let f = Fixture::new();
+    let cache = big_cache(&f, 300);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let item = items(&report)
+        .into_iter()
+        .find(|i| i.path.ends_with("_cacache"))
+        .unwrap()
+        .clone();
+    assert!(item.size_complete);
+    let shown = item.size_bytes.unwrap();
+    let task = f
+        .engine
+        .enqueue(&f.queue, &report.report_id, vec![item.id.clone()])
+        .unwrap();
+    let done = wait(&f, &task.id).await;
+    assert_eq!(done.state, TaskState::Succeeded);
+    assert!(!cache.exists());
+    let outcome = done.outcome.unwrap();
+    assert_eq!(outcome.freed_bytes, shown);
+    assert_eq!(outcome.planned.len(), 1);
+    assert_eq!(outcome.planned[0].item_id, item.id);
+    assert_eq!(outcome.planned[0].size_bytes, Some(shown));
+    assert!(outcome.planned[0].size_complete);
+    // Stored in the tasks table, readable with sqlite.
+    let stored = f.queue.database.tasks().unwrap();
+    let stored = stored.iter().find(|t| t.id == task.id).unwrap();
+    assert_eq!(stored.outcome.as_ref().unwrap().planned, outcome.planned);
+    let log = fs::read_to_string(done.log_path.unwrap()).unwrap();
+    assert!(log.contains("checked: "), "{log}");
+    assert!(
+        log.contains(&format!("({shown} bytes, shown {shown} bytes)")),
+        "{log}"
+    );
+}
+
+#[tokio::test]
+async fn p0_116_grown_tree_aborts_with_a_reason_in_the_log() {
+    let f = Fixture::new();
+    let cache = big_cache(&f, 300);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let item = items(&report)
+        .into_iter()
+        .find(|i| i.path.ends_with("_cacache"))
+        .unwrap()
+        .clone();
+    for i in 300..1900 {
+        f.file(&format!(".npm/_cacache/content-v2/{:02}/f{i:05}", i % 32));
+    }
+    let before = tree_allocated(&cache);
+    let task = f
+        .engine
+        .enqueue(&f.queue, &report.report_id, vec![item.id.clone()])
+        .unwrap();
+    let done = wait(&f, &task.id).await;
+    assert_eq!(done.state, TaskState::Failed);
+    assert_eq!(done.error.as_ref().unwrap().code, "E_CLEANUP_OVERSIZE");
+    assert_eq!(tree_allocated(&cache), before, "nothing may be removed");
+    let outcome = done.outcome.unwrap();
+    assert_eq!(outcome.freed_bytes, 0);
+    assert_eq!(outcome.skipped.len(), 1);
+    let log = fs::read_to_string(done.log_path.unwrap()).unwrap();
+    assert!(
+        log.contains("abort: ") && log.contains("nothing was removed"),
+        "{log}"
+    );
+}
+
+#[tokio::test]
+async fn p0_116_incomplete_items_are_listed_unselected_and_empty_ones_not_at_all() {
+    let f = Fixture::limits(Duration::from_secs(30), 64);
+    big_cache(&f, 400);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let item = items(&report)
+        .into_iter()
+        .find(|i| i.path.ends_with("_cacache"))
+        .unwrap()
+        .clone();
+    assert!(!item.size_complete && !item.selected);
+    assert!(
+        items(&report)
+            .iter()
+            .all(|i| i.size_complete || i.size_bytes.unwrap_or(0) > 0)
+    );
+    // Nothing is listed once the category's time is up.
+    let f = Fixture::timeout(Duration::ZERO);
+    big_cache(&f, 10);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    assert!(items(&report).is_empty());
+}
+
+#[test]
+fn p0_116_limits_are_proportional_with_fixed_slack() {
+    use opennavo_desktop_lib::cleanup::execute::{item_limit, total_limit};
+    assert_eq!(item_limit(0), 64 << 20);
+    assert_eq!(item_limit(1000), 1100 + (64 << 20));
+    assert_eq!(total_limit(10_000), 11_000 + (256 << 20));
+    assert_eq!(item_limit(u64::MAX), u64::MAX);
+}
+// PR #117: an item that grows while it is being emptied stops at the limit, and the bytes it had already unlinked
+// must be reported instead of vanishing from the outcome, the log and the result page.
+#[tokio::test]
+async fn p1_117_aborted_removal_reports_the_bytes_it_already_deleted() {
+    let f = Fixture::new();
+    // Shown while it is small, emptied while it is large.
+    let cache = big_cache(&f, 300);
+    // Emptied first, so the run is already removing files when the grown item reappears.
+    let neighbour = small_cache(&f, ".gradle/caches", 20_000);
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let listed = |suffix: &str| {
+        items(&report)
+            .into_iter()
+            .find(|i| i.path.ends_with(suffix))
+            .unwrap_or_else(|| panic!("{suffix} is listed"))
+            .clone()
+    };
+    let neighbour_item = listed(".gradle/caches");
+    let item = listed("_cacache");
+    let shown = item.size_bytes.unwrap();
+    let limit = shown_limit(shown);
+    let neighbour_bytes = tree_allocated(&neighbour);
+    // Grow it on disk without touching what the plan recorded: new files inside the folders the scan already saw.
+    for i in 300..2300 {
+        let path = f
+            .home
+            .join(format!(".npm/_cacache/content-v2/{:02}/f{i:05}", i % 32));
+        fs::write(&path, vec![7u8; 65536]).unwrap();
+    }
+    let grown = tree_allocated(&cache);
+    assert!(
+        grown > limit,
+        "the item must outgrow its limit: {grown} > {limit} (shown {shown})"
+    );
+    // A missing path is not measured by the preflight. Putting the same folder back keeps its identity, so the
+    // removal still accepts the plan it was given.
+    let stash = f.home.join(".stashed-cacache");
+    fs::rename(&cache, &stash).unwrap();
+    let sentinels: Vec<_> = (0..32u32)
+        .map(|d| f.home.join(format!(".gradle/caches/{d:02}/f{d:05}")))
+        .collect();
+    let restore = {
+        let (stash, cache) = (stash.clone(), cache.clone());
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while sentinels.iter().all(|path| path.exists()) {
+                if Instant::now() > deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_micros(200));
+            }
+            fs::rename(&stash, &cache).unwrap();
+        })
+    };
+    let task = f
+        .engine
+        .enqueue(
+            &f.queue,
+            &report.report_id,
+            vec![neighbour_item.id.clone(), item.id.clone()],
+        )
+        .unwrap();
+    let done = wait(&f, &task.id).await;
+    restore.join().unwrap();
+    let deleted_item = grown - tree_allocated_lenient(&cache);
+    let neighbour_left = tree_allocated_lenient(&neighbour);
+    let deleted = neighbour_bytes - neighbour_left + deleted_item;
+
+    assert_eq!(done.state, TaskState::Failed);
+    assert_eq!(
+        done.error.as_ref().unwrap().code,
+        "E_CLEANUP_OVERSIZE",
+        "the run must stop at the limit"
+    );
+    assert!(
+        deleted_item > 0,
+        "the removed item had unlinked files before it stopped"
+    );
+    assert!(
+        deleted_item <= limit,
+        "never free more than the limit: {deleted_item} > {limit}"
+    );
+    let outcome = done.outcome.unwrap();
+    assert_eq!(
+        outcome.freed_bytes, deleted,
+        "the outcome must match the bytes actually deleted"
+    );
+    // The result page and the task table read this persisted outcome.
+    let stored = f.queue.database.tasks().unwrap();
+    let stored = stored.iter().find(|t| t.id == task.id).unwrap();
+    assert_eq!(
+        stored.outcome.as_ref().unwrap().freed_bytes,
+        deleted,
+        "the persisted outcome carries the real deleted bytes"
+    );
+    let log = fs::read_to_string(done.log_path.unwrap()).unwrap();
+    assert!(
+        log.contains(&format!("freed {deleted_item} bytes before")),
+        "the log states the bytes deleted before the abort: {log}"
+    );
+    assert!(
+        log.contains(&format!("freed {deleted_item} bytes); cleanup stopped")),
+        "the abort line states the bytes deleted before the abort: {log}"
+    );
+}
+
+// PR #117: the preflight measures with the same open-file list as the removal. Files that are open stay where they
+// are, so measuring them would stop the whole run with nothing removed once they pass the tolerance.
+#[tokio::test]
+async fn p1_117_preflight_excludes_open_files_from_the_item_size() {
+    let f = Fixture::new();
+    let open: Vec<PathBuf> = (0..1_200)
+        .map(|i| {
+            f.file(&format!(
+                ".npm/_cacache/content-v2/{:02}/open-{i:05}",
+                i % 32
+            ))
+        })
+        .collect();
+    for i in 0..300 {
+        f.file(&format!(
+            ".npm/_cacache/content-v2/{:02}/free-{i:05}",
+            i % 32
+        ));
+    }
+    // The scan and the removal both keep these files; only a preflight measuring them would see them as growth.
+    f.processes.open.lock().unwrap().extend(open.clone());
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let item = items(&report)
+        .into_iter()
+        .find(|i| i.path.ends_with("_cacache"))
+        .expect("the cache is listed")
+        .clone();
+    let shown = item.size_bytes.unwrap();
+    let cache = f.home.join(".npm/_cacache");
+    let on_disk = tree_allocated(&cache);
+    assert!(
+        on_disk > shown_limit(shown),
+        "the open files must take the real tree past the tolerance: {on_disk} <= {} (shown {shown})",
+        shown_limit(shown)
+    );
+    let task = f
+        .engine
+        .enqueue(&f.queue, &report.report_id, vec![item.id.clone()])
+        .unwrap();
+    let done = wait(&f, &task.id).await;
+    assert_eq!(
+        done.state,
+        TaskState::Succeeded,
+        "the preflight must not mistake open files for growth: {:?}",
+        done.error
+    );
+    let outcome = done.outcome.unwrap();
+    assert!(
+        outcome.freed_bytes > 0 && outcome.freed_bytes <= shown_limit(shown),
+        "the removable part is freed and the open part is not: {}",
+        outcome.freed_bytes
+    );
+    assert!(open.iter().all(|path| path.exists()), "open files stay");
+    assert!(
+        !f.home
+            .join(".npm/_cacache/content-v2/00/free-00000")
+            .exists(),
+        "the files that are not open are removed"
+    );
+}
+
+// FIXED-ONLY END

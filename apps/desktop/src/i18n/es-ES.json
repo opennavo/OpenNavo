@@ -1414,6 +1414,8 @@
     "E_PROTECTED": "Esta app está protegida y no se puede desinstalar",
     "E_APP_MANAGEMENT": "Primero permite que OpenNavo gestione apps",
     "E_UNINSTALL_INCOMPLETE": "La aplicación sigue existiendo. La desinstalación no se completó; revisa el registro e inténtalo de nuevo.",
+    "E_CLEANUP_OVERSIZE": "Limpieza detenida: la selección es más grande de lo mostrado y no se eliminó nada por encima del tamaño mostrado. Vuelve a analizar e inténtalo de nuevo.",
+    "E_CLEANUP_SIZE_UNKNOWN": "El tamaño de este elemento no se midió por completo, así que no se puede limpiar. Vuelve a analizar e inténtalo de nuevo.",
     "E_PLAN_EXPIRED": "Los archivos cambiaron. Vuelve a analizar.",
     "E_SCAN_CANCELED": "Análisis cancelado",
     "E_RESTORE_UNAVAILABLE": "Algunos archivos ya no están en la Papelera y no se pudieron restaurar",
@@ -1829,6 +1831,7 @@
       "admin": "Requiere tu contraseña de administrador",
       "reveal": "Mostrar en Finder",
       "protect": "Conservar siempre",
+      "partial": "Solo se midió en parte, así que no se puede eliminar directamente. Vuelve a analizar e inténtalo de nuevo.",
       "keptOpen": "Conserva {count} archivo en uso | Conserva {count} archivos en uso"
     },
     "footer": {
@@ -1844,6 +1847,7 @@
       "count": "{count} elemento | {count} elementos",
       "delete": "{size} se elimina para siempre: cachés, registros, cachés de desarrollo y archivos similares que las apps regeneran. No se puede deshacer.",
       "trash": "{size} va a la Papelera: restos de apps eliminadas y archivos similares. Podrás deshacerlo después.",
+      "partial": "{count} elemento(s) solo se midieron en parte (al menos {size}). No están seleccionados y no se eliminarán.",
       "emptyTrash": "Has seleccionado la Papelera: todo lo que contiene se vaciará y no se podrá recuperar.",
       "admin": "Incluye {count} elemento en segundo plano del sistema, que pedirá tu contraseña de administrador una vez. | Incluye {count} elementos en segundo plano del sistema, que pedirán tu contraseña de administrador una vez.",
       "cancel": "Cancelar",

@@ -1414,6 +1414,8 @@
     "E_PROTECTED": "Cette app est protégée et ne peut pas être désinstallée",
     "E_APP_MANAGEMENT": "Autorisez d’abord OpenNavo à gérer les apps",
     "E_UNINSTALL_INCOMPLETE": "L’app existe toujours. Désinstallation inachevée ; consultez le journal et réessayez",
+    "E_CLEANUP_OVERSIZE": "Nettoyage interrompu : la sélection est plus volumineuse qu’affiché, rien n’a été supprimé au-delà de la taille affichée. Relancez l’analyse et réessayez.",
+    "E_CLEANUP_SIZE_UNKNOWN": "La taille de cet élément n’a pas été entièrement mesurée, il ne peut pas être nettoyé. Relancez l’analyse et réessayez.",
     "E_PLAN_EXPIRED": "Les fichiers ont changé. Relancez l’analyse",
     "E_SCAN_CANCELED": "Analyse annulée",
     "E_RESTORE_UNAVAILABLE": "Certains fichiers ne sont plus dans la corbeille et n’ont pas pu être restaurés",
@@ -1829,6 +1831,7 @@
       "admin": "Mot de passe administrateur requis",
       "reveal": "Afficher dans le Finder",
       "protect": "Toujours conserver",
+      "partial": "Mesuré en partie seulement : suppression directe impossible. Relancez l’analyse et réessayez.",
       "keptOpen": "{count} fichier utilisé conservé | {count} fichiers utilisés conservés"
     },
     "footer": {
@@ -1844,6 +1847,7 @@
       "count": "{count} élément au total | {count} éléments au total",
       "delete": "{size} supprimés définitivement : caches, journaux, caches de développement et autres fichiers régénérables. Cette action est irréversible.",
       "trash": "{size} mis à la corbeille : résidus d’apps supprimées et fichiers similaires. Vous pourrez annuler ensuite.",
+      "partial": "{count} élément(s) mesuré(s) en partie seulement (au moins {size}). Non sélectionnés, ils ne seront pas supprimés.",
       "emptyTrash": "Vous avez sélectionné la corbeille : son contenu actuel sera supprimé sans possibilité de récupération.",
       "admin": "{count} élément d’arrière-plan système nécessite une saisie du mot de passe administrateur. | {count} éléments d’arrière-plan système nécessitent une saisie du mot de passe administrateur.",
       "cancel": "Annuler",

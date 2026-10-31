@@ -26,9 +26,13 @@ const parts = computed(() => splitPath(displayPath(props.item.path)));
 const label = computed(() =>
   named.value ? named.value.text : command.value ? (props.item.command ?? '') : parts.value.base
 );
-const size = computed(() =>
-  props.item.sizeBytes === null ? '—' : formatBytes(props.item.sizeBytes, { locale: appLocale.value })
-);
+/** Only partly measured: the size is a lower bound and the item can't be selected (#116). */
+const partial = computed(() => !props.item.sizeComplete);
+const size = computed(() => {
+  if (props.item.sizeBytes === null) return '—';
+  const text = formatBytes(props.item.sizeBytes, { locale: appLocale.value });
+  return partial.value ? t('cleanup.category.atLeast', { size: text }) : text;
+});
 const age = computed(() =>
   command.value || props.item.modifiedAt === null
     ? ''
@@ -68,7 +72,13 @@ const chip = computed(() => {
   <div
     class="group flex min-h-36px items-center gap-10px border-t border-t-solid border-line-subtle py-6px pl-76px pr-12px hover:bg-component-item-active"
   >
-    <OnCheckbox :model-value="checked" :aria-label="label" @update:model-value="value => emit('toggle', value)" />
+    <OnCheckbox
+      :model-value="checked && !partial"
+      :disabled="partial"
+      :aria-label="label"
+      :title="partial ? t('cleanup.item.partial') : undefined"
+      @update:model-value="value => emit('toggle', value)"
+    />
     <div class="min-w-0 flex-1">
       <template v-if="named">
         <div
@@ -98,6 +108,9 @@ const chip = computed(() => {
       <div v-if="item.note" class="mt-2px truncate font-mono text-11.5px text-ink-tertiary">
         {{ item.note }}
       </div>
+      <div v-if="partial" class="mt-2px truncate text-11.5px text-status-warning">
+        {{ t('cleanup.item.partial') }}
+      </div>
       <!-- Tool caches keep the few files a running process has open (a `go run` binary) and clean the rest. -->
       <div v-if="item.keptOpenFiles" class="mt-2px truncate text-11.5px text-ink-tertiary">
         {{ t('cleanup.item.keptOpen', { count: item.keptOpenFiles }, { plural: item.keptOpenFiles }) }}
@@ -118,7 +131,9 @@ const chip = computed(() => {
       </span>
     </span>
     <span class="w-72px shrink-0 truncate text-right text-11.5px text-ink-tertiary">{{ age }}</span>
-    <span class="w-62px shrink-0 text-right text-12px tabular-nums text-ink-secondary">{{ size }}</span>
+    <span class="w-62px shrink-0 truncate text-right text-12px tabular-nums text-ink-secondary" :title="size">{{
+      size
+    }}</span>
     <span class="flex w-50px shrink-0 justify-end gap-2px opacity-0 group-hover:opacity-100 focus-within:opacity-100">
       <OnButton
         v-if="!command"

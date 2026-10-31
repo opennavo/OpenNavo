@@ -73,6 +73,9 @@ pub struct CleanupItem {
     pub kind: CleanupItemKind,
     pub command: Option<String>,
     pub size_bytes: Option<u64>,
+    /// False when the scan stopped measuring early (time or entry limit, unreadable folders): `size_bytes` is then
+    /// only a lower bound, so the item is shown as "at least" and can never be selected or deleted.
+    pub size_complete: bool,
     pub kept_open_files: u64,
     pub modified_at: Option<i64>,
     pub reason: CleanupReason,

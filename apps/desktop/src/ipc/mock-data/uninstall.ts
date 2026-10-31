@@ -638,7 +638,8 @@ export function createUninstallMock({ state, tickMs, permissions, enqueue }: Uni
       trashed: execution.mode === 'trash' ? done.length : 0,
       deleted: execution.mode === 'delete' ? done.length : 0,
       skipped,
-      restorable: execution.mode === 'trash'
+      restorable: execution.mode === 'trash',
+      planned: []
     };
     apps = apps.filter(app => app.id !== execution.app.id);
     changed('task');

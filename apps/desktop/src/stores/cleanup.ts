@@ -107,7 +107,8 @@ export const useCleanupStore = defineStore('cleanup', () => {
       category.groups.flatMap(group => group.items.map(item => ({ category, group, item })))
     )
   );
-  const isChecked = (item: CleanupItem) => Boolean(selected.value[item.id]);
+  /** A size that is only a lower bound is never selectable (#116). */
+  const isChecked = (item: CleanupItem) => item.sizeComplete && Boolean(selected.value[item.id]);
   const chosen = computed(() => entries.value.filter(entry => isChecked(entry.item)));
   const totals = computed(() => {
     const items = chosen.value.map(entry => entry.item);
@@ -139,17 +140,20 @@ export const useCleanupStore = defineStore('cleanup', () => {
 
   const itemsOf = (category: CategoryReport) => category.groups.flatMap(group => group.items);
   function stateOf(items: readonly CleanupItem[]): 'on' | 'ind' | 'off' {
-    const count = items.filter(isChecked).length;
-    return count === 0 ? 'off' : count === items.length ? 'on' : 'ind';
+    const selectable = items.filter(item => item.sizeComplete);
+    const count = selectable.filter(isChecked).length;
+    return count === 0 ? 'off' : count === selectable.length ? 'on' : 'ind';
   }
   const categoryState = (category: CategoryReport) => stateOf(itemsOf(category));
   const groupState = (group: CleanupGroup) => stateOf(group.items);
+  /** Items only partly measured: shown with "at least", never removed. */
+  const partial = computed(() => entries.value.filter(entry => !entry.item.sizeComplete));
   const setItem = (id: string, value: boolean) => {
     selected.value = { ...selected.value, [id]: value };
   };
   function setItems(items: readonly CleanupItem[], value: boolean) {
     const next = { ...selected.value };
-    for (const item of items) next[item.id] = value;
+    for (const item of items) next[item.id] = value && item.sizeComplete;
     selected.value = next;
   }
   const setCategory = (category: CategoryReport, value: boolean) => setItems(itemsOf(category), value);
@@ -159,7 +163,7 @@ export const useCleanupStore = defineStore('cleanup', () => {
   }
   function onlyRebuildable() {
     selected.value = Object.fromEntries(
-      entries.value.map(entry => [entry.item.id, entry.category.risk === 'rebuildable'])
+      entries.value.map(entry => [entry.item.id, entry.item.sizeComplete && entry.category.risk === 'rebuildable'])
     );
   }
   function toggleExpanded(key: string) {
@@ -419,6 +423,7 @@ export const useCleanupStore = defineStore('cleanup', () => {
     removeRule,
     confirm,
     restore,
+    partial,
     purge,
     finish
   };

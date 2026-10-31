@@ -2535,6 +2535,7 @@ else:
                 deleted: 0,
                 skipped: vec![],
                 restorable,
+                planned: vec![],
             });
             queue.database.save_task(&run).expect("save");
         }

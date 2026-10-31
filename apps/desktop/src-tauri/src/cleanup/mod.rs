@@ -183,6 +183,13 @@ impl Engine {
         if unique.len() != ids.len() || ids.iter().any(|id| !entry.items.contains_key(id)) {
             return Err(AppError::new("E_INVALID_ARG", "item_ids"));
         }
+        // A size that is only a lower bound is never offered for removal (#116).
+        if ids.iter().any(|id| !entry.items[id].item.size_complete) {
+            return Err(AppError::new(
+                "E_CLEANUP_SIZE_UNKNOWN",
+                "cleanup_size_unknown",
+            ));
+        }
         Ok(entry)
     }
     pub fn enqueue(

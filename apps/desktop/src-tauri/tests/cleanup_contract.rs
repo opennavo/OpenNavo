@@ -130,6 +130,7 @@ fn c21_kept_open_files_is_a_required_numeric_output_field() {
         kind: CleanupItemKind::Dir,
         command: None,
         size_bytes: Some(100),
+        size_complete: true,
         kept_open_files: 2,
         modified_at: None,
         reason: CleanupReason::ToolCache,
