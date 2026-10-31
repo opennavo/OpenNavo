@@ -93,9 +93,11 @@ pub async fn firewall_alerts(
 #[tauri::command]
 #[specta::specta]
 pub async fn firewall_alert_reply(
+    window: tauri::WebviewWindow,
     state: State<'_, Arc<Service>>,
     reply: FirewallReply,
 ) -> Result<(), AppError> {
+    require_alert_window(window.label())?;
     let service = state.inner().clone();
     crate::blocking(move || service.mutate(json!({"op":"alert_reply","reply":reply}))).await
 }
@@ -192,4 +194,54 @@ pub async fn firewall_settings_set(
 ) -> Result<FirewallSettings, AppError> {
     let service = state.inner().clone();
     crate::blocking(move || service.mutate(json!({"op":"settings_set","settings":settings}))).await
+}
+
+/// Only the question window Rust creates may answer, whatever the capability files say: the main
+/// window (or any other webview) would skip the window's answer delay and click-only rule.
+pub(crate) fn require_alert_window(label: &str) -> Result<(), AppError> {
+    if label == crate::firewall::ALERT_LABEL {
+        Ok(())
+    } else {
+        Err(AppError::new("E_FORBIDDEN", "firewall_alert_window_only"))
+    }
+}
+
+#[cfg(test)]
+mod alert_window_tests {
+    use super::require_alert_window;
+
+    #[test]
+    fn only_the_question_window_may_answer() {
+        assert!(require_alert_window("firewall-alert").is_ok());
+        for label in ["main", "tray", "mcp-confirm", "permission-guide", ""] {
+            assert_eq!(
+                require_alert_window(label).unwrap_err().code,
+                "E_FORBIDDEN",
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_question_window_capability_grants_the_reply() {
+        let acl = include_str!("../../permissions/native.toml");
+        let section = |id: &str| {
+            acl.split("[[permission]]")
+                .find(|entry| entry.contains(&format!("identifier = \"{id}\"")))
+                .unwrap_or_else(|| panic!("{id}"))
+                .to_owned()
+        };
+        assert!(!section("native-main").contains("\"firewall_alert_reply\""));
+        assert!(section("native-main").contains("\"firewall_alerts\""));
+        assert!(section("native-firewall-alert").contains("\"firewall_alert_reply\""));
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/firewall-alert.json")).unwrap();
+        assert_eq!(capability["windows"], serde_json::json!(["firewall-alert"]));
+        assert!(
+            capability["permissions"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("native-firewall-alert"))
+        );
+    }
 }

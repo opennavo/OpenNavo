@@ -883,6 +883,15 @@ describe('Question window', () => {
     expect(wrapper.find('[data-alert-deadline]').exists()).toBe(true);
   });
 
+  it('Marks both buttons as not yet answering while the question is new', async () => {
+    const wrapper = await openAlerts();
+    for (const selector of ['[data-alert-block]', '[data-alert-allow]'])
+      expect(wrapper.get(selector).attributes('aria-disabled'), selector).toBe('true');
+    await armed();
+    for (const selector of ['[data-alert-block]', '[data-alert-allow]'])
+      expect(wrapper.get(selector).attributes('aria-disabled'), selector).toBeUndefined();
+  });
+
   it('Answers only by click: Return and Space on a focused button decide nothing, even once armed', async () => {
     const reply = vi.spyOn(commands, 'firewallAlertReply');
     const wrapper = await openAlerts();

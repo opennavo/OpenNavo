@@ -256,6 +256,7 @@ async function answer(action: FirewallAction) {
           variant="primary"
           icon="ban"
           data-alert-block
+          :aria-disabled="!armed || undefined"
           :loading="pending('block')"
           :disabled="pending('allow')"
           @click="answer('block')"

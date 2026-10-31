@@ -1,10 +1,9 @@
 //! Confirmation gate for deep-link installs and Local MCP writes, answered in OpenNavo's own window.
 //!
 //! Requests made by the app's own UI do not pass through this gate. The service deliberately keeps
-//! the policy state separate from the dialog adapter. That makes the one-dialog rule and grant
-//! lifecycle testable without creating an AppKit window in a libtest worker, while confirm always
-//! delegates rendering to the dialog plugin, which marshals the dialog to Tauri's main thread on
-//! desktop.
+//! the policy state separate from the window adapter (`confirm_window`). That makes the one-slot rule
+//! and grant lifecycle testable without creating a window in a libtest worker; the window itself is
+//! created and destroyed on Tauri's main thread.
 
 use crate::AppError;
 use serde::Serialize;
@@ -34,7 +33,7 @@ pub struct ConfirmationRequest {
     pub plan_digest: Option<String>,
 }
 
-/// One row in a collection confirmation. The native dialog owns the complete list so the user approves the
+/// One row in a collection confirmation. The confirmation window shows the complete list so the user approves the
 /// same ordered collection that the guarded command will enqueue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmationListItem {
@@ -264,7 +263,7 @@ impl ConfirmationListItem {
     }
 }
 
-/// Single-slot native confirmation service. Keep this in app state so the later MCP broker can reuse the same
+/// Single-slot confirmation service. Keep this in app state so the later MCP broker can reuse the same
 /// gate instead of adding another dialog or grant implementation.
 #[derive(Default)]
 pub struct ConfirmationService {
@@ -387,8 +386,8 @@ impl ConfirmationService {
         }
     }
 
-    /// A destroyed webview cannot keep a command waiting on a native callback. Clearing the slot also
-    /// drops timed-out confirmations on purpose: once the window is gone, any later native interaction
+    /// A destroyed webview cannot keep a command waiting on a window answer. Clearing the slot also
+    /// drops timed-out confirmations on purpose: once the window is gone, any later interaction
     /// is invalid.
     pub fn cancel_active(&self) {
         if let Ok(mut state) = self.state.lock() {
@@ -585,9 +584,9 @@ impl ConfirmationService {
     }
 
     /// Withdraw the open confirmation from `caller` (Local MCP when a switch is turned off). The waiting
-    /// request ends at once with `E_CONFIRMATION_INVALIDATED` and its grants are revoked. The native dialog
-    /// cannot be dismissed programmatically, so, as with a timeout, the slot stays taken until it is
-    /// answered, and that late answer never produces a grant.
+    /// request ends at once with `E_CONFIRMATION_INVALIDATED` and its grants are revoked. The window is then
+    /// closed by the waiting `confirm_window`, which frees the slot; an answer that still arrives never
+    /// produces a grant.
     pub fn revoke_caller(&self, caller: &str) -> bool {
         let Ok(mut state) = self.state.lock() else {
             return false;
@@ -618,8 +617,8 @@ impl ConfirmationService {
         })
     }
 
-    /// A timed-out confirmation keeps the single slot until its native callback releases it, but its
-    /// already-issued grants must not stay usable.
+    /// A timed-out confirmation keeps the single slot until its window is closed and the slot
+    /// released (or a late answer arrives), but its already-issued grants must not stay usable.
     fn timeout(&self, id: u64) {
         if let Ok(mut state) = self.state.lock() {
             if let Some(active) = state.active.as_mut()
