@@ -109,6 +109,8 @@ pub struct Broker {
     /// Serializes whole switch transitions (bind/persist/stop), so runtime
     /// state and the persisted switch cannot diverge under concurrent toggles.
     lifecycle: Mutex<()>,
+    /// Set while a write tool runs (including its dialog).
+    writing: AtomicBool,
 }
 
 impl Broker {
@@ -129,7 +131,23 @@ impl Broker {
                 ..Inner::default()
             }),
             lifecycle: Mutex::new(()),
+            writing: AtomicBool::new(false),
         }
+    }
+
+    /// Whether a write on `connection` may proceed: running, both switches
+    /// on, and the connection still registered.
+    pub fn write_valid(&self, connection: u64) -> bool {
+        let inner = self.lock();
+        inner.running
+            && inner.enabled
+            && inner.write_enabled
+            && inner.connections.contains_key(&connection)
+    }
+
+    /// The write audit log next to the persisted state.
+    pub fn audit(&self) -> super::audit::Audit {
+        super::audit::Audit::new(&self.data_dir)
     }
 
     /// Current status for Settings and diagnostics.
@@ -383,10 +401,13 @@ fn accept_loop(
                 let Some(broker) = weak.upgrade() else {
                     return;
                 };
-                if let Err(error) = socket::verify_peer(&stream) {
-                    log::warn!("Local MCP rejected peer: {error}");
-                    continue;
-                }
+                let peer = match socket::verify_peer(&stream) {
+                    Ok(peer) => peer,
+                    Err(error) => {
+                        log::warn!("Local MCP rejected peer: {error}");
+                        continue;
+                    }
+                };
                 let Ok(shutdown) = stream.try_clone() else {
                     continue;
                 };
@@ -399,7 +420,7 @@ fn accept_loop(
                 let spawned = thread::Builder::new()
                     .name(format!("opennavo-mcp-conn-{id}"))
                     .spawn(move || {
-                        connection_loop(unregister_weak, id, stream, connection_host);
+                        connection_loop(unregister_weak, id, peer.pid, stream, connection_host);
                     });
                 if spawned.is_err()
                     && let Some(broker) = weak.upgrade()
@@ -458,9 +479,11 @@ fn rpc_error(code: &str, message: &str) -> RpcError {
 fn connection_loop(
     weak: Weak<Broker>,
     id: u64,
+    peer_pid: Option<i32>,
     stream: UnixStream,
     host: Option<Arc<dyn ToolHost>>,
 ) {
+    let connection = id;
     let mut reader = BufReader::new(stream);
     loop {
         let line = match read_line(&mut reader, MAX_REQUEST_BYTES) {
@@ -508,8 +531,19 @@ fn connection_loop(
         } else {
             match method {
                 Some("ping") => Ok(json!({})),
-                Some("tools/list") => Ok(super::tools::list_result()),
-                Some("tools/call") => call_tool(host.as_deref(), params),
+                Some("tools/list") => Ok(super::tools::list_result_for(
+                    weak.upgrade()
+                        .is_some_and(|broker| broker.status().write_enabled),
+                )),
+                Some("tools/call") => {
+                    let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+                    if super::tools::is_write_tool(name) {
+                        let peer = reader.get_ref().try_clone().ok();
+                        call_write(&weak, connection, peer_pid, peer, host.as_deref(), params)
+                    } else {
+                        call_tool(host.as_deref(), params)
+                    }
+                }
                 Some(_) => Err(rpc_error("E_METHOD_NOT_FOUND", "Method not found")),
                 None => Err(rpc_error("E_INVALID_REQUEST", "Missing method")),
             }
@@ -520,6 +554,104 @@ fn connection_loop(
     }
     if let Some(broker) = weak.upgrade() {
         broker.unregister(id);
+    }
+}
+
+/// Run a write tool. Writes need the write switch, are never queued behind
+/// another write (any connection) and get a validity check bound to this
+/// connection, so an approval cannot outlive the connection or the switches.
+fn call_write(
+    weak: &Weak<Broker>,
+    connection: u64,
+    peer_pid: Option<i32>,
+    peer: Option<UnixStream>,
+    host: Option<&dyn ToolHost>,
+    params: Value,
+) -> Result<Value, RpcError> {
+    let Some(broker) = weak.upgrade() else {
+        return Err(rpc_error("E_MCP_DISABLED", "Local MCP is off"));
+    };
+    let Some(host) = host else {
+        return Err(rpc_error(
+            "E_MCP_DISABLED",
+            "Local MCP tools are unavailable",
+        ));
+    };
+    if !broker.write_valid(connection) {
+        return Err(rpc_error(
+            "E_MCP_WRITE_DISABLED",
+            super::tools::WRITE_DISABLED_MESSAGE,
+        ));
+    }
+    let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+    let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let request = super::tools::parse_write(name, arguments)
+        .map_err(|error: ToolError| (error.code, error.message))?;
+    let client_name = params
+        .get("client")
+        .and_then(|client| client.get("name"))
+        .and_then(Value::as_str)
+        .map(super::protocol::sanitize_client_name)
+        .filter(|name| !name.is_empty());
+    let Some(_slot) = WriteSlot::acquire(&broker) else {
+        return Err(rpc_error("E_BUSY", super::tools::BUSY_MESSAGE));
+    };
+    let check = weak.clone();
+    let context = super::tools::WriteContext {
+        connection,
+        peer_pid,
+        client_name,
+        // The connection stays registered while its thread waits on the
+        // dialog, so also look at the socket itself: a client that hung up
+        // must not leave an approval behind.
+        still_valid: Arc::new(move || {
+            peer.as_ref().is_some_and(peer_open)
+                && check
+                    .upgrade()
+                    .is_some_and(|broker| broker.write_valid(connection))
+        }),
+    };
+    drop(broker);
+    host.write(request, context)
+        .map_err(|error: ToolError| (error.code, error.message))
+}
+
+/// Whether the client end of `stream` is still connected. Peeks without
+/// consuming or changing the descriptor's blocking mode; pipelined bytes
+/// count as connected, end of stream or an error as gone.
+fn peer_open(stream: &UnixStream) -> bool {
+    use nix::sys::socket::{MsgFlags, recv};
+    use std::os::fd::AsRawFd;
+
+    let mut byte = [0u8; 1];
+    match recv(
+        stream.as_raw_fd(),
+        &mut byte,
+        MsgFlags::MSG_PEEK | MsgFlags::MSG_DONTWAIT,
+    ) {
+        Ok(0) => false,
+        Ok(_) => true,
+        Err(nix::errno::Errno::EAGAIN) => true,
+        Err(_) => false,
+    }
+}
+
+/// One write at a time across all connections.
+struct WriteSlot(Arc<Broker>);
+
+impl WriteSlot {
+    fn acquire(broker: &Arc<Broker>) -> Option<Self> {
+        broker
+            .writing
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self(Arc::clone(broker)))
+    }
+}
+
+impl Drop for WriteSlot {
+    fn drop(&mut self) {
+        self.0.writing.store(false, Ordering::Release);
     }
 }
 
@@ -618,11 +750,21 @@ fn read_line<R: BufRead>(reader: &mut R, max: usize) -> io::Result<Option<Vec<u8
 /// performs a network request.
 struct LiveTools {
     core: Arc<crate::core::DesktopCore>,
+    writes: super::writes::Writes,
 }
 
 impl LiveTools {
-    fn new(core: Arc<crate::core::DesktopCore>) -> Self {
-        Self { core }
+    fn new(
+        core: Arc<crate::core::DesktopCore>,
+        app: tauri::AppHandle,
+        data_dir: &std::path::Path,
+    ) -> Self {
+        let writes = super::writes::Writes {
+            app,
+            core: core.clone(),
+            audit: super::audit::Audit::new(data_dir),
+        };
+        Self { core, writes }
     }
 }
 
@@ -763,6 +905,14 @@ impl ToolHost for LiveTools {
         let task = blocking_tool(move || database.task(&id))?;
         Ok(json!({ "task": task }))
     }
+
+    fn write(
+        &self,
+        request: super::tools::WriteRequest,
+        context: super::tools::WriteContext,
+    ) -> Result<Value, ToolError> {
+        self.writes.run(request, context)
+    }
 }
 
 /// Install the broker during Tauri setup. Startup failures are logged and
@@ -784,7 +934,7 @@ pub fn install(app: tauri::AppHandle) {
         log::warn!("Local MCP read tools unavailable: DesktopCore is not managed");
         return;
     };
-    let host: Arc<dyn ToolHost> = Arc::new(LiveTools::new(core));
+    let host: Arc<dyn ToolHost> = Arc::new(LiveTools::new(core, app.clone(), &data_dir));
     let broker = Arc::new(Broker::with_host(data_dir, Some(host)));
     if let Err(error) = broker.start_if_enabled() {
         log::warn!("Local MCP broker unavailable: {error}");
@@ -1141,19 +1291,168 @@ mod tests {
         assert!(!names.contains(&"install_app"));
         assert!(!names.contains(&"uninstall_app"));
 
-        for name in ["install_app", "uninstall_app", "get_latest_scan_result"] {
+        for (name, code) in [
+            ("install_app", "E_MCP_WRITE_DISABLED"),
+            ("uninstall_app", "E_MCP_WRITE_DISABLED"),
+            ("get_latest_scan_result", "E_TOOL_NOT_FOUND"),
+        ] {
             let response = request(
                 &path,
                 json!({
                     "v": 1,
                     "id": name,
                     "method": "tools/call",
-                    "params": { "name": name, "arguments": {} }
+                    "params": { "name": name, "arguments": { "kind": "cask", "token": "iina" } }
                 }),
             );
             assert_eq!(response["ok"], false, "name {name}");
-            assert_eq!(response["error"]["code"], "E_TOOL_NOT_FOUND", "name {name}");
+            assert_eq!(response["error"]["code"], code, "name {name}");
         }
+        broker.shutdown();
+    }
+
+    /// Write host that blocks until released, standing in for the native dialog.
+    use super::super::tools::{WriteContext, WriteRequest};
+
+    struct WriteHost {
+        entered: std::sync::mpsc::SyncSender<WriteContext>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl ToolHost for WriteHost {
+        fn search_catalog(&self, _: &str, _: Option<&str>, _: u32) -> Result<Value, ToolError> {
+            Ok(json!({}))
+        }
+        fn get_catalog_item(&self, _: &str, _: &str) -> Result<Value, ToolError> {
+            Ok(json!({}))
+        }
+        fn list_installed_apps(&self) -> Result<Value, ToolError> {
+            Ok(json!({}))
+        }
+        fn list_updatable_apps(&self) -> Result<Value, ToolError> {
+            Ok(json!({}))
+        }
+        fn get_task(&self, _: &str) -> Result<Value, ToolError> {
+            Ok(json!({}))
+        }
+        fn write(&self, request: WriteRequest, context: WriteContext) -> Result<Value, ToolError> {
+            assert_eq!(request.tool(), "install_app");
+            self.entered.send(context.clone()).expect("entered");
+            self.release.lock().expect("lock").recv().expect("release");
+            if (context.still_valid)() {
+                Ok(json!({ "queued": true }))
+            } else {
+                Err(ToolError::new("E_CONFIRMATION_INVALIDATED", "invalidated"))
+            }
+        }
+    }
+
+    fn install_call(id: &str) -> Value {
+        json!({
+            "v": 1,
+            "id": id,
+            "method": "tools/call",
+            "params": {
+                "name": "install_app",
+                "arguments": { "kind": "cask", "token": "iina" },
+                "client": { "name": "Claude\u{7}" }
+            }
+        })
+    }
+
+    fn write_broker(
+        dir: &tempfile::TempDir,
+    ) -> (
+        Arc<Broker>,
+        std::sync::mpsc::Receiver<WriteContext>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (entered, entered_rx) = std::sync::mpsc::sync_channel(4);
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let host: Arc<dyn ToolHost> = Arc::new(WriteHost {
+            entered,
+            release: Mutex::new(release),
+        });
+        let broker = Arc::new(Broker::with_host(dir.path().to_path_buf(), Some(host)));
+        broker.set_enabled(true).expect("enable");
+        broker.set_write_enabled(true).expect("write");
+        wait_running(&broker);
+        (broker, entered_rx, release_tx)
+    }
+
+    #[test]
+    fn a_second_write_while_one_is_open_gets_busy_not_queued() {
+        let dir = tempdir();
+        let (broker, entered, release) = write_broker(&dir);
+        let path = socket::path(dir.path()).path;
+        let first_path = path.clone();
+        let first = std::thread::spawn(move || request(&first_path, install_call("1")));
+        let context = entered
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first write");
+        assert_eq!(context.client_name.as_deref(), Some("Claude"));
+        assert!(context.peer_pid.is_some());
+
+        let second = request(&path, install_call("2"));
+        assert_eq!(second["ok"], false);
+        assert_eq!(second["error"]["code"], "E_BUSY");
+        assert!(
+            entered.try_recv().is_err(),
+            "busy call must not reach the host"
+        );
+
+        release.send(()).expect("release");
+        let first = first.join().expect("join");
+        assert_eq!(first["ok"], true, "{first}");
+
+        // The slot is free again afterwards.
+        let third_path = path.clone();
+        let third = std::thread::spawn(move || request(&third_path, install_call("3")));
+        entered
+            .recv_timeout(Duration::from_secs(5))
+            .expect("third write");
+        release.send(()).expect("release");
+        assert_eq!(third.join().expect("join")["ok"], true);
+        broker.shutdown();
+    }
+
+    #[test]
+    fn turning_writes_off_invalidates_an_open_approval() {
+        let dir = tempdir();
+        let (broker, entered, release) = write_broker(&dir);
+        let path = socket::path(dir.path()).path;
+        let call = std::thread::spawn(move || request(&path, install_call("1")));
+        let context = entered.recv_timeout(Duration::from_secs(5)).expect("write");
+        assert!((context.still_valid)());
+        broker.set_write_enabled(false).expect("write off");
+        assert!(!(context.still_valid)());
+        release.send(()).expect("release");
+        let _ = call.join();
+        broker.shutdown();
+    }
+
+    #[test]
+    fn a_closed_connection_invalidates_its_approval() {
+        let dir = tempdir();
+        let (broker, entered, release) = write_broker(&dir);
+        let path = socket::path(dir.path()).path;
+        let mut stream = UnixStream::connect(&path).expect("connect");
+        serde_json::to_writer(&mut stream, &install_call("1")).expect("write");
+        stream.write_all(b"\n").expect("newline");
+        let context = entered.recv_timeout(Duration::from_secs(5)).expect("write");
+        assert!((context.still_valid)());
+        stream.shutdown(std::net::Shutdown::Both).expect("hang up");
+        drop(stream);
+        let mut valid = true;
+        for _ in 0..200 {
+            valid = (context.still_valid)();
+            if !valid {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!valid, "approval must not outlive its connection");
+        release.send(()).expect("release");
         broker.shutdown();
     }
 }

@@ -82,5 +82,13 @@
   "confirmation.unsupported": "不是 Cask",
   "confirmation.deepLink": "深度連結",
   "confirmation.install": "安裝",
-  "confirmation.installCollection": "安裝合集"
+  "confirmation.installCollection": "安裝合集",
+  "mcpConfirm.install": "有 AI 應用請求 OpenNavo 安裝 {name}（{target}）。",
+  "mcpConfirm.uninstall": "有 AI 應用請求 OpenNavo 將 {name} 移到垃圾桶：\n{path}\n\n只移走應用本體，關聯檔案保持不動。",
+  "mcpConfirm.requestedBy": "請求方：{caller}",
+  "mcpConfirm.unsigned": "未簽名 · {path}",
+  "mcpConfirm.unknownCaller": "未知程序",
+  "mcpConfirm.mayComeFrom": "可能來自：{name}（未驗證）",
+  "mcpConfirm.claims": "自稱：{name}",
+  "mcpConfirm.footer": "只有你點了「允許」才會執行。每個請求單獨確認。"
 }

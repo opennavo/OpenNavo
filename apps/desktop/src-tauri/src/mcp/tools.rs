@@ -1,10 +1,13 @@
-//! Read-only MCP tool catalogue, argument validation and dispatch.
+//! MCP tool catalogue, argument validation and dispatch.
 //!
 //! This module is deliberately Tauri-free: the app-side broker supplies a
 //! [`ToolHost`] implementation backed by `DesktopCore`, while tests (and the
-//! scratch crate) can inject a mock. `tools/list` only ever advertises the
-//! read tools below; every other name is rejected by [`is_read_tool`] before a
-//! request can reach the app.
+//! scratch crate) can inject a mock. `tools/list` advertises the read tools
+//! and, only while the write switch is on, the two write tools
+//! (`install_app`, `uninstall_app`). Every other name is rejected before a
+//! request can reach the app. Write tools are parsed here but executed by the
+//! host through [`ToolHost::write`], which owns the confirmation dialog and
+//! the audit log.
 //!
 //! `get_latest_scan_result` is intentionally absent: `security::Service` only
 //! exposes `scan_get(id)` and a scan store keyed by id, with no stable
@@ -71,13 +74,179 @@ pub trait ToolHost: Send + Sync {
     fn list_installed_apps(&self) -> Result<Value, ToolError>;
     fn list_updatable_apps(&self) -> Result<Value, ToolError>;
     fn get_task(&self, id: &str) -> Result<Value, ToolError>;
+    /// Run one write tool after the user confirms it in a native dialog.
+    /// Hosts without write support keep the default, which refuses.
+    fn write(&self, request: WriteRequest, context: WriteContext) -> Result<Value, ToolError> {
+        let _ = (request, context);
+        Err(ToolError::new(
+            "E_MCP_WRITE_DISABLED",
+            WRITE_DISABLED_MESSAGE,
+        ))
+    }
+}
+
+/// Write tools served only while the write switch is on.
+pub const WRITE_TOOLS: &[&str] = &["install_app", "uninstall_app"];
+
+/// Returned for write tools while writes are off.
+pub const WRITE_DISABLED_MESSAGE: &str =
+    "Install and uninstall are turned off in OpenNavo Settings → Local MCP.";
+
+/// Returned while another confirmation is open. Writes are never queued.
+pub const BUSY_MESSAGE: &str =
+    "OpenNavo is waiting for the user to answer another request. Wait a moment, then try again.";
+
+/// A validated write tool call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteRequest {
+    /// Queue an install of a catalog cask or formula.
+    Install { kind: String, token: String },
+    /// Move one application bundle to the Trash; related files stay.
+    Uninstall { path: String },
+}
+
+impl WriteRequest {
+    pub fn tool(&self) -> &'static str {
+        match self {
+            Self::Install { .. } => "install_app",
+            Self::Uninstall { .. } => "uninstall_app",
+        }
+    }
+
+    /// The object recorded in the audit log: `kind/token` or the app path.
+    pub fn object(&self) -> String {
+        match self {
+            Self::Install { kind, token } => format!("{kind}/{token}"),
+            Self::Uninstall { path } => path.clone(),
+        }
+    }
+}
+
+/// Who asked for a write, as known to the broker. Nothing here is trusted:
+/// the peer pid comes from the socket and `client_name` from `initialize`.
+#[derive(Clone)]
+pub struct WriteContext {
+    /// Broker connection the request arrived on; approval is bound to it.
+    pub connection: u64,
+    /// Process id of the `mcp` subprocess on the other end of the socket.
+    pub peer_pid: Option<i32>,
+    /// Sanitized, self-reported `clientInfo.name`.
+    pub client_name: Option<String>,
+    /// Whether an approval may still be used: the connection is open and both
+    /// switches are on. Checked after the dialog and before executing.
+    pub still_valid: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+impl std::fmt::Debug for WriteContext {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WriteContext")
+            .field("connection", &self.connection)
+            .field("peer_pid", &self.peer_pid)
+            .field("client_name", &self.client_name)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Whether `name` is a write tool.
+pub fn is_write_tool(name: &str) -> bool {
+    WRITE_TOOLS.contains(&name)
+}
+
+/// Write tool definitions, advertised only while writes are on.
+pub fn write_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "install_app",
+            "description": "Ask OpenNavo to install one catalog app. OpenNavo shows the user a confirmation dialog; nothing happens unless the user clicks Allow. On approval the install is queued and a task is returned (poll it with get_task). Returns E_BUSY while another confirmation is open: wait a moment and try again.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": INSTALL_KINDS },
+                    "token": { "type": "string", "minLength": 1, "maxLength": 128 }
+                },
+                "required": ["kind", "token"],
+                "additionalProperties": false
+            },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false }
+        }),
+        json!({
+            "name": "uninstall_app",
+            "description": "Ask OpenNavo to move one application to the Trash. Only the .app bundle is moved; its related files are left in place. Refused while the app is running. OpenNavo shows the user a confirmation dialog listing the path; nothing happens unless the user clicks Allow. Returns E_BUSY while another confirmation is open: wait a moment and try again.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "minLength": 6, "maxLength": 1024, "description": "Absolute .app path from list_installed_apps." }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            },
+            "annotations": { "readOnlyHint": false, "destructiveHint": true }
+        }),
+    ]
+}
+
+/// Catalog kinds `install_app` accepts.
+pub const INSTALL_KINDS: &[&str] = &["cask", "formula"];
+
+/// `tools/list` result for the current write switch.
+pub fn list_result_for(write_enabled: bool) -> Value {
+    let mut tools = definitions();
+    if write_enabled {
+        tools.extend(write_definitions());
+    }
+    json!({ "tools": tools })
+}
+
+/// Validate a write tool call without touching the host.
+pub fn parse_write(name: &str, arguments: Value) -> Result<WriteRequest, ToolError> {
+    let object = arguments_object(&arguments)?;
+    match name {
+        "install_app" => {
+            reject_unknown(object, &["kind", "token"])?;
+            let kind = required_string(object, "kind")?;
+            if !INSTALL_KINDS.contains(&kind.as_str()) {
+                return Err(ToolError::invalid("kind must be cask or formula"));
+            }
+            let token = required_string(object, "token")?;
+            if token.is_empty()
+                || token.len() > 128
+                || !token
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"@._+-/".contains(&byte))
+                || token.starts_with('/')
+                || token.contains("..")
+            {
+                return Err(ToolError::invalid("token is not valid"));
+            }
+            Ok(WriteRequest::Install { kind, token })
+        }
+        "uninstall_app" => {
+            reject_unknown(object, &["path"])?;
+            let path = required_string(object, "path")?;
+            let trimmed = path.trim_end_matches('/');
+            let valid = trimmed.starts_with('/')
+                && trimmed.len() <= 1024
+                && trimmed.ends_with(".app")
+                && !trimmed.chars().any(char::is_control)
+                && !trimmed.split('/').any(|part| part == ".." || part == ".");
+            if !valid {
+                return Err(ToolError::invalid(
+                    "path must be an absolute .app path from list_installed_apps",
+                ));
+            }
+            Ok(WriteRequest::Uninstall {
+                path: trimmed.to_owned(),
+            })
+        }
+        _ => Err(ToolError::not_found(format!("Unknown tool: {name}"))),
+    }
 }
 
 /// Tool definitions advertised through `tools/list`.
 ///
-/// Only read tools are listed. Write tools arrive with their own switch in a
-/// later change; keeping them out of the list means a client never sees a tool
-/// the broker cannot serve.
+/// Read tools only; [`list_result_for`] adds the write tools while the write
+/// switch is on, so a client never sees a tool the broker cannot serve.
 pub fn definitions() -> Vec<Value> {
     vec![
         json!({
@@ -499,5 +668,106 @@ mod tests {
         );
         let error = call(&MockHost, "get_task", json!({ "id": "" })).expect_err("reject");
         assert_eq!(error.code, "E_INVALID_ARG");
+    }
+
+    #[test]
+    fn write_tools_are_listed_only_while_writes_are_on() {
+        let names = |value: Value| -> Vec<String> {
+            value["tools"]
+                .as_array()
+                .expect("tools")
+                .iter()
+                .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+                .collect()
+        };
+        let off = names(list_result_for(false));
+        assert!(!off.iter().any(|name| is_write_tool(name)));
+        let on = names(list_result_for(true));
+        assert_eq!(&on[on.len() - 2..], ["install_app", "uninstall_app"]);
+        assert!(!on.iter().any(|name| name == "get_latest_scan_result"));
+        for tool in write_definitions() {
+            assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+            assert_eq!(tool["annotations"]["readOnlyHint"], false);
+        }
+    }
+
+    #[test]
+    fn parse_write_accepts_one_install_or_one_app_bundle() {
+        assert_eq!(
+            parse_write("install_app", json!({ "kind": "cask", "token": "iina" })).expect("ok"),
+            WriteRequest::Install {
+                kind: "cask".into(),
+                token: "iina".into()
+            }
+        );
+        assert!(
+            parse_write(
+                "install_app",
+                json!({ "kind": "formula", "token": "user/tap/wget" })
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            parse_write(
+                "uninstall_app",
+                json!({ "path": "/Applications/IINA.app/" })
+            )
+            .expect("ok"),
+            WriteRequest::Uninstall {
+                path: "/Applications/IINA.app".into()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_write_rejects_bad_arguments() {
+        for (name, arguments) in [
+            ("install_app", json!({ "kind": "mas", "token": "iina" })),
+            ("install_app", json!({ "kind": "cask", "token": "" })),
+            ("install_app", json!({ "kind": "cask", "token": "a b" })),
+            ("install_app", json!({ "kind": "cask", "token": "../x" })),
+            ("install_app", json!({ "kind": "cask", "token": "/etc" })),
+            (
+                "install_app",
+                json!({ "kind": "cask", "token": "iina", "force": true }),
+            ),
+            (
+                "install_app",
+                json!({ "kind": "cask", "tokens": ["a", "b"] }),
+            ),
+            ("uninstall_app", json!({ "path": "Applications/IINA.app" })),
+            ("uninstall_app", json!({ "path": "/Applications/IINA" })),
+            (
+                "uninstall_app",
+                json!({ "path": "/Applications/../IINA.app" }),
+            ),
+            (
+                "uninstall_app",
+                json!({ "path": "/Applications/./IINA.app" }),
+            ),
+            (
+                "uninstall_app",
+                json!({ "path": "/Applications/I\nNA.app".replace("\\n", "\n") }),
+            ),
+            (
+                "uninstall_app",
+                json!({ "paths": ["/Applications/A.app", "/Applications/B.app"] }),
+            ),
+            (
+                "uninstall_app",
+                json!({ "path": "/Applications/IINA.app", "related": true }),
+            ),
+        ] {
+            let error = parse_write(name, arguments.clone()).expect_err("must reject");
+            assert_ne!(error.code, "E_TOOL_NOT_FOUND", "{arguments}");
+        }
+        let long = format!("/{}.app", "a".repeat(1100));
+        assert!(parse_write("uninstall_app", json!({ "path": long })).is_err());
+        assert_eq!(
+            parse_write("delete_everything", json!({}))
+                .expect_err("unknown")
+                .code,
+            "E_TOOL_NOT_FOUND"
+        );
     }
 }

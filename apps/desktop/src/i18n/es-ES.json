@@ -989,6 +989,33 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Otro (JSON)"
+      },
+      "audit": {
+        "title": "Registro de solicitudes de escritura",
+        "hint": "Solicitudes de instalación y desinstalación de apps de IA. Se guardan solo en este Mac durante 90 días.",
+        "view": "Ver",
+        "clear": "Borrar",
+        "empty": "Aún no hay solicitudes de escritura.",
+        "loadFailed": "No se ha podido leer el registro.",
+        "clearTitle": "¿Borrar el registro de solicitudes de escritura?",
+        "clearDescription": "Se eliminarán todas las solicitudes registradas. No se puede deshacer.",
+        "clearConfirm": "Borrar",
+        "cleared": "Registro borrado",
+        "clearFailed": "No se ha podido borrar el registro.",
+        "install": "Instalar",
+        "uninstall": "Mover a la Papelera",
+        "unsigned": "Sin firmar · {path}",
+        "unknownCaller": "Proceso desconocido",
+        "mayComeFrom": "Puede venir de: {name} (sin verificar)",
+        "claims": "Dice ser: {name}",
+        "result": "Resultado: {result}",
+        "noResult": "Sin resultado registrado",
+        "decisions": {
+          "allowed": "Permitida",
+          "denied": "Denegada",
+          "timedOut": "Sin respuesta a tiempo",
+          "invalidated": "Permitida y luego anulada"
+        }
       }
     }
   },

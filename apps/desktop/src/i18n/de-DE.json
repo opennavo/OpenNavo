@@ -989,6 +989,33 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Andere (JSON)"
+      },
+      "audit": {
+        "title": "Protokoll der Schreibanfragen",
+        "hint": "Installations- und Deinstallationsanfragen von KI-Apps. Nur auf diesem Mac gespeichert, 90 Tage lang.",
+        "view": "Anzeigen",
+        "clear": "Leeren",
+        "empty": "Noch keine Schreibanfragen.",
+        "loadFailed": "Das Protokoll konnte nicht gelesen werden.",
+        "clearTitle": "Protokoll der Schreibanfragen leeren?",
+        "clearDescription": "Alle aufgezeichneten Anfragen werden gelöscht. Das lässt sich nicht rückgängig machen.",
+        "clearConfirm": "Leeren",
+        "cleared": "Protokoll geleert",
+        "clearFailed": "Das Protokoll konnte nicht geleert werden.",
+        "install": "Installieren",
+        "uninstall": "In den Papierkorb legen",
+        "unsigned": "Nicht signiert · {path}",
+        "unknownCaller": "Unbekannter Prozess",
+        "mayComeFrom": "Stammt möglicherweise von: {name} (nicht überprüft)",
+        "claims": "Bezeichnet sich als: {name}",
+        "result": "Ergebnis: {result}",
+        "noResult": "Kein Ergebnis aufgezeichnet",
+        "decisions": {
+          "allowed": "Erlaubt",
+          "denied": "Abgelehnt",
+          "timedOut": "Keine Antwort rechtzeitig",
+          "invalidated": "Erlaubt, dann verworfen"
+        }
       }
     }
   },

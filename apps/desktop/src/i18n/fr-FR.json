@@ -989,6 +989,33 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Autre (JSON)"
+      },
+      "audit": {
+        "title": "Journal des demandes d’écriture",
+        "hint": "Demandes d’installation et de désinstallation venant d’apps d’IA. Conservées uniquement sur ce Mac pendant 90 jours.",
+        "view": "Afficher",
+        "clear": "Effacer",
+        "empty": "Aucune demande d’écriture pour l’instant.",
+        "loadFailed": "Impossible de lire le journal.",
+        "clearTitle": "Effacer le journal des demandes d’écriture ?",
+        "clearDescription": "Toutes les demandes enregistrées seront supprimées. Cette action est irréversible.",
+        "clearConfirm": "Effacer",
+        "cleared": "Journal effacé",
+        "clearFailed": "Impossible d’effacer le journal.",
+        "install": "Installation",
+        "uninstall": "Placement dans la corbeille",
+        "unsigned": "Non signé · {path}",
+        "unknownCaller": "Processus inconnu",
+        "mayComeFrom": "Provient peut-être de : {name} (non vérifié)",
+        "claims": "Se présente comme : {name}",
+        "result": "Résultat : {result}",
+        "noResult": "Aucun résultat enregistré",
+        "decisions": {
+          "allowed": "Autorisée",
+          "denied": "Refusée",
+          "timedOut": "Pas de réponse à temps",
+          "invalidated": "Autorisée puis annulée"
+        }
       }
     }
   },

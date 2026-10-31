@@ -879,6 +879,33 @@ export default {
       copyFailed: '无法复制配置。',
       moved: '复制配置后 OpenNavo 移动了位置，请重新复制，AI 应用才能继续找到它。',
       pathUnavailable: '找不到 OpenNavo 的安装位置，暂无可复制的配置。',
+      audit: {
+        title: '写操作记录',
+        hint: 'AI 应用发起的安装和卸载请求。只存在这台 Mac 上，保留 90 天。',
+        view: '查看',
+        clear: '清空',
+        empty: '还没有写操作请求。',
+        loadFailed: '读取记录失败。',
+        clearTitle: '清空写操作记录？',
+        clearDescription: '所有已记录的请求都会被删除，无法恢复。',
+        clearConfirm: '清空',
+        cleared: '记录已清空',
+        clearFailed: '清空记录失败。',
+        install: '安装',
+        uninstall: '移到废纸篓',
+        unsigned: '未签名 · {path}',
+        unknownCaller: '未知进程',
+        mayComeFrom: '可能来自：{name}（未验证）',
+        claims: '自称：{name}',
+        result: '结果：{result}',
+        noResult: '没有记录结果',
+        decisions: {
+          allowed: '已允许',
+          denied: '已拒绝',
+          timedOut: '超时未答复',
+          invalidated: '已允许，随后作废'
+        }
+      },
       clients: {
         claude: 'Claude Desktop',
         cursor: 'Cursor',

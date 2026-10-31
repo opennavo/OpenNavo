@@ -139,7 +139,7 @@ fn text(locale: Locale, key: &str) -> Result<String, AppError> {
     native_i18n::text(locale, &format!("confirmation.{key}"))
 }
 
-fn app_locale<R: Runtime>(app: &tauri::AppHandle<R>) -> Locale {
+pub(crate) fn app_locale<R: Runtime>(app: &tauri::AppHandle<R>) -> Locale {
     app.try_state::<std::sync::Arc<crate::core::DesktopCore>>()
         .and_then(|core| core.current_settings().ok())
         .map_or(Locale::EnUs, |settings| settings.locale)
@@ -227,6 +227,37 @@ impl ConfirmationService {
                 text(locale, "deny")?,
             ))
             // tauri-plugin-dialog's desktop adapter calls run_on_main_thread before showing AppKit/rfd.
+            .show(move |allowed| {
+                service.finish_reply(dialog_id, allowed, |result| {
+                    let _ = sender.send(result);
+                });
+            });
+
+        self.wait_for_reply(pending, receiver, guard).await
+    }
+
+    /// Show a native dialog with a message the caller composed (Local MCP writes). The same single slot,
+    /// timeout and one-shot grant rules apply; `request` is what the grant binds to.
+    pub async fn confirm_message<R: Runtime>(
+        self: &std::sync::Arc<Self>,
+        app: &tauri::AppHandle<R>,
+        request: ConfirmationRequest,
+        message: String,
+    ) -> Result<ConfirmationGrant, AppError> {
+        let locale = app_locale(app);
+        let pending = self.begin(request)?;
+        let (sender, receiver) = oneshot::channel();
+        let service = std::sync::Arc::clone(self);
+        let dialog_id = pending.id;
+        let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
+        app.dialog()
+            .message(message)
+            .title(text(locale, "title")?)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                text(locale, "allow")?,
+                text(locale, "deny")?,
+            ))
             .show(move |allowed| {
                 service.finish_reply(dialog_id, allowed, |result| {
                     let _ = sender.send(result);

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { OnButton, OnCard, OnChip, OnSegmented, OnToggle } from '@opennavo/ui';
+import { OnButton, OnCard, OnChip, OnConfirm, OnModal, OnSegmented, OnToggle } from '@opennavo/ui';
 import SettingRow from './SettingRow.vue';
-import type { McpStatus } from '@/ipc/bindings';
+import type { AuditCaller, AuditEntry, McpStatus } from '@/ipc/bindings';
 import { commands } from '@/ipc/client';
 import { useToasts } from '@/composables/useToasts';
+import { useAppLocale } from '@/composables/useAppLocale';
 import { MCP_CLIENTS, copiedMcpPath, mcpAppMoved, mcpConfig, rememberCopiedMcpPath } from '@/utils/mcpConfig';
 import type { McpClient } from '@/utils/mcpConfig';
 
@@ -16,6 +17,7 @@ type Failure = 'offFailed' | 'writeOffFailed' | 'changeFailed';
 
 const { t } = useI18n();
 const toasts = useToasts();
+const { appLocale } = useAppLocale();
 const status = ref<McpStatus | null>(null);
 const busy = ref(false);
 const failure = ref<Failure | null>(null);
@@ -67,6 +69,54 @@ async function copyConfig() {
     tone: 'success',
     title: t('settings.mcp.copied', { client: t(`settings.mcp.clients.${client.value}`) })
   });
+}
+
+// Write request log: stored only on this Mac by the backend; the page only reads and clears it.
+const auditOpen = ref(false);
+const auditEntries = ref<AuditEntry[]>([]);
+const auditFailed = ref(false);
+const clearOpen = ref(false);
+const clearing = ref(false);
+
+async function openAudit() {
+  auditFailed.value = false;
+  const result = await commands.mcpAuditList().catch(() => null);
+  if (result?.status === 'ok') auditEntries.value = result.data;
+  else {
+    auditEntries.value = [];
+    auditFailed.value = true;
+  }
+  auditOpen.value = true;
+}
+
+async function clearAudit() {
+  clearing.value = true;
+  try {
+    const result = await commands.mcpAuditClear().catch(() => null);
+    if (result?.status === 'ok') {
+      auditEntries.value = [];
+      clearOpen.value = false;
+      toasts.push({ tone: 'success', title: t('settings.mcp.audit.cleared') });
+    } else toasts.push({ tone: 'danger', title: t('settings.mcp.audit.clearFailed') });
+  } finally {
+    clearing.value = false;
+  }
+}
+
+function auditTime(at: number) {
+  return new Intl.DateTimeFormat(appLocale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at));
+}
+
+function auditTool(tool: string) {
+  if (tool === 'install_app') return t('settings.mcp.audit.install');
+  if (tool === 'uninstall_app') return t('settings.mcp.audit.uninstall');
+  return tool;
+}
+
+function auditCaller(caller: AuditCaller) {
+  if (caller.signed && caller.signer) return caller.signer;
+  if (caller.path) return t('settings.mcp.audit.unsigned', { path: caller.path });
+  return t('settings.mcp.audit.unknownCaller');
 }
 </script>
 
@@ -136,5 +186,61 @@ async function copyConfig() {
         <p v-else class="m-0 text-12.5px text-status-danger">{{ t('settings.mcp.pathUnavailable') }}</p>
       </div>
     </OnCard>
+    <OnCard padding="none">
+      <SettingRow :label="t('settings.mcp.audit.title')" :hint="t('settings.mcp.audit.hint')">
+        <OnButton size="sm" data-test="mcp-audit-view" @click="openAudit">{{ t('settings.mcp.audit.view') }}</OnButton>
+        <OnButton size="sm" variant="ghost" data-test="mcp-audit-clear" @click="clearOpen = true">{{
+          t('settings.mcp.audit.clear')
+        }}</OnButton>
+      </SettingRow>
+    </OnCard>
+
+    <OnModal v-model:open="auditOpen" size="lg" :title="t('settings.mcp.audit.title')">
+      <p v-if="auditFailed" role="alert" class="m-0 text-12.5px text-status-danger" data-test="mcp-audit-failed">
+        {{ t('settings.mcp.audit.loadFailed') }}
+      </p>
+      <p v-else-if="!auditEntries.length" class="m-0 text-12.5px text-ink-tertiary" data-test="mcp-audit-empty">
+        {{ t('settings.mcp.audit.empty') }}
+      </p>
+      <ul v-else class="m-0 flex list-none flex-col gap-10px p-0" data-test="mcp-audit-list">
+        <li
+          v-for="entry in auditEntries"
+          :key="entry.id"
+          class="rounded-default border border-solid border-line-subtle px-14px py-10px text-12.5px"
+          data-test="mcp-audit-entry"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-8px">
+            <span class="font-600 text-ink-primary">{{ auditTool(entry.tool) }}</span>
+            <OnChip :tone="entry.decision === 'allowed' ? 'success' : 'neutral'" data-test="mcp-audit-decision">{{
+              t(`settings.mcp.audit.decisions.${entry.decision}`)
+            }}</OnChip>
+          </div>
+          <div class="mt-4px break-all font-mono text-12px text-ink-secondary">{{ entry.object }}</div>
+          <div class="mt-4px text-ink-secondary">{{ auditCaller(entry.caller) }}</div>
+          <div v-if="entry.caller.mayComeFrom" class="text-ink-tertiary">
+            {{ t('settings.mcp.audit.mayComeFrom', { name: entry.caller.mayComeFrom }) }}
+          </div>
+          <div v-if="entry.caller.claimedName" class="text-ink-tertiary">
+            {{ t('settings.mcp.audit.claims', { name: entry.caller.claimedName }) }}
+          </div>
+          <div class="mt-4px flex flex-wrap justify-between gap-8px text-11.5px text-ink-tertiary">
+            <span>{{
+              entry.result ? t('settings.mcp.audit.result', { result: entry.result }) : t('settings.mcp.audit.noResult')
+            }}</span>
+            <time :datetime="new Date(entry.at).toISOString()">{{ auditTime(entry.at) }}</time>
+          </div>
+        </li>
+      </ul>
+    </OnModal>
+
+    <OnConfirm
+      v-model:open="clearOpen"
+      tone="danger"
+      :title="t('settings.mcp.audit.clearTitle')"
+      :description="t('settings.mcp.audit.clearDescription')"
+      :confirm-label="t('settings.mcp.audit.clearConfirm')"
+      :loading="clearing"
+      @confirm="clearAudit"
+    />
   </div>
 </template>

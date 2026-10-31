@@ -198,6 +198,10 @@ export const commands = {
 	mcpSetWriteEnabled: (enabled: boolean) => typedError<McpStatus, AppError>(__TAURI_INVOKE("mcp_set_write_enabled", { enabled })),
 	/**  Return the persisted master switch and live broker state. */
 	mcpStatus: () => __TAURI_INVOKE<McpStatus>("mcp_status"),
+	/**  Local MCP write audit log, newest first (90-day retention). */
+	mcpAuditList: () => typedError<AuditEntry[], AppError>(__TAURI_INVOKE("mcp_audit_list")),
+	/**  Delete every Local MCP audit entry. */
+	mcpAuditClear: () => typedError<null, AppError>(__TAURI_INVOKE("mcp_audit_clear")),
 	localeGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("locale_get")),
 	systemLocaleGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("system_locale_get")),
 	settingsSet: (settings: Settings) => typedError<Settings, AppError>(__TAURI_INVOKE("settings_set", { settings })),
@@ -361,6 +365,39 @@ export type AppStoreEvent = AppStoreChange;
 
 /**  Window appearance: follow macOS, or keep every OpenNavo window light or dark. */
 export type Appearance = "system" | "light" | "dark";
+
+/**  The process that asked; only the code signature of `path` is verified. */
+export type AuditCaller = {
+	/**  Executable of the `mcp` subprocess's direct parent. */
+	path: string | null,
+	/**  Signing authority (leaf certificate summary) when the parent is signed. */
+	signer: string | null,
+	teamId: string | null,
+	/**  Whether the parent carries a valid signature. */
+	signed: boolean,
+	/**  Nearest `.app` ancestor of the parent, unverified. */
+	mayComeFrom: string | null,
+	/**  Self-reported `clientInfo.name`. */
+	claimedName: string | null,
+	/**  Parent pid, recorded for the audit only (never shown in the dialog). */
+	pid: number | null,
+};
+
+/**  The user's answer; `invalidated` means approved but discarded because the connection or a switch went away first. */
+export type AuditDecision = "allowed" | "denied" | "timedOut" | "invalidated";
+
+/**  One write request as shown in Settings. */
+export type AuditEntry = {
+	id: string,
+	/**  Milliseconds since the Unix epoch. */
+	at: number,
+	tool: string,
+	object: string,
+	caller: AuditCaller,
+	decision: AuditDecision,
+	/**  `queued:<task id>`, `trashed`, or an error code. `None` until known. */
+	result: string | null,
+};
 
 export type AvDatabaseStatus = {
 	daily: number | null,

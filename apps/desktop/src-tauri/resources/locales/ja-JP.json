@@ -82,5 +82,13 @@
   "confirmation.unsupported": "Cask ではありません",
   "confirmation.deepLink": "ディープリンク",
   "confirmation.install": "インストール",
-  "confirmation.installCollection": "コレクションをインストール"
+  "confirmation.installCollection": "コレクションをインストール",
+  "mcpConfirm.install": "AI アプリが OpenNavo に {name}（{target}）のインストールを依頼しました。",
+  "mcpConfirm.uninstall": "AI アプリが OpenNavo に {name} をゴミ箱に移すよう依頼しました：\n{path}\n\n移動するのはアプリ本体だけで、関連ファイルはそのまま残ります。",
+  "mcpConfirm.requestedBy": "依頼元：{caller}",
+  "mcpConfirm.unsigned": "署名なし · {path}",
+  "mcpConfirm.unknownCaller": "不明なプロセス",
+  "mcpConfirm.mayComeFrom": "発信元の可能性：{name}（未確認）",
+  "mcpConfirm.claims": "自己申告：{name}",
+  "mcpConfirm.footer": "「許可」をクリックしない限り何も実行されません。依頼ごとに個別に確認します。"
 }

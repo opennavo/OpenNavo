@@ -989,6 +989,33 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "その他（JSON）"
+      },
+      "audit": {
+        "title": "書き込みリクエストの記録",
+        "hint": "AI アプリからのインストールとアンインストールのリクエスト。この Mac にのみ保存され、90 日間保持されます。",
+        "view": "表示",
+        "clear": "消去",
+        "empty": "書き込みリクエストはまだありません。",
+        "loadFailed": "記録を読み込めませんでした。",
+        "clearTitle": "書き込みリクエストの記録を消去しますか？",
+        "clearDescription": "記録されたリクエストはすべて削除されます。元に戻せません。",
+        "clearConfirm": "消去",
+        "cleared": "記録を消去しました",
+        "clearFailed": "記録を消去できませんでした。",
+        "install": "インストール",
+        "uninstall": "ゴミ箱に移動",
+        "unsigned": "署名なし · {path}",
+        "unknownCaller": "不明なプロセス",
+        "mayComeFrom": "発信元の可能性：{name}（未確認）",
+        "claims": "自己申告：{name}",
+        "result": "結果：{result}",
+        "noResult": "結果の記録なし",
+        "decisions": {
+          "allowed": "許可済み",
+          "denied": "拒否",
+          "timedOut": "時間内に応答なし",
+          "invalidated": "許可後に無効化"
+        }
       }
     }
   },

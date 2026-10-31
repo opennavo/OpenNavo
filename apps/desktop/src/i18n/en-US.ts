@@ -903,6 +903,33 @@ const messages: MessageSchema = {
       copyFailed: "Couldn't copy the configuration.",
       moved: 'OpenNavo has moved since you copied the configuration. Copy it again so your AI apps can still find it.',
       pathUnavailable: "Couldn't find where OpenNavo is installed, so there is no configuration to copy.",
+      audit: {
+        title: 'Write request log',
+        hint: 'Install and uninstall requests from AI apps. Kept only on this Mac, for 90 days.',
+        view: 'View',
+        clear: 'Clear',
+        empty: 'No write requests yet.',
+        loadFailed: "Couldn't read the log.",
+        clearTitle: 'Clear the write request log?',
+        clearDescription: "Every recorded request will be deleted. This can't be undone.",
+        clearConfirm: 'Clear',
+        cleared: 'Log cleared',
+        clearFailed: "Couldn't clear the log.",
+        install: 'Install',
+        uninstall: 'Move to Trash',
+        unsigned: 'Unsigned · {path}',
+        unknownCaller: 'Unknown process',
+        mayComeFrom: 'May come from: {name} (unverified)',
+        claims: 'Claims to be: {name}',
+        result: 'Result: {result}',
+        noResult: 'No result recorded',
+        decisions: {
+          allowed: 'Allowed',
+          denied: 'Denied',
+          timedOut: 'No answer in time',
+          invalidated: 'Allowed, then cancelled'
+        }
+      },
       clients: {
         claude: 'Claude Desktop',
         cursor: 'Cursor',

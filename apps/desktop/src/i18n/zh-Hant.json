@@ -884,6 +884,33 @@
       "copyFailed": "無法複製配置。",
       "moved": "複製配置後 OpenNavo 移動了位置，請重新複製，AI 應用才能繼續找到它。",
       "pathUnavailable": "找不到 OpenNavo 的安裝位置，暫無可複製的配置。",
+      "audit": {
+        "title": "寫操作記錄",
+        "hint": "AI 應用發起的安裝和解除安裝請求。只存在這台 Mac 上，保留 90 天。",
+        "view": "檢視",
+        "clear": "清空",
+        "empty": "還沒有寫操作請求。",
+        "loadFailed": "讀取記錄失敗。",
+        "clearTitle": "清空寫操作記錄？",
+        "clearDescription": "所有已記錄的請求都會被刪除，無法恢復。",
+        "clearConfirm": "清空",
+        "cleared": "記錄已清空",
+        "clearFailed": "清空記錄失敗。",
+        "install": "安裝",
+        "uninstall": "移到垃圾桶",
+        "unsigned": "未簽名 · {path}",
+        "unknownCaller": "未知程序",
+        "mayComeFrom": "可能來自：{name}（未驗證）",
+        "claims": "自稱：{name}",
+        "result": "結果：{result}",
+        "noResult": "沒有記錄結果",
+        "decisions": {
+          "allowed": "已允許",
+          "denied": "已拒絕",
+          "timedOut": "超時未答覆",
+          "invalidated": "已允許，隨後作廢"
+        }
+      },
       "clients": {
         "claude": "Claude Desktop",
         "cursor": "Cursor",

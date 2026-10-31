@@ -9,7 +9,10 @@ use tauri::State;
 
 use crate::{
     AppError,
-    mcp::broker::{Broker, BrokerError, McpStatus},
+    mcp::{
+        audit::AuditEntry,
+        broker::{Broker, BrokerError, McpStatus},
+    },
 };
 
 /// Return the persisted master switch and live broker state.
@@ -43,6 +46,22 @@ pub async fn mcp_set_write_enabled(
     let switch = Arc::clone(&broker);
     crate::blocking(move || switch.set_write_enabled(enabled).map_err(map_error)).await?;
     Ok(broker.status())
+}
+
+/// Local MCP write audit log, newest first (90-day retention).
+#[tauri::command]
+#[specta::specta]
+pub async fn mcp_audit_list(broker: State<'_, Arc<Broker>>) -> Result<Vec<AuditEntry>, AppError> {
+    let audit = broker.audit();
+    crate::blocking(move || Ok(audit.list(crate::mcp::audit::now_ms())?)).await
+}
+
+/// Delete every Local MCP audit entry.
+#[tauri::command]
+#[specta::specta]
+pub async fn mcp_audit_clear(broker: State<'_, Arc<Broker>>) -> Result<(), AppError> {
+    let audit = broker.audit();
+    crate::blocking(move || Ok(audit.clear()?)).await
 }
 
 fn map_error(error: BrokerError) -> AppError {

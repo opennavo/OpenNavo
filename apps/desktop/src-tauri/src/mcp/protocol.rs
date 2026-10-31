@@ -170,6 +170,15 @@ impl Backend {
         }
     }
 
+    /// Whether the persisted write switch is on. In-memory tests never
+    /// expose write tools.
+    fn write_enabled(&self) -> bool {
+        match self {
+            Self::Static(_) => false,
+            Self::Live(client) => state::load(client.data_dir()).write_enabled,
+        }
+    }
+
     fn call_tool(&mut self, params: Value) -> Result<Value, client::CallError> {
         match self {
             Self::Live(client) => client.call("tools/call", params),
@@ -330,7 +339,7 @@ fn handle_line<W: Write>(
             write_result(output, id, result)
         }
         "ping" => write_result(output, id, json!({})),
-        "tools/list" => write_result(output, id, tools::list_result()),
+        "tools/list" => write_result(output, id, tools::list_result_for(backend.write_enabled())),
         "tools/call" => write_tools_call(output, id, object.get("params"), backend, session),
         _ => write_error(output, id, -32601, "Method not found", None),
     }
@@ -409,9 +418,18 @@ fn write_tools_call<W: Write>(
         );
     };
 
-    // Never forward a write or unknown name: `tools/list` advertises only the
-    // read tools, and phase B2 has no write switch yet.
-    if !tools::is_read_tool(name) {
+    // A write tool is forwarded only while the persisted write switch is on;
+    // the broker checks again. Unknown names are never forwarded.
+    if tools::is_write_tool(name) && !backend.write_enabled() {
+        return write_error(
+            output,
+            id,
+            -32004,
+            tools::WRITE_DISABLED_MESSAGE,
+            Some(json!({ "code": "E_MCP_WRITE_DISABLED" })),
+        );
+    }
+    if !tools::is_read_tool(name) && !tools::is_write_tool(name) {
         return write_error(
             output,
             id,
@@ -846,13 +864,21 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_write_tool_calls_are_rejected() {
-        for name in [
-            "install_app",
-            "uninstall_app",
-            "get_latest_scan_result",
-            "delete_everything",
-        ] {
+    fn write_tools_are_refused_while_writes_are_off() {
+        for name in ["install_app", "uninstall_app"] {
+            let input = with_initialize(&format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{{\"name\":\"{name}\",\"arguments\":{{}}}}}}\n"
+            ));
+            let (responses, _) = run(&input, Availability::Enabled);
+            let error = &responses[1]["error"];
+            assert_eq!(error["code"], -32004, "name {name}");
+            assert_eq!(error["data"]["code"], "E_MCP_WRITE_DISABLED", "name {name}");
+        }
+    }
+
+    #[test]
+    fn unknown_tool_calls_are_rejected() {
+        for name in ["get_latest_scan_result", "delete_everything"] {
             let input = with_initialize(&format!(
                 "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{{\"name\":\"{name}\",\"arguments\":{{}}}}}}\n"
             ));
