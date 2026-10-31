@@ -3312,4 +3312,65 @@ async fn p1_117_aborted_removal_reports_the_bytes_it_already_deleted() {
     );
 }
 
+// PR #117: the preflight measures with the same open-file list as the removal. Files that are open stay where they
+// are, so measuring them would stop the whole run with nothing removed once they pass the tolerance.
+#[tokio::test]
+async fn p1_117_preflight_excludes_open_files_from_the_item_size() {
+    let f = Fixture::new();
+    let open: Vec<PathBuf> = (0..1_200)
+        .map(|i| {
+            f.file(&format!(
+                ".npm/_cacache/content-v2/{:02}/open-{i:05}",
+                i % 32
+            ))
+        })
+        .collect();
+    for i in 0..300 {
+        f.file(&format!(
+            ".npm/_cacache/content-v2/{:02}/free-{i:05}",
+            i % 32
+        ));
+    }
+    // The scan and the removal both keep these files; only a preflight measuring them would see them as growth.
+    f.processes.open.lock().unwrap().extend(open.clone());
+    let report = f.scan(&[CleanupCategory::DevCaches]).await;
+    let item = items(&report)
+        .into_iter()
+        .find(|i| i.path.ends_with("_cacache"))
+        .expect("the cache is listed")
+        .clone();
+    let shown = item.size_bytes.unwrap();
+    let cache = f.home.join(".npm/_cacache");
+    let on_disk = tree_allocated(&cache);
+    assert!(
+        on_disk > shown_limit(shown),
+        "the open files must take the real tree past the tolerance: {on_disk} <= {} (shown {shown})",
+        shown_limit(shown)
+    );
+    let task = f
+        .engine
+        .enqueue(&f.queue, &report.report_id, vec![item.id.clone()])
+        .unwrap();
+    let done = wait(&f, &task.id).await;
+    assert_eq!(
+        done.state,
+        TaskState::Succeeded,
+        "the preflight must not mistake open files for growth: {:?}",
+        done.error
+    );
+    let outcome = done.outcome.unwrap();
+    assert!(
+        outcome.freed_bytes > 0 && outcome.freed_bytes <= shown_limit(shown),
+        "the removable part is freed and the open part is not: {}",
+        outcome.freed_bytes
+    );
+    assert!(open.iter().all(|path| path.exists()), "open files stay");
+    assert!(
+        !f.home
+            .join(".npm/_cacache/content-v2/00/free-00000")
+            .exists(),
+        "the files that are not open are removed"
+    );
+}
+
 // FIXED-ONLY END
