@@ -325,7 +325,7 @@ export function installMockIpc(
         }
       ]
     : [];
-  // Local MCP confirmation window previews (`?mock=mcp-confirm-install` / `mcp-confirm-uninstall`).
+  // Confirmation window previews (`?mock=mcp-confirm-install` / `mcp-confirm-uninstall` / `deeplink-confirm-install` / `deeplink-confirm-collection`).
   const mcpConfirm: McpConfirmView | null = flags.has('mcp-confirm-install')
     ? {
         id: 'confirm-1',
@@ -337,7 +337,11 @@ export function installMockIpc(
         callerPath: '/opt/homebrew/bin/node',
         mayComeFrom: 'Cursor',
         claimedName: 'cursor-vscode',
-        allowAfterMs: 1000
+        allowAfterMs: 1000,
+        origin: 'mcp',
+        source: null,
+        items: [],
+        installCount: 0
       }
     : flags.has('mcp-confirm-uninstall')
       ? {
@@ -350,9 +354,54 @@ export function installMockIpc(
           callerPath: '/Applications/Claude.app/Contents/Helpers/node',
           mayComeFrom: 'Claude',
           claimedName: 'claude-ai',
-          allowAfterMs: 1000
+          allowAfterMs: 1000,
+          origin: 'mcp',
+          source: null,
+          items: [],
+          installCount: 0
         }
-      : null;
+      : flags.has('deeplink-confirm-install')
+        ? {
+            id: 'confirm-3',
+            action: 'install',
+            name: 'Ghostty',
+            target: 'cask/ghostty',
+            path: null,
+            signer: null,
+            callerPath: null,
+            mayComeFrom: null,
+            claimedName: null,
+            allowAfterMs: 1000,
+            origin: 'deepLink',
+            source: 'opennavo://package/cask/ghostty?action=install',
+            items: [],
+            installCount: 0
+          }
+        : flags.has('deeplink-confirm-collection')
+          ? {
+              id: 'confirm-4',
+              action: 'installCollection',
+              name: 'dev-setup',
+              target: 'collection/dev-setup',
+              path: null,
+              signer: null,
+              callerPath: null,
+              mayComeFrom: null,
+              claimedName: null,
+              allowAfterMs: 1000,
+              origin: 'deepLink',
+              source: 'opennavo://collection/dev-setup?action=install',
+              items: [
+                { name: 'Ghostty', target: 'cask/ghostty', skip: null },
+                { name: 'Visual Studio Code', target: 'cask/visual-studio-code', skip: null },
+                { name: 'Rectangle', target: 'cask/rectangle', skip: 'installed' },
+                { name: 'Legacy Tool', target: 'cask/legacy-tool', skip: 'disabled' },
+                { name: 'Raycast', target: 'cask/raycast', skip: null },
+                { name: 'ripgrep', target: 'formula/ripgrep', skip: 'unsupported' }
+              ],
+              installCount: 3
+            }
+          : null;
   const mcpOffFailed = () => {
     const message = 'Permission denied (os error 13)';
     mcp = { ...mcp, error: `E_MCP_BROKER: ${message}` };

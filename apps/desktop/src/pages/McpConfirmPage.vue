@@ -5,7 +5,7 @@ import { OnButton, OnLogo } from '@opennavo/ui';
 import type { McpConfirmView } from '@/ipc/bindings';
 import { commands } from '@/ipc/client';
 
-// Local MCP confirmation, in the window Rust creates for one write request. Everything shown comes from Rust as plain
+// One confirmation (a Local MCP write or an opennavo:// deep-link install), in the window Rust creates for it. Everything shown comes from Rust as plain
 // text (already filtered for display) and is rendered with text interpolation only. Deny is the default: Return,
 // Escape and closing the window all deny. Allow only counts as a click, and Rust refuses it for about a second after
 // this page first reads the request, whatever this page shows.
@@ -76,7 +76,14 @@ const caller = computed(() => {
   if (current.callerPath) return t('mcpConfirm.unsigned', { path: current.callerPath });
   return t('mcpConfirm.unknownCaller');
 });
-const isInstall = computed(() => view.value?.action === 'install');
+const isInstall = computed(() => view.value?.action !== 'uninstall');
+const deepLink = computed(() => view.value?.origin === 'deepLink');
+const isCollection = computed(() => view.value?.action === 'installCollection');
+const intro = computed(() => {
+  if (isCollection.value) return t('mcpConfirm.introCollection');
+  if (deepLink.value) return t('mcpConfirm.introDeepLink');
+  return isInstall.value ? t('mcpConfirm.introInstall') : t('mcpConfirm.introUninstall');
+});
 </script>
 
 <template>
@@ -85,25 +92,27 @@ const isInstall = computed(() => view.value?.action === 'install');
       <header class="flex items-center gap-12px">
         <OnLogo :size="30" />
         <div class="min-w-0">
-          <h1 class="m-0 text-16px font-650 leading-[1.3]">{{ t('mcpConfirm.title') }}</h1>
+          <h1 class="m-0 text-16px font-650 leading-[1.3]">
+            {{ deepLink ? t('mcpConfirm.titleDeepLink') : t('mcpConfirm.title') }}
+          </h1>
           <p class="m-0 mt-2px text-12.5px text-ink-secondary">
-            {{ isInstall ? t('mcpConfirm.introInstall') : t('mcpConfirm.introUninstall') }}
+            {{ intro }}
           </p>
         </div>
       </header>
 
       <section
-        class="mt-16px rounded-default border border-solid border-line-subtle bg-surface-raised px-16px py-14px"
+        class="mt-16px flex min-h-0 flex-col rounded-default border border-solid border-line-subtle bg-surface-raised px-16px py-14px"
         data-test="mcp-confirm-request"
       >
         <div class="flex items-baseline justify-between gap-12px">
           <span class="text-15px font-650">{{ view.name }}</span>
           <span class="shrink-0 rounded-full bg-surface-inset px-8px py-2px text-11.5px font-600 text-ink-secondary">{{
-            isInstall ? t('mcpConfirm.install') : t('mcpConfirm.uninstall')
+            isCollection ? t('mcpConfirm.collection') : isInstall ? t('mcpConfirm.install') : t('mcpConfirm.uninstall')
           }}</span>
         </div>
         <dl class="m-0 mt-10px grid grid-cols-[96px_minmax(0,1fr)] gap-x-10px gap-y-6px text-12.5px">
-          <template v-if="isInstall">
+          <template v-if="view.action === 'install'">
             <dt class="text-ink-tertiary">{{ t('mcpConfirm.target') }}</dt>
             <dd class="m-0 min-w-0 break-all font-mono text-12px text-ink-secondary">{{ view.target }}</dd>
           </template>
@@ -111,8 +120,18 @@ const isInstall = computed(() => view.value?.action === 'install');
             <dt class="text-ink-tertiary">{{ t('mcpConfirm.path') }}</dt>
             <dd class="m-0 min-w-0 break-all font-mono text-12px text-ink-secondary">{{ view.path }}</dd>
           </template>
-          <dt class="text-ink-tertiary">{{ t('mcpConfirm.requestedBy') }}</dt>
-          <dd class="m-0 min-w-0 break-all text-ink-primary" data-test="mcp-confirm-caller">{{ caller }}</dd>
+          <template v-if="deepLink">
+            <dt class="text-ink-tertiary">{{ t('mcpConfirm.requestedBy') }}</dt>
+            <dd class="m-0 min-w-0 text-ink-primary" data-test="mcp-confirm-caller">{{ t('mcpConfirm.webLink') }}</dd>
+            <dt class="text-ink-tertiary">{{ t('mcpConfirm.source') }}</dt>
+            <dd class="m-0 min-w-0 break-all font-mono text-12px text-ink-secondary" data-test="mcp-confirm-source">
+              {{ view.source }}
+            </dd>
+          </template>
+          <template v-else>
+            <dt class="text-ink-tertiary">{{ t('mcpConfirm.requestedBy') }}</dt>
+            <dd class="m-0 min-w-0 break-all text-ink-primary" data-test="mcp-confirm-caller">{{ caller }}</dd>
+          </template>
           <template v-if="view.signer && view.callerPath">
             <dt class="sr-only">{{ t('mcpConfirm.path') }}</dt>
             <dd class="m-0 min-w-0 break-all font-mono text-11.5px text-ink-tertiary col-start-2">
@@ -132,6 +151,36 @@ const isInstall = computed(() => view.value?.action === 'install');
             </dd>
           </template>
         </dl>
+        <template v-if="isCollection">
+          <p class="m-0 mt-12px text-12.5px font-600 text-ink-primary" data-test="mcp-confirm-summary">
+            {{
+              t('mcpConfirm.collectionSummary', {
+                count: view.items.length,
+                install: view.installCount,
+                skip: view.items.length - view.installCount
+              })
+            }}
+          </p>
+          <ul
+            class="m-0 mt-8px min-h-0 list-none overflow-y-auto border-t border-t-solid border-line-subtle p-0"
+            data-test="mcp-confirm-items"
+          >
+            <li
+              v-for="(item, index) in view.items"
+              :key="index"
+              class="flex items-baseline justify-between gap-10px border-b border-b-solid border-line-subtle py-6px text-12.5px last:border-b-0"
+              :data-skip="item.skip ?? undefined"
+            >
+              <span class="min-w-0" :class="item.skip ? 'text-ink-tertiary' : 'text-ink-primary'">
+                {{ item.name }}
+                <span class="ml-4px break-all font-mono text-11.5px text-ink-tertiary">{{ item.target }}</span>
+              </span>
+              <span v-if="item.skip" class="shrink-0 text-11.5px text-status-warning">{{
+                t(`mcpConfirm.skip.${item.skip}`)
+              }}</span>
+            </li>
+          </ul>
+        </template>
       </section>
 
       <p class="m-0 mt-14px text-12.5px font-600 text-ink-primary" data-test="mcp-confirm-footer">

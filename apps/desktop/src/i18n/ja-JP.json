@@ -877,7 +877,21 @@
     "allow": "許可",
     "deny": "拒否",
     "expired": "この依頼はもう待機していません。",
-    "failed": "回答を送信できませんでした。もう一度お試しください。"
+    "failed": "回答を送信できませんでした。もう一度お試しください。",
+    "titleDeepLink": "Web リンクからのインストールを確認",
+    "introDeepLink": "Web ページが OpenNavo のリンクを開き、このアプリのインストールを求めています。",
+    "introCollection": "Web ページが OpenNavo のリンクを開き、このコレクションのインストールを求めています。",
+    "collection": "コレクション",
+    "webLink": "Web リンク（opennavo://）",
+    "source": "送信元",
+    "collectionSummary": "{count} 個のアプリ：{install} 個をインストール、{skip} 個をスキップ",
+    "skip": {
+      "disabled": "無効のためキューに追加しません",
+      "installed": "インストール済み",
+      "queued": "キューに追加済み",
+      "duplicate": "重複",
+      "unsupported": "非対応"
+    }
   },
   "settings": {
     "title": "設定",

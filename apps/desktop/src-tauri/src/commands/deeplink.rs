@@ -173,9 +173,15 @@ async fn confirm_single(
     ensure_install_environment(context.state).await?;
     let plan = ResolvedInstallPlan::resolve(&context.state.database, target, Default::default())?;
     let request = single_install_request(source, &plan);
+    let token = plan.command_target().token.clone();
+    let name = crate::catalog::get(&context.state.database, crate::model::Kind::Cask, &token)
+        .ok()
+        .flatten()
+        .and_then(|item| crate::mcp::writes::item_name(&item))
+        .unwrap_or(token);
     let grant = match context
         .confirmation
-        .confirm(context.app, request.clone())
+        .confirm(context.app, request.clone(), &name)
         .await
     {
         Ok(grant) => grant,
@@ -258,7 +264,13 @@ async fn confirm_collection(
         .collect();
     let grant = match context
         .confirmation
-        .confirm_collection(context.app, request.clone(), items, plan.installs.len())
+        .confirm_collection(
+            context.app,
+            request.clone(),
+            &slug,
+            items,
+            plan.installs.len(),
+        )
         .await
     {
         Ok(grant) => grant,

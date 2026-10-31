@@ -803,8 +803,10 @@ describe('Question window', () => {
     // Held TCP connections are let through after 2 minutes without an answer; the window counts down.
     expect(wrapper.get('[data-alert-deadline]').text()).toMatch(/^[12]:\d\d 内不回答会先放行这次连接$/);
     expect(wrapper.find('[data-alert-released]').exists()).toBe(false);
-    // No default button: nothing has focus until the user clicks.
-    expect(document.activeElement?.tagName).not.toBe('BUTTON');
+    // Block, on the left, has the focus; Allow is on the right.
+    expect(document.activeElement).toBe(wrapper.get('[data-alert-block]').element);
+    const order = wrapper.findAll('footer button').map(item => item.text());
+    expect(order).toEqual(['阻止', '允许']);
 
     await radio(wrapper, '只限这个地址').trigger('click');
     await radio(wrapper, '直到 App 退出').trigger('click');
@@ -859,6 +861,25 @@ describe('Question window', () => {
     });
     // The next question still has its connections on hold.
     expect(wrapper.find('h1').text()).toBe('「python3」想连接网络');
+    expect(wrapper.find('[data-alert-deadline]').exists()).toBe(true);
+  });
+
+  it('Answers nothing from the keyboard as the window shows up, and never from Escape', async () => {
+    const reply = vi.spyOn(commands, 'firewallAlertReply');
+    const wrapper = await openAlerts();
+    expect(ANSWER_DELAY_MS).toBeGreaterThanOrEqual(1000);
+    // Return on the focused Block button while the question is new decides nothing.
+    await wrapper.get('[data-alert-block]').trigger('keydown', { key: 'Enter' });
+    await wrapper.get('[data-alert-block]').trigger('click');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await settle();
+    expect(reply).not.toHaveBeenCalled();
+    await armed();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await settle();
+    expect(reply).not.toHaveBeenCalled();
+    // Unanswered, the question stays with its countdown (connections are let through at the deadline).
+    expect(wrapper.find('h1').text()).toBe('「Firefox」想连接网络');
     expect(wrapper.find('[data-alert-deadline]').exists()).toBe(true);
   });
 
