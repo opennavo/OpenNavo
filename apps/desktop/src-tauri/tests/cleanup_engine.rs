@@ -704,8 +704,8 @@ async fn an_incomplete_activity_reading_is_not_reused() {
     let ids = items(&report).iter().map(|i| i.id.clone()).collect();
     let task = f.execute(&report, ids).await;
     assert_eq!(task.outcome.unwrap().deleted, 5);
-    // Checked when each item starts and again right before it is removed.
-    assert_eq!(f.processes.open_reads.load(Ordering::Acquire) - reads, 10);
+    // Checked by the preflight, when each item starts and again right before it is removed.
+    assert_eq!(f.processes.open_reads.load(Ordering::Acquire) - reads, 15);
 }
 
 #[tokio::test]

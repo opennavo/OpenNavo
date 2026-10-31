@@ -98,8 +98,15 @@ pub async fn run(
     // than shown beyond the tolerance, stops the run with nothing removed.
     let shown_total = report.selected_bytes;
     let mut abort = {
-        let (engine, entry, ids, flag) = (engine.clone(), entry.clone(), ids.clone(), flag.clone());
-        let (lines, abort) = crate::blocking(move || engine.preflight(&entry, &ids, &flag)).await?;
+        let (engine, entry, ids, flag, activities) = (
+            engine.clone(),
+            entry.clone(),
+            ids.clone(),
+            flag.clone(),
+            activities.clone(),
+        );
+        let (lines, abort) =
+            crate::blocking(move || engine.preflight(&entry, &ids, &flag, &activities)).await?;
         for line in lines {
             report.line(line);
         }
@@ -299,6 +306,7 @@ impl Engine {
         entry: &super::Entry,
         ids: &[String],
         flag: &AtomicBool,
+        activities: &Activities,
     ) -> Result<(Vec<String>, Option<AppError>), AppError> {
         let mut lines = vec![];
         let (mut shown, mut measured) = (0u64, 0u64);
@@ -323,13 +331,27 @@ impl Engine {
             if std::fs::symlink_metadata(path).is_err() {
                 continue;
             }
+            // The removal keeps files that are open somewhere; measuring them here would report a size the removal
+            // can never reach and stop the whole run with nothing removed (#117).
+            let reading = activities.get(self);
+            let open: Vec<_> = reading
+                .as_ref()
+                .as_ref()
+                .ok()
+                .map(|activity| {
+                    activity
+                        .open_under(path)
+                        .map(|(open, _)| open.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
             let now = match tree::estimate(
                 path,
                 flag,
                 Instant::now() + self.category_timeout,
                 self.max_tree_nodes,
                 |_| false,
-                &[],
+                &open,
             ) {
                 Ok(tree) => tree,
                 Err(error) if error.code == "E_CANCELED" => return Err(error),
