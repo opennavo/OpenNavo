@@ -4888,6 +4888,7 @@ class LinkPackageUpdate(BaseModel):
     githubTagRegex: Annotated[str | None | MISSING, Field(description='Go RE2 expression matched against the raw tag; use ^ and $ for a whole-tag match. Mutually exclusive with githubTagPrefix. Compiled only by Go; limits are UTF-8 bytes.', max_length=1024, min_length=1)] = MISSING
     githubAssetPattern: Annotated[str | None | MISSING, Field(description='Case-sensitive Go path.Match glob on asset names (for example *.dmg). Requires at least one match and retains only matching assets. Supports *, ? and character classes; no globstar. Limits are UTF-8 bytes.', max_length=512, min_length=1)] = MISSING
     includePrereleases: Annotated[bool | MISSING, Field(description='Defaults to false. Include releases GitHub marks prerelease; drafts are always excluded. Required for beta-only desktop releases. Filters and true require githubRepo. Selects newest published match from at most 1000 releases, reporting no-match or search-limit without fallback.')] = MISSING
+    version: Annotated[str | MISSING, Field(description='Current version for a link app without githubRepo or sparkleFeed (for example 1.0.7); must contain a digit. Rejected with version_managed_by_source when a GitHub or Sparkle source owns the version. Recorded in version history and catalog changes; cannot be cleared.', max_length=64, min_length=1, pattern='^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$')] = MISSING
     bundleIds: Annotated[list[str] | MISSING, Field(max_length=32)] = MISSING
     teamId: Annotated[str | None | MISSING, Field(pattern='^[A-Z0-9]{10}$')] = MISSING
     pricing: Literal['free', 'paid', 'freemium', 'subscription', 'open_source', 'unknown'] | MISSING = MISSING
@@ -4900,6 +4901,7 @@ class LinkPackage(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
+    version: Annotated[str | None | MISSING, Field(description='Current version, from the release source or set by an editor.')] = MISSING
     revision: Annotated[int | MISSING, Field(description='Link edit counter. Use this value for the optional expected revision when updating or removing this Link app; package content revisions are separate.', examples=[0], ge=0)] = MISSING
     token: Annotated[str, Field(pattern='^[a-z0-9][a-z0-9+@._-]{0,127}$')]
     name: Annotated[str, Field(max_length=256, min_length=1)]

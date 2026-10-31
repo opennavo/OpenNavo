@@ -4475,6 +4475,8 @@ export interface components {
             githubAssetPattern?: string | null;
             /** @description Defaults to false. Include releases GitHub marks prerelease; drafts are always excluded. Required for beta-only desktop releases. Filters and true require githubRepo. Selects newest published match from at most 1000 releases, reporting no-match or search-limit without fallback. */
             includePrereleases?: boolean;
+            /** @description Current version for a link app without githubRepo or sparkleFeed (for example 1.0.7); must contain a digit. Rejected with version_managed_by_source when a GitHub or Sparkle source owns the version. Recorded in version history and catalog changes; cannot be cleared. */
+            version?: string;
             bundleIds?: string[];
             teamId?: string | null;
             /** @enum {string} */
@@ -4540,6 +4542,8 @@ export interface components {
          *     }
          */
         LinkPackage: {
+            /** @description Current version, from the release source or set by an editor. */
+            version?: string | null;
             /**
              * Format: int64
              * @description Link edit counter. Use this value for the optional expected revision when updating or removing this Link app; package content revisions are separate.
