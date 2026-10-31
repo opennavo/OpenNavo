@@ -194,6 +194,8 @@ export const commands = {
 	settingsGet: () => typedError<Settings, AppError>(__TAURI_INVOKE("settings_get")),
 	/**  Turn the Local MCP broker on or off immediately and persist the choice. */
 	mcpSetEnabled: (enabled: boolean) => typedError<McpStatus, AppError>(__TAURI_INVOKE("mcp_set_enabled", { enabled })),
+	/**  Allow or forbid Local MCP write tools immediately; turning it off disconnects every client. */
+	mcpSetWriteEnabled: (enabled: boolean) => typedError<McpStatus, AppError>(__TAURI_INVOKE("mcp_set_write_enabled", { enabled })),
 	/**  Return the persisted master switch and live broker state. */
 	mcpStatus: () => __TAURI_INVOKE<McpStatus>("mcp_status"),
 	localeGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("locale_get")),
@@ -1395,9 +1397,13 @@ export type MatchReason = "app_bundle" | "brew_uninstall" | "zap_rule" | "bundle
 /**  Broker status surfaced by `mcp_status`. */
 export type McpStatus = {
 	enabled: boolean,
+	/**  Write-tool switch; always `false` while `enabled` is off. */
+	writeEnabled: boolean,
 	running: boolean,
 	socketPath: string | null,
 	error: string | null,
+	/**  Absolute path of the running app executable, for client config presets. */
+	commandPath: string | null,
 };
 
 export type MemoryPressure = "normal" | "warning" | "critical";

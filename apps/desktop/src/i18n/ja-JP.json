@@ -869,7 +869,8 @@
       "about": "概要",
       "cleanup": "クリーンアップ",
       "monitor": "システムモニタ",
-      "security": "セキュリティ"
+      "security": "セキュリティ",
+      "mcp": "ローカル MCP"
     },
     "general": {
       "followSystem": "システムに従う（現在: {language}）",
@@ -970,7 +971,33 @@
       "catalog": "ローカルカタログ：{count}個のパッケージ、同期日時 {time}",
       "sync": "今すぐ同期"
     },
-    "saved": "保存しました"
+    "saved": "保存しました",
+    "mcp": {
+      "enable": "ローカル MCP をオンにする",
+      "enableHint": "この Mac 上の AI アプリ（Claude Desktop、Cursor、Codex など）が、アプリの検索やインストール済み一覧の読み取りを行えるようにします。初期設定はオフで、オフの間は接続を一切受け付けません。",
+      "write": "インストールとアンインストールを許可",
+      "writeHint": "AI アプリは依頼できるだけです。OpenNavo で「許可」をクリックするまで何も実行されません。",
+      "stillOn": "オンのまま",
+      "offFailed": "ローカル MCP をオフにできませんでした。オンのままで、AI アプリは引き続き接続できます。もう一度お試しください。",
+      "writeOffFailed": "インストールとアンインストールをオフにできませんでした。許可されたままです。もう一度お試しください。",
+      "changeFailed": "ローカル MCP の設定を変更できませんでした。もう一度お試しください。",
+      "config": "クライアント設定",
+      "configHint": "AI アプリの MCP 設定に貼り付けてください。OpenNavo の現在の場所を指しています。",
+      "copy": "設定をコピー",
+      "copied": "{client} の設定をコピーしました",
+      "copyFailed": "設定をコピーできませんでした。",
+      "moved": "設定をコピーした後に OpenNavo が移動されました。AI アプリが見つけられるよう、もう一度コピーしてください。",
+      "notRunning": "ローカル MCP はオンですが動作していないため、AI アプリは接続できません。オフにしてからもう一度オンにして再試行してください。",
+      "statusFailed": "ローカル MCP の状態を読み取れませんでした。",
+      "movedClients": "まだ以前の場所を指しています：{clients}",
+      "pathUnavailable": "OpenNavo のインストール場所が見つからないため、コピーできる設定がありません。",
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "その他（JSON）"
+      }
+    }
   },
   "mirrors": {
     "official": "公式",

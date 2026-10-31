@@ -863,7 +863,35 @@ export default {
       about: '关于',
       cleanup: '清理',
       monitor: '电脑监控',
-      security: '安全防护'
+      security: '安全防护',
+      mcp: '本地 MCP'
+    },
+    mcp: {
+      enable: '开启本地 MCP',
+      enableHint:
+        '让这台 Mac 上的 AI 应用（如 Claude Desktop、Cursor、Codex）搜索应用、读取已安装列表。默认关闭；关闭时不接受任何连接。',
+      write: '允许安装和卸载',
+      writeHint: 'AI 应用只能发起请求，你在 OpenNavo 里点了「允许」才会执行。',
+      stillOn: '仍开着',
+      offFailed: '无法关闭本地 MCP。它仍开着，AI 应用仍可连接，请重试。',
+      writeOffFailed: '无法关闭安装和卸载，它们仍被允许，请重试。',
+      changeFailed: '无法更改本地 MCP 设置，请重试。',
+      config: '客户端配置',
+      configHint: '粘贴到 AI 应用的 MCP 设置中。配置指向 OpenNavo 当前所在的位置。',
+      copy: '复制配置',
+      copied: '已复制 {client} 配置',
+      copyFailed: '无法复制配置。',
+      moved: '复制配置后 OpenNavo 移动了位置，请重新复制，AI 应用才能继续找到它。',
+      notRunning: '本地 MCP 已打开，但没有在运行，AI 应用连不上。关掉再打开可以重试。',
+      statusFailed: '无法读取本地 MCP 状态。',
+      movedClients: '仍指向旧位置：{clients}',
+      pathUnavailable: '找不到 OpenNavo 的安装位置，暂无可复制的配置。',
+      clients: {
+        claude: 'Claude Desktop',
+        cursor: 'Cursor',
+        codex: 'Codex (TOML)',
+        generic: '其他（JSON）'
+      }
     },
     general: {
       followSystem: '跟随系统（当前：{language}）',

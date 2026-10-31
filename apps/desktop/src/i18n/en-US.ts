@@ -887,7 +887,35 @@ const messages: MessageSchema = {
       about: 'About',
       cleanup: 'Clean Up',
       monitor: 'System Monitor',
-      security: 'Security'
+      security: 'Security',
+      mcp: 'Local MCP'
+    },
+    mcp: {
+      enable: 'Turn on Local MCP',
+      enableHint:
+        'Lets AI apps on this Mac, such as Claude Desktop, Cursor and Codex, search apps and read your installed list. Off by default; while it is off, nothing accepts connections.',
+      write: 'Allow install and uninstall',
+      writeHint: 'AI apps can only ask. Nothing runs until you click Allow in OpenNavo.',
+      stillOn: 'Still on',
+      offFailed: "Couldn't turn off Local MCP. It is still on, and AI apps can still connect. Try again.",
+      writeOffFailed: "Couldn't turn off install and uninstall. They are still allowed. Try again.",
+      changeFailed: "Couldn't change Local MCP. Try again.",
+      config: 'Client configuration',
+      configHint: "Paste it into your AI app's MCP settings. It points to where OpenNavo is now.",
+      copy: 'Copy configuration',
+      copied: '{client} configuration copied',
+      copyFailed: "Couldn't copy the configuration.",
+      moved: 'OpenNavo has moved since you copied the configuration. Copy it again so your AI apps can still find it.',
+      notRunning: "Local MCP is on but not running, so AI apps can't connect. Turn it off and on again to retry.",
+      statusFailed: "Couldn't read the Local MCP status.",
+      movedClients: 'Still pointing to the old location: {clients}',
+      pathUnavailable: "Couldn't find where OpenNavo is installed, so there is no configuration to copy.",
+      clients: {
+        claude: 'Claude Desktop',
+        cursor: 'Cursor',
+        codex: 'Codex (TOML)',
+        generic: 'Other (JSON)'
+      }
     },
     general: {
       followSystem: 'Follow system (current: {language})',

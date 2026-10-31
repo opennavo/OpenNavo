@@ -869,7 +869,8 @@
       "about": "À propos",
       "cleanup": "Nettoyage",
       "monitor": "Surveillance du système",
-      "security": "Sécurité"
+      "security": "Sécurité",
+      "mcp": "MCP local"
     },
     "general": {
       "followSystem": "Langue du système ({language})",
@@ -970,7 +971,33 @@
       "catalog": "Catalogue local : {count} paquet, synchronisé {time} | Catalogue local : {count} paquets, synchronisé {time}",
       "sync": "Synchroniser"
     },
-    "saved": "Enregistré"
+    "saved": "Enregistré",
+    "mcp": {
+      "enable": "Activer le MCP local",
+      "enableHint": "Permet aux apps d’IA de ce Mac, comme Claude Desktop, Cursor et Codex, de rechercher des apps et de lire la liste de vos apps installées. Désactivé par défaut ; tant qu’il est désactivé, aucune connexion n’est acceptée.",
+      "write": "Autoriser l’installation et la désinstallation",
+      "writeHint": "Les apps d’IA peuvent seulement le demander. Rien n’est exécuté tant que vous n’avez pas cliqué sur Autoriser dans OpenNavo.",
+      "stillOn": "Toujours activé",
+      "offFailed": "Impossible de désactiver le MCP local. Il est toujours activé et les apps d’IA peuvent encore se connecter. Réessayez.",
+      "writeOffFailed": "Impossible de désactiver l’installation et la désinstallation. Elles restent autorisées. Réessayez.",
+      "changeFailed": "Impossible de modifier le MCP local. Réessayez.",
+      "config": "Configuration du client",
+      "configHint": "Collez-la dans les réglages MCP de votre app d’IA. Elle pointe vers l’emplacement actuel d’OpenNavo.",
+      "copy": "Copier la configuration",
+      "copied": "Configuration de {client} copiée",
+      "copyFailed": "Impossible de copier la configuration.",
+      "moved": "OpenNavo a été déplacé depuis que vous avez copié la configuration. Copiez-la à nouveau pour que vos apps d’IA puissent le retrouver.",
+      "notRunning": "Le MCP local est activé mais ne fonctionne pas : les apps d’IA ne peuvent pas s’y connecter. Désactivez-le puis réactivez-le pour réessayer.",
+      "statusFailed": "Impossible de lire l’état du MCP local.",
+      "movedClients": "Pointe encore vers l’ancien emplacement : {clients}",
+      "pathUnavailable": "Impossible de trouver où OpenNavo est installé : aucune configuration à copier.",
+      "clients": {
+        "claude": "Claude Desktop",
+        "cursor": "Cursor",
+        "codex": "Codex (TOML)",
+        "generic": "Autre (JSON)"
+      }
+    }
   },
   "mirrors": {
     "official": "Source officielle",
