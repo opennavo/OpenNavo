@@ -66,6 +66,21 @@ describe('Local MCP confirmation window', () => {
     expect(document.activeElement).toBe(buttons[0]?.element);
   });
 
+  for (const key of ['Enter', 'Escape']) {
+    it(`Still denies on ${key} after Allow is armed`, async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const answer = vi.spyOn(commands, 'mcpConfirmAnswer');
+      const wrapper = await page('mcp-confirm-install');
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(wrapper.get('[data-test="mcp-confirm-allow"]').attributes('disabled')).toBeUndefined();
+      wrapper.get('[data-test="mcp-confirm-allow"]').element.focus();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+      await flushPromises();
+      expect(answer).toHaveBeenCalledTimes(1);
+      expect(answer).toHaveBeenCalledWith('confirm-1', false);
+    });
+  }
+
   it('Allows only by a click after the delay', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const answer = vi.spyOn(commands, 'mcpConfirmAnswer');

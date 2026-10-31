@@ -373,15 +373,16 @@ impl ConfirmationService {
         let dialog_id = pending.id;
         let receiver = self.open_prompt(dialog_id, view)?;
         let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        let result = match confirm_window::open(app, std::sync::Arc::clone(self)) {
+        let result = match confirm_window::open(app, std::sync::Arc::clone(self), dialog_id) {
             Ok(()) => self.wait_for_reply(pending, receiver, guard).await,
             Err(error) => {
                 drop(guard);
                 Err(error)
             }
         };
-        self.release_prompt(dialog_id);
+        // Close before freeing the slot so a later request's window is never the one destroyed.
         confirm_window::close(app);
+        self.release_prompt(dialog_id);
         result
     }
 
@@ -613,9 +614,13 @@ impl ConfirmationService {
     }
 
     /// The window was closed (or failed): that is a refusal.
-    pub fn deny_window(&self) {
+    /// Deny the window prompt `dialog_id`; events from an older window never touch a newer request.
+    pub fn deny_window(&self, dialog_id: u64) {
         let pending = self.state.lock().ok().and_then(|mut state| {
-            let prompt = state.prompt.as_mut()?;
+            let prompt = state
+                .prompt
+                .as_mut()
+                .filter(|prompt| prompt.dialog_id == dialog_id)?;
             Some((prompt.dialog_id, prompt.reply.take()?))
         });
         if let Some((dialog_id, reply)) = pending {
@@ -827,6 +832,7 @@ mod confirm_window {
     pub(super) fn open<R: Runtime>(
         app: &tauri::AppHandle<R>,
         service: Arc<ConfirmationService>,
+        dialog_id: u64,
     ) -> Result<(), AppError> {
         let handle = app.clone();
         app.run_on_main_thread(move || {
@@ -859,14 +865,14 @@ mod confirm_window {
                             tauri::WindowEvent::CloseRequested { .. }
                                 | tauri::WindowEvent::Destroyed
                         ) {
-                            events.deny_window();
+                            events.deny_window(dialog_id);
                         }
                     });
                     let _ = window.set_focus();
                 }
                 Err(error) => {
                     log::warn!("Local MCP confirmation window unavailable: {error}");
-                    service.deny_window();
+                    service.deny_window(dialog_id);
                 }
             }
         })
@@ -1599,12 +1605,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn events_from_an_older_window_never_deny_a_newer_request() {
+        let service = std::sync::Arc::new(ConfirmationService::default());
+        let old = service.begin(mcp_request()).expect("begin").id;
+        let old_reply = service.open_prompt(old, view()).expect("prompt");
+        service.deny_window(old);
+        assert!(old_reply.await.expect("reply").is_err());
+        service.release_prompt(old);
+
+        let newer = service.begin(mcp_request()).expect("begin again").id;
+        let mut reply = service.open_prompt(newer, view()).expect("prompt again");
+        service.deny_window(old);
+        assert!(
+            reply.try_recv().is_err(),
+            "stale Destroyed must not answer the new request"
+        );
+        let shown = service.window_view().expect("still open");
+        service
+            .state
+            .lock()
+            .unwrap()
+            .prompt
+            .as_mut()
+            .unwrap()
+            .shown_at = Some(Instant::now() - ALLOW_ARM_DELAY);
+        service.answer_window(&shown.id, true).expect("allowed");
+        assert!(reply.await.expect("reply").is_ok());
+    }
+
+    #[tokio::test]
     async fn closing_the_window_denies_and_release_frees_the_slot() {
         let service = std::sync::Arc::new(ConfirmationService::default());
         let pending = service.begin(mcp_request()).expect("begin");
         let id = pending.id;
         let receiver = service.open_prompt(id, view()).expect("prompt");
-        service.deny_window();
+        service.deny_window(id);
         assert_eq!(
             receiver.await.expect("reply").unwrap_err().code,
             "E_CONFIRMATION_DENIED"
