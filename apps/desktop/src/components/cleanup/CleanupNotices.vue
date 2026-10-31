@@ -31,7 +31,14 @@ const { errorText } = usePackageState();
 
 const notices = computed<Notice[]>(() => {
   const list: Notice[] = [];
-  if (store.rescanned)
+  if (store.planChanged)
+    list.push({
+      key: 'planChanged',
+      tone: 'info',
+      icon: 'refresh-cw',
+      text: t('cleanup.notices.planChanged')
+    });
+  else if (store.rescanned)
     list.push({
       key: 'rescanned',
       tone: 'info',

@@ -14,6 +14,20 @@ fn validate_ipc_trigger(trigger: TaskTrigger) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Planned deletions run only through their own commands, which ask in OpenNavo's confirmation
+/// window and bind the task to the plan the user allowed; the UI never supplies that binding.
+fn validate_ipc_options(op: TaskOp, options: &TaskOptions) -> Result<(), AppError> {
+    if op == TaskOp::Clean {
+        return Err(AppError::new("E_INVALID_ARG", "cleanup_execute_required"));
+    }
+    if options.plan_digest.is_some()
+        || (matches!(op, TaskOp::Uninstall | TaskOp::RemoveLeftovers) && options.plan_id.is_some())
+    {
+        return Err(AppError::new("E_INVALID_ARG", "uninstall_execute_required"));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn task_enqueue(
@@ -24,9 +38,7 @@ pub async fn task_enqueue(
     trigger: TaskTrigger,
 ) -> Result<Task, AppError> {
     validate_ipc_trigger(trigger)?;
-    if op == TaskOp::Clean {
-        return Err(AppError::new("E_INVALID_ARG", "cleanup_execute_required"));
-    }
+    validate_ipc_options(op, &options)?;
     let queue = state.queue.clone();
     crate::blocking(move || queue.enqueue(op, target, options, trigger)).await
 }
@@ -40,6 +52,7 @@ pub async fn task_enqueue_many(
     trigger: TaskTrigger,
 ) -> Result<Vec<Task>, AppError> {
     validate_ipc_trigger(trigger)?;
+    validate_ipc_options(op, &options)?;
     let queue = state.queue.clone();
     crate::blocking(move || queue.enqueue_many(op, targets, options, trigger)).await
 }
@@ -177,6 +190,52 @@ mod tests {
     #[tokio::test]
     async fn task_enqueue_many_preserves_internal_triggers_and_rejects_external_origins() {
         assert_trigger_policy(true).await;
+    }
+
+    #[tokio::test]
+    async fn generic_task_commands_refuse_planned_deletions_and_caller_digests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(tmp.path());
+        let app = tauri::test::mock_app();
+        app.manage(core.clone());
+        let planned = TaskOptions {
+            plan_id: Some("plan".into()),
+            item_ids: Some(vec!["item".into()]),
+            delete_mode: Some(DeleteMode::Trash),
+            ..TaskOptions::default()
+        };
+        for many in [false, true] {
+            for (op, options, message) in [
+                (TaskOp::Clean, planned.clone(), "cleanup_execute_required"),
+                (
+                    TaskOp::Uninstall,
+                    planned.clone(),
+                    "uninstall_execute_required",
+                ),
+                (
+                    TaskOp::RemoveLeftovers,
+                    planned.clone(),
+                    "uninstall_execute_required",
+                ),
+                (
+                    TaskOp::Upgrade,
+                    TaskOptions {
+                        plan_digest: Some("forged".into()),
+                        ..TaskOptions::default()
+                    },
+                    "uninstall_execute_required",
+                ),
+            ] {
+                let error = enqueue(&app, op, many, TaskTrigger::Manual, options)
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    (error.code.as_str(), error.message.as_str()),
+                    ("E_INVALID_ARG", message)
+                );
+            }
+        }
+        assert!(core.database.tasks().unwrap().is_empty());
     }
 
     #[tokio::test]

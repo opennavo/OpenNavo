@@ -905,6 +905,38 @@ const messages: MessageSchema = {
     webLink: 'A web link (opennavo://)',
     source: 'Source',
     collectionSummary: '{count} apps: {install} will be installed, {skip} skipped',
+    own: {
+      requester: 'OpenNavo on this Mac',
+      summary: '{count} item, {size} | {count} items, {size}',
+      permanent: 'These files skip the Trash and can’t be recovered.',
+      more: 'And {count} more | And {count} more',
+      brewfileInstall: {
+        title: 'Confirm installing from a Brewfile',
+        intro:
+          'OpenNavo will install the apps this Brewfile lists. The file is checked again before anything is queued.',
+        badge: 'Install'
+      },
+      cleanup: {
+        title: 'Confirm clean up',
+        intro: 'OpenNavo will remove the items below. If anything changed since the scan, nothing is removed.',
+        badge: 'Clean Up'
+      },
+      uninstall: {
+        title: 'Confirm uninstall',
+        intro: 'OpenNavo will move these items to the Trash. You can put them back until the Trash is emptied.',
+        badge: 'Move to Trash'
+      },
+      uninstallDelete: {
+        title: 'Confirm uninstall and delete',
+        intro: 'OpenNavo will delete these items right away instead of moving them to the Trash.',
+        badge: 'Delete'
+      },
+      purge: {
+        title: 'Confirm deleting from the Trash',
+        intro: 'OpenNavo will delete these items from the Trash for good.',
+        badge: 'Delete'
+      }
+    },
     skip: {
       disabled: 'Disabled, not queued',
       installed: 'Already installed',
@@ -1457,6 +1489,7 @@ const messages: MessageSchema = {
       'Cleanup stopped: the selection is larger than shown, so nothing beyond the shown size was removed. Scan again and retry.',
     E_CLEANUP_SIZE_UNKNOWN: 'This item’s size wasn’t fully measured, so it can’t be cleaned. Scan again and retry.',
     E_PLAN_EXPIRED: 'Files changed. Scan again.',
+    E_PLAN_CHANGED: 'The list changed after you reviewed it, so nothing ran. Check it again',
     E_SCAN_CANCELED: 'Scan canceled',
     E_RESTORE_UNAVAILABLE: 'Some files are no longer in the Trash and could not be put back',
     E_TRASH_FAILED: 'Could not move it to the Trash',
@@ -1660,6 +1693,8 @@ const messages: MessageSchema = {
     },
     notices: {
       rescanned: 'Files changed, so OpenNavo scanned again.',
+      planChanged:
+        'The list changed after you confirmed it, so nothing was removed. It was scanned again; check it and confirm again.',
       appManagement: 'Allow OpenNavo to manage apps first. It is needed to delete apps not installed with Homebrew.',
       incomplete:
         'Without Full Disk Access, {count} location could not be checked: {paths}. Turn it on to clean up more thoroughly. | Without Full Disk Access, {count} locations could not be checked: {paths}. Turn it on to clean up more thoroughly.',
@@ -1840,6 +1875,8 @@ const messages: MessageSchema = {
     },
     notices: {
       rescanned: 'The results were refreshed. Please confirm again.',
+      planChanged:
+        'The list changed after you confirmed it, so nothing was removed. It was scanned again; check it and confirm again.',
       services:
         '{count} background item of deleted apps ({names}) still loads at login. It only causes errors and uses power, so cleaning it up is recommended. | {count} background items of deleted apps ({names}) still load at login. They only cause errors and use power, so cleaning them up is recommended.',
       incomplete: 'Without Full Disk Access, these locations weren’t checked: {paths}. Turn it on to find more.'

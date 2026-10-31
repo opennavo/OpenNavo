@@ -2486,3 +2486,114 @@ fn sizes_skip_vanished_and_unreadable_entries_and_count_hard_links_once() {
         opennavo_desktop_lib::uninstall::rules::allocated_size_detail(&root, None, None).unwrap();
     assert_eq!(unlinked.bytes, full.bytes);
 }
+
+/// #77: the UI's uninstall and purge run only the plan the confirmation window showed.
+#[tokio::test]
+async fn confirmed_uninstall_and_purge_refuse_a_plan_that_changed() {
+    let f = Fixture::new();
+    let app = f.app("Bound", "test.bound");
+    let data = f.dir("Library/Application Support/Bound");
+    let plan = f.plan(&app).await;
+    let planned = &plan.apps[0];
+    let selected: Vec<String> = planned
+        .items
+        .iter()
+        .filter(|i| i.selected)
+        .map(|i| i.id.clone())
+        .collect();
+    assert!(selected.len() > 1);
+    let choice = |ids: &[String]| {
+        vec![UninstallChoice {
+            app_id: planned.app_id.clone(),
+            item_ids: ids.to_vec(),
+            quit_running: false,
+        }]
+    };
+    let (digest, view) = f
+        .engine
+        .confirm_plan(&plan.plan_id, choice(&selected), DeleteMode::Trash)
+        .unwrap();
+    assert_eq!(
+        (view.origin.as_str(), view.action.as_str()),
+        ("app", "uninstall")
+    );
+    assert!(view.items.iter().any(|i| Path::new(&i.target) == app));
+    assert!(!view.permanent);
+    let (delete_digest, delete_view) = f
+        .engine
+        .confirm_plan(&plan.plan_id, choice(&selected), DeleteMode::Delete)
+        .unwrap();
+    assert_eq!(delete_view.action, "uninstallDelete");
+    assert!(delete_view.permanent);
+    assert_ne!(digest, delete_digest);
+
+    // Another mode, fewer items, or a forged digest is not what the user allowed: nothing is queued.
+    for (ids, mode, approved) in [
+        (&selected[..], DeleteMode::Delete, digest.as_str()),
+        (&selected[..1], DeleteMode::Trash, digest.as_str()),
+        (&selected[..], DeleteMode::Trash, "forged"),
+    ] {
+        assert_eq!(
+            f.engine
+                .execute_choices_confirmed(&f.queue, &plan.plan_id, choice(ids), mode, approved)
+                .unwrap_err()
+                .code,
+            "E_PLAN_CHANGED"
+        );
+    }
+    assert!(f.queue.database.tasks().unwrap().is_empty());
+
+    // A queued task whose digest is not the allowed one never starts.
+    let tasks = f
+        .engine
+        .execute_choices_confirmed(
+            &f.queue,
+            &plan.plan_id,
+            choice(&selected),
+            DeleteMode::Trash,
+            &digest,
+        )
+        .unwrap();
+    let mut forged = tasks[0].options.clone();
+    assert!(forged.plan_digest.is_some());
+    forged.plan_digest = Some("forged".into());
+    assert_eq!(
+        f.engine
+            .task_plan(TaskOp::Uninstall, tasks[0].target.as_ref(), &forged)
+            .unwrap_err()
+            .code,
+        "E_PLAN_CHANGED"
+    );
+    assert!(
+        app.exists() && data.exists(),
+        "nothing removed before the task runs"
+    );
+    f.queue.start();
+    let task = terminal(&f.queue, &tasks[0].id).await;
+    assert_eq!(task.state, TaskState::Succeeded);
+    assert!(!app.exists());
+
+    // Purge: the Trash items are bound too.
+    let ids = vec![task.id.clone()];
+    let (purge_digest, purge_view) = f.engine.purge_plan(&ids).unwrap();
+    assert_eq!(purge_view.action, "purge");
+    assert!(purge_view.permanent);
+    assert!(purge_view.bytes.unwrap_or(0) > 0);
+    assert_eq!(
+        f.engine.purge_confirmed(&ids, "forged").unwrap_err().code,
+        "E_PLAN_CHANGED"
+    );
+    // Something put back in the meantime changes the plan.
+    let trash = f.engine.trash_root().unwrap();
+    let restored = f.engine.restore(&task.id).unwrap();
+    assert!(restored.restored > 0);
+    assert_eq!(
+        f.engine
+            .purge_confirmed(&ids, &purge_digest)
+            .unwrap_err()
+            .code,
+        "E_PLAN_CHANGED"
+    );
+    assert!(app.exists(), "a changed plan never deletes");
+    assert!(trash.exists());
+}

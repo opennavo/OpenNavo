@@ -834,6 +834,7 @@ export function createCleanupMock({
     Boolean(item.incomplete) || (flags.has('cleanup-incomplete') && Boolean(item.path?.endsWith('DerivedData')));
   const reports = new Map<string, { report: CleanupReport; items: Map<string, CleanupItem> }>();
   const canceled = new Set<string>();
+  let planChangedOnce = false;
   const executions = new Map<string, { reportId: string; items: CleanupItem[] }>();
   const trashed = new Map<string, { paths: string[]; bytes: number; done?: boolean }>();
   const removed = new Set<string>();
@@ -1097,6 +1098,11 @@ export function createCleanupMock({
       const items = ids.map(id => entry.items.get(id));
       if (!ids.length || items.some(item => !item)) throw appError('E_INVALID_ARG', 'item_ids');
       if (items.some(item => !item?.sizeComplete)) throw appError('E_CLEANUP_SIZE_UNKNOWN', 'cleanup_size_unknown');
+      // `?mock=cleanup-plan-changed`: the first run finds the confirmed list changed (Rust's E_PLAN_CHANGED).
+      if (flags.has('cleanup-plan-changed') && !planChangedOnce) {
+        planChangedOnce = true;
+        throw appError('E_PLAN_CHANGED', 'plan_changed');
+      }
       const task = enqueue('clean', { kind: 'app', token: reportId }, { planId: reportId, itemIds: ids }, null);
       executions.set(task.id, { reportId, items: items as CleanupItem[] });
       return task;

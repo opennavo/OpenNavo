@@ -385,6 +385,10 @@ pub struct TaskOptions {
     pub rollback_of: Option<String>,
     /// Uninstall only: remove exactly `item_ids`, without the plan's required items (Local MCP).
     pub only_selected: bool,
+    /// Cleanup and uninstall only: digest of the plan the user allowed in the confirmation window.
+    /// Set by Rust when the task is queued and checked again before anything is removed; the
+    /// generic task commands refuse it from the UI.
+    pub plan_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -839,6 +843,8 @@ pub struct BrewfilePreview {
     pub ready: u32,
     pub installed: u32,
     pub unsupported: u32,
+    /// SHA-256 of the file as read for this preview; `brewfile_install` refuses a file that changed since.
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq)]

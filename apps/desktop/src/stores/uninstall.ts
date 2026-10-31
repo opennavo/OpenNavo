@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import { usePermissionGateStore } from './permissionGate';
 import type { AppPlan, DeleteMode, LocalApp, PlanItem, ScanProgress, Task, UninstallPlan } from '@/ipc/bindings';
 import { IpcError, commands, unwrap } from '@/ipc/client';
+import { confirmationRefused } from '@/ipc/confirmation';
 import { useLocalAppsStore } from './localApps';
 import { usePermissionsStore } from './permissions';
 import { useSettingsStore } from './settings';
@@ -117,6 +118,8 @@ export const useUninstallStore = defineStore('uninstall', () => {
   const background = ref(false);
   /** Shown once after a stale plan was replaced. */
   const rescanned = ref(false);
+  /** The confirmed list changed before it ran (`E_PLAN_CHANGED`): nothing was removed and it was scanned again. */
+  const planChanged = ref(false);
   const detached = ref<Detached[]>([]);
   const announcements = ref<Announcement[]>([]);
   let detachKey = 0;
@@ -173,6 +176,7 @@ export const useUninstallStore = defineStore('uninstall', () => {
     error.value = null;
     background.value = false;
     rescanned.value = false;
+    planChanged.value = false;
   }
 
   async function scan() {
@@ -302,12 +306,14 @@ export const useUninstallStore = defineStore('uninstall', () => {
     }
     const epoch = session;
     stage.value = 'submitting';
+    planChanged.value = false;
     try {
       const choices = included.value.map(app => ({
         appId: app.appId,
         itemIds: app.items.filter(isChecked).map(item => item.id),
         quitRunning: true
       }));
+      // Rust asks in OpenNavo's confirmation window and queues only the items listed there.
       const created = await unwrap(commands.uninstallExecute(current.planId, choices, mode.value));
       if (epoch !== session) return;
       taskIds.value = created.map(task => task.id);
@@ -329,8 +335,9 @@ export const useUninstallStore = defineStore('uninstall', () => {
       else if (background.value && settled === 'done') announceCurrent();
     } catch (cause) {
       if (epoch !== session) return;
-      if (cause instanceof IpcError && cause.code === 'E_PLAN_EXPIRED') {
+      if (cause instanceof IpcError && (cause.code === 'E_PLAN_EXPIRED' || cause.code === 'E_PLAN_CHANGED')) {
         rescanned.value = true;
+        planChanged.value = cause.code === 'E_PLAN_CHANGED';
         await scan();
         return;
       }
@@ -339,6 +346,7 @@ export const useUninstallStore = defineStore('uninstall', () => {
         return;
       }
       stage.value = 'review';
+      if (confirmationRefused(cause)) return;
       throw cause;
     }
   }
@@ -497,17 +505,28 @@ export const useUninstallStore = defineStore('uninstall', () => {
     if (!(await gate.require({ feature: 'installed' }))) return null;
     const epoch = session;
     const own = ids === taskIds.value;
+    const pending = candidates(ids);
+    if (!pending.length) return 0;
     let freed = 0;
-    const failures: unknown[] = [];
-    for (const id of candidates(ids)) {
-      try {
-        freed += await unwrap(commands.uninstallPurge(id));
-        completed(id);
-      } catch (cause) {
-        failures.push(cause);
+    // One confirmation window for the whole batch; Rust empties every task and reports the ones that failed.
+    try {
+      freed = await unwrap(commands.uninstallPurge(pending));
+      pending.forEach(completed);
+    } catch (cause) {
+      if (confirmationRefused(cause)) return null;
+      let failed: string[] = pending;
+      if (cause instanceof IpcError && cause.detail) {
+        try {
+          const detail = JSON.parse(cause.detail);
+          if (Array.isArray(detail.failed)) failed = detail.failed.filter((id: unknown) => typeof id === 'string');
+          if (typeof detail.freedBytes === 'number') freed = detail.freedBytes;
+        } catch {
+          /* Non-JSON backend errors fail the whole batch. */
+        }
       }
+      pending.filter(id => !failed.includes(id)).forEach(completed);
+      throw batchFailure([cause], { freedBytes: freed });
     }
-    if (failures.length) throw batchFailure(failures, { freedBytes: freed });
     if (own && epoch === session) reset();
     return freed;
   }
@@ -525,6 +544,7 @@ export const useUninstallStore = defineStore('uninstall', () => {
     error,
     background,
     rescanned,
+    planChanged,
     detached,
     announcements,
     open,

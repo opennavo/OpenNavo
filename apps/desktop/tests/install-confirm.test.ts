@@ -130,11 +130,12 @@ describe('Pre-install adoption confirmation', () => {
     expect(useInstallConfirmStore().pending).toBeNull();
   });
 
-  it('Brewfile imports require adoption consent and never report enqueue success after cancellation', async () => {
+  it('Brewfile imports go through Rust confirmation, never generic installs, and a refusal queues nothing', async () => {
     const context = await init();
     const wrapper = mount(BrewfileRestore, {
       props: {
         open: true,
+        path: '/Users/mock/Brewfile',
         preview: {
           entries: [
             {
@@ -148,24 +149,29 @@ describe('Pre-install adoption confirmation', () => {
           ],
           ready: 1,
           installed: 0,
-          unsupported: 0
+          unsupported: 0,
+          digest: 'preview-digest'
         }
       },
       global: { plugins: [context.pinia, i18n, context.router] },
       attachTo: document.body
     });
     const enqueue = vi.spyOn(commands, 'taskEnqueue');
+    const install = vi.spyOn(commands, 'brewfileInstall').mockResolvedValue({
+      status: 'error',
+      error: { code: 'E_CONFIRMATION_DENIED', message: 'confirmation_denied', detail: null }
+    });
     const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b =>
       b.textContent?.includes('安装')
     );
     expect(button).toBeDefined();
     button?.click();
     await flushPromises();
-    expect(useInstallConfirmStore().pending?.status).toBe('conflict');
+    // Rust gets the file path and the digest of the file the preview read; it re-reads and asks in its own window.
+    expect(install).toHaveBeenCalledWith('/Users/mock/Brewfile', 'preview-digest');
     expect(enqueue).not.toHaveBeenCalled();
-    useInstallConfirmStore().choose(false);
-    await flushPromises();
-    expect(enqueue).not.toHaveBeenCalled();
+    // Deny in the window: quiet, no toast, nothing queued.
+    expect(document.body.textContent).not.toContain('E_CONFIRMATION_DENIED');
     wrapper.unmount();
   });
 

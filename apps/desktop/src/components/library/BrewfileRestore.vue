@@ -4,12 +4,17 @@ import { useI18n } from 'vue-i18n';
 import { OnButton, OnChip, OnModal } from '@opennavo/ui';
 import type { OnChipTone } from '@opennavo/ui';
 import type { BrewfileEntryStatus, BrewfilePreview } from '@/ipc/bindings';
+import { commands, unwrap } from '@/ipc/client';
+import { confirmationRefused } from '@/ipc/confirmation';
+import { usePermissionGateStore } from '@/stores/permissionGate';
 import { useTasksStore } from '@/stores/tasks';
 import { usePackageState } from '@/composables/usePackageState';
 import { useToasts } from '@/composables/useToasts';
 
-// Brewfile restore preview (06 §6.3: parse internally, never invoke brew bundle); enqueue installable entries with trigger=bundle and explain others.
-const props = defineProps<{ preview: BrewfilePreview | null }>();
+// Brewfile restore preview (06 §6.3: parse internally, never invoke brew bundle). Installing goes through Rust: it reads
+// the file again, refuses it if it changed since this preview, asks in OpenNavo's confirmation window, and queues the
+// listed casks with trigger=bundle.
+const props = defineProps<{ preview: BrewfilePreview | null; path: string | null }>();
 const open = defineModel<boolean>('open', { required: true });
 
 const { t } = useI18n();
@@ -32,13 +37,16 @@ const ready = computed(() =>
 );
 
 async function install() {
+  if (!props.preview || !props.path) return;
+  const targets = ready.value.flatMap(entry =>
+    entry.kind && entry.token ? [{ kind: entry.kind, token: entry.token }] : []
+  );
+  if (!(await usePermissionGateStore().require({ feature: 'install', targets }))) return;
   installing.value = true;
   try {
-    const targets = ready.value.flatMap(entry =>
-      entry.kind && entry.token ? [{ kind: entry.kind, token: entry.token }] : []
-    );
     open.value = false;
-    const queued = await tasks.enqueueMany('install', targets, 'bundle');
+    const queued = await unwrap(commands.brewfileInstall(props.path, props.preview.digest));
+    queued.forEach(task => tasks.applyUpdate(task));
     if (!queued.length) return;
     toasts.push({
       tone: 'success',
@@ -46,6 +54,7 @@ async function install() {
     });
     open.value = false;
   } catch (error) {
+    if (confirmationRefused(error)) return;
     toasts.push({
       tone: 'danger',
       title: t('errors.actionFailed'),

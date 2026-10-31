@@ -13,6 +13,7 @@ import type {
   SkippedGroupReason
 } from '@/ipc/bindings';
 import { IpcError, commands, unwrap } from '@/ipc/client';
+import { confirmationRefused } from '@/ipc/confirmation';
 import { usePermissionsStore } from './permissions';
 import { useTasksStore } from './tasks';
 
@@ -94,6 +95,8 @@ export const useCleanupStore = defineStore('cleanup', () => {
   const error = ref<IpcError | null>(null);
   /** Shown once after an expired report was replaced. */
   const rescanned = ref(false);
+  /** Shown after the confirmed list changed before it ran (`E_PLAN_CHANGED`): nothing was removed, scanned again. */
+  const planChanged = ref(false);
   /** Free space when the run started, for the before / after line. */
   const freeBefore = ref<number | null>(null);
   const restored = ref(false);
@@ -301,7 +304,9 @@ export const useCleanupStore = defineStore('cleanup', () => {
       return;
     }
     stage.value = 'submitting';
+    planChanged.value = false;
     try {
+      // Rust asks in OpenNavo's confirmation window and queues only the list shown there.
       const created = await unwrap(
         commands.cleanupExecute(
           current.reportId,
@@ -317,12 +322,14 @@ export const useCleanupStore = defineStore('cleanup', () => {
       stage.value = 'running';
       settle();
     } catch (cause) {
-      if (cause instanceof IpcError && cause.code === 'E_PLAN_EXPIRED') {
+      if (cause instanceof IpcError && (cause.code === 'E_PLAN_EXPIRED' || cause.code === 'E_PLAN_CHANGED')) {
         rescanned.value = true;
+        planChanged.value = cause.code === 'E_PLAN_CHANGED';
         await scan();
         return;
       }
       stage.value = 'review';
+      if (confirmationRefused(cause)) return;
       throw cause;
     }
   }
@@ -358,7 +365,13 @@ export const useCleanupStore = defineStore('cleanup', () => {
   async function purge() {
     if (!(await usePermissionGateStore().require({ feature: 'cleanup' }))) return null;
     if (!taskId.value) return 0;
-    const freed = await unwrap(commands.uninstallPurge(taskId.value));
+    let freed: number;
+    try {
+      freed = await unwrap(commands.uninstallPurge([taskId.value]));
+    } catch (cause) {
+      if (confirmationRefused(cause)) return null;
+      throw cause;
+    }
     restored.value = true;
     void loadSummary().catch(() => undefined);
     return freed;
@@ -372,6 +385,7 @@ export const useCleanupStore = defineStore('cleanup', () => {
     expanded.value = [];
     taskId.value = null;
     rescanned.value = false;
+    planChanged.value = false;
     freeBefore.value = null;
   }
 
@@ -387,6 +401,7 @@ export const useCleanupStore = defineStore('cleanup', () => {
     taskId,
     error,
     rescanned,
+    planChanged,
     freeBefore,
     restored,
     volume,

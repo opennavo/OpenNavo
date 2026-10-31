@@ -27,16 +27,37 @@ pub async fn cleanup_cancel(
 ) -> Result<(), AppError> {
     state.queue.cleanup_engine.cancel(&request_id)
 }
+/// Clean the chosen items after the user allows it in OpenNavo's confirmation window; the queued
+/// task is bound to the exact list that window showed.
 #[tauri::command]
 #[specta::specta]
 pub async fn cleanup_execute(
+    app: tauri::AppHandle,
     state: State<'_, Arc<DesktopCore>>,
+    confirmation: State<'_, Arc<crate::confirmation::ConfirmationService>>,
     report_id: String,
     item_ids: Vec<String>,
 ) -> Result<Task, AppError> {
     let queue = state.queue.clone();
     let engine = queue.cleanup_engine.clone();
-    crate::blocking(move || engine.enqueue(&queue, &report_id, item_ids)).await
+    let (digest, view) = {
+        let engine = engine.clone();
+        let (report_id, item_ids) = (report_id.clone(), item_ids.clone());
+        crate::blocking(move || engine.confirm_plan(&report_id, &item_ids)).await?
+    };
+    let service = confirmation.inner().clone();
+    let request = crate::destructive::request("cleanup", &format!("cleanup/{report_id}"), digest);
+    crate::destructive::confirmed(
+        &service,
+        request,
+        |request| service.confirm_window(&app, request, view),
+        |approved| {
+            crate::blocking(move || {
+                engine.enqueue_confirmed(&queue, &report_id, item_ids, &approved)
+            })
+        },
+    )
+    .await
 }
 #[tauri::command]
 #[specta::specta]

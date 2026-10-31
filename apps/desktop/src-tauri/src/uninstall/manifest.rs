@@ -233,6 +233,122 @@ impl Engine {
     }
     pub fn purge(&self, task_id: &str) -> Result<u64, AppError> {
         let _guard = self.operation_lock.lock().map_err(poison)?;
+        self.purge_locked(task_id)
+    }
+    /// Digest and window content of emptying these uninstalls' items from the Trash: every item
+    /// still in the Trash (or on its way there), with its original path, Trash path, size and
+    /// file snapshot.
+    pub fn purge_plan(
+        &self,
+        task_ids: &[String],
+    ) -> Result<(String, crate::confirmation::McpConfirmView), AppError> {
+        let (digest, rows) = self.purge_rows(task_ids)?;
+        let bytes = rows.iter().map(|e| e.bytes).fold(0u64, u64::saturating_add);
+        let listed = rows
+            .iter()
+            .take(crate::destructive::MAX_LISTED_ITEMS)
+            .map(|e| {
+                let original = e.original.to_string_lossy();
+                let name = e
+                    .original
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| original.clone().into_owned());
+                crate::confirmation::ConfirmItemView::row(&name, &original)
+            })
+            .collect();
+        let view = crate::confirmation::McpConfirmView::app_action(
+            "purge",
+            "",
+            listed,
+            rows.len(),
+            Some(bytes),
+        );
+        Ok((digest, view))
+    }
+    /// Empty a confirmed batch: under the operation lock, the Trash items must still have the
+    /// digest the user allowed. Every task is attempted; if any fails, the first error is returned
+    /// with the total freed and the failed task ids in its detail.
+    pub fn purge_confirmed(&self, task_ids: &[String], approved: &str) -> Result<u64, AppError> {
+        let _guard = self.operation_lock.lock().map_err(poison)?;
+        // Nothing left to empty, or different items: either way not what the user allowed.
+        if !self
+            .purge_rows(task_ids)
+            .is_ok_and(|(digest, _)| digest == approved)
+        {
+            return Err(crate::destructive::plan_changed());
+        }
+        let mut freed = 0u64;
+        let mut failed = Vec::new();
+        let mut missing = Vec::new();
+        let mut first = None;
+        for task_id in task_ids {
+            match self.purge_locked(task_id) {
+                Ok(bytes) => freed = freed.saturating_add(bytes),
+                Err(error) => {
+                    if let Some(detail) = error
+                        .detail
+                        .as_deref()
+                        .and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+                    {
+                        freed = freed.saturating_add(detail["freedBytes"].as_u64().unwrap_or(0));
+                        if let Some(paths) = detail["missing"].as_array() {
+                            missing
+                                .extend(paths.iter().filter_map(|p| p.as_str().map(str::to_owned)));
+                        }
+                    }
+                    failed.push(task_id.clone());
+                    first.get_or_insert(error);
+                }
+            }
+        }
+        match first {
+            None => Ok(freed),
+            Some(error) => Err(AppError::new(&error.code, error.message).with_detail(
+                serde_json::json!({ "freedBytes": freed, "failed": failed, "missing": missing })
+                    .to_string(),
+            )),
+        }
+    }
+    fn purge_rows(&self, task_ids: &[String]) -> Result<(String, Vec<Entry>), AppError> {
+        if task_ids.is_empty()
+            || task_ids.len() > 100
+            || task_ids
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != task_ids.len()
+        {
+            return Err(AppError::new("E_INVALID_ARG", "task_ids"));
+        }
+        let mut rows = Vec::new();
+        for task_id in task_ids {
+            rows.extend(
+                entries(&self.database, task_id)?
+                    .into_iter()
+                    .filter(|e| matches!(e.state.as_str(), "trash" | "pending")),
+            );
+        }
+        if rows.is_empty() {
+            return Err(unavailable());
+        }
+        let canonical: Vec<_> = rows
+            .iter()
+            .map(|e| {
+                (
+                    &e.task,
+                    &e.item,
+                    &e.original,
+                    &e.trash,
+                    e.bytes,
+                    &e.state,
+                    &e.snapshot,
+                )
+            })
+            .collect();
+        Ok((crate::destructive::digest(&("purge", canonical)), rows))
+    }
+    fn purge_locked(&self, task_id: &str) -> Result<u64, AppError> {
         let root = self.trash_root()?;
         let mut bytes = 0;
         let mut missing = vec![];

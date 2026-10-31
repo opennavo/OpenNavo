@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import type { VueWrapper } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
+import { formatBytes } from '@opennavo/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import McpConfirmPage from '@/pages/McpConfirmPage.vue';
 import { i18n } from '@/i18n';
@@ -138,6 +139,43 @@ describe('Deep-link install confirmation window', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await flushPromises();
     expect(answer.mock.calls.every(([, allow]) => allow === false)).toBe(true);
+  });
+});
+
+describe("OpenNavo's own destructive confirmations (#77)", () => {
+  for (const flag of ['brewfile', 'cleanup', 'uninstall', 'delete', 'purge'])
+    it(`${flag}: says OpenNavo asked, lists what will run, and keeps the same safe default`, async () => {
+      const answer = vi.spyOn(commands, 'mcpConfirmAnswer');
+      const wrapper = await page(`own-confirm-${flag}`);
+      expect(wrapper.text()).not.toContain('未验证');
+      expect(wrapper.text()).toContain('OpenNavo');
+      expect(wrapper.findAll('li').length).toBeGreaterThan(0);
+      const buttons = wrapper.findAll('footer button');
+      expect(buttons.map(b => b.attributes('data-test'))).toEqual(['mcp-confirm-deny', 'mcp-confirm-allow']);
+      expect(document.activeElement).toBe(buttons[0]?.element);
+      expect(buttons[1]?.attributes('disabled')).toBeDefined();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await flushPromises();
+      expect(answer).toHaveBeenCalledWith('confirm-own', false);
+      expect(answer.mock.calls.every(([, allow]) => allow === false)).toBe(true);
+    });
+
+  it('Shows the size and warns when items are deleted for good, not moved to the Trash', async () => {
+    const moved = await page('own-confirm-uninstall');
+    expect(moved.get('[data-test="mcp-confirm-summary"]').text()).toContain(
+      formatBytes(24_310_000, { locale: 'zh-CN' })
+    );
+    expect(moved.find('[data-test="mcp-confirm-permanent"]').exists()).toBe(false);
+    moved.unmount();
+    wrappers.splice(0);
+    const deleted = await page('own-confirm-delete');
+    expect(deleted.find('[data-test="mcp-confirm-permanent"]').exists()).toBe(true);
+  });
+
+  it('Lists a Brewfile by its path, marking entries that will be skipped', async () => {
+    const wrapper = await page('own-confirm-brewfile');
+    expect(wrapper.text()).toContain('/Users/mock/Documents/Brewfile');
+    expect(wrapper.text()).toContain('visual-studio-code');
   });
 });
 

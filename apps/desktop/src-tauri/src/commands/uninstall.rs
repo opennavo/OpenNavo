@@ -113,17 +113,43 @@ pub async fn uninstall_reveal(
     })
     .await
 }
+/// Uninstall after the user allows it in OpenNavo's confirmation window; every queued task is bound
+/// to the exact items that window listed.
 #[tauri::command]
 #[specta::specta]
 pub async fn uninstall_execute(
+    app: tauri::AppHandle,
     state: State<'_, Arc<DesktopCore>>,
+    confirmation: State<'_, Arc<crate::confirmation::ConfirmationService>>,
     plan_id: String,
     choices: Vec<UninstallChoice>,
     mode: DeleteMode,
 ) -> Result<Vec<Task>, AppError> {
     let queue = state.queue.clone();
     let engine = queue.uninstall_engine.clone();
-    crate::blocking(move || engine.execute_choices(&queue, &plan_id, choices, mode)).await
+    let (digest, view) = {
+        let engine = engine.clone();
+        let (plan_id, choices) = (plan_id.clone(), choices.clone());
+        crate::blocking(move || engine.confirm_plan(&plan_id, choices, mode)).await?
+    };
+    let action = if mode == DeleteMode::Delete {
+        "uninstall delete"
+    } else {
+        "uninstall"
+    };
+    let service = confirmation.inner().clone();
+    let request = crate::destructive::request(action, &format!("uninstall/{plan_id}"), digest);
+    crate::destructive::confirmed(
+        &service,
+        request,
+        |request| service.confirm_window(&app, request, view),
+        |approved| {
+            crate::blocking(move || {
+                engine.execute_choices_confirmed(&queue, &plan_id, choices, mode, &approved)
+            })
+        },
+    )
+    .await
 }
 #[tauri::command]
 #[specta::specta]
@@ -137,14 +163,30 @@ pub async fn uninstall_restore(
     let _ = crate::blocking(move || engine.refresh(LocalAppsChangedReason::Task)).await;
     result
 }
+/// Delete these uninstalls' items from the Trash for good, after one confirmation for the batch.
 #[tauri::command]
 #[specta::specta]
 pub async fn uninstall_purge(
+    app: tauri::AppHandle,
     state: State<'_, Arc<DesktopCore>>,
-    task_id: String,
+    confirmation: State<'_, Arc<crate::confirmation::ConfirmationService>>,
+    task_ids: Vec<String>,
 ) -> Result<u64, AppError> {
     let engine = state.queue.uninstall_engine.clone();
-    crate::blocking(move || engine.purge(&task_id)).await
+    let (digest, view) = {
+        let engine = engine.clone();
+        let task_ids = task_ids.clone();
+        crate::blocking(move || engine.purge_plan(&task_ids)).await?
+    };
+    let service = confirmation.inner().clone();
+    let request = crate::destructive::request("purge", &task_ids.join(","), digest);
+    crate::destructive::confirmed(
+        &service,
+        request,
+        |request| service.confirm_window(&app, request, view),
+        |approved| crate::blocking(move || engine.purge_confirmed(&task_ids, &approved)),
+    )
+    .await
 }
 #[tauri::command]
 #[specta::specta]

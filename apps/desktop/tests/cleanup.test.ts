@@ -471,6 +471,30 @@ describe('Execution', () => {
     expect(store.taskId).toBeNull();
   });
 
+  it('A plan that changed before the confirmation was answered is scanned again and says why', async () => {
+    await context('/cleanup', 'cleanup-plan-changed');
+    const store = await scanned();
+    void store.confirm();
+    await vi.waitFor(() => expect(store.stage).toBe('finishing'), { timeout: 3000 });
+    expect(store.planChanged).toBe(true);
+    expect(store.taskId).toBeNull();
+  });
+
+  it('Deny or timeout in the confirmation window starts nothing and shows no error', async () => {
+    await context();
+    const store = await scanned();
+    for (const code of ['E_CONFIRMATION_DENIED', 'E_CONFIRMATION_TIMEOUT']) {
+      vi.spyOn(commands, 'cleanupExecute').mockResolvedValueOnce({
+        status: 'error',
+        error: { code, message: code, detail: null }
+      });
+      await store.confirm();
+      expect(store.taskId).toBeNull();
+      expect(store.stage).toBe('review');
+      expect(store.error).toBeNull();
+    }
+  });
+
   it('Cleans as one task: space freed now and the Trash part are separate, and undo puts files back', async () => {
     const { pinia, router } = await context();
     const store = await scanned();

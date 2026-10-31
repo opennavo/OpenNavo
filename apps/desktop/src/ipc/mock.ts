@@ -56,6 +56,94 @@ const appInfo: AppInfo = { version: '0.0.0', os: 'macos', arch: 'aarch64' };
 const OFFICIAL_INSTALLER = 'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh';
 const MIRROR_INSTALLER = 'https://mirrors.ustc.edu.cn/misc/brew-install.sh';
 
+/**
+ * OpenNavo's own destructive confirmations (#77), as Rust builds them: `?mock=own-confirm-brewfile`,
+ * `own-confirm-cleanup`, `own-confirm-uninstall`, `own-confirm-delete`, `own-confirm-purge`.
+ */
+function ownConfirm(flags: ReadonlySet<string>): McpConfirmView | null {
+  const base = {
+    id: 'confirm-own',
+    name: '',
+    target: '',
+    path: null,
+    signer: null,
+    callerPath: null,
+    mayComeFrom: null,
+    claimedName: null,
+    allowAfterMs: 1000,
+    origin: 'app',
+    source: null,
+    bytes: null,
+    permanent: false
+  };
+  const home = '/Users/mock';
+  if (flags.has('own-confirm-brewfile'))
+    return {
+      ...base,
+      action: 'brewfileInstall',
+      name: 'Brewfile',
+      path: `${home}/Documents/Brewfile`,
+      items: [
+        { name: 'ghostty', target: 'cask/ghostty', skip: null },
+        { name: 'zed', target: 'cask/zed', skip: null },
+        { name: 'raycast', target: 'cask/raycast', skip: null },
+        { name: 'visual-studio-code', target: 'cask/visual-studio-code', skip: 'installed' },
+        { name: 'git', target: 'formula/git', skip: 'unsupported' },
+        { name: 'mas "Xcode", id: 497799835', target: 'Brewfile:7', skip: 'unsupported' }
+      ],
+      installCount: 3
+    };
+  if (flags.has('own-confirm-cleanup'))
+    return {
+      ...base,
+      action: 'cleanup',
+      items: [
+        { name: 'Xcode DerivedData', target: `${home}/Library/Developer/Xcode/DerivedData`, skip: null },
+        { name: 'npm', target: `${home}/.npm/_cacache`, skip: null },
+        { name: 'Google Chrome', target: `${home}/Library/Caches/Google/Chrome`, skip: null },
+        { name: 'Logs', target: `${home}/Library/Logs/DiagnosticReports`, skip: null },
+        { name: 'Homebrew', target: 'brew cleanup --prune=all', skip: null }
+      ],
+      installCount: 5,
+      bytes: 18_640_000_000
+    };
+  if (flags.has('own-confirm-uninstall') || flags.has('own-confirm-delete')) {
+    const remove = flags.has('own-confirm-delete');
+    return {
+      ...base,
+      action: remove ? 'uninstallDelete' : 'uninstall',
+      name: 'Rectangle',
+      items: [
+        { name: 'Rectangle', target: '/Applications/Rectangle.app', skip: null },
+        { name: 'Rectangle', target: `${home}/Library/Application Support/Rectangle`, skip: null },
+        { name: 'Rectangle', target: `${home}/Library/Preferences/com.knollsoft.Rectangle.plist`, skip: null },
+        { name: 'Rectangle', target: `${home}/Library/Caches/com.knollsoft.Rectangle`, skip: null }
+      ],
+      installCount: 4,
+      bytes: 24_310_000,
+      permanent: remove
+    };
+  }
+  if (flags.has('own-confirm-purge'))
+    return {
+      ...base,
+      action: 'purge',
+      items: [
+        { name: 'Rectangle.app', target: '/Applications/Rectangle.app', skip: null },
+        { name: 'Rectangle', target: `${home}/Library/Application Support/Rectangle`, skip: null },
+        {
+          name: 'com.knollsoft.Rectangle.plist',
+          target: `${home}/Library/Preferences/com.knollsoft.Rectangle.plist`,
+          skip: null
+        }
+      ],
+      installCount: 3,
+      bytes: 24_100_000,
+      permanent: true
+    };
+  return null;
+}
+
 function ipcTaskTrigger(trigger: Task['trigger']): Task['trigger'] {
   if (trigger === 'deeplink' || trigger === 'mcp')
     throw { code: 'E_INVALID_ARG', message: 'external_trigger_requires_rust', detail: null };
@@ -348,7 +436,9 @@ export function installMockIpc(
         origin: 'mcp',
         source: null,
         items: [],
-        installCount: 0
+        installCount: 0,
+        bytes: null,
+        permanent: false
       }
     : flags.has('mcp-confirm-uninstall')
       ? {
@@ -365,7 +455,9 @@ export function installMockIpc(
           origin: 'mcp',
           source: null,
           items: [],
-          installCount: 0
+          installCount: 0,
+          bytes: null,
+          permanent: false
         }
       : flags.has('deeplink-confirm-install')
         ? {
@@ -382,7 +474,9 @@ export function installMockIpc(
             origin: 'deepLink',
             source: 'opennavo://package/cask/ghostty?action=install',
             items: [],
-            installCount: 0
+            installCount: 0,
+            bytes: null,
+            permanent: false
           }
         : flags.has('deeplink-confirm-collection')
           ? {
@@ -406,9 +500,11 @@ export function installMockIpc(
                 { name: 'Raycast', target: 'cask/raycast', skip: null },
                 { name: 'ripgrep', target: 'formula/ripgrep', skip: 'unsupported' }
               ],
-              installCount: 3
+              installCount: 3,
+              bytes: null,
+              permanent: false
             }
-          : null;
+          : ownConfirm(flags);
   const mcpOffFailed = () => {
     const message = 'Permission denied (os error 13)';
     mcp = { ...mcp, error: `E_MCP_BROKER: ${message}` };
@@ -693,7 +789,13 @@ export function installMockIpc(
     // Clean tasks keep their own Trash manifests; everything else is an uninstall or leftovers task.
     uninstall_restore: args =>
       cleanupMock.restore(args.taskId as string) ?? uninstall?.handlers.uninstall_restore?.(args),
-    uninstall_purge: args => cleanupMock.purge(args.taskId as string) ?? uninstall?.handlers.uninstall_purge?.(args),
+    // One confirmation for the batch in Rust; the simulation empties each task in turn.
+    uninstall_purge: args =>
+      (args.taskIds as string[]).reduce(
+        (sum, taskId) =>
+          sum + ((cleanupMock.purge(taskId) ?? uninstall?.handlers.uninstall_purge?.({ taskId })) as number),
+        0
+      ),
     app_info: () => appInfo,
     locale_get: () => settings.locale,
     system_locale_get: () => systemLocale,
@@ -1016,11 +1118,18 @@ export function installMockIpc(
         entries,
         ready: entries.filter(entry => entry.status === 'ready').length,
         installed: entries.filter(entry => entry.status === 'installed').length,
-        unsupported: entries.filter(entry => entry.status === 'unsupported').length
+        unsupported: entries.filter(entry => entry.status === 'unsupported').length,
+        digest: 'mock-brewfile-digest'
       };
     },
-    brewfile_install: args =>
-      (args.targets as TaskTarget[]).map(target => runner.enqueue('install', target, {}, 'bundle')),
+    // Rust confirms the list in its own window first; the simulation queues the ready casks of the fixed preview.
+    brewfile_install: args => {
+      if (args.digest !== 'mock-brewfile-digest')
+        throw { code: 'E_PLAN_CHANGED', message: 'plan_changed', detail: null };
+      return ['ghostty', 'zed']
+        .filter(token => !state.installed.some(item => item.kind === 'cask' && item.token === token))
+        .map(token => runner.enqueue('install', { kind: 'cask', token } as TaskTarget, {}, 'bundle'));
+    },
     app_open: () => null,
     app_reveal: () => null,
     system_open_privacy: () => null,

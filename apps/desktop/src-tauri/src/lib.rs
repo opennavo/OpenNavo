@@ -8,6 +8,7 @@ pub mod confirmation;
 pub mod core;
 pub mod db;
 pub mod deeplink;
+pub mod destructive;
 mod error;
 pub mod events;
 pub mod firewall;
