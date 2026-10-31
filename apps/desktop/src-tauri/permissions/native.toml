@@ -20,7 +20,8 @@ commands.allow = [
   "install_preflight", "apps_running", "task_enqueue", "task_enqueue_many", "task_cancel", "task_list_active", "task_log", "history_list", "history_clear", "history_export_csv", "deeplink_install_confirm",
   "locale_get", "system_locale_get", "settings_get", "settings_set", "mirror_probe", "brewfile_export", "brewfile_preview", "brewfile_install", "doctor_run",
   "app_open", "app_reveal", "system_open_privacy", "app_quit", "app_cancel_quit",
-  "permissions_get", "permission_settings_open", "permission_guide_open", "permission_guide_close"
+  "permissions_get", "permission_settings_open", "permission_guide_open", "permission_guide_close",
+  "mcp_status", "mcp_set_enabled", "mcp_set_write_enabled", "mcp_audit_list", "mcp_audit_clear"
 ]
 
 [[permission]]
@@ -49,3 +50,8 @@ description = "Monitor popover can subscribe, control fans through the backend a
 commands.allow = [
   "monitor_subscribe", "monitor_unsubscribe", "monitor_open_in_main", "fan_helper_status", "fan_helper_open_approval", "fan_helper_install", "fan_helper_uninstall", "fan_set_mode", "fan_set_speed", "fan_restore_last"
 ]
+
+[[permission]]
+identifier = "native-mcp-confirm"
+description = "Local MCP confirmation window can only read its prompt, answer it once and read the locale"
+commands.allow = ["mcp_confirm_get", "mcp_confirm_answer", "locale_get"]

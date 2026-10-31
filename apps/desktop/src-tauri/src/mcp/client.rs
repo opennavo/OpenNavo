@@ -21,11 +21,11 @@ use super::{socket, state};
 pub const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 /// Deadline for writing one request to the broker.
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-/// Deadline for the broker's answer to one request. Every Local MCP tool is a
-/// read-only lookup that never waits for user interaction (there is no
-/// confirmation dialog on this path); the slowest, `list_updatable_apps`,
-/// may scan installed apps, so the budget is generous but finite.
-pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
+/// Deadline for the broker's answer to one request. Write tools wait for the
+/// native confirmation dialog, which times out after 60 s on the app side, so
+/// the budget covers that plus planning and queueing. Read tools never wait on
+/// the user and answer well within it.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(90);
 /// Maximum accepted broker response line (the app may return catalog pages).
 pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// Internal RPC version.

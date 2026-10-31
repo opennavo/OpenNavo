@@ -60,6 +60,9 @@ if (location.hash.startsWith('#/tray-monitor')) {
   document.documentElement.dataset.opennavoWindow = 'firewall-alert';
   // Firewall question window: only the waiting connections and the answer (firewall plan §4.4).
   await startFirewallAlertState();
+} else if (location.hash.startsWith('#/mcp-confirm')) {
+  // Local MCP confirmation window: its own prompt and answer only (mcp-confirm capability), no app state.
+  document.documentElement.dataset.opennavoWindow = 'mcp-confirm';
 } else if (location.hash.startsWith('#/permission-guide')) {
   document.documentElement.dataset.opennavoWindow = 'guide';
   // Permission guidance overlay: read only permissions and language allowed by the guide capability (06 §12.7, §14).

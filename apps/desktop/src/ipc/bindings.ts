@@ -198,6 +198,34 @@ export const commands = {
 	mcpSetWriteEnabled: (enabled: boolean) => typedError<McpStatus, AppError>(__TAURI_INVOKE("mcp_set_write_enabled", { enabled })),
 	/**  Return the persisted master switch and live broker state. */
 	mcpStatus: () => __TAURI_INVOKE<McpStatus>("mcp_status"),
+	/**  Local MCP write audit log, newest first (90-day retention). */
+	mcpAuditList: () => typedError<AuditEntry[], AppError>(__TAURI_INVOKE("mcp_audit_list")),
+	/**  Delete every Local MCP audit entry. */
+	mcpAuditClear: () => typedError<null, AppError>(__TAURI_INVOKE("mcp_audit_clear")),
+	/**  Content of the open Local MCP confirmation; only the confirmation window may read it. */
+	mcpConfirmGet: () => typedError<{
+	/**  One-time id the window answers with. */
+	id: string,
+	/**  `install` or `uninstall`. */
+	action: string,
+	name: string,
+	/**  Catalog target (`cask/iina`) or the app path. */
+	target: string,
+	/**  App bundle moved to the Trash (uninstall only). */
+	path: string | null,
+	/**  Signing authority of the requesting process, only when it is validly signed. */
+	signer: string | null,
+	/**  Executable of the requesting process. */
+	callerPath: string | null,
+	/**  Nearest `.app` ancestor, unverified. */
+	mayComeFrom: string | null,
+	/**  Self-reported client name. */
+	claimedName: string | null,
+	/**  Milliseconds until Allow is accepted. */
+	allowAfterMs: number,
+} | null, AppError>(__TAURI_INVOKE("mcp_confirm_get")),
+	/**  Answer the open Local MCP confirmation once; only the confirmation window may answer. */
+	mcpConfirmAnswer: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("mcp_confirm_answer", { id, allow })),
 	localeGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("locale_get")),
 	systemLocaleGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("system_locale_get")),
 	settingsSet: (settings: Settings) => typedError<Settings, AppError>(__TAURI_INVOKE("settings_set", { settings })),
@@ -361,6 +389,39 @@ export type AppStoreEvent = AppStoreChange;
 
 /**  Window appearance: follow macOS, or keep every OpenNavo window light or dark. */
 export type Appearance = "system" | "light" | "dark";
+
+/**  The process that asked; only the code signature of `path` is verified. */
+export type AuditCaller = {
+	/**  Executable of the `mcp` subprocess's direct parent. */
+	path: string | null,
+	/**  Signing authority (leaf certificate summary) when the parent is signed. */
+	signer: string | null,
+	teamId: string | null,
+	/**  Whether the parent carries a valid signature. */
+	signed: boolean,
+	/**  Nearest `.app` ancestor of the parent, unverified. */
+	mayComeFrom: string | null,
+	/**  Self-reported `clientInfo.name`. */
+	claimedName: string | null,
+	/**  Parent pid, recorded for the audit only (never shown in the dialog). */
+	pid: number | null,
+};
+
+/**  The user's answer; `invalidated`: withdrawn because the connection or a switch went away; `rejected`: refused before asking. */
+export type AuditDecision = "allowed" | "denied" | "timedOut" | "invalidated" | "rejected";
+
+/**  One write request as shown in Settings. */
+export type AuditEntry = {
+	id: string,
+	/**  Milliseconds since the Unix epoch. */
+	at: number,
+	tool: string,
+	object: string,
+	caller: AuditCaller,
+	decision: AuditDecision,
+	/**  `queued:<task id>` (`queued` if no task id came back) or an error code. `None` until known. */
+	result: string | null,
+};
 
 export type AvDatabaseStatus = {
 	daily: number | null,
@@ -1394,6 +1455,29 @@ export type MasUpdate = {
 
 export type MatchReason = "app_bundle" | "brew_uninstall" | "zap_rule" | "bundle_id" | "app_group" | "launchd" | "symlink" | "pkg_receipt" | "team_id" | "name_exact" | "name_similar";
 
+/**  Trusted content of the Local MCP confirmation window, built in Rust and filtered for display. */
+export type McpConfirmView = {
+	/**  One-time id the window answers with. */
+	id: string,
+	/**  `install` or `uninstall`. */
+	action: string,
+	name: string,
+	/**  Catalog target (`cask/iina`) or the app path. */
+	target: string,
+	/**  App bundle moved to the Trash (uninstall only). */
+	path: string | null,
+	/**  Signing authority of the requesting process, only when it is validly signed. */
+	signer: string | null,
+	/**  Executable of the requesting process. */
+	callerPath: string | null,
+	/**  Nearest `.app` ancestor, unverified. */
+	mayComeFrom: string | null,
+	/**  Self-reported client name. */
+	claimedName: string | null,
+	/**  Milliseconds until Allow is accepted. */
+	allowAfterMs: number,
+};
+
 /**  Broker status surfaced by `mcp_status`. */
 export type McpStatus = {
 	enabled: boolean,
@@ -2169,6 +2253,8 @@ export type TaskOptions = {
 	reopen?: boolean,
 	/**  Rollback only: the history id of the update being undone. */
 	rollbackOf?: string | null,
+	/**  Uninstall only: remove exactly `item_ids`, without the plan's required items (Local MCP). */
+	onlySelected?: boolean,
 };
 
 export type TaskPhase = "scanning" | "preparing" | "fetching" | "downloading" | "installing" | "linking" | "cleaning" | "uninstalling" | "updating" | "finishing";

@@ -437,10 +437,13 @@ fn read_tools_do_not_expose_write_names() {
         );
         let response = request(&path, tool_call(forbidden, json!({})));
         assert_eq!(response["ok"], false, "name {forbidden}");
-        assert_eq!(
-            response["error"]["code"], "E_TOOL_NOT_FOUND",
-            "name {forbidden}"
-        );
+        // Write tools exist but are refused while the write switch is off.
+        let expected = if forbidden == "get_latest_scan_result" {
+            "E_TOOL_NOT_FOUND"
+        } else {
+            "E_MCP_WRITE_DISABLED"
+        };
+        assert_eq!(response["error"]["code"], expected, "name {forbidden}");
     }
     broker.shutdown();
 }

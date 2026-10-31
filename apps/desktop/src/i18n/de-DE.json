@@ -858,6 +858,27 @@
     "empty": "Noch keine Einträge",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "Anfrage einer KI-App bestätigen",
+    "install": "Installieren",
+    "uninstall": "In den Papierkorb legen",
+    "introInstall": "Eine KI-App hat OpenNavo gebeten, diese App zu installieren.",
+    "introUninstall": "Eine KI-App hat OpenNavo gebeten, diese App in den Papierkorb zu legen. Nur die App selbst wird verschoben; zugehörige Dateien bleiben, wo sie sind.",
+    "app": "App",
+    "target": "Paket",
+    "path": "Pfad",
+    "requestedBy": "Angefragt von",
+    "unsigned": "Nicht signiert · {path}",
+    "unknownCaller": "Unbekannter Prozess",
+    "mayComeFrom": "Stammt möglicherweise von",
+    "unverified": "{name} (nicht überprüft)",
+    "claims": "Bezeichnet sich als",
+    "footer": "Es passiert nichts, solange Sie nicht auf „Erlauben“ klicken. Jede Anfrage wird einzeln bestätigt.",
+    "allow": "Erlauben",
+    "deny": "Ablehnen",
+    "expired": "Diese Anfrage wartet nicht mehr.",
+    "failed": "Ihre Antwort konnte nicht gesendet werden. Versuchen Sie es erneut."
+  },
   "settings": {
     "title": "Einstellungen",
     "sections": {
@@ -996,6 +1017,34 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Andere (JSON)"
+      },
+      "audit": {
+        "title": "Protokoll der Schreibanfragen",
+        "hint": "Installations- und Deinstallationsanfragen von KI-Apps. Nur auf diesem Mac gespeichert, 90 Tage lang.",
+        "view": "Anzeigen",
+        "clear": "Leeren",
+        "empty": "Noch keine Schreibanfragen.",
+        "loadFailed": "Das Protokoll konnte nicht gelesen werden.",
+        "clearTitle": "Protokoll der Schreibanfragen leeren?",
+        "clearDescription": "Alle aufgezeichneten Anfragen werden gelöscht. Das lässt sich nicht rückgängig machen.",
+        "clearConfirm": "Leeren",
+        "cleared": "Protokoll geleert",
+        "clearFailed": "Das Protokoll konnte nicht geleert werden.",
+        "install": "Installieren",
+        "uninstall": "In den Papierkorb legen",
+        "unsigned": "Nicht signiert · {path}",
+        "unknownCaller": "Unbekannter Prozess",
+        "mayComeFrom": "Stammt möglicherweise von: {name} (nicht überprüft)",
+        "claims": "Bezeichnet sich als: {name}",
+        "result": "Ergebnis: {result}",
+        "noResult": "Kein Ergebnis aufgezeichnet",
+        "decisions": {
+          "allowed": "Erlaubt",
+          "denied": "Abgelehnt",
+          "timedOut": "Keine Antwort rechtzeitig",
+          "invalidated": "Verworfen",
+          "rejected": "Ohne Rückfrage abgelehnt"
+        }
       }
     }
   },

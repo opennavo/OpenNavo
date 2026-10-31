@@ -13,6 +13,8 @@ import type {
   Kind,
   LinkOpenTarget,
   ListQuery,
+  AuditEntry,
+  McpConfirmView,
   McpStatus,
   Permissions,
   PrivacyPane,
@@ -284,6 +286,73 @@ export function installMockIpc(
     error: null,
     commandPath: MOCK_MCP_COMMAND
   };
+  const auditNow = Date.now();
+  let mcpAudit: AuditEntry[] = flags.has('mcp-write-on')
+    ? [
+        {
+          id: 'audit-2',
+          at: auditNow - 5 * 60_000,
+          tool: 'uninstall_app',
+          object: '/Applications/Rectangle.app',
+          caller: {
+            path: '/Applications/Claude.app/Contents/Helpers/node',
+            signer: 'Developer ID Application: Anthropic PBC (Q6L2SF6YDW)',
+            teamId: 'Q6L2SF6YDW',
+            signed: true,
+            mayComeFrom: 'Claude',
+            claimedName: 'claude-ai',
+            pid: 4182
+          },
+          decision: 'denied',
+          result: 'E_CONFIRMATION_DENIED'
+        },
+        {
+          id: 'audit-1',
+          at: auditNow - 42 * 60_000,
+          tool: 'install_app',
+          object: 'cask/iina',
+          caller: {
+            path: '/opt/homebrew/bin/node',
+            signer: null,
+            teamId: null,
+            signed: false,
+            mayComeFrom: 'Cursor',
+            claimedName: 'cursor-vscode',
+            pid: 3907
+          },
+          decision: 'allowed',
+          result: 'queued:task-7'
+        }
+      ]
+    : [];
+  // Local MCP confirmation window previews (`?mock=mcp-confirm-install` / `mcp-confirm-uninstall`).
+  const mcpConfirm: McpConfirmView | null = flags.has('mcp-confirm-install')
+    ? {
+        id: 'confirm-1',
+        action: 'install',
+        name: 'IINA',
+        target: 'cask/iina',
+        path: null,
+        signer: null,
+        callerPath: '/opt/homebrew/bin/node',
+        mayComeFrom: 'Cursor',
+        claimedName: 'cursor-vscode',
+        allowAfterMs: 1000
+      }
+    : flags.has('mcp-confirm-uninstall')
+      ? {
+          id: 'confirm-2',
+          action: 'uninstall',
+          name: 'Rectangle',
+          target: '/Applications/Rectangle.app',
+          path: '/Applications/Rectangle.app',
+          signer: 'Developer ID Application: Anthropic PBC (Q6L2SF6YDW)',
+          callerPath: '/Applications/Claude.app/Contents/Helpers/node',
+          mayComeFrom: 'Claude',
+          claimedName: 'claude-ai',
+          allowAfterMs: 1000
+        }
+      : null;
   const mcpOffFailed = () => {
     const message = 'Permission denied (os error 13)';
     mcp = { ...mcp, error: `E_MCP_BROKER: ${message}` };
@@ -782,6 +851,13 @@ export function installMockIpc(
       mcp = { ...mcp, enabled, running: enabled, writeEnabled: enabled && mcp.writeEnabled, error: null };
       mcp.socketPath = enabled ? MOCK_MCP_SOCKET : null;
       return { ...mcp };
+    },
+    mcp_confirm_get: () => (mcpConfirm ? { ...mcpConfirm } : null),
+    mcp_confirm_answer: () => null,
+    mcp_audit_list: () => mcpAudit.map(entry => ({ ...entry, caller: { ...entry.caller } })),
+    mcp_audit_clear: () => {
+      mcpAudit = [];
+      return null;
     },
     mcp_set_write_enabled: args => {
       const enabled = args.enabled as boolean;

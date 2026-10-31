@@ -858,6 +858,27 @@
     "empty": "Ainda não há registros",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "Confirmar uma solicitação de um app de IA",
+    "install": "Instalar",
+    "uninstall": "Mover para a Lixeira",
+    "introInstall": "Um app de IA pediu ao OpenNavo para instalar este app.",
+    "introUninstall": "Um app de IA pediu ao OpenNavo para mover este app para a Lixeira. Só o app é movido; os arquivos relacionados continuam onde estão.",
+    "app": "App",
+    "target": "Pacote",
+    "path": "Caminho",
+    "requestedBy": "Solicitado por",
+    "unsigned": "Sem assinatura · {path}",
+    "unknownCaller": "Processo desconhecido",
+    "mayComeFrom": "Pode vir de",
+    "unverified": "{name} (não verificado)",
+    "claims": "Diz ser",
+    "footer": "Nada acontece a menos que você clique em Permitir. Cada solicitação é confirmada separadamente.",
+    "allow": "Permitir",
+    "deny": "Negar",
+    "expired": "Esta solicitação não está mais aguardando.",
+    "failed": "Não foi possível enviar sua resposta. Tente novamente."
+  },
   "settings": {
     "title": "Configurações",
     "sections": {
@@ -996,6 +1017,34 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Outro (JSON)"
+      },
+      "audit": {
+        "title": "Registro de solicitações de escrita",
+        "hint": "Solicitações de instalação e desinstalação de apps de IA. Ficam só neste Mac, por 90 dias.",
+        "view": "Ver",
+        "clear": "Limpar",
+        "empty": "Ainda não há solicitações de escrita.",
+        "loadFailed": "Não foi possível ler o registro.",
+        "clearTitle": "Limpar o registro de solicitações de escrita?",
+        "clearDescription": "Todas as solicitações registradas serão apagadas. Não é possível desfazer.",
+        "clearConfirm": "Limpar",
+        "cleared": "Registro limpo",
+        "clearFailed": "Não foi possível limpar o registro.",
+        "install": "Instalar",
+        "uninstall": "Mover para a Lixeira",
+        "unsigned": "Sem assinatura · {path}",
+        "unknownCaller": "Processo desconhecido",
+        "mayComeFrom": "Pode vir de: {name} (não verificado)",
+        "claims": "Diz ser: {name}",
+        "result": "Resultado: {result}",
+        "noResult": "Nenhum resultado registrado",
+        "decisions": {
+          "allowed": "Permitida",
+          "denied": "Negada",
+          "timedOut": "Sem resposta a tempo",
+          "invalidated": "Anulada",
+          "rejected": "Recusada sem perguntar"
+        }
       }
     }
   },

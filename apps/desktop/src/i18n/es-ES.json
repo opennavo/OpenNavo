@@ -858,6 +858,27 @@
     "empty": "Aún no hay registros",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "Confirmar una solicitud de una app de IA",
+    "install": "Instalar",
+    "uninstall": "Mover a la Papelera",
+    "introInstall": "Una app de IA ha pedido a OpenNavo que instale esta app.",
+    "introUninstall": "Una app de IA ha pedido a OpenNavo que mueva esta app a la Papelera. Solo se mueve la app; sus archivos relacionados se quedan donde están.",
+    "app": "App",
+    "target": "Paquete",
+    "path": "Ruta",
+    "requestedBy": "Solicitado por",
+    "unsigned": "Sin firmar · {path}",
+    "unknownCaller": "Proceso desconocido",
+    "mayComeFrom": "Puede venir de",
+    "unverified": "{name} (sin verificar)",
+    "claims": "Dice ser",
+    "footer": "No se hará nada a menos que hagas clic en Permitir. Cada solicitud se confirma por separado.",
+    "allow": "Permitir",
+    "deny": "Denegar",
+    "expired": "Esta solicitud ya no está esperando.",
+    "failed": "No se ha podido enviar tu respuesta. Inténtalo de nuevo."
+  },
   "settings": {
     "title": "Ajustes",
     "sections": {
@@ -996,6 +1017,34 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Otro (JSON)"
+      },
+      "audit": {
+        "title": "Registro de solicitudes de escritura",
+        "hint": "Solicitudes de instalación y desinstalación de apps de IA. Se guardan solo en este Mac durante 90 días.",
+        "view": "Ver",
+        "clear": "Borrar",
+        "empty": "Aún no hay solicitudes de escritura.",
+        "loadFailed": "No se ha podido leer el registro.",
+        "clearTitle": "¿Borrar el registro de solicitudes de escritura?",
+        "clearDescription": "Se eliminarán todas las solicitudes registradas. No se puede deshacer.",
+        "clearConfirm": "Borrar",
+        "cleared": "Registro borrado",
+        "clearFailed": "No se ha podido borrar el registro.",
+        "install": "Instalar",
+        "uninstall": "Mover a la Papelera",
+        "unsigned": "Sin firmar · {path}",
+        "unknownCaller": "Proceso desconocido",
+        "mayComeFrom": "Puede venir de: {name} (sin verificar)",
+        "claims": "Dice ser: {name}",
+        "result": "Resultado: {result}",
+        "noResult": "Sin resultado registrado",
+        "decisions": {
+          "allowed": "Permitida",
+          "denied": "Denegada",
+          "timedOut": "Sin respuesta a tiempo",
+          "invalidated": "Anulada",
+          "rejected": "Rechazada sin preguntar"
+        }
       }
     }
   },

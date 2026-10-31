@@ -423,6 +423,58 @@ async fn uninstall_includes_both_recovery_roots_even_without_optional_data_selec
 }
 
 #[tokio::test]
+async fn local_mcp_uninstall_moves_only_the_app_bundle_and_keeps_required_backups() {
+    use opennavo_desktop_lib::updater::backup;
+    let f = Fixture::new();
+    let app = f.app("Recoverable", "test.recoverable");
+    let paths = backup::directories(&app).unwrap();
+    for p in &paths {
+        fs::create_dir_all(p.join("previous.app/Contents")).unwrap();
+        fs::write(p.join("previous.app/Contents/keep"), b"backup").unwrap();
+    }
+    let data = f.dir("Library/Application Support/Recoverable");
+    let plan = f.plan(&app).await;
+    let bundle: Vec<String> = plan.apps[0]
+        .items
+        .iter()
+        .filter(|i| i.category == ItemCategory::App && Path::new(&i.path) == app)
+        .map(|i| i.id.clone())
+        .collect();
+    assert_eq!(bundle.len(), 1);
+    assert!(
+        plan.apps[0]
+            .items
+            .iter()
+            .any(|i| i.required && i.category != ItemCategory::App)
+    );
+    let tasks = f
+        .engine
+        .execute_choices_with(
+            &f.queue,
+            &plan.plan_id,
+            vec![UninstallChoice {
+                app_id: plan.apps[0].app_id.clone(),
+                item_ids: bundle,
+                quit_running: false,
+            }],
+            DeleteMode::Trash,
+            true,
+        )
+        .unwrap();
+    f.queue.start();
+    let task = terminal(&f.queue, &tasks[0].id).await;
+    assert_eq!(task.state, TaskState::Succeeded, "{:?}", task.error);
+    assert!(!app.exists());
+    assert!(
+        paths
+            .iter()
+            .all(|p| p.join("previous.app/Contents/keep").exists())
+    );
+    assert!(data.exists());
+    assert_eq!(task.outcome.unwrap().trashed, 1);
+}
+
+#[tokio::test]
 async fn uninstall_never_follows_recovery_symlinks_or_deletes_a_replaced_recovery_root() {
     use opennavo_desktop_lib::updater::backup;
     let f = Fixture::new();

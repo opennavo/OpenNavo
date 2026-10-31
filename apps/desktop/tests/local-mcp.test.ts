@@ -77,8 +77,12 @@ describe('Local MCP config presets', () => {
     localStorage.setItem(MCP_COPIED_PATHS_KEY, JSON.stringify({ claude: OLD, cursor: APP, codex: 7 }));
     expect(copiedMcpPaths()).toEqual({ claude: OLD, cursor: APP });
     expect(mcpMovedClients(APP)).toEqual(['claude']);
+    // A corrupt per-client value falls back to the old key instead of forgetting it.
     localStorage.setItem(MCP_COPIED_PATHS_KEY, '{not json');
-    expect(mcpMovedClients(APP)).toEqual([]);
+    expect(copiedMcpPaths()).toEqual({ claude: OLD, cursor: OLD, codex: OLD, generic: OLD });
+    expect(mcpMovedClients(APP)).toEqual(['claude', 'cursor', 'codex', 'generic']);
+    localStorage.removeItem(MCP_COPIED_PATH_KEY);
+    expect(copiedMcpPaths()).toEqual({});
   });
 });
 
@@ -226,5 +230,74 @@ describe('Settings: Local MCP configuration', () => {
     expect(wrapper.get('[data-test="mcp-moved-clients"]').text()).toContain(
       i18n.global.t('settings.mcp.clients.codex')
     );
+  });
+});
+
+describe('Settings: Local MCP write request log', () => {
+  const body = (test: string) => document.body.querySelectorAll(`[data-test="${test}"]`);
+
+  it('Lists entries newest first with the caller lines but never the pid', async () => {
+    const wrapper = await page('mcp-write-on');
+    await wrapper.get('[data-test="mcp-audit-view"]').trigger('click');
+    await flushPromises();
+    const entries = [...body('mcp-audit-entry')].map(node => node.textContent ?? '');
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toContain('/Applications/Rectangle.app');
+    expect(entries[0]).toContain('Developer ID Application: Anthropic PBC');
+    expect(entries[0]).toContain('可能来自：Claude（未验证）');
+    expect(entries[0]).toContain('自称：claude-ai');
+    expect(entries[1]).toContain('未签名 · /opt/homebrew/bin/node');
+    expect(entries.join(' ')).not.toContain('4182');
+  });
+
+  it('Shows the empty state', async () => {
+    const wrapper = await page('mcp-on');
+    await wrapper.get('[data-test="mcp-audit-view"]').trigger('click');
+    await flushPromises();
+    expect(body('mcp-audit-empty')).toHaveLength(1);
+  });
+
+  it('Clears only after confirmation', async () => {
+    const wrapper = await page('mcp-write-on');
+    const clear = vi.spyOn(commands, 'mcpAuditClear');
+    await wrapper.get('[data-test="mcp-audit-clear"]').trigger('click');
+    await flushPromises();
+    expect(clear).not.toHaveBeenCalled();
+    (document.body.querySelector('[data-on-confirm]') as HTMLElement).click();
+    await flushPromises();
+    expect(clear).toHaveBeenCalledTimes(1);
+    const listed = await commands.mcpAuditList();
+    expect(listed.status === 'ok' && listed.data).toEqual([]);
+  });
+
+  it('Reports a failed read', async () => {
+    const wrapper = await page('mcp-write-on');
+    vi.spyOn(commands, 'mcpAuditList').mockResolvedValueOnce({
+      status: 'error',
+      error: { code: 'E_AUDIT_UNAVAILABLE', message: 'x', detail: null }
+    });
+    await wrapper.get('[data-test="mcp-audit-view"]').trigger('click');
+    await flushPromises();
+    expect(body('mcp-audit-failed')).toHaveLength(1);
+  });
+});
+
+describe('Settings: Local MCP status ordering', () => {
+  it('A slow focus refresh never overwrites the state a switch change reported', async () => {
+    const wrapper = await page();
+    const stale = await commands.mcpStatus();
+    let finish!: () => void;
+    vi.spyOn(commands, 'mcpStatus').mockImplementationOnce(async () => {
+      await new Promise<void>(resolve => (finish = resolve));
+      return stale;
+    });
+    window.dispatchEvent(new Event('focus'));
+    await flushPromises();
+    await wrapper.get('[data-test="mcp-enabled"]').trigger('click');
+    await flushPromises();
+    expect(checked(wrapper, 'mcp-enabled')).toBe(true);
+    finish();
+    await flushPromises();
+    expect(checked(wrapper, 'mcp-enabled')).toBe(true);
   });
 });

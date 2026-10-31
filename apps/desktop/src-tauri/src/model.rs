@@ -383,6 +383,8 @@ pub struct TaskOptions {
     pub reopen: bool,
     /// Rollback only: the history id of the update being undone.
     pub rollback_of: Option<String>,
+    /// Uninstall only: remove exactly `item_ids`, without the plan's required items (Local MCP).
+    pub only_selected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

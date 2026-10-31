@@ -852,6 +852,27 @@ export default {
     empty: '还没有记录',
     duration: '{time}'
   },
+  mcpConfirm: {
+    title: '确认 AI 应用的请求',
+    install: '安装',
+    uninstall: '移到废纸篓',
+    introInstall: '有 AI 应用请求 OpenNavo 安装这个应用。',
+    introUninstall: '有 AI 应用请求 OpenNavo 将这个应用移到废纸篓。只移走应用本体，关联文件保持不动。',
+    app: '应用',
+    target: '软件包',
+    path: '路径',
+    requestedBy: '请求方',
+    unsigned: '未签名 · {path}',
+    unknownCaller: '未知进程',
+    mayComeFrom: '可能来自',
+    unverified: '{name}（未验证）',
+    claims: '自称',
+    footer: '只有你点了「允许」才会执行。每个请求单独确认。',
+    allow: '允许',
+    deny: '拒绝',
+    expired: '这个请求已不再等待回答。',
+    failed: '回答没有发出去，请重试。'
+  },
   settings: {
     title: '设置',
     sections: {
@@ -886,6 +907,34 @@ export default {
       statusFailed: '无法读取本地 MCP 状态。',
       movedClients: '仍指向旧位置：{clients}',
       pathUnavailable: '找不到 OpenNavo 的安装位置，暂无可复制的配置。',
+      audit: {
+        title: '写操作记录',
+        hint: 'AI 应用发起的安装和卸载请求。只存在这台 Mac 上，保留 90 天。',
+        view: '查看',
+        clear: '清空',
+        empty: '还没有写操作请求。',
+        loadFailed: '读取记录失败。',
+        clearTitle: '清空写操作记录？',
+        clearDescription: '所有已记录的请求都会被删除，无法恢复。',
+        clearConfirm: '清空',
+        cleared: '记录已清空',
+        clearFailed: '清空记录失败。',
+        install: '安装',
+        uninstall: '移到废纸篓',
+        unsigned: '未签名 · {path}',
+        unknownCaller: '未知进程',
+        mayComeFrom: '可能来自：{name}（未验证）',
+        claims: '自称：{name}',
+        result: '结果：{result}',
+        noResult: '没有记录结果',
+        decisions: {
+          allowed: '已允许',
+          denied: '已拒绝',
+          timedOut: '超时未答复',
+          invalidated: '已作废',
+          rejected: '未询问即拒绝'
+        }
+      },
       clients: {
         claude: 'Claude Desktop',
         cursor: 'Cursor',

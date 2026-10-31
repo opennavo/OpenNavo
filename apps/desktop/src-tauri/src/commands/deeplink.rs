@@ -298,7 +298,7 @@ async fn confirm_collection(
     Ok(DeepLinkInstallResult { tasks })
 }
 
-async fn ensure_install_environment(state: &DesktopCore) -> Result<(), AppError> {
+pub(crate) async fn ensure_install_environment(state: &DesktopCore) -> Result<(), AppError> {
     // Resolve brew in Rust so a deep link cannot bypass the same Homebrew gate used by the package button.
     let brew = state.brew_info().await?;
     if !tokio::fs::metadata(&brew.path)
@@ -343,7 +343,11 @@ fn ensure_single_target_available(
     ))
 }
 
-fn target_available(target: &TaskTarget, installed: &[InstalledItem], active: &[Task]) -> bool {
+pub(crate) fn target_available(
+    target: &TaskTarget,
+    installed: &[InstalledItem],
+    active: &[Task],
+) -> bool {
     !installed
         .iter()
         .any(|item| item.kind == target.kind && item.matches_token(&target.token))

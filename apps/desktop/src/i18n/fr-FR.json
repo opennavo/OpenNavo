@@ -858,6 +858,27 @@
     "empty": "Aucun historique pour l’instant",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "Confirmer une demande d’une app d’IA",
+    "install": "Installation",
+    "uninstall": "Placement dans la corbeille",
+    "introInstall": "Une app d’IA a demandé à OpenNavo d’installer cette app.",
+    "introUninstall": "Une app d’IA a demandé à OpenNavo de placer cette app dans la corbeille. Seule l’app elle-même est déplacée ; ses fichiers associés restent en place.",
+    "app": "App",
+    "target": "Paquet",
+    "path": "Chemin",
+    "requestedBy": "Demandé par",
+    "unsigned": "Non signé · {path}",
+    "unknownCaller": "Processus inconnu",
+    "mayComeFrom": "Provient peut-être de",
+    "unverified": "{name} (non vérifié)",
+    "claims": "Se présente comme",
+    "footer": "Rien ne se passe tant que vous n’avez pas cliqué sur Autoriser. Chaque demande est confirmée séparément.",
+    "allow": "Autoriser",
+    "deny": "Refuser",
+    "expired": "Cette demande n’est plus en attente.",
+    "failed": "Impossible d’envoyer votre réponse. Réessayez."
+  },
   "settings": {
     "title": "Réglages",
     "sections": {
@@ -996,6 +1017,34 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Autre (JSON)"
+      },
+      "audit": {
+        "title": "Journal des demandes d’écriture",
+        "hint": "Demandes d’installation et de désinstallation venant d’apps d’IA. Conservées uniquement sur ce Mac pendant 90 jours.",
+        "view": "Afficher",
+        "clear": "Effacer",
+        "empty": "Aucune demande d’écriture pour l’instant.",
+        "loadFailed": "Impossible de lire le journal.",
+        "clearTitle": "Effacer le journal des demandes d’écriture ?",
+        "clearDescription": "Toutes les demandes enregistrées seront supprimées. Cette action est irréversible.",
+        "clearConfirm": "Effacer",
+        "cleared": "Journal effacé",
+        "clearFailed": "Impossible d’effacer le journal.",
+        "install": "Installation",
+        "uninstall": "Placement dans la corbeille",
+        "unsigned": "Non signé · {path}",
+        "unknownCaller": "Processus inconnu",
+        "mayComeFrom": "Provient peut-être de : {name} (non vérifié)",
+        "claims": "Se présente comme : {name}",
+        "result": "Résultat : {result}",
+        "noResult": "Aucun résultat enregistré",
+        "decisions": {
+          "allowed": "Autorisée",
+          "denied": "Refusée",
+          "timedOut": "Pas de réponse à temps",
+          "invalidated": "Annulée",
+          "rejected": "Refusée sans demander"
+        }
       }
     }
   },

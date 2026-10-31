@@ -858,6 +858,27 @@
     "empty": "Ancora nessuna voce",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "Conferma una richiesta di un’app di IA",
+    "install": "Installazione",
+    "uninstall": "Spostamento nel Cestino",
+    "introInstall": "Un’app di IA ha chiesto a OpenNavo di installare questa app.",
+    "introUninstall": "Un’app di IA ha chiesto a OpenNavo di spostare questa app nel Cestino. Viene spostata solo l’app; i file correlati restano dove sono.",
+    "app": "App",
+    "target": "Pacchetto",
+    "path": "Percorso",
+    "requestedBy": "Richiesto da",
+    "unsigned": "Non firmato · {path}",
+    "unknownCaller": "Processo sconosciuto",
+    "mayComeFrom": "Potrebbe provenire da",
+    "unverified": "{name} (non verificato)",
+    "claims": "Si presenta come",
+    "footer": "Non succede nulla finché non fai clic su Consenti. Ogni richiesta viene confermata separatamente.",
+    "allow": "Consenti",
+    "deny": "Nega",
+    "expired": "Questa richiesta non è più in attesa.",
+    "failed": "Impossibile inviare la risposta. Riprova."
+  },
   "settings": {
     "title": "Impostazioni",
     "sections": {
@@ -996,6 +1017,34 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "Altro (JSON)"
+      },
+      "audit": {
+        "title": "Registro delle richieste di scrittura",
+        "hint": "Richieste di installazione e disinstallazione dalle app di IA. Conservate solo su questo Mac per 90 giorni.",
+        "view": "Visualizza",
+        "clear": "Cancella",
+        "empty": "Nessuna richiesta di scrittura per ora.",
+        "loadFailed": "Impossibile leggere il registro.",
+        "clearTitle": "Cancellare il registro delle richieste di scrittura?",
+        "clearDescription": "Tutte le richieste registrate verranno eliminate. L’operazione non si può annullare.",
+        "clearConfirm": "Cancella",
+        "cleared": "Registro cancellato",
+        "clearFailed": "Impossibile cancellare il registro.",
+        "install": "Installazione",
+        "uninstall": "Spostamento nel Cestino",
+        "unsigned": "Non firmato · {path}",
+        "unknownCaller": "Processo sconosciuto",
+        "mayComeFrom": "Potrebbe provenire da: {name} (non verificato)",
+        "claims": "Si presenta come: {name}",
+        "result": "Risultato: {result}",
+        "noResult": "Nessun risultato registrato",
+        "decisions": {
+          "allowed": "Consentita",
+          "denied": "Negata",
+          "timedOut": "Nessuna risposta in tempo",
+          "invalidated": "Annullata",
+          "rejected": "Rifiutata senza chiedere"
+        }
       }
     }
   },

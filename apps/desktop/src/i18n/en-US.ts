@@ -876,6 +876,28 @@ const messages: MessageSchema = {
     empty: 'No records yet',
     duration: '{time}'
   },
+  mcpConfirm: {
+    title: 'Confirm a request from an AI app',
+    install: 'Install',
+    uninstall: 'Move to Trash',
+    introInstall: 'An AI app asked OpenNavo to install this app.',
+    introUninstall:
+      'An AI app asked OpenNavo to move this app to the Trash. Only the app itself is moved; its related files stay where they are.',
+    app: 'App',
+    target: 'Package',
+    path: 'Path',
+    requestedBy: 'Requested by',
+    unsigned: 'Unsigned · {path}',
+    unknownCaller: 'Unknown process',
+    mayComeFrom: 'May come from',
+    unverified: '{name} (unverified)',
+    claims: 'Claims to be',
+    footer: 'Nothing happens unless you click Allow. Each request is confirmed on its own.',
+    allow: 'Allow',
+    deny: 'Deny',
+    expired: 'This request is no longer waiting.',
+    failed: "Couldn't send your answer. Try again."
+  },
   settings: {
     title: 'Settings',
     sections: {
@@ -910,6 +932,34 @@ const messages: MessageSchema = {
       statusFailed: "Couldn't read the Local MCP status.",
       movedClients: 'Still pointing to the old location: {clients}',
       pathUnavailable: "Couldn't find where OpenNavo is installed, so there is no configuration to copy.",
+      audit: {
+        title: 'Write request log',
+        hint: 'Install and uninstall requests from AI apps. Kept only on this Mac, for 90 days.',
+        view: 'View',
+        clear: 'Clear',
+        empty: 'No write requests yet.',
+        loadFailed: "Couldn't read the log.",
+        clearTitle: 'Clear the write request log?',
+        clearDescription: "Every recorded request will be deleted. This can't be undone.",
+        clearConfirm: 'Clear',
+        cleared: 'Log cleared',
+        clearFailed: "Couldn't clear the log.",
+        install: 'Install',
+        uninstall: 'Move to Trash',
+        unsigned: 'Unsigned · {path}',
+        unknownCaller: 'Unknown process',
+        mayComeFrom: 'May come from: {name} (unverified)',
+        claims: 'Claims to be: {name}',
+        result: 'Result: {result}',
+        noResult: 'No result recorded',
+        decisions: {
+          allowed: 'Allowed',
+          denied: 'Denied',
+          timedOut: 'No answer in time',
+          invalidated: 'Withdrawn',
+          rejected: 'Refused before asking'
+        }
+      },
       clients: {
         claude: 'Claude Desktop',
         cursor: 'Cursor',

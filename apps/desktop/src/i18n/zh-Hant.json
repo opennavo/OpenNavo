@@ -858,6 +858,27 @@
     "empty": "還沒有記錄",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "確認 AI 應用的請求",
+    "install": "安裝",
+    "uninstall": "移到垃圾桶",
+    "introInstall": "有 AI 應用請求 OpenNavo 安裝這個應用。",
+    "introUninstall": "有 AI 應用請求 OpenNavo 將這個應用移到垃圾桶。只移走應用本體，關聯檔案保持不動。",
+    "app": "應用",
+    "target": "軟體包",
+    "path": "路徑",
+    "requestedBy": "請求方",
+    "unsigned": "未簽名 · {path}",
+    "unknownCaller": "未知程序",
+    "mayComeFrom": "可能來自",
+    "unverified": "{name}（未驗證）",
+    "claims": "自稱",
+    "footer": "只有你點了「允許」才會執行。每個請求單獨確認。",
+    "allow": "允許",
+    "deny": "拒絕",
+    "expired": "這個請求已不再等待回答。",
+    "failed": "回答沒有發出去，請重試。"
+  },
   "settings": {
     "title": "設定",
     "sections": {
@@ -891,6 +912,34 @@
       "statusFailed": "無法讀取本地 MCP 狀態。",
       "movedClients": "仍指向舊位置：{clients}",
       "pathUnavailable": "找不到 OpenNavo 的安裝位置，暫無可複製的配置。",
+      "audit": {
+        "title": "寫操作記錄",
+        "hint": "AI 應用發起的安裝和解除安裝請求。只存在這台 Mac 上，保留 90 天。",
+        "view": "檢視",
+        "clear": "清空",
+        "empty": "還沒有寫操作請求。",
+        "loadFailed": "讀取記錄失敗。",
+        "clearTitle": "清空寫操作記錄？",
+        "clearDescription": "所有已記錄的請求都會被刪除，無法恢復。",
+        "clearConfirm": "清空",
+        "cleared": "記錄已清空",
+        "clearFailed": "清空記錄失敗。",
+        "install": "安裝",
+        "uninstall": "移到垃圾桶",
+        "unsigned": "未簽名 · {path}",
+        "unknownCaller": "未知程序",
+        "mayComeFrom": "可能來自：{name}（未驗證）",
+        "claims": "自稱：{name}",
+        "result": "結果：{result}",
+        "noResult": "沒有記錄結果",
+        "decisions": {
+          "allowed": "已允許",
+          "denied": "已拒絕",
+          "timedOut": "超時未答覆",
+          "invalidated": "已作廢",
+          "rejected": "未詢問即拒絕"
+        }
+      },
       "clients": {
         "claude": "Claude Desktop",
         "cursor": "Cursor",

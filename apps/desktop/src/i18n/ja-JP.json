@@ -858,6 +858,27 @@
     "empty": "記録はまだありません",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "AI アプリからの依頼を確認",
+    "install": "インストール",
+    "uninstall": "ゴミ箱に移動",
+    "introInstall": "AI アプリが OpenNavo にこのアプリのインストールを依頼しました。",
+    "introUninstall": "AI アプリが OpenNavo にこのアプリをゴミ箱に移すよう依頼しました。移動するのはアプリ本体だけで、関連ファイルはそのまま残ります。",
+    "app": "アプリ",
+    "target": "パッケージ",
+    "path": "パス",
+    "requestedBy": "依頼元",
+    "unsigned": "署名なし · {path}",
+    "unknownCaller": "不明なプロセス",
+    "mayComeFrom": "発信元の可能性",
+    "unverified": "{name}（未確認）",
+    "claims": "自己申告",
+    "footer": "「許可」をクリックしない限り何も実行されません。依頼ごとに個別に確認します。",
+    "allow": "許可",
+    "deny": "拒否",
+    "expired": "この依頼はもう待機していません。",
+    "failed": "回答を送信できませんでした。もう一度お試しください。"
+  },
   "settings": {
     "title": "設定",
     "sections": {
@@ -996,6 +1017,34 @@
         "cursor": "Cursor",
         "codex": "Codex (TOML)",
         "generic": "その他（JSON）"
+      },
+      "audit": {
+        "title": "書き込みリクエストの記録",
+        "hint": "AI アプリからのインストールとアンインストールのリクエスト。この Mac にのみ保存され、90 日間保持されます。",
+        "view": "表示",
+        "clear": "消去",
+        "empty": "書き込みリクエストはまだありません。",
+        "loadFailed": "記録を読み込めませんでした。",
+        "clearTitle": "書き込みリクエストの記録を消去しますか？",
+        "clearDescription": "記録されたリクエストはすべて削除されます。元に戻せません。",
+        "clearConfirm": "消去",
+        "cleared": "記録を消去しました",
+        "clearFailed": "記録を消去できませんでした。",
+        "install": "インストール",
+        "uninstall": "ゴミ箱に移動",
+        "unsigned": "署名なし · {path}",
+        "unknownCaller": "不明なプロセス",
+        "mayComeFrom": "発信元の可能性：{name}（未確認）",
+        "claims": "自己申告：{name}",
+        "result": "結果：{result}",
+        "noResult": "結果の記録なし",
+        "decisions": {
+          "allowed": "許可済み",
+          "denied": "拒否",
+          "timedOut": "時間内に応答なし",
+          "invalidated": "取り消し済み",
+          "rejected": "確認前に拒否"
+        }
       }
     }
   },
