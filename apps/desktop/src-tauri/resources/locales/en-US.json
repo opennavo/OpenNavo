@@ -82,13 +82,5 @@
   "confirmation.unsupported": "not a cask",
   "confirmation.deepLink": "deep link",
   "confirmation.install": "install",
-  "confirmation.installCollection": "install collection",
-  "mcpConfirm.install": "An AI app asked OpenNavo to install {name} ({target}).",
-  "mcpConfirm.uninstall": "An AI app asked OpenNavo to move {name} to the Trash:\n{path}\n\nOnly the app itself is moved. Its related files stay where they are.",
-  "mcpConfirm.requestedBy": "Requested by: {caller}",
-  "mcpConfirm.unsigned": "Unsigned · {path}",
-  "mcpConfirm.unknownCaller": "Unknown process",
-  "mcpConfirm.mayComeFrom": "May come from: {name} (unverified)",
-  "mcpConfirm.claims": "Claims to be: {name}",
-  "mcpConfirm.footer": "Nothing happens unless you click Allow. Each request is confirmed on its own."
+  "confirmation.installCollection": "install collection"
 }

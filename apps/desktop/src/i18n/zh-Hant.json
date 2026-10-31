@@ -858,6 +858,27 @@
     "empty": "還沒有記錄",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "確認 AI 應用的請求",
+    "install": "安裝",
+    "uninstall": "移到垃圾桶",
+    "introInstall": "有 AI 應用請求 OpenNavo 安裝這個應用。",
+    "introUninstall": "有 AI 應用請求 OpenNavo 將這個應用移到垃圾桶。只移走應用本體，關聯檔案保持不動。",
+    "app": "應用",
+    "target": "軟體包",
+    "path": "路徑",
+    "requestedBy": "請求方",
+    "unsigned": "未簽名 · {path}",
+    "unknownCaller": "未知程序",
+    "mayComeFrom": "可能來自",
+    "unverified": "{name}（未驗證）",
+    "claims": "自稱",
+    "footer": "只有你點了「允許」才會執行。每個請求單獨確認。",
+    "allow": "允許",
+    "deny": "拒絕",
+    "expired": "這個請求已不再等待回答。",
+    "failed": "回答沒有發出去，請重試。"
+  },
   "settings": {
     "title": "設定",
     "sections": {

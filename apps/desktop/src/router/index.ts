@@ -248,6 +248,13 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/TrayMonitorPage.vue'),
     meta: { bare: true }
   },
+  // Local MCP write confirmation: Rust's own always-on-top window, one request at a time.
+  {
+    path: '/mcp-confirm',
+    name: 'mcp-confirm',
+    component: () => import('@/pages/McpConfirmPage.vue'),
+    meta: { bare: true }
+  },
   // A connection waiting for an answer (firewall plan §4.4): Rust's small always-on-top window.
   {
     path: '/firewall-alert',

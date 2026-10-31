@@ -82,13 +82,5 @@
   "confirmation.unsupported": "kein Cask",
   "confirmation.deepLink": "Deep Link",
   "confirmation.install": "installieren",
-  "confirmation.installCollection": "Sammlung installieren",
-  "mcpConfirm.install": "Eine KI-App hat OpenNavo gebeten, {name} ({target}) zu installieren.",
-  "mcpConfirm.uninstall": "Eine KI-App hat OpenNavo gebeten, {name} in den Papierkorb zu legen:\n{path}\n\nNur die App selbst wird verschoben. Zugehörige Dateien bleiben, wo sie sind.",
-  "mcpConfirm.requestedBy": "Angefragt von: {caller}",
-  "mcpConfirm.unsigned": "Nicht signiert · {path}",
-  "mcpConfirm.unknownCaller": "Unbekannter Prozess",
-  "mcpConfirm.mayComeFrom": "Stammt möglicherweise von: {name} (nicht überprüft)",
-  "mcpConfirm.claims": "Bezeichnet sich als: {name}",
-  "mcpConfirm.footer": "Es passiert nichts, solange Sie nicht auf „Erlauben“ klicken. Jede Anfrage wird einzeln bestätigt."
+  "confirmation.installCollection": "Sammlung installieren"
 }

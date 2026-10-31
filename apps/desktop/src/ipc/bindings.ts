@@ -202,6 +202,10 @@ export const commands = {
 	mcpAuditList: () => typedError<AuditEntry[], AppError>(__TAURI_INVOKE("mcp_audit_list")),
 	/**  Delete every Local MCP audit entry. */
 	mcpAuditClear: () => typedError<null, AppError>(__TAURI_INVOKE("mcp_audit_clear")),
+	/**  Content of the open Local MCP confirmation; only the confirmation window may read it. */
+	mcpConfirmGet: () => typedError<McpConfirmView | null, AppError>(__TAURI_INVOKE("mcp_confirm_get")),
+	/**  Answer the open Local MCP confirmation once; only the confirmation window may answer. */
+	mcpConfirmAnswer: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("mcp_confirm_answer", { id, allow })),
 	localeGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("locale_get")),
 	systemLocaleGet: () => typedError<Locale, AppError>(__TAURI_INVOKE("system_locale_get")),
 	settingsSet: (settings: Settings) => typedError<Settings, AppError>(__TAURI_INVOKE("settings_set", { settings })),
@@ -1432,6 +1436,29 @@ export type MasUpdate = {
 export type MatchReason = "app_bundle" | "brew_uninstall" | "zap_rule" | "bundle_id" | "app_group" | "launchd" | "symlink" | "pkg_receipt" | "team_id" | "name_exact" | "name_similar";
 
 /**  Broker status surfaced by `mcp_status`. */
+/**  Trusted content of the Local MCP confirmation window, built in Rust and filtered for display. */
+export type McpConfirmView = {
+	/**  One-time id the window answers with. */
+	id: string,
+	/**  `install` or `uninstall`. */
+	action: string,
+	name: string,
+	/**  Catalog target (`cask/iina`) or the app path. */
+	target: string,
+	/**  App bundle moved to the Trash (uninstall only). */
+	path: string | null,
+	/**  Signing authority of the requesting process, only when it is validly signed. */
+	signer: string | null,
+	/**  Executable of the requesting process. */
+	callerPath: string | null,
+	/**  Nearest `.app` ancestor, unverified. */
+	mayComeFrom: string | null,
+	/**  Self-reported client name. */
+	claimedName: string | null,
+	/**  Milliseconds until Allow is accepted. */
+	allowAfterMs: number,
+};
+
 export type McpStatus = {
 	enabled: boolean,
 	/**  Write-tool switch; always `false` while `enabled` is off. */

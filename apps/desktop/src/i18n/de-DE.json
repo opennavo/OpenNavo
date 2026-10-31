@@ -858,6 +858,27 @@
     "empty": "Noch keine Einträge",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "Anfrage einer KI-App bestätigen",
+    "install": "Installieren",
+    "uninstall": "In den Papierkorb legen",
+    "introInstall": "Eine KI-App hat OpenNavo gebeten, diese App zu installieren.",
+    "introUninstall": "Eine KI-App hat OpenNavo gebeten, diese App in den Papierkorb zu legen. Nur die App selbst wird verschoben; zugehörige Dateien bleiben, wo sie sind.",
+    "app": "App",
+    "target": "Paket",
+    "path": "Pfad",
+    "requestedBy": "Angefragt von",
+    "unsigned": "Nicht signiert · {path}",
+    "unknownCaller": "Unbekannter Prozess",
+    "mayComeFrom": "Stammt möglicherweise von",
+    "unverified": "{name} (nicht überprüft)",
+    "claims": "Bezeichnet sich als",
+    "footer": "Es passiert nichts, solange Sie nicht auf „Erlauben“ klicken. Jede Anfrage wird einzeln bestätigt.",
+    "allow": "Erlauben",
+    "deny": "Ablehnen",
+    "expired": "Diese Anfrage wartet nicht mehr.",
+    "failed": "Ihre Antwort konnte nicht gesendet werden. Versuchen Sie es erneut."
+  },
   "settings": {
     "title": "Einstellungen",
     "sections": {

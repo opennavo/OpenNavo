@@ -82,13 +82,5 @@
   "confirmation.unsupported": "não é um cask",
   "confirmation.deepLink": "link direto",
   "confirmation.install": "instalar",
-  "confirmation.installCollection": "instalar coleção",
-  "mcpConfirm.install": "Um app de IA pediu ao OpenNavo para instalar {name} ({target}).",
-  "mcpConfirm.uninstall": "Um app de IA pediu ao OpenNavo para mover {name} para a Lixeira:\n{path}\n\nSó o app é movido. Os arquivos relacionados continuam onde estão.",
-  "mcpConfirm.requestedBy": "Solicitado por: {caller}",
-  "mcpConfirm.unsigned": "Sem assinatura · {path}",
-  "mcpConfirm.unknownCaller": "Processo desconhecido",
-  "mcpConfirm.mayComeFrom": "Pode vir de: {name} (não verificado)",
-  "mcpConfirm.claims": "Diz ser: {name}",
-  "mcpConfirm.footer": "Nada acontece a menos que você clique em Permitir. Cada solicitação é confirmada separadamente."
+  "confirmation.installCollection": "instalar coleção"
 }

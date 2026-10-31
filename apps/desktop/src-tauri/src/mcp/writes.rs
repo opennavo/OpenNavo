@@ -26,10 +26,9 @@ use super::{
 };
 use crate::{
     AppError,
-    confirmation::{ConfirmationRequest, ConfirmationService},
+    confirmation::{ConfirmationRequest, ConfirmationService, McpConfirmView},
     core::DesktopCore,
-    model::{Locale, TaskKind, TaskTarget, TaskTrigger},
-    native_i18n,
+    model::{TaskKind, TaskTarget, TaskTrigger},
     queue::ResolvedInstallPlan,
     security::{signature, types::SignatureStatus},
     uninstall::{AppSource, DeleteMode, ItemCategory, UninstallChoice},
@@ -86,17 +85,7 @@ impl Writes {
             Ok(plan) => plan,
             Err(error) => return Err(reject(&mut entry, AuditDecision::Rejected, error)),
         };
-        let locale = crate::confirmation::app_locale(&self.app);
-        let message = match dialog_message(locale, &plan, &identity) {
-            Ok(message) => message,
-            Err(error) => {
-                return Err(reject(
-                    &mut entry,
-                    AuditDecision::Rejected,
-                    tool_error(error),
-                ));
-            }
-        };
+        let view = confirm_view(&plan, &identity);
         let confirmation_request = ConfirmationRequest {
             caller: MCP_CALLER.into(),
             source: identity.caller.path.clone().unwrap_or_default(),
@@ -120,7 +109,7 @@ impl Writes {
             ));
         }
         let decision =
-            block_on(service.confirm_message(&self.app, confirmation_request.clone(), message));
+            block_on(service.confirm_window(&self.app, confirmation_request.clone(), view));
         let grant = match decision {
             Ok(grant) => grant,
             Err(error) => {
@@ -485,66 +474,35 @@ fn app_running() -> ToolError {
     )
 }
 
-fn text(locale: Locale, key: &str) -> Result<String, AppError> {
-    native_i18n::text(locale, &format!("mcpConfirm.{key}"))
-}
-
-/// Keep caller-supplied text on one line and bounded.
-fn one_line(value: &str) -> String {
-    let cleaned: String = value
-        .chars()
-        // Separators, bidi overrides and invisible characters could reorder or hide text in the dialog.
-        .filter(|character| !super::protocol::is_hidden_text(*character))
-        .map(|character| {
-            if character.is_control() {
-                ' '
-            } else {
-                character
-            }
-        })
-        .take(300)
-        .collect();
-    cleaned.trim().to_owned()
-}
-
-/// The main caller line: signer when signed, otherwise "Unsigned · path".
-fn caller_line(locale: Locale, caller: &AuditCaller) -> Result<String, AppError> {
-    let who = match (&caller.signer, &caller.path) {
-        (Some(signer), _) if caller.signed => one_line(signer),
-        (_, Some(path)) => text(locale, "unsigned")?.replace("{path}", &one_line(path)),
-        _ => text(locale, "unknownCaller")?,
-    };
-    Ok(text(locale, "requestedBy")?.replace("{caller}", &who))
-}
-
-fn dialog_message(locale: Locale, plan: &Plan, identity: &Identity) -> Result<String, AppError> {
-    let mut message = match plan {
+/// Content of the confirmation window. `McpConfirmView::new` filters every string for display.
+fn confirm_view(plan: &Plan, identity: &Identity) -> McpConfirmView {
+    let caller = &identity.caller;
+    let signer = caller.signer.as_deref().filter(|_| caller.signed);
+    match plan {
         Plan::Install { plan, name } => {
             let target = plan.command_target();
-            text(locale, "install")?
-                .replace("{name}", &one_line(name))
-                .replace(
-                    "{target}",
-                    &format!("{}/{}", target.kind.as_str(), one_line(&target.token)),
-                )
+            McpConfirmView::new(
+                "install",
+                name,
+                &format!("{}/{}", target.kind.as_str(), target.token),
+                None,
+                signer,
+                caller.path.as_deref(),
+                caller.may_come_from.as_deref(),
+                caller.claimed_name.as_deref(),
+            )
         }
-        Plan::Uninstall { path, name, .. } => text(locale, "uninstall")?
-            .replace("{name}", &one_line(name))
-            .replace("{path}", &one_line(path)),
-    };
-    message.push_str("\n\n");
-    message.push_str(&caller_line(locale, &identity.caller)?);
-    if let Some(origin) = &identity.caller.may_come_from {
-        message.push('\n');
-        message.push_str(&text(locale, "mayComeFrom")?.replace("{name}", &one_line(origin)));
+        Plan::Uninstall { path, name, .. } => McpConfirmView::new(
+            "uninstall",
+            name,
+            path,
+            Some(path),
+            signer,
+            caller.path.as_deref(),
+            caller.may_come_from.as_deref(),
+            caller.claimed_name.as_deref(),
+        ),
     }
-    if let Some(claimed) = &identity.caller.claimed_name {
-        message.push('\n');
-        message.push_str(&text(locale, "claims")?.replace("{name}", &one_line(claimed)));
-    }
-    message.push_str("\n\n");
-    message.push_str(&text(locale, "footer")?);
-    Ok(message)
 }
 
 #[cfg(test)]
@@ -561,60 +519,6 @@ mod tests {
             claimed_name: Some("cursor-vscode".into()),
             pid: Some(42),
         }
-    }
-
-    #[test]
-    fn every_locale_has_the_dialog_text() {
-        for locale in [
-            Locale::EnUs,
-            Locale::ZhCn,
-            Locale::ZhHant,
-            Locale::JaJp,
-            Locale::EsEs,
-            Locale::PtBr,
-            Locale::RuRu,
-            Locale::DeDe,
-            Locale::FrFr,
-            Locale::ItIt,
-        ] {
-            for key in [
-                "install",
-                "uninstall",
-                "requestedBy",
-                "unsigned",
-                "unknownCaller",
-                "mayComeFrom",
-                "claims",
-                "footer",
-            ] {
-                let value = text(locale, key).expect("translated");
-                assert!(!value.is_empty(), "{locale:?} {key}");
-            }
-            for (key, placeholder) in [
-                ("install", "{target}"),
-                ("uninstall", "{path}"),
-                ("requestedBy", "{caller}"),
-                ("unsigned", "{path}"),
-                ("mayComeFrom", "{name}"),
-                ("claims", "{name}"),
-            ] {
-                assert!(
-                    text(locale, key).expect("translated").contains(placeholder),
-                    "{locale:?} {key} keeps {placeholder}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn caller_lines_name_signer_or_unsigned_path_and_never_the_pid() {
-        let signed = caller_line(Locale::EnUs, &caller(true)).expect("line");
-        assert!(signed.contains("Developer ID Application: Example Inc"));
-        let unsigned = caller_line(Locale::EnUs, &caller(false)).expect("line");
-        assert!(unsigned.contains("/opt/homebrew/bin/node"));
-        assert!(!signed.contains("42") && !unsigned.contains("42"));
-        let unknown = caller_line(Locale::EnUs, &AuditCaller::default()).expect("line");
-        assert!(!unknown.is_empty());
     }
 
     #[test]
@@ -644,14 +548,36 @@ mod tests {
     }
 
     #[test]
-    fn one_line_strips_control_characters() {
-        assert_eq!(one_line("evil\nAllowed: yes\u{7}"), "evil Allowed: yes");
-        assert_eq!(one_line(&"x".repeat(400)).len(), 300);
-        assert_eq!(
-            one_line("IINA\u{202E}ppa.exe\u{200B}\u{FEFF}"),
-            "IINAppa.exe"
+    fn the_window_shows_the_signer_only_when_signed_and_never_the_pid() {
+        let identity = |signed| Identity {
+            caller: caller(signed),
+        };
+        let plan = Plan::Uninstall {
+            plan_id: "p".into(),
+            app_id: "a".into(),
+            item_ids: vec!["i".into()],
+            path: "/Applications/IINA.app".into(),
+            name: "IINA\u{202E}".into(),
+        };
+        let signed = confirm_view(&plan, &identity(true));
+        assert_eq!(signed.action, "uninstall");
+        assert_eq!(signed.name, "IINA");
+        assert_eq!(signed.path.as_deref(), Some("/Applications/IINA.app"));
+        assert!(
+            signed
+                .signer
+                .as_deref()
+                .is_some_and(|s| s.contains("Example Inc"))
         );
-        assert_eq!(one_line("a\u{2066}b\u{2069}c\u{200F}"), "abc");
-        assert_eq!(one_line("a\u{2028}b\u{2029}c\u{E0041}d"), "abcd");
+        assert_eq!(signed.may_come_from.as_deref(), Some("Cursor"));
+        assert_eq!(signed.claimed_name.as_deref(), Some("cursor-vscode"));
+        let unsigned = confirm_view(&plan, &identity(false));
+        assert_eq!(unsigned.signer, None);
+        assert_eq!(
+            unsigned.caller_path.as_deref(),
+            Some("/opt/homebrew/bin/node")
+        );
+        let json = serde_json::to_string(&unsigned).expect("json");
+        assert!(!json.contains("\"pid\""));
     }
 }

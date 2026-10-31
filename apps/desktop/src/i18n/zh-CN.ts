@@ -852,6 +852,27 @@ export default {
     empty: '还没有记录',
     duration: '{time}'
   },
+  mcpConfirm: {
+    title: '确认 AI 应用的请求',
+    install: '安装',
+    uninstall: '移到废纸篓',
+    introInstall: '有 AI 应用请求 OpenNavo 安装这个应用。',
+    introUninstall: '有 AI 应用请求 OpenNavo 将这个应用移到废纸篓。只移走应用本体，关联文件保持不动。',
+    app: '应用',
+    target: '软件包',
+    path: '路径',
+    requestedBy: '请求方',
+    unsigned: '未签名 · {path}',
+    unknownCaller: '未知进程',
+    mayComeFrom: '可能来自',
+    unverified: '{name}（未验证）',
+    claims: '自称',
+    footer: '只有你点了「允许」才会执行。每个请求单独确认。',
+    allow: '允许',
+    deny: '拒绝',
+    expired: '这个请求已不再等待回答。',
+    failed: '回答没有发出去，请重试。'
+  },
   settings: {
     title: '设置',
     sections: {

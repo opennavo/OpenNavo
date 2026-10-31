@@ -82,13 +82,5 @@
   "confirmation.unsupported": "не cask",
   "confirmation.deepLink": "глубокая ссылка",
   "confirmation.install": "установка",
-  "confirmation.installCollection": "установка подборки",
-  "mcpConfirm.install": "ИИ-приложение попросило OpenNavo установить {name} ({target}).",
-  "mcpConfirm.uninstall": "ИИ-приложение попросило OpenNavo переместить {name} в Корзину:\n{path}\n\nПеремещается только само приложение. Связанные файлы остаются на месте.",
-  "mcpConfirm.requestedBy": "Запрос от: {caller}",
-  "mcpConfirm.unsigned": "Без подписи · {path}",
-  "mcpConfirm.unknownCaller": "Неизвестный процесс",
-  "mcpConfirm.mayComeFrom": "Возможно, из: {name} (не проверено)",
-  "mcpConfirm.claims": "Называет себя: {name}",
-  "mcpConfirm.footer": "Ничего не произойдёт, пока вы не нажмёте «Разрешить». Каждый запрос подтверждается отдельно."
+  "confirmation.installCollection": "установка подборки"
 }

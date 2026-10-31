@@ -14,6 +14,7 @@ import type {
   LinkOpenTarget,
   ListQuery,
   AuditEntry,
+  McpConfirmView,
   McpStatus,
   Permissions,
   PrivacyPane,
@@ -324,6 +325,34 @@ export function installMockIpc(
         }
       ]
     : [];
+  // Local MCP confirmation window previews (`?mock=mcp-confirm-install` / `mcp-confirm-uninstall`).
+  const mcpConfirm: McpConfirmView | null = flags.has('mcp-confirm-install')
+    ? {
+        id: 'confirm-1',
+        action: 'install',
+        name: 'IINA',
+        target: 'cask/iina',
+        path: null,
+        signer: null,
+        callerPath: '/opt/homebrew/bin/node',
+        mayComeFrom: 'Cursor',
+        claimedName: 'cursor-vscode',
+        allowAfterMs: 1000
+      }
+    : flags.has('mcp-confirm-uninstall')
+      ? {
+          id: 'confirm-2',
+          action: 'uninstall',
+          name: 'Rectangle',
+          target: '/Applications/Rectangle.app',
+          path: '/Applications/Rectangle.app',
+          signer: 'Developer ID Application: Anthropic PBC (Q6L2SF6YDW)',
+          callerPath: '/Applications/Claude.app/Contents/Helpers/node',
+          mayComeFrom: 'Claude',
+          claimedName: 'claude-ai',
+          allowAfterMs: 1000
+        }
+      : null;
   const mcpOffFailed = () => {
     const message = 'Permission denied (os error 13)';
     mcp = { ...mcp, error: `E_MCP_BROKER: ${message}` };
@@ -823,6 +852,8 @@ export function installMockIpc(
       mcp.socketPath = enabled ? MOCK_MCP_SOCKET : null;
       return { ...mcp };
     },
+    mcp_confirm_get: () => (mcpConfirm ? { ...mcpConfirm } : null),
+    mcp_confirm_answer: () => null,
     mcp_audit_list: () => mcpAudit.map(entry => ({ ...entry, caller: { ...entry.caller } })),
     mcp_audit_clear: () => {
       mcpAudit = [];

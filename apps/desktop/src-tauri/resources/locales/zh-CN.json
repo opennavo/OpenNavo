@@ -82,13 +82,5 @@
   "confirmation.unsupported": "不是 Cask",
   "confirmation.deepLink": "深度链接",
   "confirmation.install": "安装",
-  "confirmation.installCollection": "安装合集",
-  "mcpConfirm.install": "有 AI 应用请求 OpenNavo 安装 {name}（{target}）。",
-  "mcpConfirm.uninstall": "有 AI 应用请求 OpenNavo 将 {name} 移到废纸篓：\n{path}\n\n只移走应用本体，关联文件保持不动。",
-  "mcpConfirm.requestedBy": "请求方：{caller}",
-  "mcpConfirm.unsigned": "未签名 · {path}",
-  "mcpConfirm.unknownCaller": "未知进程",
-  "mcpConfirm.mayComeFrom": "可能来自：{name}（未验证）",
-  "mcpConfirm.claims": "自称：{name}",
-  "mcpConfirm.footer": "只有你点了「允许」才会执行。每个请求单独确认。"
+  "confirmation.installCollection": "安装合集"
 }

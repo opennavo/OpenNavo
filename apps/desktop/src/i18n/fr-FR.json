@@ -858,6 +858,27 @@
     "empty": "Aucun historique pour l’instant",
     "duration": "{time}"
   },
+  "mcpConfirm": {
+    "title": "Confirmer une demande d’une app d’IA",
+    "install": "Installation",
+    "uninstall": "Placement dans la corbeille",
+    "introInstall": "Une app d’IA a demandé à OpenNavo d’installer cette app.",
+    "introUninstall": "Une app d’IA a demandé à OpenNavo de placer cette app dans la corbeille. Seule l’app elle-même est déplacée ; ses fichiers associés restent en place.",
+    "app": "App",
+    "target": "Paquet",
+    "path": "Chemin",
+    "requestedBy": "Demandé par",
+    "unsigned": "Non signé · {path}",
+    "unknownCaller": "Processus inconnu",
+    "mayComeFrom": "Provient peut-être de",
+    "unverified": "{name} (non vérifié)",
+    "claims": "Se présente comme",
+    "footer": "Rien ne se passe tant que vous n’avez pas cliqué sur Autoriser. Chaque demande est confirmée séparément.",
+    "allow": "Autoriser",
+    "deny": "Refuser",
+    "expired": "Cette demande n’est plus en attente.",
+    "failed": "Impossible d’envoyer votre réponse. Réessayez."
+  },
   "settings": {
     "title": "Réglages",
     "sections": {

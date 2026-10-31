@@ -82,13 +82,5 @@
   "confirmation.unsupported": "pas un cask",
   "confirmation.deepLink": "lien profond",
   "confirmation.install": "installer",
-  "confirmation.installCollection": "installer la collection",
-  "mcpConfirm.install": "Une app d’IA a demandé à OpenNavo d’installer {name} ({target}).",
-  "mcpConfirm.uninstall": "Une app d’IA a demandé à OpenNavo de placer {name} dans la corbeille :\n{path}\n\nSeule l’app elle-même est déplacée. Ses fichiers associés restent en place.",
-  "mcpConfirm.requestedBy": "Demandé par : {caller}",
-  "mcpConfirm.unsigned": "Non signé · {path}",
-  "mcpConfirm.unknownCaller": "Processus inconnu",
-  "mcpConfirm.mayComeFrom": "Provient peut-être de : {name} (non vérifié)",
-  "mcpConfirm.claims": "Se présente comme : {name}",
-  "mcpConfirm.footer": "Rien ne se passe tant que vous n’avez pas cliqué sur Autoriser. Chaque demande est confirmée séparément."
+  "confirmation.installCollection": "installer la collection"
 }

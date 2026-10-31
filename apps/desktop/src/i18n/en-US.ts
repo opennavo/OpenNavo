@@ -876,6 +876,28 @@ const messages: MessageSchema = {
     empty: 'No records yet',
     duration: '{time}'
   },
+  mcpConfirm: {
+    title: 'Confirm a request from an AI app',
+    install: 'Install',
+    uninstall: 'Move to Trash',
+    introInstall: 'An AI app asked OpenNavo to install this app.',
+    introUninstall:
+      'An AI app asked OpenNavo to move this app to the Trash. Only the app itself is moved; its related files stay where they are.',
+    app: 'App',
+    target: 'Package',
+    path: 'Path',
+    requestedBy: 'Requested by',
+    unsigned: 'Unsigned · {path}',
+    unknownCaller: 'Unknown process',
+    mayComeFrom: 'May come from',
+    unverified: '{name} (unverified)',
+    claims: 'Claims to be',
+    footer: 'Nothing happens unless you click Allow. Each request is confirmed on its own.',
+    allow: 'Allow',
+    deny: 'Deny',
+    expired: 'This request is no longer waiting.',
+    failed: "Couldn't send your answer. Try again."
+  },
   settings: {
     title: 'Settings',
     sections: {

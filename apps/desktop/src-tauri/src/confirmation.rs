@@ -7,6 +7,7 @@
 //! desktop.
 
 use crate::{AppError, model::Locale, native_i18n};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
@@ -224,6 +225,76 @@ struct State {
     next_id: u64,
     active: Option<ActiveConfirmation>,
     grants: HashMap<String, ConfirmationGrant>,
+    prompt: Option<WindowPrompt>,
+}
+
+/// The confirmation shown in the OpenNavo window, answerable once through its one-time id.
+#[derive(Debug)]
+struct WindowPrompt {
+    dialog_id: u64,
+    view: McpConfirmView,
+    /// When the window first read its content; Allow is refused until [`ALLOW_ARM_DELAY`] after it.
+    shown_at: Option<Instant>,
+    reply: Option<oneshot::Sender<Result<ConfirmationGrant, AppError>>>,
+}
+
+/// Label of the Local MCP confirmation window; only it may read or answer a prompt.
+pub const MCP_CONFIRM_LABEL: &str = "mcp-confirm";
+
+/// Allow is not accepted until this long after the window showed its content (checked here, not in the UI).
+pub const ALLOW_ARM_DELAY: Duration = Duration::from_millis(1000);
+
+/// Trusted content of the Local MCP confirmation window, built in Rust and filtered for display.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfirmView {
+    /// One-time id the window answers with.
+    pub id: String,
+    /// `install` or `uninstall`.
+    pub action: String,
+    pub name: String,
+    /// Catalog target (`cask/iina`) or the app path.
+    pub target: String,
+    /// App bundle moved to the Trash (uninstall only).
+    pub path: Option<String>,
+    /// Signing authority of the requesting process, only when it is validly signed.
+    pub signer: Option<String>,
+    /// Executable of the requesting process.
+    pub caller_path: Option<String>,
+    /// Nearest `.app` ancestor, unverified.
+    pub may_come_from: Option<String>,
+    /// Self-reported client name.
+    pub claimed_name: Option<String>,
+    /// Milliseconds until Allow is accepted.
+    pub allow_after_ms: u32,
+}
+
+impl McpConfirmView {
+    /// Build a view, filtering every caller-influenced string for display.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        action: &str,
+        name: &str,
+        target: &str,
+        path: Option<&str>,
+        signer: Option<&str>,
+        caller_path: Option<&str>,
+        may_come_from: Option<&str>,
+        claimed_name: Option<&str>,
+    ) -> Self {
+        Self {
+            id: String::new(),
+            action: action.to_owned(),
+            name: display_value(name),
+            target: display_value(target),
+            path: path.map(display_value),
+            signer: signer.map(display_value),
+            caller_path: caller_path.map(display_value),
+            may_come_from: may_come_from.map(display_value),
+            claimed_name: claimed_name.map(display_value),
+            allow_after_ms: 0,
+        }
+    }
 }
 
 /// Single-slot native confirmation service. Keep this in app state so the later MCP broker can reuse the same
@@ -288,34 +359,30 @@ impl ConfirmationService {
         self.wait_for_reply(pending, receiver, guard).await
     }
 
-    /// Show a native dialog with a message the caller composed (Local MCP writes). The same single slot,
-    /// timeout and one-shot grant rules apply; `request` is what the grant binds to.
-    pub async fn confirm_message<R: Runtime>(
+    /// Ask in OpenNavo's own confirmation window (Local MCP writes). The window is created here, in
+    /// the app process, and its content is `view`, filtered for display. The same single slot, timeout
+    /// and one-shot grant rules apply; `request` is what the grant binds to. However the wait ends
+    /// (answer, timeout, revocation), the window is closed and the slot released.
+    pub async fn confirm_window<R: Runtime>(
         self: &std::sync::Arc<Self>,
         app: &tauri::AppHandle<R>,
         request: ConfirmationRequest,
-        message: String,
+        view: McpConfirmView,
     ) -> Result<ConfirmationGrant, AppError> {
-        let locale = app_locale(app);
         let pending = self.begin(request)?;
-        let (sender, receiver) = oneshot::channel();
-        let service = std::sync::Arc::clone(self);
         let dialog_id = pending.id;
+        let receiver = self.open_prompt(dialog_id, view)?;
         let guard = ConfirmationDropGuard::new(std::sync::Arc::clone(self), dialog_id);
-        show_confirmation(
-            app,
-            text(locale, "title")?,
-            message,
-            text(locale, "allow")?,
-            text(locale, "deny")?,
-            move |allowed| {
-                service.finish_reply(dialog_id, allowed, |result| {
-                    let _ = sender.send(result);
-                });
-            },
-        );
-
-        self.wait_for_reply(pending, receiver, guard).await
+        let result = match confirm_window::open(app, std::sync::Arc::clone(self)) {
+            Ok(()) => self.wait_for_reply(pending, receiver, guard).await,
+            Err(error) => {
+                drop(guard);
+                Err(error)
+            }
+        };
+        self.release_prompt(dialog_id);
+        confirm_window::close(app);
+        result
     }
 
     /// Show one native dialog for a collection. The request's plan digest binds the displayed plan to the
@@ -473,6 +540,112 @@ impl ConfirmationService {
         drop(active);
     }
 
+    fn open_prompt(
+        &self,
+        dialog_id: u64,
+        mut view: McpConfirmView,
+    ) -> Result<oneshot::Receiver<Result<ConfirmationGrant, AppError>>, AppError> {
+        let (sender, receiver) = oneshot::channel();
+        view.id = uuid::Uuid::new_v4().to_string();
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| AppError::new("E_UNKNOWN", "confirmation_state"))?;
+        state.prompt = Some(WindowPrompt {
+            dialog_id,
+            view,
+            shown_at: None,
+            reply: Some(sender),
+        });
+        Ok(receiver)
+    }
+
+    /// Content for the confirmation window. The first read starts the Allow delay.
+    pub fn window_view(&self) -> Option<McpConfirmView> {
+        let mut state = self.state.lock().ok()?;
+        let prompt = state.prompt.as_mut()?;
+        let shown_at = *prompt.shown_at.get_or_insert_with(Instant::now);
+        let mut view = prompt.view.clone();
+        view.allow_after_ms = ALLOW_ARM_DELAY
+            .saturating_sub(shown_at.elapsed())
+            .as_millis()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        Some(view)
+    }
+
+    /// Answer the window's prompt once. Allow is refused before the window showed its content for
+    /// [`ALLOW_ARM_DELAY`]; a stale or reused id is refused.
+    pub fn answer_window(&self, id: &str, allow: bool) -> Result<(), AppError> {
+        let (dialog_id, reply) = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| AppError::new("E_UNKNOWN", "confirmation_state"))?;
+            let Some(prompt) = state.prompt.as_mut().filter(|prompt| prompt.view.id == id) else {
+                return Err(AppError::new(
+                    "E_CONFIRMATION_EXPIRED",
+                    "confirmation_expired",
+                ));
+            };
+            if allow
+                && prompt
+                    .shown_at
+                    .is_none_or(|shown| shown.elapsed() < ALLOW_ARM_DELAY)
+            {
+                return Err(AppError::new(
+                    "E_CONFIRMATION_TOO_EARLY",
+                    "confirmation_too_early",
+                ));
+            }
+            let Some(reply) = prompt.reply.take() else {
+                return Err(AppError::new(
+                    "E_CONFIRMATION_EXPIRED",
+                    "confirmation_expired",
+                ));
+            };
+            (prompt.dialog_id, reply)
+        };
+        self.finish_reply(dialog_id, allow, |result| {
+            let _ = reply.send(result);
+        });
+        Ok(())
+    }
+
+    /// The window was closed (or failed): that is a refusal.
+    pub fn deny_window(&self) {
+        let pending = self.state.lock().ok().and_then(|mut state| {
+            let prompt = state.prompt.as_mut()?;
+            Some((prompt.dialog_id, prompt.reply.take()?))
+        });
+        if let Some((dialog_id, reply)) = pending {
+            self.finish_reply(dialog_id, false, |result| {
+                let _ = reply.send(result);
+            });
+        }
+    }
+
+    /// Forget the prompt and free the slot it holds; its window is being closed, so no late answer
+    /// can arrive.
+    fn release_prompt(&self, dialog_id: u64) {
+        if let Ok(mut state) = self.state.lock() {
+            if state
+                .prompt
+                .as_ref()
+                .is_some_and(|prompt| prompt.dialog_id == dialog_id)
+            {
+                state.prompt = None;
+            }
+            if state
+                .active
+                .as_ref()
+                .is_some_and(|active| active.id == dialog_id)
+            {
+                state.active = None;
+            }
+        }
+    }
+
     /// Withdraw the open confirmation from `caller` (Local MCP when a switch is turned off). The waiting
     /// request ends at once with `E_CONFIRMATION_INVALIDATED` and its grants are revoked. The native dialog
     /// cannot be dismissed programmatically, so, as with a timeout, the slot stays taken until it is
@@ -615,7 +788,7 @@ impl ConfirmationService {
     }
 }
 
-fn display_value(value: &str) -> String {
+pub(crate) fn display_value(value: &str) -> String {
     const MAX_DISPLAY_CHARS: usize = 512;
     let mut chars = value.chars().filter(|character| {
         !character.is_control() && !crate::mcp::protocol::is_hidden_text(*character)
@@ -629,6 +802,84 @@ fn display_value(value: &str) -> String {
         "(unknown)".into()
     } else {
         display
+    }
+}
+
+/// Creates and closes the Local MCP confirmation window (Tauri side).
+mod confirm_window {
+    use super::{ConfirmationService, MCP_CONFIRM_LABEL};
+    use crate::AppError;
+    use std::sync::Arc;
+    use tauri::{Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+
+    /// Only the bundled app page may load; no remote content, no outside links.
+    pub(super) fn allowed_navigation(url: &tauri::Url) -> bool {
+        match url.scheme() {
+            "tauri" => url.host_str() == Some("localhost"),
+            "http" | "https" => {
+                url.host_str() == Some("tauri.localhost")
+                    || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn open<R: Runtime>(
+        app: &tauri::AppHandle<R>,
+        service: Arc<ConfirmationService>,
+    ) -> Result<(), AppError> {
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            if let Some(stale) = handle.get_webview_window(MCP_CONFIRM_LABEL) {
+                let _ = stale.destroy();
+            }
+            let built = WebviewWindowBuilder::new(
+                &handle,
+                MCP_CONFIRM_LABEL,
+                WebviewUrl::App("index.html#/mcp-confirm".into()),
+            )
+            .title("OpenNavo")
+            .inner_size(480.0, 460.0)
+            .resizable(false)
+            .minimizable(false)
+            .maximizable(false)
+            .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            .skip_taskbar(true)
+            .center()
+            .focused(true)
+            .on_navigation(allowed_navigation)
+            .build();
+            match built {
+                Ok(window) => {
+                    let events = Arc::clone(&service);
+                    window.on_window_event(move |event| {
+                        if matches!(
+                            event,
+                            tauri::WindowEvent::CloseRequested { .. }
+                                | tauri::WindowEvent::Destroyed
+                        ) {
+                            events.deny_window();
+                        }
+                    });
+                    let _ = window.set_focus();
+                }
+                Err(error) => {
+                    log::warn!("Local MCP confirmation window unavailable: {error}");
+                    service.deny_window();
+                }
+            }
+        })
+        .map_err(|_| AppError::new("E_UNKNOWN", "confirmation_window"))
+    }
+
+    pub(super) fn close<R: Runtime>(app: &tauri::AppHandle<R>) {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(window) = handle.get_webview_window(MCP_CONFIRM_LABEL) {
+                let _ = window.destroy();
+            }
+        });
     }
 }
 
@@ -1267,5 +1518,129 @@ mod tests {
             let _ = sender.send(late);
         });
         assert!(service.begin(request).is_ok());
+    }
+
+    fn mcp_request() -> ConfirmationRequest {
+        let mut request = request("cask/iina");
+        request.caller = "local mcp".into();
+        request
+    }
+
+    fn view() -> McpConfirmView {
+        McpConfirmView::new(
+            "install",
+            "IINA\u{202E}",
+            "cask/iina",
+            None,
+            None,
+            Some("/opt/homebrew/bin/node\u{2028}"),
+            Some("Cursor"),
+            Some("cursor\u{200B}-vscode"),
+        )
+    }
+
+    #[test]
+    fn window_view_is_filtered_and_has_a_one_time_id() {
+        let service = ConfirmationService::default();
+        let pending = service.begin(mcp_request()).expect("begin");
+        let _receiver = service.open_prompt(pending.id, view()).expect("prompt");
+        let shown = service.window_view().expect("view");
+        assert_eq!(shown.name, "IINA");
+        assert_eq!(shown.caller_path.as_deref(), Some("/opt/homebrew/bin/node"));
+        assert_eq!(shown.claimed_name.as_deref(), Some("cursor-vscode"));
+        assert!(!shown.id.is_empty());
+        assert!(shown.allow_after_ms > 0 && shown.allow_after_ms <= 1000);
+    }
+
+    #[tokio::test]
+    async fn allow_is_refused_before_the_arm_delay_and_ids_are_single_use() {
+        let service = std::sync::Arc::new(ConfirmationService::default());
+        let pending = service.begin(mcp_request()).expect("begin");
+        let receiver = service.open_prompt(pending.id, view()).expect("prompt");
+        // Not shown yet: Allow is never accepted.
+        let id = service
+            .state
+            .lock()
+            .unwrap()
+            .prompt
+            .as_ref()
+            .unwrap()
+            .view
+            .id
+            .clone();
+        assert_eq!(
+            service.answer_window(&id, true).unwrap_err().code,
+            "E_CONFIRMATION_TOO_EARLY"
+        );
+        let shown = service.window_view().expect("view");
+        assert_eq!(
+            service.answer_window(&shown.id, true).unwrap_err().code,
+            "E_CONFIRMATION_TOO_EARLY"
+        );
+        assert_eq!(
+            service.answer_window("forged", false).unwrap_err().code,
+            "E_CONFIRMATION_EXPIRED"
+        );
+        service
+            .state
+            .lock()
+            .unwrap()
+            .prompt
+            .as_mut()
+            .unwrap()
+            .shown_at = Some(Instant::now() - ALLOW_ARM_DELAY);
+        service.answer_window(&shown.id, true).expect("allowed");
+        let grant = receiver.await.expect("reply").expect("grant");
+        service.consume(&grant, &mcp_request()).expect("consume");
+        assert_eq!(
+            service.answer_window(&shown.id, true).unwrap_err().code,
+            "E_CONFIRMATION_EXPIRED"
+        );
+    }
+
+    #[tokio::test]
+    async fn closing_the_window_denies_and_release_frees_the_slot() {
+        let service = std::sync::Arc::new(ConfirmationService::default());
+        let pending = service.begin(mcp_request()).expect("begin");
+        let id = pending.id;
+        let receiver = service.open_prompt(id, view()).expect("prompt");
+        service.deny_window();
+        assert_eq!(
+            receiver.await.expect("reply").unwrap_err().code,
+            "E_CONFIRMATION_DENIED"
+        );
+        service.release_prompt(id);
+        assert!(service.window_view().is_none());
+        assert!(
+            service.begin(request("cask/zed")).is_ok(),
+            "slot released for deep links"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoking_with_the_window_open_frees_the_slot_once_released() {
+        let service = std::sync::Arc::new(ConfirmationService::default());
+        let pending = service.begin(mcp_request()).expect("begin");
+        let id = pending.id;
+        let _receiver = service.open_prompt(id, view()).expect("prompt");
+        let shown = service.window_view().expect("view");
+        assert!(service.revoke_caller("local mcp"));
+        service.release_prompt(id);
+        assert_eq!(
+            service.answer_window(&shown.id, true).unwrap_err().code,
+            "E_CONFIRMATION_EXPIRED"
+        );
+        assert!(service.begin(request("cask/zed")).is_ok());
+    }
+
+    #[test]
+    fn the_window_only_navigates_to_the_bundled_app() {
+        use super::confirm_window::allowed_navigation;
+        let ok = |url: &str| allowed_navigation(&tauri::Url::parse(url).unwrap());
+        assert!(ok("tauri://localhost/index.html#/mcp-confirm"));
+        assert!(ok("http://tauri.localhost/index.html"));
+        assert!(!ok("https://example.com/"));
+        assert!(!ok("file:///etc/passwd"));
+        assert!(!ok("https://localhost.evil.com/"));
     }
 }
