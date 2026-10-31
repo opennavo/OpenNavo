@@ -686,6 +686,7 @@
     },
     "repo": {
       "stars": "★",
+      "starsBadge": "GitHub-Sterne: {count}",
       "checked": "Repository-Daten am {date} geprüft.",
       "updated": "Vor {days} Tag aktualisiert | Vor {days} Tagen aktualisiert",
       "unmaintained": "Wird möglicherweise nicht mehr gepflegt",

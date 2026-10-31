@@ -71,3 +71,20 @@ test('Detail tabs have independent URLs; unknown packages return 404', async ({ 
   const response = await page.goto('/apps/no-such-app-zz');
   expect(response?.status()).toBe(404);
 });
+
+test('Side column cards stack with a fixed gap, not stretched to main-column rows (#112)', async ({ page }) => {
+  for (const width of [1440, 1100]) {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoReady(page, '/zh/apps/visual-studio-code');
+    const side = page.getByTestId('package-overview-side');
+    await expect(side).toBeVisible();
+    const gaps = await side.evaluate(el => {
+      const cards = Array.from(el.children)
+        .map(child => child.getBoundingClientRect())
+        .filter(rect => rect.height > 0);
+      return cards.slice(1).map((rect, i) => Math.round(rect.top - cards[i]!.bottom));
+    });
+    expect(gaps.length).toBeGreaterThan(0);
+    for (const gap of gaps) expect(gap).toBeLessThanOrEqual(14);
+  }
+});

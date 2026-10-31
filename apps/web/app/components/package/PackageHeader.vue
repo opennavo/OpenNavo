@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { packageInstallState } from '@opennavo/shared';
-import { OnButton, OnIcon, OnPackageHeader, toPackageRepoSignals, useUiMessages } from '@opennavo/ui';
+import {
+  OnButton,
+  OnIcon,
+  OnPackageHeader,
+  OnPackageStarBadge,
+  toPackageRepoSignals,
+  toPackageStarBadge,
+  useUiMessages
+} from '@opennavo/ui';
 import type { OnPackageHeaderChip } from '@opennavo/ui';
 import { trackEvent } from '~/utils/analytics';
 import { httpsUrl, linkDownloadUrl, linkSource } from '~/utils/linkApp';
@@ -15,7 +23,7 @@ import { useToasts } from '~/composables/useToasts';
 // Homebrew) reads "paused", never "disabled", which only Homebrew's own disable earns.
 const props = defineProps<{ pkg: PackagePage; headingSuffix?: string }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const messages = useUiMessages();
 const localePath = useLocalePath();
 const NuxtLink = resolveComponent('NuxtLink');
@@ -34,6 +42,15 @@ const meta = computed(() => {
 
 const subtitle = computed(() => [props.pkg.developer, props.pkg.summary].filter(Boolean).join(' · '));
 const repoSignals = computed(() => toPackageRepoSignals(props.pkg));
+// GitHub star chip right of the source badge; hidden without a GitHub repository or a star count.
+const starBadge = computed(() => toPackageStarBadge(props.pkg, toAppLocale(locale.value)));
+const starAria = computed(() =>
+  starBadge.value
+    ? t('package.repo.starsBadge', {
+        count: new Intl.NumberFormat(toAppLocale(locale.value)).format(starBadge.value.stars)
+      })
+    : ''
+);
 const installState = computed(() => packageInstallState(props.pkg));
 const unavailable = computed(() => installState.value === 'disabled');
 const source = computed(() => officialSource(props.pkg));
@@ -122,6 +139,12 @@ const chips = computed<OnPackageHeaderChip[]>(() => {
   >
     <template #tags>
       <PackageSourceBadge v-if="source" :pkg="pkg" />
+      <OnPackageStarBadge
+        v-if="starBadge"
+        :label="starBadge.label"
+        :accessible-label="starAria"
+        :href="starBadge.href"
+      />
     </template>
     <template #actions>
       <template v-if="isLink">

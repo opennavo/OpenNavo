@@ -29,7 +29,8 @@ it('hydrates cached repository ages and maintenance badges from the server clock
     return () => h(OnPackageSpecCard, { rows: packageSpec(pkg, t, 'en-US', now.value).rows });
   });
   const html = await renderToString(createSSRApp(Card));
-  expect(html).toContain('Updated 365 days ago');
+  // #112 splits a link's last character into a no-wrap span with the arrow, so compare the text, not the markup.
+  expect(html.replace(/<[^>]+>/g, '')).toContain('Updated 365 days ago');
   expect(html).not.toContain('package.repo.unmaintained');
   const payload = Object.fromEntries(Object.entries(state).map(([key, value]) => [key, value.value]));
   vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));

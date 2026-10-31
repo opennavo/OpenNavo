@@ -212,3 +212,33 @@ it('preserves the desktop installed date after removing tap metadata', async () 
     wrapper.unmount();
   }
 });
+
+it('desktop header shows the GitHub star chip only with stars and a GitHub repository', async () => {
+  const { pinia, router } = await setup('/package/cask/source-example');
+  i18n.global.locale.value = 'en-US';
+  const withStars = {
+    ...detail(),
+    repository: { url: 'https://github.com/iina/iina', stars: 1234 }
+  } as unknown as PackageDetail;
+  const wrapper = mount(DetailHeader, {
+    props: { kind: 'cask', token: 'source-example', detail: withStars },
+    global: { plugins: [pinia, router, i18n] }
+  });
+  try {
+    const star = wrapper.get('[data-testid="package-star-badge"]');
+    expect(star.text().replace(/\s+/g, ' ')).toBe('★ 1.2K');
+    expect(star.attributes('href')).toBe('https://github.com/iina/iina');
+    expect(star.attributes('rel')).toBe('noopener noreferrer nofollow');
+    expect(star.attributes('aria-label')).toBe('GitHub stars 1,234');
+    expect(star.element.closest('[data-testid="package-header-tags"]')).not.toBeNull();
+    await wrapper.setProps({ detail: detail() });
+    expect(wrapper.find('[data-testid="package-star-badge"]').exists()).toBe(false);
+    await wrapper.setProps({
+      detail: { ...detail(), repository: { url: 'https://gitlab.com/a/b', stars: 9 } } as unknown as PackageDetail
+    });
+    expect(wrapper.find('[data-testid="package-star-badge"]').exists()).toBe(false);
+  } finally {
+    wrapper.unmount();
+    i18n.global.locale.value = 'zh-CN';
+  }
+});

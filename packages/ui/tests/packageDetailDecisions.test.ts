@@ -7,6 +7,33 @@ import OnPackageOverview from '../src/components/OnPackageOverview.vue';
 import { RouterLinkStub, withLocale } from './helpers';
 
 describe('Package detail product decisions', () => {
+  it('keeps the external-link arrow on the last character of a wrapped link (#112)', () => {
+    const wrapper = mount(OnPackageSpecCard, {
+      props: {
+        rows: [
+          {
+            key: 'home',
+            label: 'Home',
+            value: 'github.com/yuuichieguchi/Calyx',
+            href: 'https://github.com/yuuichieguchi/Calyx'
+          }
+        ]
+      },
+      global: withLocale('en-US')
+    });
+    try {
+      const link = wrapper.get('[data-testid="spec-link"]');
+      expect(link.text()).toBe('github.com/yuuichieguchi/Calyx');
+      expect(link.classes()).not.toContain('inline-flex');
+      const tail = link.get('[data-testid="spec-link-tail"]');
+      expect(tail.classes()).toContain('whitespace-nowrap');
+      expect(tail.text()).toBe('x');
+      expect(tail.find('svg').exists()).toBe(true);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('includes the repository aria-describedby association in SSR output', async () => {
     const context: { teleports?: Record<string, string> } = {};
     const html = await renderToString(
@@ -56,9 +83,7 @@ describe('Package detail product decisions', () => {
         expect(link.attributes('href')?.startsWith('https://')).toBe(true);
         expect(link.attributes('target')).toBe('_blank');
         expect(link.attributes('rel')).toBe('noopener noreferrer');
-        expect(link.classes()).toEqual(
-          expect.arrayContaining(['inline-flex', 'gap-4px', 'no-underline', 'hover:underline'])
-        );
+        expect(link.classes()).toEqual(expect.arrayContaining(['no-underline', 'hover:underline']));
         expect(link.find('svg').exists()).toBe(true);
       }
     } finally {
@@ -257,7 +282,7 @@ describe('Package detail product decisions', () => {
       wrapper.unmount();
     }
   });
-  it('stacks the side column beside the main column instead of below it', () => {
+  it('stacks the side column as one column beside the main column (#112)', () => {
     const wrapper = mount(OnPackageOverview, {
       props: { hasAbout: true, command: 'brew install --cask example' },
       slots: {
@@ -270,9 +295,14 @@ describe('Package detail product decisions', () => {
     try {
       const main = wrapper.get('[data-testid="package-overview-main"]');
       expect(main.classes()).toEqual(expect.arrayContaining(['lg:row-start-2', 'lg:row-end-5']));
-      const side = wrapper.get('#aside').element.parentElement!.parentElement!;
-      expect(side.className).toContain('lg:row-start-3');
-      expect(side.className).not.toMatch(/row-start-[4-9]/);
+      // #112: every side card lives in one wrapper spanning all rows, so no card shares a row height with the main column.
+      const side = wrapper.get('[data-testid="package-overview-side"]');
+      expect(side.classes()).toEqual(
+        expect.arrayContaining(['contents', 'lg:flex', 'lg:col-start-2', 'lg:row-start-1', 'lg:row-end-5'])
+      );
+      expect(side.element.contains(wrapper.get('#aside').element)).toBe(true);
+      expect(side.element.contains(wrapper.get('[data-testid="package-install-command"]').element)).toBe(true);
+      for (const child of Array.from(side.element.children)) expect(child.className).not.toMatch(/row-(start|end)-/);
     } finally {
       wrapper.unmount();
     }

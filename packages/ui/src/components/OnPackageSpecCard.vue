@@ -27,6 +27,16 @@ withDefaults(defineProps<OnPackageSpecCardProps>(), {
 });
 
 const isHttps = (href: string | undefined): href is string => Boolean(href && /^https:\/\//i.test(href));
+
+// #112: the external-link arrow stays glued to the last character, so a wrapped link keeps it at its end.
+const linkHead = (value?: string | null) =>
+  Array.from(value ?? '')
+    .slice(0, -1)
+    .join('');
+const linkTail = (value?: string | null) =>
+  Array.from(value ?? '')
+    .slice(-1)
+    .join('');
 </script>
 
 <template>
@@ -52,11 +62,13 @@ const isHttps = (href: string | undefined): href is string => Boolean(href && /^
             :href="row.href"
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex max-w-full items-center gap-4px text-ink-primary no-underline hover:underline"
-          >
-            <span class="min-w-0">{{ row.value }}</span>
-            <OnIcon name="lucide:arrow-up-right" :size="13" />
-          </a>
+            class="text-ink-primary no-underline hover:underline"
+            data-testid="spec-link"
+            >{{ linkHead(row.value)
+            }}<span class="whitespace-nowrap" data-testid="spec-link-tail"
+              >{{ linkTail(row.value)
+              }}<OnIcon class="ml-4px inline-block align-[-2px]" name="lucide:arrow-up-right" :size="13" /></span
+          ></a>
           <template v-else>{{ row.value }}</template>
           <span v-if="row.stars" class="inline-flex items-center gap-4px">
             <span aria-hidden="true"> · </span>

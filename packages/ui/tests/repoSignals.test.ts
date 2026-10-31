@@ -155,3 +155,27 @@ describe('repository signals', () => {
     ).toBe('archived');
   });
 });
+
+describe('header star badge', () => {
+  it('formats stars and links the GitHub repository', async () => {
+    const { toPackageStarBadge } = await import('../src/utils/repoSignals');
+    expect(
+      toPackageStarBadge({ repository: { url: 'https://github.com/iina/iina.git', stars: 46966 } }, 'en-US')
+    ).toEqual({ stars: 46966, label: '47K', href: 'https://github.com/iina/iina' });
+    expect(toPackageStarBadge({ repository: { url: 'https://github.com/a/b', stars: 1234 } })?.label).toBe('1.2K');
+    expect(toPackageStarBadge({ repository: { url: 'https://github.com/a/b', stars: 1_000_000 } })?.label).toBe('1M');
+    expect(toPackageStarBadge({ repository: { stars: 12 }, link: { github: { repo: 'owner/app' } } })?.href).toBe(
+      'https://github.com/owner/app'
+    );
+  });
+
+  it('hides without stars or without a GitHub repository', async () => {
+    const { toPackageStarBadge } = await import('../src/utils/repoSignals');
+    expect(toPackageStarBadge({ repository: { url: 'https://github.com/a/b' } })).toBeNull();
+    expect(toPackageStarBadge({ repository: { url: 'https://github.com/a/b', stars: null } })).toBeNull();
+    expect(toPackageStarBadge({ repository: { url: 'https://gitlab.com/a/b', stars: 10 } })).toBeNull();
+    expect(toPackageStarBadge({ repository: { url: 'http://github.com/a/b', stars: 10 } })).toBeNull();
+    expect(toPackageStarBadge({ homepage: 'https://example.com' })).toBeNull();
+    expect(toPackageStarBadge(null)).toBeNull();
+  });
+});

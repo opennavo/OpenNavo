@@ -492,6 +492,7 @@
     },
     "repo": {
       "stars": "★",
+      "starsBadge": "GitHub スター {count}",
       "updated": "{days} 日前に更新",
       "unmaintained": "メンテナンスが終了している可能性があります",
       "archived": "アーカイブ済み",
