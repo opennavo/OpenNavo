@@ -94,13 +94,17 @@ md.core.ruler.push('on_bot_links', state => {
   }
 });
 
+// Remote release/collection notes link to third-party pages: open them in new windows without opener access, and
+// mark them user-generated so search engines do not treat them as our endorsement.
+const EXTERNAL_REL = 'noopener noreferrer nofollow ugc';
+
 // Open external links in new windows without opener access.
 md.core.ruler.push('on_link_target', state => {
   for (const block of state.tokens) {
     for (const token of block.children ?? []) {
       if (token.type !== 'link_open') continue;
       token.attrSet('target', '_blank');
-      token.attrSet('rel', 'noopener noreferrer');
+      token.attrSet('rel', EXTERNAL_REL);
     }
   }
 });
@@ -115,7 +119,7 @@ md.renderer.rules.image = (tokens, index, options, env, self) => {
   const src = String(token?.attrGet('src') ?? '');
   const alt = self.renderInlineAsText(token?.children ?? [], options, env);
   const href = md.utils.escapeHtml(src);
-  return `<a href="${href}" target="_blank" rel="noopener noreferrer">${md.utils.escapeHtml(alt) || href}</a>`;
+  return `<a href="${href}" target="_blank" rel="${EXTERNAL_REL}">${md.utils.escapeHtml(alt) || href}</a>`;
 };
 
 /** Markdown → sanitized HTML string. */
@@ -167,7 +171,7 @@ export function sanitizeReleaseHtml(source: string, options: RenderMarkdownOptio
     }
     if (!/^https?:/i.test(link.getAttribute('href') ?? '')) link.removeAttribute('href');
     link.setAttribute('target', '_blank');
-    link.setAttribute('rel', 'noopener noreferrer');
+    link.setAttribute('rel', EXTERNAL_REL);
   }
   // Same ordered mapping as Markdown: the n-th distinct heading level found becomes headingLevel + n.
   const headings = [...fragment.querySelectorAll('h1, h2, h3, h4, h5, h6')];

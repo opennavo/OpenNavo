@@ -72,11 +72,15 @@ func checkStatus(status int, headers http.Header) error {
 	if status == 200 || status == 304 {
 		return nil
 	}
-	if (status == 403 || status == 429) && headers.Get("X-Ratelimit-Reset") != "" {
-		epoch, _ := strconv.ParseInt(headers.Get("X-Ratelimit-Reset"), 10, 64)
-		reset := time.Unix(epoch, 0)
-		if reset.Before(time.Now()) {
-			reset = time.Now().Add(time.Hour)
+	// GitHub sends X-RateLimit-Reset on every response, so a 403 is a rate limit only when the quota is
+	// spent or GitHub asks to retry later; other 403s (blocked or DMCA'd repositories) back off normally.
+	if status == 429 || (status == 403 && (headers.Get("X-Ratelimit-Remaining") == "0" || headers.Get("Retry-After") != "")) {
+		reset := time.Now().Add(time.Hour)
+		if epoch, err := strconv.ParseInt(headers.Get("X-Ratelimit-Reset"), 10, 64); err == nil && time.Unix(epoch, 0).After(time.Now()) {
+			reset = time.Unix(epoch, 0)
+		}
+		if seconds, err := strconv.Atoi(headers.Get("Retry-After")); err == nil && seconds > 0 {
+			reset = time.Now().Add(time.Duration(seconds) * time.Second)
 		}
 		return &RateLimitError{Reset: reset}
 	}

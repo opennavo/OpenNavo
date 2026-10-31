@@ -152,6 +152,43 @@ func TestReleaseTagNormalization(t *testing.T) {
 	require.NotEqual(t, VersionKey("2.0-beta1"), VersionKey("2.0"))
 }
 
+func TestPrereleaseTagsNeverJoinStableVersions(t *testing.T) {
+	for tag, want := range map[string]string{"v3.0-RC1": "3.0-rc1", "v1.5.0-Beta2": "1.5.0-beta2", "v2.0b3": "2.0b3",
+		"v1.0.0-pre.1": "1.0.0-pre.1", "v4.1-dev3": "4.1-dev3", "V1.0a1": "1.0a1", "v2.0.0-alpha": "2.0.0-alpha", "1.2.3": "1.2.3"} {
+		version := ReleaseVersion(tag, "owner/app")
+		require.Equal(t, want, version, tag)
+		if want != "1.2.3" {
+			require.True(t, IsPrereleaseVersion(version), tag)
+			require.NotEqual(t, VersionKey(strings.TrimRight(want[:len(want)-len(strings.TrimLeft(want, "0123456789."))], ".")), VersionKey(version), tag)
+		}
+	}
+	require.NotEqual(t, VersionKey("2.0"), VersionKey("2.0b3"))
+	require.Equal(t, VersionKey("3.0.0-RC1"), VersionKey("3.0-rc1"))
+
+	f := NewFetcher("test")
+	f.HTTP.Client.Transport = roundTrip(func(*http.Request) (*http.Response, error) {
+		return reply(200, `[{"tag_name":"v1.0.0","prerelease":true,"body":"candidate"},{"tag_name":"v2.0","body":"new"},{"tag_name":"2.0.0","body":"old duplicate"},{"tag_name":"v3.0-RC1","prerelease":true,"body":"rc"}]`), nil
+	})
+	result, err := f.Fetch(context.Background(), Candidate{}, FetchSource{Type: "github_releases", Config: map[string]any{"repo": "owner/app"}})
+	require.NoError(t, err)
+	got := []string{}
+	for _, release := range result.Releases {
+		got = append(got, release.Version+"="+release.Body)
+	}
+	require.Equal(t, []string{"1.0.0-prerelease=candidate", "2.0=new", "3.0-rc1=rc"}, got)
+}
+
+func TestForbiddenIsRateLimitOnlyWhenQuotaSpent(t *testing.T) {
+	reset := strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)
+	var rate *RateLimitError
+	require.False(t, errors.As(checkStatus(403, http.Header{"X-Ratelimit-Remaining": {"4000"}, "X-Ratelimit-Reset": {reset}}), &rate))
+	var status *StatusError
+	require.True(t, errors.As(checkStatus(403, http.Header{"X-Ratelimit-Remaining": {"4000"}, "X-Ratelimit-Reset": {reset}}), &status))
+	require.True(t, errors.As(checkStatus(403, http.Header{"X-Ratelimit-Remaining": {"0"}, "X-Ratelimit-Reset": {reset}}), &rate))
+	require.True(t, errors.As(checkStatus(403, http.Header{"Retry-After": {"30"}}), &rate))
+	require.True(t, errors.As(checkStatus(429, http.Header{}), &rate))
+}
+
 func TestResolveGitHubReleasesFromVerifiedRepo(t *testing.T) {
 	r := NewResolver("test")
 	r.Client.Transport = roundTrip(func(*http.Request) (*http.Response, error) {
