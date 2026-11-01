@@ -69,12 +69,64 @@ impl History {
     fn acknowledge(&mut self, activity: &Activity, reporting_day: &str) {
         self.sent
             .insert(reporting_day.to_owned(), activity.version.clone());
+        self.forget(activity);
+    }
+    /// Remove one activity the server refuses to ever accept. Keeping it at the head of the
+    /// outbox would stop every later record from being sent.
+    fn forget(&mut self, activity: &Activity) {
         self.pending
             .retain(|a| a.occurred_at != activity.occurred_at || a.version != activity.version);
     }
     fn save(&self, core: &DesktopCore) -> Result<(), AppError> {
         core.database
             .set_meta(HISTORY_KEY, &serde_json::to_string(self)?)
+    }
+}
+
+/// One activity's result, which decides whether the tick keeps going.
+enum Attempt {
+    /// The server accepted the activity and named the day to acknowledge.
+    Acknowledged(String),
+    /// The server checked the record and refused it with 400. The same record fails the same way on
+    /// every later tick, so keeping it would block everything behind it.
+    Rejected,
+    /// The service is unavailable, not the record: transport error, 5xx, 429, or a server too old to
+    /// name the reporting day. The batch is kept for the next minute.
+    Unavailable(AppError),
+}
+
+async fn attempt(client: &reqwest::Client, url: &str, activity: &Activity) -> Attempt {
+    static REDIRECT_NOTICED: std::sync::Once = std::sync::Once::new();
+    let response = match client.post(url).json(activity).send().await {
+        Ok(response) => response,
+        Err(error) => return Attempt::Unavailable(error.into()),
+    };
+    if response.url().as_str() != url {
+        // A redirect in front of the API is followed, bounded like the catalog sync. Say it once, not
+        // once a minute, so a changed endpoint stays visible without filling the log.
+        REDIRECT_NOTICED.call_once(|| {
+            log::info!("usage endpoint redirected to {}", response.url());
+        });
+    }
+    let status = response.status();
+    if status == reqwest::StatusCode::BAD_REQUEST {
+        return Attempt::Rejected;
+    }
+    if status != reqwest::StatusCode::NO_CONTENT {
+        return Attempt::Unavailable(
+            AppError::new("E_NETWORK", "usage_unavailable")
+                .with_detail(format!("status {}", status.as_u16())),
+        );
+    }
+    match response
+        .headers()
+        .get("X-Usage-Day")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| {
+            value.len() == 10 && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+        }) {
+        Some(day) => Attempt::Acknowledged(day.to_owned()),
+        None => Attempt::Unavailable(AppError::new("E_NETWORK", "usage_day_missing")),
     }
 }
 
@@ -96,25 +148,45 @@ async fn tick(
         history.save(core)?;
     }
     for activity in history.pending.clone() {
-        let response = client.post(url).json(&activity).send().await?;
-        if response.status() != reqwest::StatusCode::NO_CONTENT {
-            break;
+        match attempt(client, url, &activity).await {
+            Attempt::Acknowledged(day) => {
+                history.acknowledge(&activity, &day);
+                history.save(core)?;
+            }
+            // Retaining a refused record repeats the same refusal every minute, and while it sits in
+            // the outbox nothing behind it is sent: one unsendable record, such as an activity older
+            // than the server's seven-day window or newer than its five-minute skew allowance, would
+            // end this installation's reporting for good once the local window prunes the rest.
+            // Dropping just that record keeps the remaining days and every later tick working.
+            Attempt::Rejected => {
+                log::warn!(
+                    "usage activity rejected: occurred_at={} version={}",
+                    activity.occurred_at.to_rfc3339(),
+                    activity.version
+                );
+                history.forget(&activity);
+                history.save(core)?;
+            }
+            Attempt::Unavailable(error) => {
+                log::warn!(
+                    "usage report unavailable: {} {}",
+                    error.code,
+                    error.detail.as_deref().unwrap_or(&error.message)
+                );
+                return Ok(());
+            }
         }
-        let Some(acknowledged_day) = response
-            .headers()
-            .get("X-Usage-Day")
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| {
-                value.len() == 10 && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-            })
-        else {
-            // Older/malformed responses cannot safely acknowledge a client-clock date.
-            break;
-        };
-        history.acknowledge(&activity, acknowledged_day);
-        history.save(core)?;
     }
     Ok(())
+}
+
+fn build_client() -> Result<reqwest::Client, AppError> {
+    Ok(reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        // Bounded like the catalog sync: a redirect placed in front of the API must not silently end
+        // usage reporting while every other screen keeps working.
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()?)
 }
 
 pub fn start(core: &Arc<DesktopCore>, version: String) {
@@ -124,11 +196,8 @@ pub fn start(core: &Arc<DesktopCore>, version: String) {
     }
     let weak = Arc::downgrade(core);
     tauri::async_runtime::spawn(async move {
-        let Ok(client) = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-        else {
+        let Ok(client) = build_client() else {
+            log::warn!("usage client could not be created");
             return;
         };
         let url = format!(
@@ -142,8 +211,11 @@ pub fn start(core: &Arc<DesktopCore>, version: String) {
             if core.queue.is_stopping() {
                 break;
             }
-            // Errors are deliberately silent; the bounded outbox retries next minute.
-            let _ = tick(&core, &client, &url, Utc::now(), &version).await;
+            // A failed tick keeps the outbox for the next minute; the log line is what makes a run of
+            // failures visible, since nothing else in the app depends on this report.
+            if let Err(error) = tick(&core, &client, &url, Utc::now(), &version).await {
+                log::warn!("usage tick failed: {} ({})", error.code, error.message);
+            }
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
     });
@@ -153,6 +225,261 @@ pub fn start(core: &Arc<DesktopCore>, version: String) {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use std::io::{Read, Write};
+
+    /// An HTTP fixture that answers up to `requests` connections and records the request bodies, so
+    /// a test can see exactly which activities the client sent. It stops early rather than waiting
+    /// forever for a request the client no longer makes.
+    fn serve(
+        requests: usize,
+        answer: impl Fn(usize, &serde_json::Value) -> String + Send + 'static,
+    ) -> (String, std::thread::JoinHandle<Vec<serde_json::Value>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/usage/activity", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while bodies.len() < requests && std::time::Instant::now() < deadline {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buf[..n]);
+                    if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let header = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
+                        let length: usize = header
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:"))
+                            .unwrap()
+                            .trim()
+                            .parse()
+                            .unwrap();
+                        if bytes.len() >= end + 4 + length {
+                            let body: serde_json::Value =
+                                serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+                            stream
+                                .write_all(answer(bodies.len(), &body).as_bytes())
+                                .unwrap();
+                            bodies.push(body);
+                            break;
+                        }
+                    }
+                }
+            }
+            bodies
+        });
+        (url, server)
+    }
+
+    fn no_content(at: &serde_json::Value) -> String {
+        let at: DateTime<Utc> = at["occurredAt"].as_str().unwrap().parse().unwrap();
+        format!(
+            "HTTP/1.1 204 No Content\r\nX-Usage-Day: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            day(at)
+        )
+    }
+
+    fn open_core(tmp: &tempfile::TempDir) -> Arc<DesktopCore> {
+        DesktopCore::open(
+            tmp.path().join("data"),
+            tmp.path().join("cache"),
+            tmp.path().join("askpass"),
+            Arc::new(|_| {}),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_rejected_activity_is_dropped_and_the_batch_continues() {
+        // The server refuses a record dated in its future, as it does for a clock running more than
+        // five minutes ahead. The same record fails the same way on every later tick, so it must not
+        // stand between the day behind it and the server.
+        let (url, server) = serve(2, |index, body| {
+            assert_eq!(body.as_object().unwrap().len(), 5);
+            if index == 0 {
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_owned()
+            } else {
+                no_content(body)
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        let id = History::load(&core).unwrap().id;
+        // Today's record is the one the server refuses (a clock running ahead of the server), and the
+        // record for the day before it is still waiting behind it.
+        let pending = vec![
+            Activity {
+                anonymous_id: id.clone(),
+                platform: "desktop".into(),
+                occurred_at: now - chrono::Duration::seconds(1),
+                version: "0.1.4".into(),
+                locale: "en-US".into(),
+            },
+            Activity {
+                anonymous_id: id.clone(),
+                platform: "desktop".into(),
+                occurred_at: now - chrono::Duration::days(3),
+                version: "0.1.3".into(),
+                locale: "en-US".into(),
+            },
+        ];
+        History {
+            id,
+            sent: BTreeMap::new(),
+            pending,
+        }
+        .save(&core)
+        .unwrap();
+
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let delivered = server.join().unwrap();
+        assert_eq!(
+            delivered.len(),
+            2,
+            "the refused record did not end the batch"
+        );
+        assert_eq!(
+            delivered[1]["version"], "0.1.3",
+            "the record behind the rejection was sent"
+        );
+        let history = History::load(&core).unwrap();
+        assert!(
+            !history.pending.iter().any(|a| a.version == "0.1.3"),
+            "the delivered record is acknowledged"
+        );
+        assert!(
+            !history.pending.iter().any(|a| a.version == "0.1.4"),
+            "the refused record is dropped rather than retried every minute"
+        );
+
+        // The next tick records the day again with its current timestamp instead of repeating the same
+        // refusal, which is what keeps this installation reporting at all.
+        let (url, server) = serve(1, |_, body| no_content(body));
+        tick(
+            &core,
+            &client,
+            &url,
+            now + chrono::Duration::minutes(1),
+            "0.1.4",
+        )
+        .await
+        .unwrap();
+        let delivered = server.join().unwrap();
+        assert_eq!(
+            delivered.len(),
+            1,
+            "the next tick is not stuck on the refused record"
+        );
+        assert_eq!(delivered[0]["version"], "0.1.4");
+        let next = now + chrono::Duration::minutes(1);
+        let at: DateTime<Utc> = delivered[0]["occurredAt"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            at >= next && at <= next + chrono::Duration::minutes(5),
+            "the next report carries the current time"
+        );
+        assert!(History::load(&core).unwrap().pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_server_failure_keeps_the_outbox_for_the_next_tick() {
+        let (url, server) = serve(1, |_, _| {
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_owned()
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.3").await.unwrap();
+        server.join().unwrap();
+        let history = History::load(&core).unwrap();
+        assert_eq!(
+            history.pending.len(),
+            1,
+            "an unavailable service keeps the record"
+        );
+        assert!(history.sent.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_redirected_endpoint_is_followed() {
+        let target = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let target_url = format!("http://{}/usage/activity", target.local_addr().unwrap());
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/usage/activity", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            // The API moved behind a redirect; the client must follow it rather than treat 3xx as final.
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf).unwrap();
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 308 Permanent Redirect\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        target_url
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            let (mut stream, _) = target.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buf[..n]);
+                if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
+                    let length: usize = header
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .unwrap()
+                        .trim()
+                        .parse()
+                        .unwrap();
+                    if bytes.len() >= end + 4 + length {
+                        let body: serde_json::Value =
+                            serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+                        stream.write_all(no_content(&body).as_bytes()).unwrap();
+                        return;
+                    }
+                }
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, Utc::now(), "0.1.3")
+            .await
+            .unwrap();
+        server.join().unwrap();
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.pending.is_empty(),
+            "the redirected 204 acknowledges the record"
+        );
+    }
 
     #[test]
     fn background_daily_dedup_midnight_version_and_bounded_offline_history() {
