@@ -399,25 +399,156 @@ mod tests {
         assert!(History::load(&core).unwrap().pending.is_empty());
     }
 
-    #[tokio::test]
-    async fn a_server_failure_keeps_the_outbox_for_the_next_tick() {
-        let (url, server) = serve(1, |_, _| {
-            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                .to_owned()
+    /// A status the retry classifier treats as "the service, not the record". The client must keep the
+    /// whole outbox and try again on the next tick instead of dropping anything.
+    async fn an_unavailable_status_keeps_the_whole_batch(status: &'static str) {
+        let (url, server) = serve(1, move |_, _| {
+            format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
         let now = Utc::now();
+        seed_two_days(&core, now);
         let client = build_client().unwrap();
-        tick(&core, &client, &url, now, "0.1.3").await.unwrap();
-        server.join().unwrap();
-        let history = History::load(&core).unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let delivered = server.join().unwrap();
         assert_eq!(
-            history.pending.len(),
+            delivered.len(),
             1,
-            "an unavailable service keeps the record"
+            "an unavailable service stops the batch at the first record"
         );
-        assert!(history.sent.is_empty());
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.sent.is_empty(),
+            "no record is acknowledged by a {status}"
+        );
+        // Both records are still there: today's, and the one behind it the client never reached.
+        for version in ["0.1.4", "0.1.3"] {
+            assert!(
+                history.pending.iter().any(|a| a.version == version),
+                "{version} is kept for the next tick after {status}"
+            );
+        }
+
+        // The next tick sends both, so nothing was lost by waiting.
+        let (url, server) = serve(2, |_, body| no_content(body));
+        tick(
+            &core,
+            &client,
+            &url,
+            now + chrono::Duration::minutes(1),
+            "0.1.4",
+        )
+        .await
+        .unwrap();
+        let delivered = server.join().unwrap();
+        assert_eq!(
+            delivered.len(),
+            2,
+            "the next tick resends the whole batch after {status}"
+        );
+        assert!(History::load(&core).unwrap().pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_server_failure_keeps_the_whole_batch() {
+        an_unavailable_status_keeps_the_whole_batch("503 Service Unavailable").await;
+    }
+
+    #[tokio::test]
+    async fn a_rate_limited_request_keeps_the_whole_batch() {
+        // 429 is the server asking for less traffic, not refusing the record: it must be retried.
+        an_unavailable_status_keeps_the_whole_batch("429 Too Many Requests").await;
+    }
+
+    #[tokio::test]
+    async fn a_record_the_server_rejects_is_not_sent_again_on_the_next_tick() {
+        // USAGE-039: one record the server will never accept must not become permanent silence. The
+        // first tick drops it, and the next tick must not repeat it: it reports the current day only.
+        let (url, server) = serve(1, |_, _| {
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_owned()
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        server.join().unwrap();
+        let after_rejection = History::load(&core).unwrap();
+        assert!(
+            !after_rejection.pending.iter().any(|a| a.version == "0.1.4"),
+            "the rejected record is dropped at once"
+        );
+        assert!(
+            after_rejection.pending.iter().any(|a| a.version == "0.1.3"),
+            "the record behind the rejection is still waiting"
+        );
+
+        // Reject everything the next tick sends, so a repeated bad record would show up as another 400
+        // instead of being hidden by an acknowledgement.
+        let (url, server) = serve(2, |_, _| {
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_owned()
+        });
+        let next = now + chrono::Duration::minutes(1);
+        tick(&core, &client, &url, next, "0.1.4").await.unwrap();
+        let delivered = server.join().unwrap();
+        let rejected_at = (now - chrono::Duration::seconds(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        // The rejected record is this run's `0.1.4` at `now`; the only `0.1.4` the next tick may send is
+        // the fresh record it writes for the new day, dated at `next` or later.
+        assert!(
+            !delivered.iter().any(|body| {
+                body["version"] == "0.1.4"
+                    && body["occurredAt"]
+                        .as_str()
+                        .unwrap()
+                        .parse::<DateTime<Utc>>()
+                        .unwrap()
+                        < next
+            }),
+            "the rejected 0.1.4 record at {rejected_at} is not sent again"
+        );
+        assert!(
+            delivered.iter().any(|body| body["version"] == "0.1.3"),
+            "the record behind the rejected one is reached on the next tick"
+        );
+        // Reporting resumes with a fresh record for the current day, which is what USAGE-039 protects:
+        // dropping the one unaccepted record must not end this installation's reporting.
+        assert!(
+            delivered.iter().any(|body| body["version"] == "0.1.4"),
+            "the next tick still reports the current day"
+        );
+    }
+
+    /// A stored outbox whose first record is today's and whose second is three days old, so a test
+    /// can see whether a failure at the head leaves the record behind it alone.
+    fn seed_two_days(core: &DesktopCore, now: DateTime<Utc>) -> String {
+        let id = History::load(core).unwrap().id;
+        let pending = vec![
+            Activity {
+                anonymous_id: id.clone(),
+                platform: "desktop".into(),
+                occurred_at: now - chrono::Duration::seconds(1),
+                version: "0.1.4".into(),
+                locale: "en-US".into(),
+            },
+            Activity {
+                anonymous_id: id.clone(),
+                platform: "desktop".into(),
+                occurred_at: now - chrono::Duration::days(3),
+                version: "0.1.3".into(),
+                locale: "en-US".into(),
+            },
+        ];
+        History {
+            id: id.clone(),
+            sent: BTreeMap::new(),
+            pending,
+        }
+        .save(core)
+        .unwrap();
+        id
     }
 
     #[tokio::test]
