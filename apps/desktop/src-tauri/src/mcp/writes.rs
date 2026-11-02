@@ -1,4 +1,5 @@
-//! App-side Local MCP write tools: `install_app` and `uninstall_app`.
+//! App-side Local MCP write tools: `install_app`, `uninstall_app` and
+//! `clean_cache`.
 //!
 //! Every write goes through the same steps, in order:
 //! 1. The audit log must be writable, otherwise the write is refused.
@@ -26,7 +27,7 @@ use super::{
 };
 use crate::{
     AppError,
-    confirmation::{ConfirmationRequest, ConfirmationService, McpConfirmView},
+    confirmation::{ConfirmationRequest, ConfirmationService, McpConfirmView, display_value},
     core::DesktopCore,
     model::{TaskKind, TaskTarget, TaskTrigger},
     queue::ResolvedInstallPlan,
@@ -57,10 +58,51 @@ enum Plan {
         path: String,
         name: String,
     },
+    Clean {
+        report_id: String,
+        item_ids: Vec<String>,
+        digest: String,
+        view: Box<McpConfirmView>,
+    },
+}
+
+/// The cleanup rule, applied to a selection that arrives with a report id.
+///
+/// The scan tool already left unreachable items out of its answer, but a report
+/// id outlives one conversation: an older report (from before a rule change, or
+/// from a scan the client only half read) is still selectable by id. So the rule
+/// runs again here, on the report the grant will actually execute against.
+fn plan_clean_selection(
+    report: &crate::cleanup::types::CleanupReport,
+    ids: &[String],
+) -> Result<(), AppError> {
+    let chosen = super::cleanup::check_selection(report, ids).map_err(selection_error)?;
+    if chosen.is_empty() {
+        return Err(AppError::new("E_INVALID_ARG", "item_ids"));
+    }
+    Ok(())
 }
 
 fn tool_error(error: AppError) -> ToolError {
     ToolError::new(error.code, error.message)
+}
+
+/// A selection the cleanup rule refuses, as a tool error. The message names no
+/// path: the caller is told which id it may not use, not what is on disk.
+fn selection_error(error: super::cleanup::SelectionError) -> AppError {
+    use super::cleanup::SelectionError;
+    match error {
+        SelectionError::NotRemovable(id) => AppError::new(
+            "E_NOT_REMOVABLE",
+            format!(
+                "clean_cache cannot remove item {id}: it is not a regenerable cache, or the scan could not measure it completely."
+            ),
+        ),
+        SelectionError::Duplicate(id) => {
+            AppError::new("E_INVALID_ARG", format!("item {id} is named twice"))
+        }
+        SelectionError::Empty => AppError::new("E_INVALID_ARG", "no items selected"),
+    }
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -97,6 +139,7 @@ impl Writes {
             plan_digest: match &plan {
                 Plan::Install { plan, .. } => Some(plan.digest()),
                 Plan::Uninstall { plan_id, .. } => Some(plan_id.clone()),
+                Plan::Clean { digest, .. } => Some(digest.clone()),
             },
         };
         let service = match self.confirmation() {
@@ -188,7 +231,40 @@ impl Writes {
         match request {
             WriteRequest::Install { kind, token } => self.plan_install(kind, token).await,
             WriteRequest::Uninstall { path } => self.plan_uninstall(path).await,
+            WriteRequest::Clean {
+                report_id,
+                item_ids,
+            } => self.plan_clean(report_id, item_ids).await,
         }
+    }
+
+    /// Plan a cleanup. The engine builds the very view the user will see, and
+    /// the digest of that selection travels with the grant, so the list in the
+    /// dialog is the list that runs.
+    async fn plan_clean(&self, report_id: &str, item_ids: &[String]) -> Result<Plan, ToolError> {
+        let engine = self.core.queue.cleanup_engine.clone();
+        let report_id = report_id.to_owned();
+        let item_ids = item_ids.to_vec();
+        let (digest, view) = {
+            let engine = engine.clone();
+            let report_id = report_id.clone();
+            let item_ids = item_ids.clone();
+            crate::blocking(move || {
+                let entry = engine.cached(&report_id, crate::uninstall::now())?;
+                // The same rule the scan tool applied, checked again here: a client
+                // could have kept ids from an older report, or never seen this one.
+                plan_clean_selection(&entry.report, &item_ids)?;
+                engine.confirm_plan(&report_id, &item_ids)
+            })
+            .await
+            .map_err(tool_error)?
+        };
+        Ok(Plan::Clean {
+            report_id,
+            item_ids,
+            digest,
+            view: Box::new(view),
+        })
     }
 
     async fn plan_install(&self, kind: &str, token: &str) -> Result<Plan, ToolError> {
@@ -387,6 +463,29 @@ impl Writes {
                     json!({ "status": "queued", "movesToTrash": [path], "task": task }),
                 ))
             }
+            Plan::Clean {
+                report_id,
+                item_ids,
+                digest,
+                ..
+            } => {
+                if !(context.still_valid)() {
+                    return Err(invalidated());
+                }
+                let queue = self.core.queue.clone();
+                let engine = queue.cleanup_engine.clone();
+                let task = crate::blocking(move || {
+                    // The grant the user gave is the digest of the list the
+                    // dialog showed; the engine refuses if the selection moved.
+                    engine.enqueue_confirmed(&queue, &report_id, item_ids, &digest)
+                })
+                .await
+                .map_err(tool_error)?;
+                Ok((
+                    format!("queued:{}", task.id),
+                    json!({ "status": "queued", "task": task }),
+                ))
+            }
         }
     }
 
@@ -503,6 +602,19 @@ fn confirm_view(plan: &Plan, identity: &Identity) -> McpConfirmView {
     let caller = &identity.caller;
     let signer = caller.signer.as_deref().filter(|_| caller.signed);
     match plan {
+        // The cleanup engine builds its own list (paths, sizes, irreversibility),
+        // the same one OpenNavo's own window shows. An AI app asked for it, so the
+        // origin says `mcp` and the caller is added here: the window keeps the
+        // file-list layout and still names who asked.
+        Plan::Clean { view, .. } => McpConfirmView {
+            origin: "mcp".into(),
+            signer: signer.map(display_value),
+            team_id: caller.team_id.as_deref().map(display_value),
+            caller_path: caller.path.as_deref().map(display_value),
+            may_come_from: caller.may_come_from.as_deref().map(display_value),
+            claimed_name: caller.claimed_name.as_deref().map(display_value),
+            ..view.as_ref().clone()
+        },
         Plan::Install { plan, name } => {
             let target = plan.command_target();
             McpConfirmView::new(
@@ -704,5 +816,122 @@ mod tests {
         );
         let json = serde_json::to_string(&unsigned).expect("json");
         assert!(!json.contains("\"pid\""));
+    }
+
+    #[test]
+    fn a_cleanup_asked_for_over_mcp_still_names_who_asked() {
+        // The engine builds the confirmation as OpenNavo's own request (`origin:
+        // "app"`), with no caller fields. Shown unchanged, an AI app's cleanup
+        // would look like something OpenNavo decided to do by itself.
+        let report = cleanup_report();
+        // Exactly what `Engine::confirm_plan` builds: OpenNavo's own layout.
+        let engine_view = McpConfirmView::app_action(
+            "cleanup",
+            "",
+            vec![crate::confirmation::ConfirmItemView::row(
+                "g",
+                "/Users/me/Library/Caches/cache",
+            )],
+            1,
+            Some(1024),
+        );
+        assert_eq!(engine_view.origin, "app");
+        let plan = Plan::Clean {
+            report_id: report.report_id.clone(),
+            item_ids: vec!["cache".into()],
+            digest: "d".into(),
+            view: Box::new(engine_view),
+        };
+        let view = confirm_view(&plan, &Identity { caller: caller(true) });
+        assert_eq!(view.origin, "mcp", "an AI app asked for this cleanup");
+        assert!(
+            view.signer.as_deref().is_some_and(|s| s.contains("Example Inc")),
+            "the window must still name the caller"
+        );
+        assert_eq!(view.team_id.as_deref(), Some("ABCDE12345"));
+        assert_eq!(view.action, "cleanup");
+    }
+
+    fn cleanup_report() -> crate::cleanup::types::CleanupReport {
+        use crate::cleanup::types::{
+            CategoryReport, CleanupCategory, CleanupGroup, CleanupItem, CleanupItemKind,
+            CleanupReason, CleanupRisk, CleanupVolume,
+        };
+        let item = |id: &str, reason, mode| CleanupItem {
+            id: id.into(),
+            path: format!("/Users/me/Library/Caches/{id}"),
+            kind: CleanupItemKind::Dir,
+            command: None,
+            size_bytes: Some(1024),
+            size_complete: true,
+            kept_open_files: 0,
+            modified_at: None,
+            reason,
+            selected: false,
+            delete_mode: mode,
+            needs_admin: false,
+            note: None,
+        };
+        let category = |key, risk, items| CategoryReport {
+            key,
+            risk,
+            bytes: 1024,
+            complete: true,
+            groups: vec![CleanupGroup {
+                id: "g".into(),
+                title: "g".into(),
+                subtitle: None,
+                app_id: None,
+                bundle_id: None,
+                items,
+            }],
+            skipped: vec![],
+        };
+        crate::cleanup::types::CleanupReport {
+            report_id: "r".into(),
+            scanned_at: 0,
+            expires_at: i64::MAX,
+            volume: CleanupVolume {
+                name: "synthetic".into(),
+                total_bytes: 1,
+                free_bytes: 0,
+            },
+            categories: vec![
+                category(
+                    CleanupCategory::AppCaches,
+                    CleanupRisk::Rebuildable,
+                    vec![item("cache", CleanupReason::CacheDir, DeleteMode::Trash)],
+                ),
+                category(
+                    CleanupCategory::Trash,
+                    CleanupRisk::Review,
+                    vec![item("trash", CleanupReason::Trash, DeleteMode::Trash)],
+                ),
+            ],
+            incomplete: vec![],
+        }
+    }
+
+    #[test]
+    fn a_cleanup_selection_is_checked_against_the_report_that_will_execute() {
+        // The scan tool hides unreachable items, but a report id outlives the
+        // conversation: a client can name an id it never saw. The rule must run
+        // again here, against the same report the grant is bound to.
+        let report = cleanup_report();
+        assert!(plan_clean_selection(&report, &["cache".into()]).is_ok());
+        assert_eq!(
+            plan_clean_selection(&report, &["trash".into()]).unwrap_err().code,
+            "E_NOT_REMOVABLE"
+        );
+        assert_eq!(
+            plan_clean_selection(&report, &["cache".into(), "cache".into()])
+                .unwrap_err()
+                .code,
+            "E_INVALID_ARG"
+        );
+        assert_eq!(
+            plan_clean_selection(&report, &[]).unwrap_err().code,
+            "E_INVALID_ARG"
+        );
     }
 }

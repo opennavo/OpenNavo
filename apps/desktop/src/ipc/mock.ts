@@ -495,7 +495,30 @@ export function installMockIpc(
           bytes: null,
           permanent: false
         }
-      : flags.has('deeplink-confirm-install')
+      : flags.has('mcp-confirm-cleanup')
+        ? {
+            id: 'confirm-5',
+            action: 'cleanup',
+            name: '',
+            target: '',
+            path: null,
+            signer: 'Developer ID Application: Anthropic PBC',
+            teamId: 'Q6L2SF6YDW',
+            callerPath: '/Applications/Claude.app/Contents/Helpers/node',
+            mayComeFrom: 'Claude',
+            claimedName: 'claude-ai',
+            allowAfterMs: 1000,
+            origin: 'mcp',
+            source: null,
+            items: [
+              { name: 'Xcode DerivedData', target: '/Users/mock/Library/Developer/Xcode/DerivedData', skip: null, note: null },
+              { name: 'logs', target: '/Users/mock/Library/Logs/DiagnosticReports', skip: null, note: 'cleanupGroup' }
+            ],
+            installCount: 2,
+            bytes: 2048,
+            permanent: false
+          }
+        : flags.has('deeplink-confirm-install')
         ? {
             id: 'confirm-3',
             action: 'install',
