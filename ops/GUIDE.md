@@ -299,11 +299,16 @@ points `receiver/current` at it. It hands the payload to the receiver through a
 pipe and never through a file, because the payload carries the registry token.
 
 Before switching, it asks the staged receiver `--probe`. That entry point imports
-the receiver, reads the host configuration and confirms its lock path is usable,
-then stops — it takes no lock, reads no payload and edits nothing. Asking `main()`
-the same question instead would be a real edit: `main()` sweeps stale temporary
-files *before* it reads standard input, and it needs the lock, so a deployment that
-was merely running would make a healthy receiver look broken.
+the receiver, reads the host configuration and takes its lock, then stops — it
+sweeps nothing, reads no payload and changes nothing. It answers **0** when it can
+start, **2** when another deployment holds the lock, and anything else for a real
+failure. Busy gets its own code because `main()` exits 1 both for a lock it cannot
+take and for every other failure; a success/failure pair would report a running
+deployment as a broken receiver.
+
+`--probe` is not the main guard against a receiver that cannot load. `py_compile`
+and `--self-check` run first and catch that; the probe adds the host configuration
+and the lock, which those two do not touch.
 
 The bootstrap is the trust root: a deployment may never replace it, so operators
 still install it by hand, and `ship.mjs` excludes it. It also takes no lock across
@@ -311,20 +316,20 @@ the handover — the receiver takes its own lock unchanged once it starts. Only 
 two pointer renames run under the deployment lock.
 
 A payload without a `receiver` field is not a receiver install. The desktop
-publish carries none on purpose: that workflow checks out `desktop-v<version>`,
-not a main commit, so it has no main revision to name and no reason to change the
-receiver. The bootstrap runs whatever receiver is already `current` and passes the
-payload through untouched. The same path serves a sender older than this file.
+publish carries none on purpose: that workflow checks out `desktop-v<version>` tag,
+not a main commit, so it has no main revision to name. **It must never carry one.**
+The bootstrap fetches the receiver for whatever revision the payload names, and a
+tag's receiver is far behind `main` — 591 to 1884 lines, with the newest tag
+`desktop-v0.1.24` still 591 behind — so naming the tag would downgrade the program
+that runs every deployment on the host. The bootstrap runs whatever receiver is
+already `current` and passes the payload through untouched. The same path serves a
+sender older than this file.
 
-**That receiver is not close to `main`.** A desktop tag lags it badly: at
-`desktop-v0.1.24` the two files differ by 591 added and 74 removed lines, and
-older tags by up to 1884. Moving onto the bootstrap does not shrink that gap, and
-nothing in this design measures it. What currently stops a publish from being
-handed to a receiver too old to understand the payload is a coincidence: those
-receivers have no `--self-check`, so the bootstrap's verification step refuses
-them. Treat that as luck, not a guard — it disappears the moment an old tag
-happens to gain the flag. Check the tag against `main` before publishing after a
-receiver change.
+**What stops that today is a coincidence, not a guard.** Those tags have no
+`--self-check`, so a payload naming one would fail the bootstrap's verification
+step and be refused. Nothing in this design measures the gap, and the coincidence
+disappears the moment an old tag gains the flag. Check the tag against `main`
+before publishing after a receiver change.
 
 **A newly installed receiver that then fails is put back.** If the receiver exits
 nonzero or overruns its 900-second deadline, `receiver/current` returns to
@@ -332,13 +337,16 @@ nonzero or overruns its 900-second deadline, `receiver/current` returns to
 deployment installs its own revision regardless, so the cost is one extra install.
 This matters most for the desktop publish above: it carries no receiver and would
 otherwise keep using a receiver that cannot deploy. Failures *before* the switch —
-a digest mismatch, a failed compile or self-check, a receiver that cannot start —
-never move `current` at all.
+a digest mismatch, a failed compile or self-check, a receiver that cannot start,
+another deployment holding the lock — never move `current` at all.
 
-The deadline is deliberately shorter than the SSH client's own timeout in
-`send-deployment.py` (1500 seconds). Were they equal, the SSH client would give up
-first, and the operator would see a bare SSH timeout instead of the message naming
-the receiver that was restored — even though the rollback had happened.
+The 900-second deadline is shorter than the SSH client's own timeout in
+`send-deployment.py` (1500 seconds), and it has to be: the SSH timeout runs from
+process start, so the fetch, the two check steps and the probe all count against
+the same budget. Run out of it and the SSH client gives up first — the rollback
+still happens, but the operator sees a bare SSH timeout instead of the message
+naming the receiver that was restored. `PRE_RUN_LIMIT + RUN_TIMEOUT` must stay
+under the SSH timeout, and a test recomputes that from both files.
 
 **Order matters, and it cannot be reversed.** A receiver without `--self-check`
 fails the bootstrap's verification step on every deployment:

@@ -53,7 +53,16 @@ UNSTARTABLE = '''\
 import sys
 if '--self-check' in sys.argv:
     sys.exit(0)
-sys.exit(2)
+sys.exit(3)
+'''
+# Answers --probe with 2: another deployment holds the lock. Busy, not broken.
+BUSY = '''\
+import sys
+if '--self-check' in sys.argv:
+    sys.exit(0)
+if '--probe' in sys.argv:
+    sys.exit(2)
+sys.exit(0)
 '''
 BROKEN = '''\
 import sys
@@ -483,7 +492,9 @@ class FailureTests(BootstrapTestCase):
         self.point_previous_at(OTHER)
         (self.receiver / 'current').unlink()
         (self.receiver / 'current').symlink_to(OTHER)
-        failing = b"import sys\nif '--self-check' in sys.argv[1:]:\n    sys.exit(0)\nsys.exit(1)\n"
+        failing = (b"import sys\n"
+                   b"if '--self-check' in sys.argv[1:] or '--probe' in sys.argv[1:]:\n"
+                   b"    sys.exit(0)\nsys.exit(1)\n")
         self.serve(REVISION, failing)
         with patch('sys.stderr') as stderr:
             self.assertEqual(self.run_main(payload(data=failing)), 1)
@@ -501,7 +512,7 @@ class FailureTests(BootstrapTestCase):
         def hang(receiver, data, timeout=None, arguments=()):
             if Path(receiver).parent.name == 'current':
                 return bootstrap.TIMED_OUT
-            return bootstrap.RUN_TIMEOUT and 1
+            return bootstrap.DEPLOY_FAILED
 
         with patch.object(bootstrap, 'run', side_effect=hang):
             self.assertEqual(self.run_main(payload()), 1)
@@ -529,12 +540,28 @@ class FailureTests(BootstrapTestCase):
         (self.receiver / 'current').unlink()
         (self.receiver / 'current').symlink_to(OTHER)
         self.serve(REVISION)
-        with patch.object(bootstrap, 'run', side_effect=[True, bootstrap.TIMED_OUT]):
+        with patch.object(bootstrap, 'run', side_effect=[bootstrap.STARTED, bootstrap.TIMED_OUT]):
             with patch('sys.stderr') as stderr:
                 self.assertEqual(self.run_main(payload()), 1)
         written = ''.join(call[0][0] for call in stderr.write.call_args_list)
         self.assertIn(OTHER, written)
         self.assertIn('did not take effect', written)
+
+    def test_the_receiver_runs_under_the_run_timeout(self):
+        # The deadline only protects anything if it is actually passed to the call that
+        # starts the receiver. Removing the argument leaves every other test green.
+        self.serve(REVISION)
+        seen = []
+        original = bootstrap.run
+
+        def record(receiver, payload, timeout=None, arguments=()):
+            if Path(receiver).parent.name == 'current':
+                seen.append(timeout)
+            return original(receiver, payload, timeout, arguments)
+
+        with patch.object(bootstrap, 'run', side_effect=record):
+            self.assertEqual(self.run_main(payload()), 0)
+        self.assertEqual(seen, [bootstrap.RUN_TIMEOUT], 'the receiver ran without its deadline')
 
     def test_the_configuration_problem_is_named_as_such(self):
         # A new receiver may need keys the host does not have yet. The bootstrap must
@@ -578,11 +605,18 @@ class LintTests(unittest.TestCase):
         # client enforces its own timeout, so bootstrap must finish first, print which
         # receiver it restored, and let that reach the workflow log. Equal timeouts make
         # the SSH failure the only visible one even though the rollback did happen.
+        #
+        # The SSH timeout runs from process start; run()'s starts when run() is called.
+        # Every step before run() therefore counts against the same budget, so the
+        # comparison is pre_run + RUN_TIMEOUT, not RUN_TIMEOUT alone. That is the
+        # mistake that made 900 look safe next to 1500 while 1500 did not fit.
         sender = (Path(__file__).parent.parent / '.github/scripts/send-deployment.py').read_text()
         ssh_timeout = int(re.search(r'\btimeout=(\d+)\)', sender).group(1))
-        self.assertLess(bootstrap.RUN_TIMEOUT, ssh_timeout - 60,
-                        'the bootstrap must time out well before the SSH client, or its '
-                        'rollback message is replaced by a bare SSH timeout')
+        pre_run = bootstrap.FETCH_TIMEOUT + 2 * bootstrap.CHECK_TIMEOUT + bootstrap.START_TIMEOUT
+        self.assertEqual(pre_run, bootstrap.PRE_RUN_LIMIT, 'PRE_RUN_LIMIT no longer sums its parts')
+        self.assertLess(pre_run + bootstrap.RUN_TIMEOUT, ssh_timeout,
+                        'the bootstrap may be killed by the SSH client before it can report '
+                        'which receiver it restored')
         # And the probe must fit inside the run budget, not be counted beside it.
         self.assertLess(bootstrap.START_TIMEOUT, bootstrap.RUN_TIMEOUT)
 
@@ -601,6 +635,32 @@ class LintTests(unittest.TestCase):
         self.assertIn(".open('a')", entry, 'the probe opens the lock path for writing')
         self.assertNotIn(".open('w')", entry, 'the probe truncates the lock file')
         self.assertNotIn('sweep_stale_temp_files', entry, 'the probe edits the host')
+
+    def test_busy_is_its_own_probe_answer(self):
+        # The receiver's main() exits 1 for a lock it cannot take and for every other
+        # failure alike, so a success/failure pair cannot tell a running deployment
+        # from a broken receiver. --probe answers 2 for busy, and the bootstrap must
+        # report it as busy rather than as a receiver that cannot start.
+        receiver = (Path(__file__).parent.parent / 'ops/github-deploy.py').read_text()
+        entry = receiver[receiver.index('def probe():'):receiver.index('def main():')]
+        self.assertIn('PROBE_BUSY', entry, 'the receiver does not give busy its own exit code')
+        self.assertEqual(bootstrap.PROBE_BUSY, 2)
+        source = Path(__file__).with_name('deploy-bootstrap.py').read_text()
+        body = source[source.index('def install('):source.index('def main()')]
+        self.assertIn('status == PROBE_BUSY', body, 'install() does not separate busy from broken')
+        self.assertIn('another deployment holds', body, 'a busy lock is reported as a broken receiver')
+
+    def test_probe_passes_busy_through_and_collapses_everything_else(self):
+        # probe() decides which receiver statuses survive as their own answer. Read
+        # directly, so folding busy back into the success set fails here even though
+        # install()'s wording is unchanged.
+        for status, expected in ((bootstrap.STARTED, bootstrap.STARTED),
+                                 (bootstrap.PROBE_BUSY, bootstrap.PROBE_BUSY),
+                                 (bootstrap.DEPLOY_FAILED, bootstrap.EXEC_FAILED),
+                                 (bootstrap.TIMED_OUT, bootstrap.EXEC_FAILED)):
+            with self.subTest(status=status):
+                with patch.object(bootstrap, 'run', return_value=status):
+                    self.assertEqual(bootstrap.probe(Path('/receiver'), 10), expected)
 
     def test_the_check_steps_cannot_wait_on_standard_input(self):
         steps = []

@@ -54,6 +54,8 @@ for(let i=0;i<30;i++) {
 process.exit(1);"""
 
 MAX_ARCHIVE = 40 * 1024 * 1024
+# --probe's exit code for "another deployment holds the lock": busy, not broken.
+PROBE_BUSY = 2
 RELEASE_NAME = re.compile(r'gh-[0-9a-f]{12}-[0-9]{1,20}-[0-9]{1,4}')
 # Each release snapshot holds that deployment's pre-migration database dump.
 RELEASE_RETENTION = 5
@@ -2368,25 +2370,33 @@ def self_check():
 def probe():
     """Report whether this receiver can start, without doing anything to the host.
 
-    The deploy bootstrap runs this on a staged receiver before `current` moves. It must
-    reach everything main() does before it reads a payload — import, the host
-    configuration, and its own lock — and nothing after: main() sweeps stale temporary
-    files before reading stdin, so running main() with an empty payload would edit the
-    host just to answer "can you start". No lock is held here, so a deployment that is
-    merely running cannot make a healthy receiver look broken.
+    The deploy bootstrap runs this on a staged receiver before `current` moves, and
+    reads three exit codes rather than one: 0 when the receiver loaded, read the host
+    configuration and could take its lock; 2 when the lock is held by another
+    deployment, which is busy and not broken; anything else for a real failure. A
+    single success/failure code cannot separate those last two, and a deployment that
+    is merely running would look like a broken receiver.
+
+    It reaches everything main() does before it reads a payload and nothing after:
+    main() sweeps stale temporary files before reading stdin, so running main() with
+    an empty payload would edit the host just to answer "can you start".
     """
     config = json.loads(Path('/etc/opennavo/github-deploy.json').read_text())
     required = ('root', 'project', 'registry', 'compose_file', 'caddy_file')
     missing = [key for key in required if key not in config]
     if missing:
         raise ValueError('host configuration is missing: ' + ', '.join(missing))
-    # main() opens and locks this first; opening it here proves the path is usable
-    # without taking the lock, which a concurrent deployment may legitimately hold.
-    # Append, not write: truncating the file would itself be an edit to the host.
     lock_path = Path(config['root']) / 'deploy/github-deploy.lock'
-    with lock_path.open('a'):
-        pass
-    print('probe: receiver loaded, host configuration and lock path are usable', flush=True)
+    # Same file and mode main() uses, so this proves the path main() will open works.
+    with lock_path.open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print('probe: another deployment holds the receiver lock', flush=True)
+            sys.exit(PROBE_BUSY)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+    print('probe: receiver loaded, host configuration is valid and the lock is free', flush=True)
 
 
 def main():

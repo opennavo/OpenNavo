@@ -30,18 +30,29 @@ CHECKSUM = re.compile(r'[0-9a-f]{64}\Z')
 MAX_PAYLOAD = 80 * 1024 * 1024
 RETENTION = 5
 # How long a receiver may take to report that it started, and how long it may run.
-# RUN_TIMEOUT must stay well under the SSH client's own timeout in
-# .github/scripts/send-deployment.py (1500s): when they are equal, the SSH client
-# gives up first, the rollback still happens, and the operator sees a bare SSH
-# timeout instead of the message that says which receiver was restored. Recent
-# successful deploys took 2-8 minutes, so 900s is still about twice the observed
-# worst case. test_the_run_timeout_leaves_room_under_the_ssh_timeout guards the gap.
+# The whole budget must fit inside the SSH client's timeout in
+# .github/scripts/send-deployment.py: the SSH timeout runs from process start, while
+# run()'s starts when run() is called, so the pre-run steps count against it too.
+# PRE_RUN_LIMIT sums the worst case of every step before run(): the fetch, the two
+# check steps, the probe, and the checksum and disk work around them. Keep
+# PRE_RUN_LIMIT + RUN_TIMEOUT below the SSH timeout, or the SSH client gives up
+# first: the rollback still happens, but the operator sees a bare SSH timeout
+# instead of the message naming the receiver that was restored.
+# Recent successful deploys took 2-8 minutes, so 900s is still about twice the
+# observed worst case. test_the_run_timeout_leaves_room_under_the_ssh_timeout
+# recomputes this from the source of both files.
+FETCH_TIMEOUT = 30
+CHECK_TIMEOUT = 120
 START_TIMEOUT = 120
 RUN_TIMEOUT = 900
+PRE_RUN_LIMIT = FETCH_TIMEOUT + 2 * CHECK_TIMEOUT + START_TIMEOUT
 # The only exit statuses the receiver produces: 0 when the deployment succeeded and
 # 1 when it failed. Anything else means the interpreter or the import itself failed,
 # which is the one case where the receiver cannot repair itself.
 STARTED, DEPLOY_FAILED = 0, 1
+# The receiver answers --probe itself with this when another deployment holds the lock.
+# Kept in step with PROBE_BUSY in ops/github-deploy.py.
+PROBE_BUSY = 2
 # Never produced by the receiver: the staged file was missing (the child never ran)
 # or the receiver did not finish in time.
 EXEC_FAILED, TIMED_OUT = -1, -2
@@ -188,14 +199,20 @@ def run(receiver, payload, timeout=None, arguments=()):
 
 
 def probe(receiver, timeout):
-    """Decide whether the receiver can start at all, before it becomes current.
+    """Decide whether the receiver can start, before it becomes current.
 
     The receiver answers this on its own, with --probe: it imports itself, reads the
-    host configuration and opens its lock path, and does nothing else. Running main()
-    with an empty payload instead would be a worse question and a real edit — main()
-    sweeps stale temporary files before it reads standard input.
+    host configuration and takes its lock, and does nothing else. Running main() with
+    an empty payload instead would be a worse question and a real edit — main() sweeps
+    stale temporary files before it reads standard input.
+
+    Returns STARTED, PROBE_BUSY, or -1 for anything else. `busy` has to be its own
+    answer: the receiver's main() exits 1 both for a lock it cannot take and for every
+    other failure, so a success/failure pair cannot tell a running deployment from a
+    broken receiver.
     """
-    return run(receiver, b'', timeout, ['--probe']) in (STARTED, DEPLOY_FAILED)
+    status = run(receiver, b'', timeout, ['--probe'])
+    return status if status in (STARTED, PROBE_BUSY) else EXEC_FAILED
 
 
 def install(config, payload):
@@ -211,7 +228,12 @@ def install(config, payload):
     directory.mkdir(parents=True, exist_ok=True)
     staged = stage(directory, revision, data)
     check(staged)
-    if not probe(staged, START_TIMEOUT):
+    status = probe(staged, START_TIMEOUT)
+    if status == PROBE_BUSY:
+        # Another deployment is running. It is not this revision's problem, and the
+        # switch below would wait for its lock anyway, so say so and stop.
+        fail('another deployment holds the receiver lock, so revision %s was not installed' % revision)
+    if status != STARTED:
         # Switching first and hoping would install a receiver that cannot start, and
         # the next deployment would run it again.
         fail('the receiver for revision %s cannot start, so the current receiver was left in place' % revision)
