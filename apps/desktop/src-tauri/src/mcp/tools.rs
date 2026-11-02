@@ -198,7 +198,7 @@ pub fn write_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "uninstall_app",
-            "description": "Ask OpenNavo to move one application to the Trash. Only the .app bundle is moved; its related files are left in place. Refused while the app is running. OpenNavo shows the user a confirmation dialog listing the path; nothing happens unless the user clicks Allow. Returns E_BUSY while another confirmation is open: wait a moment and try again.",
+            "description": "Ask OpenNavo to move one application to the Trash. Only the .app bundle is moved; its related files are left in place. Refused while the app is running. Apps installed with Homebrew are always refused with E_UNSUPPORTED: `brew uninstall` also removes that package's dependencies, which is more than this confirmation can show, so the user must uninstall those in OpenNavo's own Uninstall page. OpenNavo shows the user a confirmation dialog listing the path; nothing happens unless the user clicks Allow. Returns E_BUSY while another confirmation is open: wait a moment and try again.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -679,6 +679,21 @@ mod tests {
     }
 
     #[test]
+    fn the_uninstall_tool_says_homebrew_apps_are_refused_before_it_is_called() {
+        // A client that only reads the tool list should not have to discover the
+        // Homebrew refusal by calling and failing. The description must say so,
+        // and must say where the user can do it instead.
+        let uninstall = write_definitions()
+            .into_iter()
+            .find(|tool| tool["name"] == "uninstall_app")
+            .expect("uninstall_app listed");
+        let description = uninstall["description"].as_str().expect("description");
+        assert!(description.contains("Homebrew"), "{description}");
+        assert!(description.contains("E_UNSUPPORTED"), "{description}");
+        assert!(description.contains("Uninstall page"), "{description}");
+    }
+
+    #[test]
     fn write_and_unknown_names_are_rejected_before_the_host() {
         for name in [
             "install_app",
@@ -693,7 +708,12 @@ mod tests {
             .iter()
             .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
             .collect();
-        for forbidden in ["install_app", "uninstall_app", "clean_cache", "get_latest_scan_result"] {
+        for forbidden in [
+            "install_app",
+            "uninstall_app",
+            "clean_cache",
+            "get_latest_scan_result",
+        ] {
             assert!(
                 !listed.iter().any(|name| name == forbidden),
                 "{forbidden} must not be listed"
@@ -789,7 +809,10 @@ mod tests {
         let off = names(list_result_for(false));
         assert!(!off.iter().any(|name| is_write_tool(name)));
         let on = names(list_result_for(true));
-        assert_eq!(&on[on.len() - 3..], ["install_app", "uninstall_app", "clean_cache"]);
+        assert_eq!(
+            &on[on.len() - 3..],
+            ["install_app", "uninstall_app", "clean_cache"]
+        );
         assert!(!on.iter().any(|name| name == "get_latest_scan_result"));
         for tool in write_definitions() {
             assert_eq!(tool["inputSchema"]["additionalProperties"], false);
@@ -891,10 +914,7 @@ mod tests {
             for (name, mut arguments) in [
                 ("install_app", json!({ "kind": "cask", "token": "iina" })),
                 ("uninstall_app", json!({ "path": "/Applications/IINA.app" })),
-                (
-                    "clean_cache",
-                    json!({ "reportId": "r", "itemIds": ["a"] }),
-                ),
+                ("clean_cache", json!({ "reportId": "r", "itemIds": ["a"] })),
             ] {
                 arguments[field] = json!(true);
                 let error = parse_write(name, arguments).expect_err("must reject");
@@ -944,9 +964,12 @@ mod tests {
         }
         let too_many: Vec<String> = (0..513).map(|index| format!("id{index}")).collect();
         assert_eq!(
-            parse_write("clean_cache", json!({ "reportId": "r", "itemIds": too_many }))
-                .expect_err("too many")
-                .code,
+            parse_write(
+                "clean_cache",
+                json!({ "reportId": "r", "itemIds": too_many })
+            )
+            .expect_err("too many")
+            .code,
             "E_INVALID_ARG"
         );
     }

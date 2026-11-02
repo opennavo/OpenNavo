@@ -93,9 +93,10 @@ pub fn candidates(report: &CleanupReport) -> Vec<(&CategoryReport, &CleanupItem)
         .categories
         .iter()
         .flat_map(|category| {
-            category.groups.iter().flat_map(move |group| {
-                group.items.iter().map(move |item| (category, item))
-            })
+            category
+                .groups
+                .iter()
+                .flat_map(move |group| group.items.iter().map(move |item| (category, item)))
         })
         .filter(|(category, item)| removable(category, item))
         .collect()

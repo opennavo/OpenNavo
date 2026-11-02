@@ -94,9 +94,7 @@ const ownLayout = computed(() => fromApp.value || mcpCleanup.value);
 const isCollection = computed(() => view.value?.action === 'installCollection');
 const isBrewfile = computed(() => fromApp.value && view.value?.action === 'brewfileInstall');
 const appAction = computed(() => (ownLayout.value ? (view.value?.action ?? '') : ''));
-const hasList = computed(
-  () => isCollection.value || (ownLayout.value && Boolean(view.value?.items.length))
-);
+const hasList = computed(() => isCollection.value || (ownLayout.value && Boolean(view.value?.items.length)));
 const title = computed(() => {
   if (ownLayout.value) return t(`mcpConfirm.own.${appAction.value}.title`);
   return deepLink.value ? t('mcpConfirm.titleDeepLink') : t('mcpConfirm.title');

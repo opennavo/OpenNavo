@@ -345,18 +345,10 @@ impl Writes {
         if app.running {
             return Err(app_running());
         }
-        if app.source == AppSource::Homebrew {
-            return Err(ToolError::new(
-                "E_UNSUPPORTED",
-                "This app is managed by Homebrew. Uninstalling it would remove more than the app, so ask the user to uninstall it in OpenNavo.",
-            ));
-        }
-        if !app.removable || app.protected_reason.is_some() {
-            return Err(ToolError::new(
-                "E_PROTECTED",
-                "OpenNavo does not remove this app.",
-            ));
-        }
+        // The order matters: Homebrew before the generic protected check, so a
+        // Homebrew app gets the reason that says what to do instead of a bare
+        // "OpenNavo does not remove this app".
+        uninstall_refusal(&app)?;
         let permissions = self.core.permissions().await.map_err(tool_error)?;
         let request_id = format!("mcp-{}", uuid::Uuid::new_v4());
         let plan = self
@@ -597,6 +589,39 @@ fn app_running() -> ToolError {
     )
 }
 
+/// Whether an installed app may be uninstalled through Local MCP at all, before
+/// any plan is built. Kept apart from `plan_uninstall` so the order of the two
+/// refusals is testable without an app inventory on disk.
+fn uninstall_refusal(app: &crate::uninstall::LocalApp) -> Result<(), ToolError> {
+    if app.source == AppSource::Homebrew {
+        return Err(homebrew_managed(&app.name));
+    }
+    if !app.removable || app.protected_reason.is_some() {
+        return Err(ToolError::new(
+            "E_PROTECTED",
+            "OpenNavo does not remove this app. Its Uninstall page can show why.",
+        ));
+    }
+    Ok(())
+}
+
+/// A Homebrew-managed app is never uninstalled through Local MCP.
+///
+/// `brew uninstall` also removes that cask's dependencies and anything else the
+/// formula owns, which reaches past the one app the confirmation dialog names.
+/// The app's own Uninstall page can show the whole footprint; a tool call cannot,
+/// so this stays closed. The message tells the client what to do next, and it
+/// does not name the cask: that is Homebrew's bookkeeping, not the user's app.
+fn homebrew_managed(name: &str) -> ToolError {
+    let app = display_value(name);
+    ToolError::new(
+        "E_UNSUPPORTED",
+        format!(
+            "OpenNavo does not uninstall Homebrew-managed apps over Local MCP: Homebrew also removes that package's dependencies, which is more than this confirmation can show. Ask the user to uninstall {app} in OpenNavo's Uninstall page, which lists everything that would be removed."
+        ),
+    )
+}
+
 /// Content of the confirmation window. `McpConfirmView::new` filters every string for display.
 fn confirm_view(plan: &Plan, identity: &Identity) -> McpConfirmView {
     let caller = &identity.caller;
@@ -646,6 +671,7 @@ fn confirm_view(plan: &Plan, identity: &Identity) -> McpConfirmView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::uninstall::ProtectedReason;
 
     fn caller(signed: bool) -> AuditCaller {
         AuditCaller {
@@ -842,14 +868,90 @@ mod tests {
             digest: "d".into(),
             view: Box::new(engine_view),
         };
-        let view = confirm_view(&plan, &Identity { caller: caller(true) });
+        let view = confirm_view(
+            &plan,
+            &Identity {
+                caller: caller(true),
+            },
+        );
         assert_eq!(view.origin, "mcp", "an AI app asked for this cleanup");
         assert!(
-            view.signer.as_deref().is_some_and(|s| s.contains("Example Inc")),
+            view.signer
+                .as_deref()
+                .is_some_and(|s| s.contains("Example Inc")),
             "the window must still name the caller"
         );
         assert_eq!(view.team_id.as_deref(), Some("ABCDE12345"));
         assert_eq!(view.action, "cleanup");
+    }
+
+    #[test]
+    fn a_homebrew_app_is_refused_with_a_reason_the_client_can_act_on() {
+        // Homebrew uninstalls reach past the one app the dialog names, so this
+        // stays closed. What matters is that the refusal says so and points the
+        // client at the app's own Uninstall page instead of a bare "unsupported".
+        let app = uninstall_app(AppSource::Homebrew, true, None);
+        let error = uninstall_refusal(&app).expect_err("Homebrew stays closed");
+        assert_eq!(error.code, "E_UNSUPPORTED");
+        assert!(error.message.contains("Homebrew"), "{}", error.message);
+        assert!(
+            error.message.contains("Uninstall page"),
+            "the client must be told where the user can do this: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains("Firefox"),
+            "the message names the app so the client can relay it: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_homebrew_app_gets_the_homebrew_reason_not_the_generic_one() {
+        // A Homebrew app is also `removeable == false` in some inventories; the
+        // specific reason has to win, or the client is told nothing useful.
+        let app = uninstall_app(AppSource::Homebrew, false, Some(ProtectedReason::System));
+        assert_eq!(
+            uninstall_refusal(&app).expect_err("refused").code,
+            "E_UNSUPPORTED"
+        );
+        let protected = uninstall_app(AppSource::Direct, false, Some(ProtectedReason::System));
+        assert_eq!(
+            uninstall_refusal(&protected).expect_err("refused").code,
+            "E_PROTECTED"
+        );
+        assert!(uninstall_refusal(&uninstall_app(AppSource::Direct, true, None)).is_ok());
+    }
+
+    #[test]
+    fn a_homebrew_refusal_filters_the_app_name_it_echoes() {
+        // The name comes from the bundle on disk, not from the client, but it is
+        // still echoed into the tool result: bidi controls must not survive.
+        let app = uninstall_app(AppSource::Homebrew, true, None);
+        let mut named = app.clone();
+        named.name = "Fire\u{202E}fox".into();
+        let error = uninstall_refusal(&named).expect_err("refused");
+        assert!(!error.message.contains('\u{202E}'), "{}", error.message);
+    }
+
+    fn uninstall_app(
+        source: AppSource,
+        removable: bool,
+        protected_reason: Option<ProtectedReason>,
+    ) -> crate::uninstall::LocalApp {
+        let mut app: crate::uninstall::LocalApp = serde_json::from_value(serde_json::json!({
+            "id": "one",
+            "path": "/Applications/Firefox.app",
+            "name": "Firefox",
+            "source": "direct",
+            "running": false,
+            "removable": true
+        }))
+        .expect("fixture");
+        app.source = source;
+        app.removable = removable;
+        app.protected_reason = protected_reason;
+        app
     }
 
     fn cleanup_report() -> crate::cleanup::types::CleanupReport {
@@ -920,7 +1022,9 @@ mod tests {
         let report = cleanup_report();
         assert!(plan_clean_selection(&report, &["cache".into()]).is_ok());
         assert_eq!(
-            plan_clean_selection(&report, &["trash".into()]).unwrap_err().code,
+            plan_clean_selection(&report, &["trash".into()])
+                .unwrap_err()
+                .code,
             "E_NOT_REMOVABLE"
         );
         assert_eq!(
