@@ -159,3 +159,29 @@ test('Desktop CI compares main pushes with its own green commits, the gate with 
   ]);
   assert.deepEqual(baseline(undefined), ['ci-server.yml', 'ci-frontend.yml', 'ci-security.yml']);
 });
+
+// A list of near-miss paths is still a list: it holds the forms its author thought of. The
+// regex is what decides, so it is checked against the whole space of paths it could wrongly
+// accept, generated rather than chosen. A rule widens in two directions - an insertion before
+// the file name (`.*`, `[^/]*`, `\w*` all do it) and a dropped `^` that accepts any leading
+// path - and both spaces are enumerated here, for the frontend rule and the mcp rule.
+test('the spec rules reject both an insertion before the name and a leading path', () => {
+  const fillers = ['x', '1', '.', '_', '-', '/', 'A'];
+  const prefixes = ['sub/', 'vendor/', 'x/', 'foo/bar/', 'apps/', './'];
+  for (const [spec, area] of [['public', 'frontend'], ['admin', 'frontend'], ['admin', 'mcp']]) {
+    const rejected = [];
+    for (const first of ['', ...fillers]) {
+      for (const second of ['', ...fillers]) {
+        if (!first && !second) continue;
+        rejected.push(`apps/server/api/${first}${second}${spec}.openapi.yaml`);
+      }
+    }
+    for (const prefix of prefixes) rejected.push(`${prefix}apps/server/api/${spec}.openapi.yaml`);
+    for (const prefix of prefixes) rejected.push(`${prefix}apps/server/api/${spec}.openapi.yaml.bak`);
+    const accepted = rejected.filter(path => classify([path])[area]);
+    assert.deepEqual(accepted, [], `the ${area} rule widened and accepts these`);
+  }
+  assert.equal(classify(['apps/server/api/public.openapi.yaml']).frontend, true);
+  assert.equal(classify(['apps/server/api/admin.openapi.yaml']).frontend, true);
+  assert.equal(classify(['apps/server/api/admin.openapi.yaml']).mcp, true);
+});
