@@ -48,35 +48,38 @@ GUIDE = ROOT / "ops" / "GUIDE.md"
 # failure: the block count drops and the summary still says everything is fine.
 BLOCK = re.compile(r"^([ \t]*)```(?:sh|bash)\n(.*?)^\1```$", re.S | re.M)
 
-# A literal path under /tmp that two runs would both pick. mktemp output is fine;
-# what is not fine is a name written into the script. Matches any extension, not
-# just .err, because the defect is the fixed name and not the suffix.
+# A literal path under /tmp that two runs would both pick. Any extension, not just
+# .err, because the defect is the fixed name and not the suffix.
 #
-# Deliberately does not match `mktemp "${TMPDIR:-/tmp}/x.XXXXXX"`: that string
-# contains /tmp/ but also mktemp on the same line, which the negative lookahead
-# below excludes.
+# A path containing a run of six or more `X` is a mktemp template and is not
+# fixed: the unique part is exactly what the two runs differ in. Filtered in
+# `is_template()`, not by a lookbehind here, because a lookbehind placed before
+# `\b` lets the greedy name class backtrack and report `${TMPDIR:-/tmp}/lvs.` as
+# a match inside `.../lvs.XXXXXX` - a false positive on the very idiom this check
+# tells the reader to use.
 FIXED_TMP = re.compile(
     r"(?<!mktemp )(?<!mktemp -d )"
     r"(?:/tmp/|\$\{TMPDIR:-/tmp\}/)[A-Za-z0-9_.-]+"
-    r"(?<!XXXXXX)\b"
 )
-# Lines that legitimately name a /tmp path for another reason: a comment, or a
-# mktemp template. Checked per line so one mention does not excuse a real one.
-EXEMPT = re.compile(r"mktemp|^\s*#")
+# A `<name>` token anywhere a shell would read it as a redirect. This covers the
+# command position too, which an earlier version of this check exempted as a
+# "legitimate substitute your own value placeholder". The shell has no such
+# concept: `<worker-container>` in a command position is an input redirect, and
+# the command after it is lost. Measured with a `docker` stub:
+#
+#   docker exec -it <worker-container> /opennavo assets-backfill --dry-run --limit 50
+#   sh -n  -> 0
+#   run    -> exit 1, "worker-container: No such file or directory"
+#             argv was `docker got 2 args: [exec] [-it]`, so the container name
+#             and all three flags never reached the command.
+#
+# Requiring the value to come from a variable (`"$WORKER"`) keeps the commands
+# copy-pasteable, which is the only thing that makes an angle bracket safe.
+PLACEHOLDER = re.compile(r"(?<![<\w])<[A-Za-z_][A-Za-z0-9_.-]*>")
 
-# A redirect target written as a placeholder: `2><WINDOW_TIMESTAMP>`, `> <PATH>`.
-#
-# `sh -n` accepts this. `<` starts an input redirect, so `2><X>` parses as "stderr
-# to the file named by the input of <X>", which is nonsense the parser cannot see
-# yet. At run time the command substitution dies with `syntax error near
-# unexpected token '<'` - and because the failing command is the last in an
-# assignment, the script's own exit status is still 0. The reader gets no error
-# from `$?` and an empty result, which reads as "ran cleanly, found nothing".
-# That is the wrong answer this whole section exists to avoid.
-#
-# `<worker-container>` in a command position is a legitimate "substitute your own
-# value" placeholder and must keep working, so this matches only a redirect.
-REDIR_TO_PLACEHOLDER = re.compile(r"[0-9]?>>?\s*<[^<>\s]+>")
+# A path whose variable part is an `XXXXXX` run is a mktemp template, which each
+# run resolves to a different name, so it is not shared. Returns True for those.
+TEMPLATE = re.compile(r"X{6,}")
 
 
 def shell_blocks(text: str) -> list[tuple[int, str]]:
@@ -151,10 +154,13 @@ def main() -> int:
         body_lines = body.split("\n")
         seen: set[str] = set()
         for index, line in enumerate(body_lines):
-            if EXEMPT.search(line):
+            if line.lstrip().startswith("#"):
                 continue
             for match in FIXED_TMP.finditer(line):
                 path = match.group(0)
+                # A template each run resolves differently is not a shared path.
+                if TEMPLATE.search(path):
+                    continue
                 if path in seen:
                     continue
                 seen.add(path)
@@ -165,14 +171,15 @@ def main() -> int:
                     f"  Two concurrent runs then read each other's stderr, which is "
                     f"the answer this section exists to get right."
                 )
-            for match in REDIR_TO_PLACEHOLDER.finditer(line):
+            for match in PLACEHOLDER.finditer(line):
                 real_line = block_line + 1 + index
                 failures.append(
-                    f"ops/GUIDE.md:{real_line}: {match.group(0).strip()} redirects into "
-                    f"a placeholder, which `sh -n` accepts and the shell cannot run.\n"
-                    f"  At run time this is `syntax error near unexpected token '<'`; "
-                    f"the script still exits 0, so the reader sees an empty result and "
-                    f"no error."
+                    f"ops/GUIDE.md:{real_line}: {match.group(0)} is an angle-bracket "
+                    f"placeholder in a shell block, where the shell reads it as an "
+                    f"input redirect, not as a value to substitute.\n"
+                    f"  Measured: `sh -n` exits 0, then the run loses every argument "
+                    f"after the placeholder and fails on a missing file. Put the "
+                    f"value in a variable and quote it: \"$WORKER\"."
                 )
 
     if failures:
