@@ -127,11 +127,13 @@ func (s *Service) fetch(ctx context.Context, id int64, observed map[string]any) 
 	}
 	result, err := s.Fetcher.Fetch(ctx, p, source)
 	if err != nil && errors.Is(err, context.Canceled) {
-		// A worker shutdown cancels the run and asynq requeues the in-flight task itself, so this source
-		// is not a failure and must not be made due either: moving next_fetch_at to now would let the next
-		// schedule tick enqueue a second copy as soon as the 20-minute uniqueness lock expires, while the
-		// requeued task may still be waiting. The lease from the claim stays until the requeued run
-		// finishes and sets the real next_fetch_at.
+		// A worker shutdown cancels the run, and this task does not retry (`changelog:fetch` runs with
+		// Retries: 0), so asynq archives it instead of requeueing: a canceled run is gone, not waiting.
+		// The lease the claim took still stands, so this source is not scheduled again until the two-hour
+		// fetchLease runs out. That is why next_fetch_at must not move to now: doing so would make the
+		// source due immediately, and the next tick would enqueue a fresh fetch while the archived task's
+		// 20-minute uniqueness lock still holds. Nothing is lost either way — the source keeps its last
+		// known state and is fetched on the first tick after the lease expires.
 		category, _ := pipeline.Failure(err)
 		return map[string]any{"status": "canceled", "source": state.Type, "errorCategory": category}, err
 	}

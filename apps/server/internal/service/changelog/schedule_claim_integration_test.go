@@ -113,8 +113,9 @@ func TestScheduleReleasesOnlyTheDuplicateRejectedSource(t *testing.T) {
 	}
 }
 
-// A canceled fetch is not made due: asynq requeues the in-flight task itself, and moving next_fetch_at to
-// now would let the next tick enqueue a second copy once the lock expires while the first is still waiting.
+// A canceled fetch is not made due. This task runs with Retries: 0, so a shutdown-canceled run is archived
+// rather than requeued; the lease from the claim is all that stops the next tick from enqueuing a second
+// copy, and it stands until fetchLease runs out.
 func TestCanceledFetchKeepsNextFetchUnchanged(t *testing.T) {
 	ctx := context.Background()
 	st := testutil.NewStore(t)
@@ -137,7 +138,53 @@ func TestCanceledFetchKeepsNextFetchUnchanged(t *testing.T) {
 	stats, err := svc.Fetch(ctx, sid)
 	require.Error(t, err)
 	require.Equal(t, "canceled", stats["status"])
-	require.Equal(t, lease.UTC(), sourceState(t, st, sid).UTC(), "cancellation leaves the lease to the requeued task")
+	require.Equal(t, lease.UTC(), sourceState(t, st, sid).UTC(), "cancellation leaves the lease in place")
+}
+
+// The archive path, end to end: a scheduled run is canceled by a shutdown, asynq archives it (Retries: 0)
+// so it never runs again, and only the claim's lease stands between the source and a duplicate enqueue.
+// Until the lease runs out the next ticks must leave it alone; the first tick after it must pick it up.
+func TestArchivedCanceledFetchIsNotEnqueuedAgainBeforeTheLeaseEnds(t *testing.T) {
+	ctx := context.Background()
+	st, svc, ids, now := scheduleFixture(t, 1)
+	id := ids[0]
+	firstTick := &failingQueue{}
+	svc.Queue = firstTick
+	stats, err := svc.Schedule(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats["enqueued"])
+	require.Equal(t, ids, firstTick.queued)
+
+	// The run reaches the HTTP call and a worker shutdown cancels it. No retry, so asynq archives the task:
+	// nothing is waiting to run, and the lease from the claim is the only thing holding the source.
+	svc.Fetcher = pipeline.NewFetcher("test")
+	svc.Fetcher.HTTP.Client = &http.Client{Transport: responseTransport(func(r *http.Request) (*http.Response, error) {
+		return nil, context.Canceled
+	})}
+	stats, err = svc.Fetch(ctx, id)
+	require.Error(t, err)
+	require.Equal(t, "canceled", stats["status"])
+	lease := now.Add(2 * time.Hour)
+	require.WithinDuration(t, lease, sourceState(t, st, id), time.Second, "the canceled run leaves the lease alone")
+
+	// A tick before the lease ends must not enqueue the source again: the archived task cannot run, so a
+	// second copy would be the only one that does, and two tasks for one source would race on it.
+	early := &failingQueue{}
+	next := &changelog.Service{Store: st, Queue: early, Now: func() time.Time { return now.Add(time.Hour) }}
+	stats, err = next.Schedule(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, stats["enqueued"])
+	require.Empty(t, early.queued)
+	require.WithinDuration(t, lease, sourceState(t, st, id), time.Second, "the early tick keeps the lease")
+
+	// The first tick after the lease expires does pick it up, so the canceled run delays the source by the
+	// lease and no more.
+	late := &failingQueue{}
+	after := &changelog.Service{Store: st, Queue: late, Now: func() time.Time { return lease.Add(time.Minute) }}
+	stats, err = after.Schedule(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats["enqueued"])
+	require.Equal(t, ids, late.queued)
 }
 
 // ClaimChangelogDue is what stops two schedule ticks from enqueuing one source twice: across concurrent
