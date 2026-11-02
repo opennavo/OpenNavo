@@ -126,8 +126,44 @@ def check(receiver):
             fail('the receiver %s step timed out, so the current receiver was left in place' % name)
 
 
+def deploy_directory(root):
+    """Return <root>/deploy, created private if missing.
+
+    mkdir(exist_ok=True) leaves an existing directory's mode alone (measured: 0755
+    stays 0755), so the chmod repairs a legacy host. Duplicated from the receiver:
+    this file cannot import it.
+    """
+    directory = Path(root, 'deploy')
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    return directory
+
+
+def open_lock(path):
+    """Open the lock without following a symlink, and leave it private.
+
+    O_NOFOLLOW: open('w') follows a symlink planted there and truncates its target.
+    0o600 covers a first creation whatever umask was inherited; the fchmod repairs
+    a lock an earlier version left 0644.
+    """
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    os.fchmod(descriptor, 0o600)
+    return os.fdopen(descriptor, 'w')
+
+
+def adopt(directory, current):
+    """Copy a pre-layout regular-file receiver into receiver/; returns its name."""
+    data = current.read_bytes()
+    target = directory / ('adopted-' + hashlib.sha256(data).hexdigest()[:12])
+    target.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (target / 'github-deploy.py').write_bytes(data)
+    return target.name
+
+
 def point(path, target):
     """Replace one symlink atomically, so no reader ever sees it missing."""
+    if not path.is_symlink() and path.is_dir():  # os.replace cannot replace a directory
+        fail('receiver/%s is a real directory, not a symlink; move it aside' % path.name)
     temporary = path.with_name('.%s.%d' % (path.name, os.getpid()))
     try:
         temporary.unlink()
@@ -143,6 +179,10 @@ def switch(directory, revision):
         replaced = os.readlink(current)
         if replaced != revision:
             point(previous, replaced)
+    elif current.is_file():
+        # A pre-layout receiver is a regular file, and os.replace would delete it
+        # with no copy left; adopt it first so a rollback has somewhere to point.
+        point(previous, adopt(directory, current))
     point(current, revision)
 
 
@@ -232,6 +272,9 @@ def install(config, payload):
     directory.mkdir(parents=True, exist_ok=True)
     staged = stage(directory, revision, data)
     check(staged)
+    # The probe takes the lock, so its directory has to exist first; this also
+    # repairs a legacy host whose deploy/ was created by hand at 0755.
+    deploy_directory(config['root'])
     status = probe(staged, START_TIMEOUT)
     if status == PROBE_BUSY:
         # Another deployment is running. It is not this revision's problem, and the
@@ -244,7 +287,7 @@ def install(config, payload):
     # Only the switch and the prune run under the lock: a concurrent deployment
     # must not see current between two revisions, and the receiver takes the
     # lock itself once it starts.
-    with (Path(config['root']) / 'deploy/github-deploy.lock').open('w') as guard:
+    with open_lock(deploy_directory(config['root']) / 'github-deploy.lock') as guard:
         fcntl.flock(guard, fcntl.LOCK_EX)
         switch(directory, revision)
         prune(directory)
@@ -264,10 +307,16 @@ def main():
     message = json.loads(payload)
     if 'receiver' not in message:
         # Nothing to install: a desktop publish, or a sender older than this file.
-        receiver = Path(config['root']) / 'receiver/current/github-deploy.py'
-        if not receiver.exists():
-            fail('no receiver is installed and this payload installs none')
-        sys.exit(run(receiver, payload))
+        current = Path(config['root']) / 'receiver/current'
+        if not current.is_symlink():
+            fail('receiver/current is a real directory, not a symlink to a revision, so it '
+                 'cannot be run' if current.is_dir() else
+                 'receiver/current is a regular file, not a symlink to a revision, so it '
+                 'cannot be run' if current.exists() else
+                 'no receiver is installed and this payload installs none')
+        if not (current / 'github-deploy.py').is_file():
+            fail('receiver/current points at %s, which holds no github-deploy.py' % os.readlink(current))
+        sys.exit(run(current / 'github-deploy.py', payload))
     receiver = install(config, message)
     status = run(receiver, payload, RUN_TIMEOUT)
     if status != STARTED:
