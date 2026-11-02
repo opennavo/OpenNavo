@@ -237,49 +237,72 @@ fi
 # No outcome here is a statement about whether a backup exists.
 
 if command -v lvs >/dev/null 2>&1; then
-    OUT=$(lvs --noheadings -o lv_name,lv_time 2>/tmp/lvs.err)
-    if [ -s /tmp/lvs.err ]; then
-        echo "lvs could not read LVM metadata, so this check did not run:"
-        sed 's/^/  /' /tmp/lvs.err
-        echo "  -> row 1 stays unknown"
-    elif [ -n "$OUT" ]; then
-        printf '%s\n' "$OUT"
-    else
-        echo "lvs ran cleanly and listed no logical volumes: not LVM, or LVM with nothing on it"
+    # A fixed /tmp path lets two people running this at once overwrite each
+    # other's stderr, so one reads another host's error as their own result.
+    # mktemp -d, not `mktemp pref.XXXXXX.err`: BSD mktemp returns exit 0 on a
+    # template whose Xs are not final and hands back the literal filename
+    # unchanged, so the shared path would survive the "fix" and still look fine.
+    LV_TMP=$(mktemp -d "${TMPDIR:-/tmp}/lvs.XXXXXX") || {
+        echo "cannot create a temporary directory; LVM not checked, row 1 stays unknown"
+        LV_TMP=
+    }
+    if [ -n "$LV_TMP" ]; then
+        OUT=$(lvs --noheadings -o lv_name,lv_time 2>"$LV_TMP/stderr")
+        if [ -s "$LV_TMP/stderr" ]; then
+            echo "lvs could not read LVM metadata, so this check did not run:"
+            sed 's/^/  /' "$LV_TMP/stderr"
+            echo "  -> row 1 stays unknown"
+        elif [ -n "$OUT" ]; then
+            printf '%s\n' "$OUT"
+        else
+            echo "lvs ran cleanly and listed no logical volumes: not LVM, or LVM with nothing on it"
+        fi
+        rm -rf "$LV_TMP"
     fi
-    rm -f /tmp/lvs.err
 else
     echo "lvs not installed (package lvm2); LVM not checked, row 1 stays unknown"
 fi
 
 if command -v zfs >/dev/null 2>&1; then
-    OUT=$(zfs list -H -t snapshot -o name,creation 2>/tmp/zfs.err)
-    if [ -s /tmp/zfs.err ]; then
-        echo "zfs reported an error, so this check did not run:"
-        sed 's/^/  /' /tmp/zfs.err
-        echo "  -> row 1 stays unknown"
-    elif [ -n "$OUT" ]; then
-        printf '%s\n' "$OUT"
-    else
-        echo "zfs ran cleanly and listed no snapshots: not ZFS, or ZFS with none"
+    ZFS_TMP=$(mktemp -d "${TMPDIR:-/tmp}/zfs.XXXXXX") || {
+        echo "cannot create a temporary directory; ZFS not checked, row 1 stays unknown"
+        ZFS_TMP=
+    }
+    if [ -n "$ZFS_TMP" ]; then
+        OUT=$(zfs list -H -t snapshot -o name,creation 2>"$ZFS_TMP/stderr")
+        if [ -s "$ZFS_TMP/stderr" ]; then
+            echo "zfs reported an error, so this check did not run:"
+            sed 's/^/  /' "$ZFS_TMP/stderr"
+            echo "  -> row 1 stays unknown"
+        elif [ -n "$OUT" ]; then
+            printf '%s\n' "$OUT"
+        else
+            echo "zfs ran cleanly and listed no snapshots: not ZFS, or ZFS with none"
+        fi
+        rm -rf "$ZFS_TMP"
     fi
-    rm -f /tmp/zfs.err
 else
     echo "zfs not installed; ZFS not checked, row 1 stays unknown"
 fi
 
 if command -v btrfs >/dev/null 2>&1; then
-    OUT=$(btrfs subvolume list / 2>/tmp/btrfs.err)
-    if [ -s /tmp/btrfs.err ]; then
-        echo "btrfs reported an error, so this check did not run:"
-        sed 's/^/  /' /tmp/btrfs.err
-        echo "  -> row 1 stays unknown"
-    elif printf '%s\n' "$OUT" | grep -qi snapshot; then
-        printf '%s\n' "$OUT" | grep -i snapshot
-    else
-        echo "btrfs ran cleanly; no subvolume name mentions snapshot"
+    BTRFS_TMP=$(mktemp -d "${TMPDIR:-/tmp}/btrfs.XXXXXX") || {
+        echo "cannot create a temporary directory; btrfs not checked, row 1 stays unknown"
+        BTRFS_TMP=
+    }
+    if [ -n "$BTRFS_TMP" ]; then
+        OUT=$(btrfs subvolume list / 2>"$BTRFS_TMP/stderr")
+        if [ -s "$BTRFS_TMP/stderr" ]; then
+            echo "btrfs reported an error, so this check did not run:"
+            sed 's/^/  /' "$BTRFS_TMP/stderr"
+            echo "  -> row 1 stays unknown"
+        elif printf '%s\n' "$OUT" | grep -qi snapshot; then
+            printf '%s\n' "$OUT" | grep -i snapshot
+        else
+            echo "btrfs ran cleanly; no subvolume name mentions snapshot"
+        fi
+        rm -rf "$BTRFS_TMP"
     fi
-    rm -f /tmp/btrfs.err
 else
     echo "btrfs not installed (package btrfs-progs); btrfs not checked, row 1 stays unknown"
 fi
