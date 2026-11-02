@@ -1332,6 +1332,13 @@ mod tests {
     /// this test goes red. That is the point: it means card 101 landed, and this
     /// expectation — and the doc comment on `UpdatableApp` — should be updated
     /// with it.
+    ///
+    /// Card 101 cannot simply push a filter down into `updates_list`: that
+    /// function is also the return value of `check_update_sources_inner`
+    /// (`core.rs:599`), which the tray reads (`tray.rs:97`, `tray.rs:250`), so
+    /// narrowing it there would narrow what those callers see as well. The
+    /// split has to happen by adding a separate all-rows accessor, not by
+    /// tightening the one everybody already shares.
     #[test]
     fn queue_updates_accepts_a_homebrew_formula_the_page_does_not_draw() {
         let available = vec![
