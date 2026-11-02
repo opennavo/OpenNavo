@@ -1310,4 +1310,62 @@ mod tests {
             "an app the user did not see is a different grant"
         );
     }
+
+    /// A Homebrew formula the updates page does not draw is still queueable here.
+    ///
+    /// This pins a known and currently intended asymmetry rather than a feature.
+    /// `updatable_rows` answers from `updates_list`, which is built from both
+    /// `outdated.casks` and `outdated.formulae` (`updates.rs:67`) and whose
+    /// `merge` keeps formulae (`updater/service.rs` retains only on source
+    /// enablement and native-cask ownership, never on kind). The page hides them
+    /// instead: `scheduler::visible` and the web store's `shown()` both drop
+    /// non-cask Homebrew rows. So the set this tool can act on is a superset of
+    /// the set the user can see, and a client holding a formula id can queue it.
+    ///
+    /// Nothing downstream narrows it: `plan_update_selection` maps the row's
+    /// kind straight through to `TaskKind::Formula`, and `brew::args::write_args`
+    /// turns that into `brew upgrade --formula <token>` (its only refusals are
+    /// for `Kind::Link` and for options no update sets). `scheduler::eligible`
+    /// refusing formulas governs background upgrades, not this path.
+    ///
+    /// If `list_updatable_apps` ever starts filtering to what the page draws,
+    /// this test goes red. That is the point: it means card 101 landed, and this
+    /// expectation — and the doc comment on `UpdatableApp` — should be updated
+    /// with it.
+    #[test]
+    fn queue_updates_accepts_a_homebrew_formula_the_page_does_not_draw() {
+        let available = vec![
+            updatable("ghostty", "ghostty", "Ghostty", crate::model::Kind::Cask),
+            updatable("jq", "jq", "jq", crate::model::Kind::Formula),
+        ];
+
+        let selection = plan_update_selection(&available, &["jq".into()])
+            .expect("the formula is in the read tool's own list, so it is accepted");
+
+        assert_eq!(
+            selection.targets,
+            vec![crate::model::TaskTarget {
+                kind: crate::model::TaskKind::Formula,
+                token: "jq".into()
+            }],
+            "the kind travels through unchanged: this becomes a real formula upgrade"
+        );
+
+        // And the queue accepts exactly that target: no rule here refuses a
+        // formula, only `Kind::Link` and options no update can carry.
+        assert_eq!(
+            crate::brew::args::write_args(
+                crate::model::TaskOp::Upgrade,
+                selection.targets.first(),
+                &crate::model::TaskOptions::default(),
+            )
+            .expect("an update target the read tool listed is a valid brew invocation"),
+            vec![
+                "upgrade".to_string(),
+                "--formula".to_string(),
+                "jq".to_string()
+            ],
+            "so the queued command really is a formula upgrade"
+        );
+    }
 }
