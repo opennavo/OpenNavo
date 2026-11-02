@@ -62,8 +62,37 @@ test('every config file in the API directory stays out of the frontend jobs', ()
     'apps/server/api/redocly.yaml', 'apps/server/api/public-external.openapi.yaml']) {
     assert.ok(files.includes(known), `the discovery finds ${known}`);
   }
+  // Paths the spec rules must reject although no generator reads them either. The
+  // directory walk above cannot produce them: it lists what is there, and these are
+  // the near-misses of what is there. Without them an anchor is unverified - dropping
+  // `$` makes every path ending in the spec name match, dropping `^` makes every path
+  // containing it match, and both leave the walk's own assertions green.
+  files.push(
+    'apps/server/api/public.openapi.yaml.bak',
+    'apps/server/api/public.openapi.yamlx',
+    'sub/apps/server/api/public.openapi.yaml',
+    'vendor/apps/server/api/public.openapi.yaml',
+    'apps/server/api/admin.openapi.yaml.bak',
+    'apps/server/api/admin.openapi.yamlx',
+    'sub/apps/server/api/admin.openapi.yaml',
+    'vendor/apps/server/api/admin.openapi.yaml'
+  );
   for (const file of files) {
     assert.equal(classify([file]).frontend, false, `${file} is not generated into packages/, so the frontend jobs must not run`);
+  }
+});
+
+test('the mcp spec rule matches the admin spec and nothing around it', () => {
+  // The mcp area has its own rule for the same file. It must reject the same
+  // near-misses, plus a longer name: `xadmin.openapi.yaml` differs from the spec only
+  // before `admin`, so a rule that lost its `^` would classify it as mcp.
+  assert.equal(classify(['apps/server/api/admin.openapi.yaml']).mcp, true, 'the spec reaches mcp');
+  for (const file of ['apps/server/api/admin.openapi.yaml.bak',
+    'apps/server/api/admin.openapi.yamlx',
+    'sub/apps/server/api/admin.openapi.yaml',
+    'vendor/apps/server/api/admin.openapi.yaml',
+    'apps/server/api/xadmin.openapi.yaml']) {
+    assert.equal(classify([file]).mcp, false, `${file} is not the admin spec, so it must not reach mcp`);
   }
 });
 
