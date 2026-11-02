@@ -619,13 +619,22 @@ class LintTests(unittest.TestCase):
         # Every step before run() therefore counts against the same budget, so the
         # comparison is pre_run + RUN_TIMEOUT, not RUN_TIMEOUT alone. That is the
         # mistake that made 900 look safe next to 1500 while 1500 did not fit.
+        #
+        # REPORT_MARGIN is the part after the last timeout: killing the receiver,
+        # restoring the pointer, printing which revision came back. A budget that
+        # merely equals the SSH timeout leaves no room for it, so the operator sees
+        # the timeout instead of the explanation.
         sender = (Path(__file__).parent.parent / '.github/scripts/send-deployment.py').read_text()
         ssh_timeout = int(re.search(r'\btimeout=(\d+)\)', sender).group(1))
         pre_run = bootstrap.FETCH_TIMEOUT + 2 * bootstrap.CHECK_TIMEOUT + bootstrap.START_TIMEOUT
         self.assertEqual(pre_run, bootstrap.PRE_RUN_LIMIT, 'PRE_RUN_LIMIT no longer sums its parts')
-        self.assertLess(pre_run + bootstrap.RUN_TIMEOUT, ssh_timeout,
+        self.assertLess(pre_run + bootstrap.RUN_TIMEOUT + bootstrap.REPORT_MARGIN, ssh_timeout,
                         'the bootstrap may be killed by the SSH client before it can report '
                         'which receiver it restored')
+        self.assertGreater(bootstrap.REPORT_MARGIN, 0,
+                           'a zero margin leaves no room to print what was restored')
+        self.assertEqual(bootstrap.BUDGET_LIMIT, pre_run + bootstrap.RUN_TIMEOUT + bootstrap.REPORT_MARGIN,
+                         'BUDGET_LIMIT no longer sums its parts')
         # And the probe must fit inside the run budget, not be counted beside it.
         self.assertLess(bootstrap.START_TIMEOUT, bootstrap.RUN_TIMEOUT)
 

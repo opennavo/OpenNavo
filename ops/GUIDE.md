@@ -348,8 +348,12 @@ The 900-second deadline is shorter than the SSH client's own timeout in
 process start, so the fetch, the two check steps and the probe all count against
 the same budget. Run out of it and the SSH client gives up first — the rollback
 still happens, but the operator sees a bare SSH timeout instead of the message
-naming the receiver that was restored. `PRE_RUN_LIMIT + RUN_TIMEOUT` must stay
-under the SSH timeout, and a test recomputes that from both files.
+naming the receiver that was restored. The budget is
+`PRE_RUN_LIMIT + RUN_TIMEOUT + REPORT_MARGIN` (390 + 900 + 60 = 1350 against
+1500, 150 seconds left), and a test recomputes it from both files. `REPORT_MARGIN`
+is the room after the last timeout — killing the receiver, restoring the pointer
+and printing what came back — which no timeout above covers. A budget that merely
+equals the SSH timeout has no room for the sentence that explains what happened.
 
 **Order matters, and it cannot be reversed.** A receiver without `--self-check`
 fails the bootstrap's verification step on every deployment:
