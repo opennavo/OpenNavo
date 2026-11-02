@@ -336,6 +336,14 @@ export function createUpdaterMock({
     return withPrefs([...brew, ...sourceRows()]);
   }
 
+  /**
+   * The rows the updates page lists. Rust applies the cask-only catalog rule (ADR-018) inside
+   * `updates_list`, so the mock applies the same rule here instead of letting each caller do it.
+   */
+  function listed(homebrew: OutdatedItem[]): OutdatedItem[] {
+    return merge(homebrew).filter(row => row.source !== 'homebrew' || row.kind === 'cask');
+  }
+
   const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     update_prepare_reinstall: args => {
       const row = sourceRows().find(
@@ -480,5 +488,5 @@ export function createUpdaterMock({
     });
   }
 
-  return { handlers, merge, hooks: { steps, completed }, rollbackable };
+  return { handlers, merge, listed, hooks: { steps, completed }, rollbackable };
 }

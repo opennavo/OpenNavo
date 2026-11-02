@@ -154,7 +154,10 @@ async fn cached_ignores_and_unignore_emit_updates_and_survive_restart() {
         Arc::new(move |e| saved.lock().unwrap().push(e)),
     )
     .unwrap();
-    let total = core.rebuild_updates().await.unwrap().len();
+    core.rebuild_updates().await.unwrap();
+    // Both lists shrink by exactly one: the ignored row was one the page listed.
+    let listed_before = listed(&core);
+    let reported_before = reported(&core);
     let target = TaskTarget {
         kind: Kind::Cask.into(),
         token: "visual-studio-code".into(),
@@ -162,9 +165,11 @@ async fn cached_ignores_and_unignore_emit_updates_and_survive_restart() {
     core.ignore_update(target.clone(), None, None)
         .await
         .unwrap();
-    assert_eq!(core.updates_list().unwrap().len(), total - 1);
+    assert_eq!(listed(&core), listed_before - 1);
+    assert_eq!(reported(&core), reported_before - 1);
     core.unignore_update(target).await.unwrap();
-    assert_eq!(core.updates_list().unwrap().len(), total);
+    assert_eq!(listed(&core), listed_before);
+    assert_eq!(reported(&core), reported_before);
     assert_eq!(
         events
             .lock()
@@ -181,7 +186,7 @@ async fn cached_ignores_and_unignore_emit_updates_and_survive_restart() {
         Arc::new(|_| {}),
     )
     .unwrap();
-    assert_eq!(restarted.updates_list().unwrap().len(), total);
+    assert_eq!(listed(&restarted), listed_before);
 }
 #[tokio::test]
 async fn explicit_index_update_uses_only_simulated_write_queue() {
@@ -347,11 +352,24 @@ fn finished(
     task
 }
 
+/// Raw row lookup. `node` is a formula, which the updates page never lists, so these
+/// assertions read the unfiltered set on purpose.
 fn update(core: &opennavo_desktop_lib::core::DesktopCore, token: &str) -> Option<OutdatedItem> {
-    core.updates_list()
+    core.updates_all()
         .unwrap()
         .into_iter()
         .find(|item| item.token == token)
+}
+
+/// The rows the page lists. Every count below is a page count, so it must match what the
+/// window receives rather than what the sources reported.
+fn listed(core: &opennavo_desktop_lib::core::DesktopCore) -> usize {
+    core.updates_list().unwrap().len()
+}
+
+/// Raw rows before `visible`: two formulae plus the casks the fixture installs.
+fn reported(core: &opennavo_desktop_lib::core::DesktopCore) -> usize {
+    core.updates_all().unwrap().len()
 }
 
 #[tokio::test]
@@ -359,8 +377,14 @@ async fn a_successful_upgrade_leaves_the_update_list_before_the_post_task_check(
     use opennavo_desktop_lib::events::CoreEvent;
     let tmp = tempfile::tempdir().unwrap();
     let (core, events) = settling_core(tmp.path());
-    let total = core.rebuild_updates().await.unwrap().len();
-    assert!(update(&core, "node").is_some());
+    core.rebuild_updates().await.unwrap();
+    let total = listed(&core);
+    let raw = reported(&core);
+    assert_eq!(total, 2, "the fixture installs two casks the page lists");
+    assert_eq!(raw, 4, "and two formulae it does not");
+    assert!(update(&core, "node").is_some(), "the raw set still reports the formula");
+    assert!(!core.updates_list().unwrap().iter().any(|i| i.token == "node"),
+        "the page never lists a Homebrew formula");
 
     // A failed upgrade keeps offering the update.
     core.after_task(&finished(
@@ -370,20 +394,25 @@ async fn a_successful_upgrade_leaves_the_update_list_before_the_post_task_check(
         TaskState::Failed,
     ))
     .await;
-    assert_eq!(core.updates_list().unwrap().len(), total);
+    assert_eq!(listed(&core), total);
 
+    // `node` is a formula, so it never appeared on the page: settling it changes the raw set
+    // only, and the page count proves the two lists are not the same list.
     let upgraded = finished(&core, TaskOp::Upgrade, "node", TaskState::Succeeded);
     events.lock().unwrap().clear();
     core.after_task(&upgraded).await;
     assert!(update(&core, "node").is_none());
-    assert_eq!(core.updates_list().unwrap().len(), total - 1);
+    assert_eq!(reported(&core), raw - 1);
+    assert_eq!(listed(&core), total);
     // The settled list is the first thing windows hear after the task, before any slower post-task work.
     assert!(matches!(
         events.lock().unwrap().first(),
-        Some(CoreEvent::Updates(changed)) if changed.count as usize == total - 1
+        Some(CoreEvent::Updates(changed)) if changed.count as usize == total
     ));
     // Rebuilding from the cached brew output, as a catalog sync does, does not bring the update back.
-    assert_eq!(core.rebuild_updates().await.unwrap().len(), total - 1);
+    core.rebuild_updates().await.unwrap();
+    assert_eq!(reported(&core), raw - 1);
+    assert_eq!(listed(&core), total);
     let restarted = opennavo_desktop_lib::core::DesktopCore::open(
         tmp.path().join("data"),
         tmp.path().join("cache"),
@@ -416,4 +445,33 @@ async fn a_pin_or_unpin_flips_the_update_at_once() {
     ))
     .await;
     assert!(!update(&core, "node").unwrap().pinned);
+}
+
+/// One implementation of the page rule, three readers. `updates_list` is what the window, the
+/// update notification and the MCP `list_updatable_apps` tool all read, so a Homebrew formula or
+/// link must not reach any of them while the raw set still carries it for the task pipeline.
+#[tokio::test]
+async fn the_page_list_and_the_task_rows_disagree_only_on_what_the_page_hides() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (core, _) = settling_core(tmp.path());
+    core.rebuild_updates().await.unwrap();
+
+    let all = core.updates_all().unwrap();
+    let listed = core.updates_list().unwrap();
+    let hidden: Vec<&str> = all
+        .iter()
+        .filter(|row| !listed.iter().any(|shown| shown.token == row.token))
+        .map(|row| row.token.as_str())
+        .collect();
+    assert_eq!(
+        hidden,
+        ["node", "pcre2"],
+        "the fixture's two formulae are exactly what the page must not list"
+    );
+    assert!(
+        all.iter()
+            .filter(|row| row.source == UpdateSource::Homebrew && row.kind != Kind::Cask)
+            .all(|row| !listed.iter().any(|shown| shown.token == row.token)),
+        "no Homebrew formula or link may reach the page list"
+    );
 }

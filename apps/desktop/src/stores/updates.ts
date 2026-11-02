@@ -16,8 +16,9 @@ import { commands, packageKey, unwrap } from '@/ipc/client';
 import { useMajorConfirmStore } from './majorConfirm';
 import { useTasksStore } from './tasks';
 
-// Cask-only catalog (ADR-018): neither show nor count command-line tools from brew outdated.
-const shown = (list: OutdatedItem[]) => list.filter(item => item.source !== 'homebrew' || item.kind === 'cask');
+// The cask-only catalog rule (ADR-018) is applied once, in Rust: `updates_list` returns the rows
+// the page lists, so this store must not filter again. A second copy here is how the updates
+// page and the update notification drifted apart (#147).
 // Operations after which a target no longer has the update brew outdated listed before them.
 const SETTLING: readonly TaskOp[] = ['upgrade', 'reinstall', 'uninstall'];
 
@@ -187,7 +188,7 @@ export const useUpdatesStore = defineStore('updates', () => {
       const item = listed.get(key);
       if (!item || item.pinned === pin.pinned || checkedSince(pin.at)) pins.delete(key);
     }
-    items.value = shown(list)
+    items.value = list
       .filter(item => !settled.has(rowKey(item)))
       .map(item => {
         const pin = item.source === 'homebrew' ? pins.get(packageKey(item.kind, item.token)) : undefined;

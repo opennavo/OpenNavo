@@ -900,7 +900,7 @@ export function installMockIpc(
       cacheBytes: state.cacheBytes
     }),
     ...updates.handlers,
-    updates_list: () => updates.merge(runner.outdated()),
+    updates_list: () => updates.listed(runner.outdated()),
     // ?mock=updates-partial: GitHub and developer-site rules could not be read in the last check.
     updates_status: (): UpdatesStatus => ({
       checkedAt,
@@ -919,7 +919,9 @@ export function installMockIpc(
     // null checks every enabled source; [] only rereads the list (plan §11.4).
     updates_check: args => {
       if ((args.sources as UpdateSource[] | null)?.length !== 0) checkedAt = Date.now();
-      return updates.merge(runner.outdated());
+      // Rust returns `updates_list`, which is the listed set; a check must not hand back
+      // rows the page hides.
+      return updates.listed(runner.outdated());
     },
     updates_ignore: args => {
       const target = args.target as TaskTarget;

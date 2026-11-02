@@ -468,9 +468,20 @@ impl DesktopCore {
         }));
         Ok(())
     }
-    pub fn updates_list(&self) -> Result<Vec<OutdatedItem>, AppError> {
+    /// Every row any source reported, including the ones the updates page hides.
+    /// Persistence and the task pipeline read this; the page and the notification do not.
+    pub fn updates_all(&self) -> Result<Vec<OutdatedItem>, AppError> {
         let updates = self.updates.read().map_err(poisoned)?.clone();
         self.queue.updater.merge(updates)
+    }
+    /// The rows the updates page lists: `scheduler::visible` is the single implementation
+    /// of that rule, so a page, a notification and an MCP client cannot disagree.
+    pub fn updates_list(&self) -> Result<Vec<OutdatedItem>, AppError> {
+        Ok(self
+            .updates_all()?
+            .into_iter()
+            .filter(crate::scheduler::visible)
+            .collect())
     }
     pub async fn rebuild_updates(self: &Arc<Self>) -> Result<Vec<OutdatedItem>, AppError> {
         let core = self.clone();

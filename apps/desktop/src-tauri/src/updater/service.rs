@@ -563,6 +563,7 @@ impl Service {
         Ok(candidate)
     }
     pub fn changed(&self) -> Result<(), AppError> {
+        // The count is what the page lists, so it uses the same `visible` rule the page does.
         (self.sink)(CoreEvent::Updates(UpdatesChanged {
             count: self
                 .merge(
@@ -571,7 +572,9 @@ impl Service {
                         .and_then(|s| serde_json::from_str(&s).ok())
                         .unwrap_or_default(),
                 )?
-                .len() as u32,
+                .into_iter()
+                .filter(crate::scheduler::visible)
+                .count() as u32,
         }));
         Ok(())
     }
