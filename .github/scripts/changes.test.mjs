@@ -72,6 +72,12 @@ test('every config file in the API directory stays out of the frontend jobs', ()
     'apps/server/api/public.openapi.yamlx',
     'sub/apps/server/api/public.openapi.yaml',
     'vendor/apps/server/api/public.openapi.yaml',
+    // A directory between `api/` and the name, as opposed to the prefix forms above. Only this
+    // shape catches a rule that kept both anchors and inserted `.*` after `api/`; `.bak`,
+    // `.yamlx` and a `sub/` prefix all survive that widening, because they differ from the spec
+    // name at its edges, not in the middle.
+    'apps/server/api/sub/public.openapi.yaml',
+    'apps/server/api/sub/admin.openapi.yaml',
     'apps/server/api/admin.openapi.yaml.bak',
     'apps/server/api/admin.openapi.yamlx',
     'sub/apps/server/api/admin.openapi.yaml',
@@ -91,6 +97,9 @@ test('the mcp spec rule matches the admin spec and nothing around it', () => {
     'apps/server/api/admin.openapi.yamlx',
     'sub/apps/server/api/admin.openapi.yaml',
     'vendor/apps/server/api/admin.openapi.yaml',
+    // The mid-directory form: it survives a rule that kept `^` and `$` but inserted `.*`
+    // after `api/`, which is the widening none of the edge forms above can see.
+    'apps/server/api/sub/admin.openapi.yaml',
     'apps/server/api/xadmin.openapi.yaml']) {
     assert.equal(classify([file]).mcp, false, `${file} is not the admin spec, so it must not reach mcp`);
   }
