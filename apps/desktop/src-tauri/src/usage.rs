@@ -455,10 +455,47 @@ mod tests {
         an_unavailable_status_keeps_the_whole_batch("503 Service Unavailable").await;
     }
 
+    /// A 429 with the header a rate-limiting proxy sends: the batch still waits, and the next tick
+    /// sends both records once the server stops asking for less traffic.
     #[tokio::test]
-    async fn a_rate_limited_request_keeps_the_whole_batch() {
-        // 429 is the server asking for less traffic, not refusing the record: it must be retried.
-        an_unavailable_status_keeps_the_whole_batch("429 Too Many Requests").await;
+    async fn a_rate_limited_endpoint_keeps_the_batch() {
+        let (url, server) = serve(1, |_, _| {
+            "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_owned()
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        // A rate-limited tick is a successful tick: it reports what it could not send and returns.
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        server.join().unwrap();
+        let history = History::load(&core).unwrap();
+        assert!(history.sent.is_empty(), "a 429 acknowledges no record");
+        for version in ["0.1.4", "0.1.3"] {
+            assert!(
+                history.pending.iter().any(|a| a.version == version),
+                "{version} is still waiting after a 429"
+            );
+        }
+
+        let (url, server) = serve(2, |_, body| no_content(body));
+        tick(
+            &core,
+            &client,
+            &url,
+            now + chrono::Duration::minutes(1),
+            "0.1.4",
+        )
+        .await
+        .unwrap();
+        let delivered = server.join().unwrap();
+        assert_eq!(
+            delivered.len(),
+            2,
+            "the next tick resends the whole batch after a 429"
+        );
+        assert!(History::load(&core).unwrap().pending.is_empty());
     }
 
     #[tokio::test]
