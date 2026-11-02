@@ -383,7 +383,7 @@ mod tests {
             Activity {
                 anonymous_id: id.clone(),
                 platform: "desktop".into(),
-                occurred_at: now - chrono::Duration::seconds(1),
+                occurred_at: a_moment_earlier(now),
                 version: "0.1.4".into(),
                 locale: "en-US".into(),
             },
@@ -606,8 +606,8 @@ mod tests {
         let next = now + chrono::Duration::minutes(1);
         tick(&core, &client, &url, next, "0.1.4").await.unwrap();
         let delivered = server.join().unwrap();
-        let rejected_at = (now - chrono::Duration::seconds(1))
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let rejected_at =
+            a_moment_earlier(now).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         // The rejected record is this run's `0.1.4` at `now`; the only `0.1.4` the next tick may send is
         // the fresh record it writes for the new day, dated at `next` or later.
         assert!(
@@ -634,6 +634,19 @@ mod tests {
         );
     }
 
+    /// One second before `now`, except in the first second of a local reporting day, where that lands
+    /// on the previous day. Tests seed "today's record" this way, and `record()` replaces pending
+    /// entries of its own day, so a seed that crossed the boundary would be counted as a third day and
+    /// change what the test asserts. The clamp keeps the seed on `now`'s day at every wall-clock time.
+    fn a_moment_earlier(now: DateTime<Utc>) -> DateTime<Utc> {
+        let earlier = now - chrono::Duration::seconds(1);
+        if day(earlier) == day(now) {
+            earlier
+        } else {
+            now
+        }
+    }
+
     /// A stored outbox whose first record is today's and whose second is three days old, so a test
     /// can see whether a failure at the head leaves the record behind it alone.
     fn seed_two_days(core: &DesktopCore, now: DateTime<Utc>) -> String {
@@ -642,7 +655,7 @@ mod tests {
             Activity {
                 anonymous_id: id.clone(),
                 platform: "desktop".into(),
-                occurred_at: now - chrono::Duration::seconds(1),
+                occurred_at: a_moment_earlier(now),
                 version: "0.1.4".into(),
                 locale: "en-US".into(),
             },
