@@ -293,6 +293,12 @@ still install it by hand, and `ship.mjs` excludes it. It also takes no lock acro
 the handover — the receiver takes its own lock unchanged once it starts. Only the
 two pointer renames run under the deployment lock.
 
+A payload without a `receiver` field is not a receiver install. The desktop
+publish carries none on purpose: that workflow checks out `desktop-v<version>`,
+not a main commit, so it has no main revision to name and no reason to change the
+receiver. The bootstrap runs whatever receiver is already `current` and passes the
+payload through untouched. The same path serves a sender older than this file.
+
 **Order matters, and it cannot be reversed.** A receiver without `--self-check`
 fails the bootstrap's verification step on every deployment:
 
