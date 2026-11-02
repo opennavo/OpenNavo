@@ -582,7 +582,13 @@ impl Service {
             unsafe extern "C" {
                 fn pthread_set_qos_class_self_np(class: u32, relative: i32) -> i32;
             }
-            let _ = pthread_set_qos_class_self_np(0x09, 0);
+            // Only the scan runs at background QoS. In production this thread is
+            // always one the scan itself spawned (scan.rs:565, :974); the test seam
+            // calls run_scan_options on the test harness thread, and lowering that
+            // starves the whole test under load instead of just the scan.
+            if cfg!(not(test)) {
+                let _ = pthread_set_qos_class_self_np(0x09, 0);
+            }
         }
         let done = (|| {
             let own_data = self.own_data()?;
