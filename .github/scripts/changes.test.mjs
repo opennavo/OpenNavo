@@ -162,10 +162,11 @@ test('Desktop CI compares main pushes with its own green commits, the gate with 
 
 // A list of near-miss paths is still a list: it holds the forms its author thought of. The
 // regex is what decides, so it is checked against the whole space of paths it could wrongly
-// accept, generated rather than chosen. A rule widens in two directions - an insertion before
-// the file name (`.*`, `[^/]*`, `\w*` all do it) and a dropped `^` that accepts any leading
-// path - and both spaces are enumerated here, for the frontend rule and the mcp rule.
-test('the spec rules reject both an insertion before the name and a leading path', () => {
+// accept, generated rather than chosen. A rule widens in three directions, and this test covers
+// the two a path can reach: an insertion before the file name (`.*`, `[^/]*`, `\w*` all do it)
+// and a dropped `^` that accepts any leading path. The third - a generalised name - cannot be
+// reached by any path, so it has its own test below.
+test('the spec rules reject an insertion before the name and a leading path', () => {
   const fillers = ['x', '1', '.', '_', '-', '/', 'A'];
   const prefixes = ['sub/', 'vendor/', 'x/', 'foo/bar/', 'apps/', './'];
   for (const [spec, area] of [['public', 'frontend'], ['admin', 'frontend'], ['admin', 'mcp']]) {
@@ -184,4 +185,42 @@ test('the spec rules reject both an insertion before the name and a leading path
   assert.equal(classify(['apps/server/api/public.openapi.yaml']).frontend, true);
   assert.equal(classify(['apps/server/api/admin.openapi.yaml']).frontend, true);
   assert.equal(classify(['apps/server/api/admin.openapi.yaml']).mcp, true);
+});
+
+// The third direction, which no constructed path reaches: the rule can stop insisting on the
+// exact file name - `.yaml` -> `ya?ml`, a `/i` flag, another spec folded into the alternation,
+// or the suffix relaxed to `.*`. A path shaped like a near-miss cannot expose that, because the
+// widened rule would accept a name that is not a near-miss at all (`.yml`, `.YAML`, a sibling).
+// So this asks the rule what it accepts instead: the real name must match, every generalised
+// spelling must not.
+test('the spec rules accept the exact name and no generalised spelling of it', () => {
+  const real = {
+    frontend: ['apps/server/api/public.openapi.yaml', 'apps/server/api/admin.openapi.yaml'],
+    mcp: ['apps/server/api/admin.openapi.yaml']
+  };
+  // If a rule gained /i, `ya?ml`, or another alternative, one of these would start matching.
+  const generalised = {
+    frontend: [
+      'apps/server/api/public.openapi.yml',
+      'apps/server/api/admin.openapi.yml',
+      'apps/server/api/public.openapi.YAML',
+      'apps/server/api/admin.openapi.YAML',
+      'apps/server/api/public-external.openapi.yaml',
+      'apps/server/api/admin-external.openapi.yaml'
+    ],
+    mcp: [
+      'apps/server/api/admin.openapi.yml',
+      'apps/server/api/admin.openapi.YAML',
+      'apps/server/api/public-external.openapi.yaml',
+      'apps/server/api/public.openapi.yaml'
+    ]
+  };
+  for (const [area, paths] of Object.entries(real)) {
+    for (const path of paths) {
+      assert.equal(classify([path])[area], true, `the ${area} rule matches ${path}`);
+    }
+    for (const path of generalised[area]) {
+      assert.equal(classify([path])[area], false, `the ${area} rule generalised and matches ${path}`);
+    }
+  }
 });
