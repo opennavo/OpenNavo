@@ -75,7 +75,7 @@ def revision_of(payload):
 def fetch(revision):
     url = REMOTE.format(revision=revision)
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:
+        with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT) as response:
             data = response.read(MAX_PAYLOAD + 1)
     except urllib.error.URLError as error:
         # Named explicitly: an unreachable host looks like a broken receiver otherwise.
@@ -106,14 +106,14 @@ def check(receiver):
     load never replaces one that works.
 
     Standard input is closed: neither step takes a payload, and a receiver that
-    tried to read one here would block until the 120s timeout instead of failing.
+    tried to read one here would block until CHECK_TIMEOUT instead of failing.
     """
     steps = ((['-I', '-m', 'py_compile', str(receiver)], 'compile'),
              ([str(receiver), '--self-check'], 'self-check'))
     for arguments, name in steps:
         try:
             subprocess.run([sys.executable, *arguments], check=True, capture_output=True, text=True,
-                           stdin=subprocess.DEVNULL, timeout=120)
+                           stdin=subprocess.DEVNULL, timeout=CHECK_TIMEOUT)
         except subprocess.CalledProcessError as error:
             detail = (error.stderr or error.stdout or '').strip().splitlines()
             reason = detail[-1] if detail else 'exit %d' % error.returncode
@@ -275,11 +275,22 @@ def main():
         previous = Path(config['root']) / 'receiver' / 'previous'
         restored = os.readlink(previous) if previous.is_symlink() else None
         rollback(Path(config['root']) / 'receiver')
-        reason = ('did not finish within %ds' % RUN_TIMEOUT if status == TIMED_OUT else
-                  'could not start' if status == EXEC_FAILED else 'exited with status %d' % status)
-        fail('the receiver for this deployment %s, so %s; the deployment did not take effect'
-             % (reason, 'the previous receiver %s was restored' % restored if restored else
-                'there was no previous receiver to restore'))
+        if status == TIMED_OUT:
+            reason = 'did not finish within %ds' % RUN_TIMEOUT
+        elif status == EXEC_FAILED:
+            reason = 'could not start'
+        else:
+            # The receiver exited on its own with a non-zero status, which is its own
+            # "this deployment failed". An operator paged at night must read that first:
+            # otherwise they go looking for a broken receiver when the deployment is
+            # what failed, and the log above is where the actual reason is.
+            reason = ('exited with status %d: the deployment failed on its own terms '
+                      '(see the log above), not the receiver' % status)
+        outcome = ('the previous receiver %s was restored, so a desktop publish does not '
+                   'keep running this one' % restored if restored else
+                   'there was no previous receiver to restore')
+        fail('the receiver for this deployment %s; %s; the deployment did not take effect'
+             % (reason, outcome))
     sys.exit(status)
 
 

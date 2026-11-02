@@ -333,12 +333,15 @@ before publishing after a receiver change.
 
 **A newly installed receiver that then fails is put back.** If the receiver exits
 nonzero or overruns its 900-second deadline, `receiver/current` returns to
-`receiver/previous` and the failure names the revision it went back to. The next
-deployment installs its own revision regardless, so the cost is one extra install.
-This matters most for the desktop publish above: it carries no receiver and would
-otherwise keep using a receiver that cannot deploy. Failures *before* the switch —
-a digest mismatch, a failed compile or self-check, a receiver that cannot start,
-another deployment holding the lock — never move `current` at all.
+`receiver/previous` and the failure names the revision it went back to. For the
+nonzero case the message leads with `the deployment failed on its own terms`, not
+with a broken receiver: the receiver exited by design, and the cause is in the log
+above. Read it that way when paged. The next deployment installs its own revision
+regardless, so the cost is one extra install. This matters most for the desktop
+publish above: it carries no receiver and would otherwise keep using a receiver
+that cannot deploy. Failures *before* the switch — a digest mismatch, a failed
+compile or self-check, a receiver that cannot start, another deployment holding
+the lock — never move `current` at all.
 
 The 900-second deadline is shorter than the SSH client's own timeout in
 `send-deployment.py` (1500 seconds), and it has to be: the SSH timeout runs from

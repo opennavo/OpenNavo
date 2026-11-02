@@ -502,6 +502,15 @@ class FailureTests(BootstrapTestCase):
         written = ''.join(call[0][0] for call in stderr.write.call_args_list)
         self.assertIn('exited with status 1', written)
         self.assertIn(OTHER, written)
+        # The first thing an operator reads must be that the deployment failed, not
+        # that the receiver is broken: the reason is in the log above, and pointing
+        # them at the wrong component sends the investigation the wrong way.
+        self.assertIn('exited with status 1: the deployment failed on its own terms', written,
+                      'the exit status is reported without saying the deployment failed')
+        # The reason the receiver is put back, not just that it was: a desktop publish
+        # carries no receiver, so without this line a restored pointer looks optional.
+        self.assertIn('a desktop publish does not', written,
+                      'the message does not say why a failed deploy restores the receiver')
 
     def test_a_receiver_that_never_finishes_is_killed_and_rolled_back(self):
         self.install_revision(OTHER)
@@ -674,6 +683,51 @@ class LintTests(unittest.TestCase):
         self.assertEqual(len(steps), 2, 'both the compile step and the self-check step run')
         for kwargs in steps:
             self.assertIs(kwargs.get('stdin'), subprocess.DEVNULL, 'a check step inherits stdin')
+
+    def test_the_pre_run_deadlines_are_the_constants_the_budget_counts(self):
+        # PRE_RUN_LIMIT is only the real worst case if each step is given exactly the
+        # constant it is summed from. A hard-coded 30 or 120 in the body drifts the
+        # moment someone edits the constant, and the SSH budget test stays green
+        # because it reads the constants rather than the calls.
+        #
+        # The constants are patched to a value they do not currently hold: with
+        # timeout == the default, a body hard-coding that same number would satisfy
+        # an equality assertion without ever reading the constant.
+        steps = []
+
+        def fake_check(arguments, **kwargs):
+            steps.append(kwargs)
+            return subprocess.CompletedProcess(arguments, 0)
+
+        with patch.multiple(bootstrap, CHECK_TIMEOUT=7), \
+                patch.object(bootstrap.subprocess, 'run', side_effect=fake_check):
+            bootstrap.check(Path('/staged/github-deploy.py'))
+        self.assertEqual(len(steps), 2, 'both check steps run')
+        for kwargs in steps:
+            self.assertEqual(kwargs.get('timeout'), 7,
+                             'a check step does not take its deadline from CHECK_TIMEOUT')
+
+        seen = []
+
+        class Answer:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exception):
+                return False
+
+            def read(self, limit):
+                return b'x'
+
+        def fake_urlopen(url, timeout=None):
+            seen.append(timeout)
+            return Answer()
+
+        with patch.multiple(bootstrap, FETCH_TIMEOUT=11), \
+                patch.object(bootstrap.urllib.request, 'urlopen', side_effect=fake_urlopen):
+            bootstrap.fetch(REVISION)
+        self.assertEqual(seen, [11],
+                         'the fetch does not take its deadline from FETCH_TIMEOUT')
 
 
 if __name__ == '__main__':
