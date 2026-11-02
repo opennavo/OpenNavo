@@ -3,6 +3,7 @@
 Every test runs in a temporary directory with a temporary configuration, and
 nothing here starts a deployment, reaches the network or touches /etc.
 """
+import fcntl
 import hashlib
 import importlib.util
 import io
@@ -12,6 +13,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -25,7 +27,9 @@ THIRD = 'c' * 40
 SENTINEL = 'registry-token-do-not-write-this-to-disk'
 
 # Stands in for the receiver: reads the payload from stdin and reports what it
-# got, so a test can prove the bytes crossed the handover unchanged.
+# got, so a test can prove the bytes crossed the handover unchanged. With an empty
+# payload it behaves like the real receiver's main(): it starts, takes the lock and
+# then fails the validation, which is what the start probe looks for.
 RECEIVER = '''\
 import hashlib
 import os
@@ -37,7 +41,17 @@ report = os.environ.get('HANDOVER_REPORT')
 if report:
     with open(report, 'w') as stream:
         stream.write('%d %s' % (len(raw), hashlib.sha256(raw).hexdigest()))
+if not raw:
+    sys.exit(1)
 sys.exit(int(os.environ.get('RECEIVER_STATUS', '0')))
+'''
+# Starts, then dies the way the interpreter does when the file cannot even be
+# imported: this is the "cannot start" case, not a failed deployment.
+UNSTARTABLE = '''\
+import sys
+if '--self-check' in sys.argv:
+    sys.exit(0)
+sys.exit(2)
 '''
 BROKEN = '''\
 import sys
@@ -195,6 +209,17 @@ class VerificationOrderTests(BootstrapTestCase):
         self.assertEqual(self.run_main(payload(data=broken)), 1)
         self.assertEqual(os.readlink(self.receiver / 'current'), OTHER)
 
+    def test_the_compile_step_is_what_reports_unparsable_source(self):
+        # Without py_compile the self-check step still exits 1, because the
+        # interpreter raises SyntaxError on import. Both refuse the receiver, so a
+        # test that only reads the exit status cannot tell which step ran. This one
+        # reads the message: the compile step must be the one that fails first.
+        self.serve(REVISION, b'def f(:\n')
+        with patch('sys.stderr') as stderr:
+            self.assertEqual(self.run_main(payload(data=b'def f(:\n')), 1)
+        written = ''.join(call[0][0] for call in stderr.write.call_args_list)
+        self.assertIn('compile step', written)
+
     def test_the_previous_pointer_is_written_before_current_moves(self):
         self.install_revision(OTHER)
         (self.receiver / 'current').unlink()
@@ -295,6 +320,91 @@ class HandoverTests(BootstrapTestCase):
             self.assertEqual(self.run_main(b'x' * 128), 1)
 
 
+class LockTests(BootstrapTestCase):
+    """The switch must not be reachable by a second deployment while it runs.
+
+    A second flock() from this process opens its own file description, and flock
+    is per description, so it is blocked exactly as another deployment would be.
+    That makes the lock observable without starting a second process.
+    """
+
+    def assert_locked(self):
+        guard = (self.root / 'deploy/github-deploy.lock').open('w')
+        self.addCleanup(guard.close)
+        with self.assertRaises(BlockingIOError, msg='the deployment lock is not held here'):
+            fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def assert_unlocked(self):
+        guard = (self.root / 'deploy/github-deploy.lock').open('w')
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(guard, fcntl.LOCK_UN)
+        guard.close()
+
+    def hold(self, seen=None):
+        """Run install with switch and prune replaced by probes of the lock."""
+        original_switch, original_prune = bootstrap.switch, bootstrap.prune
+
+        def switch(directory, revision):
+            if seen is not None:
+                seen.append('switch')
+            self.assert_locked()
+            return original_switch(directory, revision)
+
+        def prune(directory):
+            if seen is not None:
+                seen.append('prune')
+            self.assert_locked()
+            return original_prune(directory)
+
+        return patch.multiple(bootstrap, switch=switch, prune=prune)
+
+    def test_the_switch_and_the_prune_run_inside_the_lock(self):
+        self.serve(REVISION)
+        with self.hold():
+            self.assertEqual(self.run_main(payload()), 0)
+
+    def test_the_receiver_starts_outside_the_lock(self):
+        # The receiver takes the lock itself; holding it here would deadlock it.
+        self.serve(REVISION)
+        original = bootstrap.run
+        observed = []
+
+        def run(receiver, data, timeout=None):
+            observed.append(Path(receiver).parent.name)
+            self.assert_unlocked()
+            return original(receiver, data, timeout)
+
+        with self.hold(), patch.object(bootstrap, 'run', side_effect=run):
+            self.assertEqual(self.run_main(payload()), 0)
+        self.assertIn('current', observed, 'the receiver was never started')
+
+    def test_the_lock_is_released_after_a_successful_install(self):
+        self.serve(REVISION)
+        self.assertEqual(self.run_main(payload()), 0)
+        self.assert_unlocked()
+
+    def test_the_lock_is_released_when_the_install_fails(self):
+        self.serve(REVISION, BROKEN.encode())
+        self.assertEqual(self.run_main(payload(data=BROKEN.encode())), 1)
+        self.assert_unlocked()
+
+
+class TimeoutTests(BootstrapTestCase):
+    def test_a_receiver_that_hangs_is_killed_and_reported(self):
+        self.serve(REVISION)
+        hung = Path(self.directory.name) / 'hung.py'
+        hung.write_text('import sys, time\nsys.stdin.buffer.read()\ntime.sleep(60)\n')
+        started = time.monotonic()
+        status = bootstrap.run(hung, payload(), 1)
+        self.assertEqual(status, bootstrap.TIMED_OUT)
+        self.assertLess(time.monotonic() - started, 30, 'the timeout did not stop the receiver')
+
+    def test_a_receiver_that_finishes_before_the_deadline_reports_its_status(self):
+        self.serve(REVISION)
+        target = self.install_revision(REVISION)
+        self.assertEqual(bootstrap.run(target / 'github-deploy.py', payload(), 30), 0)
+
+
 class FailureTests(BootstrapTestCase):
     def test_a_receiver_that_cannot_exec_restores_the_previous_one(self):
         self.install_revision(OTHER)
@@ -312,24 +422,71 @@ class FailureTests(BootstrapTestCase):
         self.config.unlink()
         self.assertEqual(self.run_main(payload()), 1)
 
-    def test_an_unstartable_receiver_restores_the_previous_version(self):
-        # The path handed to run() is .../receiver/current/github-deploy.py: the
-        # bootstrap deliberately starts the receiver through the pointer, so the
-        # test matches on that rather than on the revision directory name.
+    def test_an_unstartable_receiver_is_refused_before_it_becomes_current(self):
+        # Runs the real thing: no patch on run(), no synthetic EXEC_FAILED. The
+        # receiver leaves with an exit status that only an interpreter failure
+        # produces, so the probe has to catch it and current must never move.
         self.install_revision(OTHER)
         (self.receiver / 'current').unlink()
         (self.receiver / 'current').symlink_to(OTHER)
-        self.serve(REVISION, RECEIVER.encode())
-        original = bootstrap.run
+        self.serve(REVISION, UNSTARTABLE.encode())
+        self.assertEqual(self.run_main(payload(data=UNSTARTABLE.encode())), 1)
+        self.assertEqual(os.readlink(self.receiver / 'current'), OTHER)
 
-        def start_fails(receiver, data):
+    def test_a_receiver_that_fails_the_deployment_does_not_roll_back(self):
+        # Exit 1 is the receiver's own "this deployment failed". It reached main(),
+        # took its lock and made its own decision; rolling back would hide that
+        # behind an older receiver and the next deploy would start from the wrong one.
+        self.install_revision(OTHER)
+        (self.receiver / 'current').unlink()
+        (self.receiver / 'current').symlink_to(OTHER)
+        self.serve(REVISION)
+        self.assertEqual(self.run_main(payload(), receiver_status=1), 1)
+        self.assertEqual(os.readlink(self.receiver / 'current'), REVISION)
+
+    def test_a_receiver_that_never_finishes_is_killed_and_rolled_back(self):
+        self.install_revision(OTHER)
+        (self.receiver / 'current').unlink()
+        (self.receiver / 'current').symlink_to(OTHER)
+        self.serve(REVISION)
+
+        def hang(receiver, data, timeout=None):
             if Path(receiver).parent.name == 'current':
-                return bootstrap.EXEC_FAILED
-            return original(receiver, data)
+                return bootstrap.TIMED_OUT
+            return bootstrap.RUN_TIMEOUT and 1
 
-        with patch.object(bootstrap, 'run', side_effect=start_fails):
+        with patch.object(bootstrap, 'run', side_effect=hang):
             self.assertEqual(self.run_main(payload()), 1)
         self.assertEqual(os.readlink(self.receiver / 'current'), OTHER)
+
+    def test_the_rollback_says_which_receiver_was_restored(self):
+        # Nothing was restored yet: the probe refuses the receiver before the switch,
+        # so current never moved and there is nothing to name. What the operator must
+        # see is that the running receiver is unchanged and the deployment did nothing.
+        self.install_revision(OTHER)
+        (self.receiver / 'current').unlink()
+        (self.receiver / 'current').symlink_to(OTHER)
+        self.serve(REVISION, UNSTARTABLE.encode())
+        with patch('sys.stderr') as stderr:
+            self.assertEqual(self.run_main(payload(data=UNSTARTABLE.encode())), 1)
+        written = ''.join(call[0][0] for call in stderr.write.call_args_list)
+        self.assertIn('cannot start', written)
+        self.assertIn('left in place', written)
+        self.assertEqual(os.readlink(self.receiver / 'current'), OTHER)
+
+    def test_a_restore_names_the_receiver_it_went_back_to(self):
+        # The other restore path: the receiver passed the probe but never finished,
+        # so current had already moved and must go back with a message naming it.
+        self.install_revision(OTHER)
+        (self.receiver / 'current').unlink()
+        (self.receiver / 'current').symlink_to(OTHER)
+        self.serve(REVISION)
+        with patch.object(bootstrap, 'run', side_effect=[True, bootstrap.TIMED_OUT]):
+            with patch('sys.stderr') as stderr:
+                self.assertEqual(self.run_main(payload()), 1)
+        written = ''.join(call[0][0] for call in stderr.write.call_args_list)
+        self.assertIn(OTHER, written)
+        self.assertIn('did not take effect', written)
 
     def test_the_configuration_problem_is_named_as_such(self):
         # A new receiver may need keys the host does not have yet. The bootstrap must
@@ -354,8 +511,37 @@ class LintTests(unittest.TestCase):
         # Both names appear inside their own definitions, so the comparison is
         # against the calls in main(), not the first mention in the file.
         source = Path(__file__).with_name('deploy-bootstrap.py').read_text()
-        self.assertLess(source.index('receiver = install(config, message)'),
-                        source.index('status = run(receiver, payload)'))
+        install = source.index('def install(')
+        body = source[install:source.index('def main()')]
+        self.assertLess(body.index('check(staged)'), body.index('switch(directory, revision)'))
+        self.assertLess(body.index('probe(staged'), body.index('switch(directory, revision)'))
+        # The switch itself stays inside the lock: a concurrent deployment must not
+        # see current mid-move, and the receiver takes the same lock.
+        switch = body.index('switch(directory, revision)')
+        self.assertGreater(switch, body.index('fcntl.flock(guard, fcntl.LOCK_EX)'),
+                           'the switch runs outside the deployment lock')
+        # And the lock must be released before the receiver runs, or the receiver
+        # deadlocks on the lock it takes itself. install() is where it is held.
+        self.assertLess(source.index('fcntl.flock(guard, fcntl.LOCK_EX)'), source.index('def main()'))
+        self.assertEqual(source.count('fcntl.flock('), 1, 'a second lock site can hold it across run()')
+
+    def test_the_check_steps_cannot_wait_on_standard_input(self):
+        # Neither the compile nor the self-check step takes a payload: the receiver
+        # reads it from run(). A check step left on an inherited stdin blocks until
+        # the 120s timeout, which looks like a broken receiver and delays the deploy.
+        # The stub reads stdin before it looks at --self-check, so only the DEVNULL
+        # in check() keeps this test from hanging.
+        steps = []
+
+        def fake_run(arguments, **kwargs):
+            steps.append(kwargs)
+            return subprocess.CompletedProcess(arguments, 0)
+
+        with patch.object(bootstrap.subprocess, 'run', side_effect=fake_run):
+            bootstrap.check(Path('/staged/github-deploy.py'))
+        self.assertEqual(len(steps), 2, 'both the compile step and the self-check step run')
+        for kwargs in steps:
+            self.assertIs(kwargs.get('stdin'), subprocess.DEVNULL, 'a check step inherits stdin')
 
 
 if __name__ == '__main__':

@@ -29,8 +29,16 @@ CHECKSUM = re.compile(r'[0-9a-f]{64}\Z')
 # Mirrors the receiver's own stdin bound so a payload cannot grow here unnoticed.
 MAX_PAYLOAD = 80 * 1024 * 1024
 RETENTION = 5
-# The child uses this only when exec itself failed; the receiver never exits 127.
-EXEC_FAILED = 127
+# How long a receiver may take to report that it started, and how long it may run.
+START_TIMEOUT = 120
+RUN_TIMEOUT = 1500
+# The only exit statuses the receiver produces: 0 when the deployment succeeded and
+# 1 when it failed. Anything else means the interpreter or the import itself failed,
+# which is the one case where the receiver cannot repair itself.
+STARTED, DEPLOY_FAILED = 0, 1
+# Never produced by the receiver: the staged file was missing (the child never ran)
+# or the receiver did not finish in time.
+EXEC_FAILED, TIMED_OUT = -1, -2
 
 
 def fail(message):
@@ -79,12 +87,16 @@ def check(receiver):
 
     Both run before the current pointer moves, so a receiver that cannot even
     load never replaces one that works.
+
+    Standard input is closed: neither step takes a payload, and a receiver that
+    tried to read one here would block until the 120s timeout instead of failing.
     """
     steps = ((['-I', '-m', 'py_compile', str(receiver)], 'compile'),
              ([str(receiver), '--self-check'], 'self-check'))
     for arguments, name in steps:
         try:
-            subprocess.run([sys.executable, *arguments], check=True, capture_output=True, text=True, timeout=120)
+            subprocess.run([sys.executable, *arguments], check=True, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=120)
         except subprocess.CalledProcessError as error:
             detail = (error.stderr or error.stdout or '').strip().splitlines()
             reason = detail[-1] if detail else 'exit %d' % error.returncode
@@ -141,21 +153,43 @@ def prune(directory):
         entry.rmdir()
 
 
-def run(receiver, payload):
+def run(receiver, payload, timeout=None):
     """Start the receiver with the original payload on its standard input.
 
     A pipe, not a temporary file: the payload carries the registry token. The
     receiver may exit before reading it (a busy lock does that), which closes the
     pipe early; that is its exit status to report, not a bootstrap failure.
+
+    Returns the exit status, or TIMED_OUT when the receiver did not finish. The
+    caller decides what a timeout means; a deployment that is merely slow is not
+    a receiver that cannot start.
     """
     if not receiver.is_file():
         return EXEC_FAILED
     process = subprocess.Popen([sys.executable, str(receiver)], stdin=subprocess.PIPE)
     try:
-        process.communicate(payload)
+        process.communicate(payload, timeout=timeout)
     except BrokenPipeError:
         process.wait()
+    except subprocess.TimeoutExpired:
+        # Leaving it running would hold the receiver's own lock forever, and the SSH
+        # session above ends at 1500s anyway, leaving nobody able to see what it does.
+        process.kill()
+        process.wait()
+        return TIMED_OUT
     return process.returncode
+
+
+def probe(receiver, timeout):
+    """Decide whether the receiver can start at all, before it becomes current.
+
+    Nothing here sends a payload: the receiver's main() reports a missing or short
+    input as an error, which proves it imported, read the host configuration and
+    took its own lock. A receiver that cannot reach that point is broken; one that
+    merely fails the deployment afterwards is not, and rolling back for that would
+    hide the real failure behind an older receiver.
+    """
+    return run(receiver, b'', timeout) in (STARTED, DEPLOY_FAILED)
 
 
 def install(config, payload):
@@ -169,7 +203,12 @@ def install(config, payload):
         fail('the receiver fetched for revision %s does not match the checksum in the payload' % revision)
     directory = Path(config['root']) / 'receiver'
     directory.mkdir(parents=True, exist_ok=True)
-    check(stage(directory, revision, data))
+    staged = stage(directory, revision, data)
+    check(staged)
+    if not probe(staged, START_TIMEOUT):
+        # Switching first and hoping would install a receiver that cannot start, and
+        # the next deployment would run it again.
+        fail('the receiver for revision %s cannot start, so the current receiver was left in place' % revision)
     # Only the switch and the prune run under the lock: a concurrent deployment
     # must not see current between two revisions, and the receiver takes the
     # lock itself once it starts.
@@ -198,9 +237,18 @@ def main():
             fail('no receiver is installed and this payload installs none')
         sys.exit(run(receiver, payload))
     receiver = install(config, message)
-    status = run(receiver, payload)
-    if status == EXEC_FAILED and rollback(Path(config['root']) / 'receiver'):
-        fail('the receiver installed for this deployment could not start, so the previous one was restored')
+    status = run(receiver, payload, RUN_TIMEOUT)
+    if status in (EXEC_FAILED, TIMED_OUT):
+        # The receiver never got as far as its own rollback. Put the previous one back
+        # so the next deployment does not start from a receiver that cannot run, and
+        # say so: a silent rollback would look like a deployment that merely failed.
+        previous = Path(config['root']) / 'receiver' / 'previous'
+        restored = os.readlink(previous) if previous.is_symlink() else None
+        rollback(Path(config['root']) / 'receiver')
+        reason = 'did not finish within %ds' % RUN_TIMEOUT if status == TIMED_OUT else 'could not start'
+        fail('the receiver for this deployment %s, so %s; the deployment did not take effect'
+             % (reason, 'the previous receiver %s was restored' % restored if restored else
+                'there was no previous receiver to restore'))
     sys.exit(status)
 
 
