@@ -653,6 +653,31 @@ mod tests {
         }
     }
 
+    /// The seed is "a moment before now" so it can never be mistaken for a fresh record of the same
+    /// tick, but one second before the first second of a local day is the *previous* day, and the
+    /// caller would then be seeding a third day. Both branches are pinned here because every test
+    /// that seeds at `15:59:30Z` exercises only the first one, which would let the clamp rot unseen.
+    #[test]
+    fn a_seeded_record_stays_on_the_ticks_reporting_day() {
+        let midday = Utc.with_ymd_and_hms(2026, 10, 22, 6, 0, 0).unwrap();
+        assert_eq!(
+            a_moment_earlier(midday),
+            midday - chrono::Duration::seconds(1),
+            "anywhere but the first second of the day, the seed is one second earlier"
+        );
+        let boundary = Utc.with_ymd_and_hms(2026, 10, 22, 16, 0, 0).unwrap();
+        assert_ne!(
+            day(boundary - chrono::Duration::seconds(1)),
+            day(boundary),
+            "this case only means something if one second earlier really is the previous day"
+        );
+        assert_eq!(
+            day(a_moment_earlier(boundary)),
+            day(boundary),
+            "the clamp keeps the seed on the tick's own reporting day"
+        );
+    }
+
     /// A stored outbox whose first record is today's and whose second is three days old, so a test
     /// can see whether a failure at the head leaves the record behind it alone.
     fn seed_two_days(core: &DesktopCore, now: DateTime<Utc>) -> String {
@@ -835,7 +860,7 @@ mod tests {
                 Redirect::Follow,
             ),
             (
-                "the fifth request is still followed",
+                "the fifth redirect is still followed",
                 reqwest::StatusCode::TEMPORARY_REDIRECT,
                 "https",
                 "https",
@@ -843,7 +868,7 @@ mod tests {
                 Redirect::Follow,
             ),
             (
-                "the sixth is an error, not a seventh request",
+                "the sixth redirect is refused, so there is no seventh request",
                 reqwest::StatusCode::TEMPORARY_REDIRECT,
                 "https",
                 "https",
