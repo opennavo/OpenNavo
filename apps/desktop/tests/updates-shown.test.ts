@@ -65,6 +65,11 @@ afterEach(() => vi.restoreAllMocks());
 describe('The update page lists homebrew casks only (ADR-018)', () => {
   // The truth table. Each case is named for the answer the rule gives, so a failure says which branch broke
   // rather than only that the list changed.
+  //
+  // Scope: these lock the page's behaviour here, not Rust's `scheduler::visible()`. The two rules agree, but the
+  // Rust test `visible_is_the_pages_rule_not_the_schedulers` only covers Homebrew cask/formula/link and one
+  // App Store row, so the non-homebrew formula cases below have no counterpart there. Do not read them as a
+  // two-way lock: changing Rust alone would not turn anything here red.
   it.each<[UpdateSource, Kind, boolean]>([
     ['homebrew', 'cask', true],
     ['homebrew', 'formula', false],
