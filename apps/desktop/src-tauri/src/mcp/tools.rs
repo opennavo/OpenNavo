@@ -176,7 +176,7 @@ pub fn write_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "uninstall_app",
-            "description": "Ask OpenNavo to move one application to the Trash. Only the .app bundle is moved; its related files are left in place. Refused while the app is running. OpenNavo shows the user a confirmation dialog listing the path; nothing happens unless the user clicks Allow. Returns E_BUSY while another confirmation is open: wait a moment and try again.",
+            "description": "Ask OpenNavo to move one application to the Trash. Only the .app bundle is moved; its related files are left in place. Refused while the app is running. Apps installed with Homebrew are always refused with E_UNSUPPORTED: `brew uninstall` also removes that package's dependencies, which is more than this confirmation can show, so the user must uninstall those in OpenNavo's own Uninstall page. OpenNavo shows the user a confirmation dialog listing the path; nothing happens unless the user clicks Allow. Returns E_BUSY while another confirmation is open: wait a moment and try again.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -575,6 +575,21 @@ mod tests {
             assert_eq!(tool["inputSchema"]["additionalProperties"], false);
             assert_eq!(tool["annotations"]["readOnlyHint"], true);
         }
+    }
+
+    #[test]
+    fn the_uninstall_tool_says_homebrew_apps_are_refused_before_it_is_called() {
+        // A client that only reads the tool list should not have to discover the
+        // Homebrew refusal by calling and failing. The description must say so,
+        // and must say where the user can do it instead.
+        let uninstall = write_definitions()
+            .into_iter()
+            .find(|tool| tool["name"] == "uninstall_app")
+            .expect("uninstall_app listed");
+        let description = uninstall["description"].as_str().expect("description");
+        assert!(description.contains("Homebrew"), "{description}");
+        assert!(description.contains("E_UNSUPPORTED"), "{description}");
+        assert!(description.contains("Uninstall page"), "{description}");
     }
 
     #[test]
