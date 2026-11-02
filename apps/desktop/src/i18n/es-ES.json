@@ -223,7 +223,7 @@
       "requires": "Requisitos",
       "category": "Categoría",
       "region": "Región de la tienda",
-      "bundleId": "Bundle ID"
+      "bundleId": "ID del bundle"
     },
     "privacyNote": "Tu Mac obtiene esta información directamente de Apple, sin pasar por los servidores de OpenNavo.",
     "notInRegion": "Esta app no está disponible en la tienda de esta región ({region})",
@@ -484,7 +484,7 @@
       "developer": "Desarrollador",
       "homepage": "Sitio web",
       "token": "Identificador",
-      "bundleId": "Bundle ID",
+      "bundleId": "ID del bundle",
       "installedVersion": "Versión instalada",
       "installLocation": "Ubicación de instalación",
       "yes": "Sí",
@@ -965,6 +965,7 @@
       "copied": "Configuración de {client} copiada",
       "copyFailed": "No se ha podido copiar la configuración.",
       "moved": "OpenNavo se ha movido desde que copiaste la configuración. Vuelve a copiarla para que tus apps de IA puedan seguir encontrándolo.",
+      "movedLegacy": "OpenNavo se ha movido desde que se copió una configuración. La copia anterior no registró para qué app era, así que vuelve a copiarla en cada app de IA que uses.",
       "notRunning": "El MCP local está activado, pero no se está ejecutando, así que las apps de IA no pueden conectarse. Desactívalo y vuelve a activarlo para reintentarlo.",
       "statusFailed": "No se pudo leer el estado del MCP local.",
       "movedClients": "Aún apunta a la ubicación anterior: {clients}",
@@ -1559,7 +1560,7 @@
     "footprintPartial": "Algunos archivos no se pudieron leer, así que el total real puede ser mayor.",
     "fields": {
       "path": "Ubicación",
-      "bundleId": "Bundle ID",
+      "bundleId": "ID del bundle",
       "version": "Versión",
       "vendor": "Desarrollador",
       "arch": "Arquitectura",

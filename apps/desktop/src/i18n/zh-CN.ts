@@ -223,7 +223,7 @@ export default {
       requires: '系统要求',
       category: '类别',
       region: '商店地区',
-      bundleId: 'Bundle ID'
+      bundleId: '应用包标识符'
     },
     privacyNote: '这些信息由你的 Mac 直接向 Apple 获取，不经过 OpenNavo 的服务器。',
     notInRegion: '这款 App 在{region}商店不可用',
@@ -478,7 +478,7 @@ export default {
       developer: '开发者',
       homepage: '主页',
       token: '软件包标识符',
-      bundleId: 'Bundle ID',
+      bundleId: '应用包标识符',
       installedVersion: '已安装版本',
       installLocation: '安装位置',
       yes: '是',
@@ -960,6 +960,8 @@ export default {
       copied: '已复制 {client} 配置',
       copyFailed: '无法复制配置。',
       moved: '复制配置后 OpenNavo 移动了位置，请重新复制，AI 应用才能继续找到它。',
+      movedLegacy:
+        '复制配置后 OpenNavo 移动了位置。早先的复制没有记录是给哪个应用的，请在用到的那几个 AI 应用里分别重新复制。',
       notRunning: '本地 MCP 已打开，但没有在运行，AI 应用连不上。关掉再打开可以重试。',
       statusFailed: '无法读取本地 MCP 状态。',
       movedClients: '仍指向旧位置：{clients}',
@@ -1556,7 +1558,7 @@ export default {
     footprintPartial: '有些文件读不到，实际占用可能更大。',
     fields: {
       path: '位置',
-      bundleId: 'Bundle ID',
+      bundleId: '应用包标识符',
       version: '版本',
       vendor: '开发者',
       arch: '架构',
