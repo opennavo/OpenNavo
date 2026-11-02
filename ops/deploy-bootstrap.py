@@ -129,9 +129,8 @@ def check(receiver):
 def deploy_directory(root):
     """Return <root>/deploy, created private if missing.
 
-    mkdir(exist_ok=True) leaves an existing directory's mode alone (measured: 0755
-    stays 0755), so the chmod repairs a legacy host. Duplicated from the receiver:
-    this file cannot import it.
+    mkdir(exist_ok=True) leaves an existing mode alone, so the chmod repairs a legacy
+    host. The receiver has its own copy: this file cannot import it.
     """
     directory = Path(root, 'deploy')
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -142,9 +141,8 @@ def deploy_directory(root):
 def open_lock(path):
     """Open the lock without following a symlink, and leave it private.
 
-    O_NOFOLLOW: open('w') follows a symlink planted there and truncates its target.
-    0o600 covers a first creation whatever umask was inherited; the fchmod repairs
-    a lock an earlier version left 0644.
+    open('w') follows a planted symlink and truncates its target; 0o600 covers a first
+    creation under any umask, and the fchmod repairs a lock left 0644.
     """
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     os.fchmod(descriptor, 0o600)
@@ -187,9 +185,16 @@ def switch(directory, revision):
 
 
 def rollback(directory):
-    """Point current back at previous; used when the receiver just installed cannot start."""
+    """Point current back at previous; used when the receiver just installed cannot start.
+
+    Returns False when there is nothing to restore, and then removes the pointer: a first
+    deployment whose receiver failed must not stay current, because a desktop publish
+    carries no receiver of its own and would keep running it.
+    """
     current, previous = directory / 'current', directory / 'previous'
     if not previous.is_symlink():
+        if current.is_symlink():
+            current.unlink()
         return False
     point(current, os.readlink(previous))
     return True
@@ -217,13 +222,10 @@ def prune(directory):
 def run(receiver, payload, timeout=None, arguments=()):
     """Start the receiver with the original payload on its standard input.
 
-    A pipe, not a temporary file: the payload carries the registry token. The
-    receiver may exit before reading it (a busy lock does that), which closes the
-    pipe early; that is its exit status to report, not a bootstrap failure.
+    A pipe, not a temporary file: the payload carries the registry token. The receiver
+    may exit early (a busy lock does that), which is its status to report, not a failure.
 
-    Returns the exit status, or TIMED_OUT when the receiver did not finish. The
-    caller decides what a timeout means; a deployment that is merely slow is not
-    a receiver that cannot start.
+    Returns the exit status, or TIMED_OUT when the receiver did not finish.
     """
     if not receiver.is_file():
         return EXEC_FAILED
@@ -245,15 +247,13 @@ def run(receiver, payload, timeout=None, arguments=()):
 def probe(receiver, timeout):
     """Decide whether the receiver can start, before it becomes current.
 
-    The receiver answers this on its own, with --probe: it imports itself, reads the
-    host configuration and takes its lock, and does nothing else. Running main() with
-    an empty payload instead would be a worse question and a real edit — main() sweeps
-    stale temporary files before it reads standard input.
+    The receiver answers this itself with --probe: it imports, reads the host configuration
+    and takes its lock, nothing else. Running main() with an empty payload would be a worse
+    question and a real edit — main() sweeps stale files before reading standard input.
 
-    Returns STARTED, PROBE_BUSY, or -1 for anything else. `busy` has to be its own
-    answer: the receiver's main() exits 1 both for a lock it cannot take and for every
-    other failure, so a success/failure pair cannot tell a running deployment from a
-    broken receiver.
+    Returns STARTED, PROBE_BUSY, or -1. `busy` must be its own answer: main() exits 1 for a
+    lock it cannot take and for every other failure, so a pair cannot tell a running
+    deployment from a broken receiver.
     """
     status = run(receiver, b'', timeout, ['--probe'])
     return status if status in (STARTED, PROBE_BUSY) else EXEC_FAILED
@@ -341,7 +341,8 @@ def main():
                       '(see the log above), not the receiver' % status)
         outcome = ('the previous receiver %s was restored, so a desktop publish does not '
                    'keep running this one' % restored if restored else
-                   'there was no previous receiver to restore')
+                   'there was no previous receiver to restore, so no receiver is current and '
+                   'a desktop publish will refuse until one is installed')
         fail('the receiver for this deployment %s; %s; the deployment did not take effect'
              % (reason, outcome))
     sys.exit(status)

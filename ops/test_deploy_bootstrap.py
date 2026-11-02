@@ -628,6 +628,49 @@ class FailureTests(BootstrapTestCase):
         (self.receiver / 'current').unlink()
         self.assertFalse(bootstrap.rollback(self.receiver))
 
+    def test_a_first_deployment_that_fails_leaves_no_receiver_current(self):
+        # The host has never deployed before: `previous` does not exist, so there is nothing
+        # to roll back to. Returning quietly would leave `current` on the receiver that just
+        # failed, and a desktop publish carries no receiver of its own: it runs
+        # receiver/current/github-deploy.py, so every later publish would keep running the
+        # broken one. The only safe state is "no receiver current", which the publish path
+        # already refuses with a clear message.
+        # setUp leaves a dangling `current`, which switch() would faithfully preserve as
+        # `previous`. A host that has never deployed has no pointer at all.
+        (self.receiver / 'current').unlink()
+        self.assertFalse((self.receiver / 'previous').is_symlink())
+        self.serve(REVISION)
+        self.assertEqual(self.run_main(payload(), receiver_status=1), 1)
+        self.assertFalse((self.receiver / 'current').is_symlink(),
+                         'a failed first deployment left its own receiver current')
+        self.assertFalse((self.receiver / 'previous').is_symlink(),
+                         'a rollback invented a previous receiver that never existed')
+
+    def test_a_failed_first_deployment_says_no_receiver_is_installed(self):
+        # The operator reads this line to know what the host is now running. "Restored the
+        # previous receiver" would be a lie here, and "there was no previous receiver" alone
+        # leaves the consequence unsaid.
+        (self.receiver / 'current').unlink()
+        self.serve(REVISION)
+        with patch('sys.stderr') as stderr:
+            self.assertEqual(self.run_main(payload(), receiver_status=1), 1)
+        text = ''.join(call.args[0] for call in stderr.write.call_args_list if call.args)
+        self.assertIn('no receiver is current', text,
+                      'the message does not say what the host is left running')
+
+    def test_a_desktop_publish_after_a_failed_first_deployment_refuses_clearly(self):
+        # The state rollback() now leaves behind: no `current` at all. A desktop publish
+        # carries no receiver, so it has nothing to run and must say so, not crash on a
+        # missing path or silently "succeed".
+        (self.receiver / 'current').unlink()
+        self.serve(REVISION)
+        self.assertEqual(self.run_main(payload(), receiver_status=1), 1)
+        with patch('sys.stderr') as stderr:
+            self.assertEqual(self.run_main(json.dumps({'deployment': 'x'}).encode()), 1)
+        text = ''.join(call.args[0] for call in stderr.write.call_args_list if call.args)
+        self.assertIn('no receiver is installed', text,
+                      'the publish path does not explain why it refused')
+
     def test_a_missing_configuration_stops_before_reading_the_payload(self):
         self.config.unlink()
         self.assertEqual(self.run_main(payload()), 1)
