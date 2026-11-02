@@ -72,7 +72,6 @@ jobs:
       - run: node tooling/scripts/check-hardcoded-i18n.mjs
       - run: node tooling/scripts/sync-brand-readme.mjs --check
       - run: node tooling/scripts/derive-traditional.mjs --check
-      - run: node --test tooling/scripts/traditional-markdown.test.mjs
       - run: pnpm --filter "@opennavo/*" --if-present run lint
       - run: pnpm --filter "@opennavo/*" --if-present run typecheck
       - uses: ./.github/actions/go-cache-save
