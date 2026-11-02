@@ -465,7 +465,12 @@ mod tests {
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        // A fixed clock, not `Utc::now()`. `record()` starts a fresh activity for a new day, so two
+        // ticks at 23:59:30 local and 23:59:30 plus one minute fall on different reporting days: the
+        // second tick would then have a third record to send, reach the two-connection server with one
+        // hop left, and leave the new day pending. That failed once a day at 23:59 local, a window no
+        // longer worth running through to prove behaviour this test is not about.
+        let now: DateTime<Utc> = "2026-10-22T04:00:00Z".parse().unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -522,7 +527,9 @@ mod tests {
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        // Fixed for the same reason as the helper above: two ticks a minute apart must land on one
+        // reporting day, or the fresh record for the new day outlives the connections this test serves.
+        let now: DateTime<Utc> = "2026-10-22T04:00:00Z".parse().unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         // A rate-limited tick is a successful tick: it reports what it could not send and returns.
