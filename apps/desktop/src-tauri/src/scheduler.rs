@@ -322,6 +322,31 @@ mod tests {
         );
     }
 
+    /// The same app, the same version on offer, but a different source: the page now says the
+    /// update comes from somewhere else, so it is a row the user has not seen before and the
+    /// notice must name it. Without the source in the identity the two rows compare equal and the
+    /// notice stays silent about a change the page shows.
+    #[test]
+    fn a_source_switch_announces_the_row_again() {
+        let sparkle = item(UpdateSource::Sparkle, Kind::Cask, "editor");
+        let github = item(UpdateSource::Github, Kind::Cask, "editor");
+        // Same app, same version: only the source differs, which is the whole point.
+        assert_eq!(sparkle.app_id, github.app_id);
+        assert_eq!(sparkle.current_version, github.current_version);
+        assert!(visible(&sparkle) && visible(&github));
+
+        let before: HashSet<_> = [identity(&sparkle).unwrap()].into_iter().collect();
+        let switched = [github.clone()];
+        let added = newly_visible(&switched, &before);
+        assert_eq!(added.len(), 1, "a source switch is a new row on the page");
+        assert_eq!(added[0].source, UpdateSource::Github);
+
+        // And the reverse direction too: the identity is not anchored on one source.
+        let back: HashSet<_> = [identity(&github).unwrap()].into_iter().collect();
+        let switched_back = [sparkle];
+        assert_eq!(newly_visible(&switched_back, &back).len(), 1);
+    }
+
     /// A non-Homebrew row without an app id has no identity to compare, so it is left out instead of
     /// collapsing onto a shared empty key that would make every such row look like every other.
     #[test]
