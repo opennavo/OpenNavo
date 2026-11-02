@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -40,6 +41,20 @@ func (q *failingQueue) Enqueue(_ context.Context, _ string, payload jobs.Payload
 	}
 	q.queued = append(q.queued, payload.SourceID)
 	return "queued", nil
+}
+
+// cancelingQueue cancels the tick's context while it enqueues, as a SIGTERM arriving mid-batch does, then
+// fails every enqueue: the worker is stopping, so nothing in this batch can become a task.
+type cancelingQueue struct {
+	mu     sync.Mutex
+	cancel context.CancelFunc
+}
+
+func (q *cancelingQueue) Enqueue(ctx context.Context, _ string, _ jobs.Payload, _ jobs.Metadata) (string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.cancel()
+	return "", ctx.Err()
 }
 
 func sourceState(t *testing.T, st *store.Store, id int64) time.Time {
@@ -113,9 +128,10 @@ func TestScheduleReleasesOnlyTheDuplicateRejectedSource(t *testing.T) {
 	}
 }
 
-// A canceled fetch is not made due. This task runs with Retries: 0, so a shutdown-canceled run is archived
-// rather than requeued; the lease from the claim is all that stops the next tick from enqueuing a second
-// copy, and it stands until fetchLease runs out.
+// A canceled fetch is not made due. asynq archives the task instead of requeueing it (Retries: 0 selects the
+// archive branch), and an archived task still holds the 20-minute uniqueness lock. Keeping the lease is what
+// stops the recovery delay from growing past fetchLease = 2h; the price is that a canceled source can sit
+// unscheduled for up to 2h.
 func TestCanceledFetchKeepsNextFetchUnchanged(t *testing.T) {
 	ctx := context.Background()
 	st := testutil.NewStore(t)
@@ -185,6 +201,41 @@ func TestArchivedCanceledFetchIsNotEnqueuedAgainBeforeTheLeaseEnds(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 1, stats["enqueued"])
 	require.Equal(t, ids, late.queued)
+}
+
+// The release has to survive the shutdown that makes it necessary: the tick's context is already over when
+// the batch is interrupted, so a plain ctx there would leave every claimed source waiting out fetchLease for
+// a task that was never enqueued — the very behaviour the claim and release pair exists to avoid.
+func TestScheduleReleasesTheLeaseWhenTheTickIsCanceledMidBatch(t *testing.T) {
+	st, _, ids, now := scheduleFixture(t, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	svc := &changelog.Service{Store: st, Queue: &cancelingQueue{cancel: cancel}, Now: func() time.Time { return now }}
+	_, err := svc.Schedule(ctx)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled, "the tick reports why it stopped")
+	// The enqueued source is past the cancel too, so it never became a task: all three go back to due.
+	for _, id := range ids {
+		require.WithinDuration(t, now, sourceState(t, st, id), time.Second, "source %d is due again after the shutdown", id)
+	}
+}
+
+// When the queue itself fails and the release fails too, both must reach the caller: replacing one with the
+// other would turn a queue outage (network_error) into an unexplained unknown-category failure.
+func TestScheduleReportsAQueueFailureWhoseReleaseAlsoFailed(t *testing.T) {
+	st, svc, ids, now := scheduleFixture(t, 2)
+	queueErr := &net.OpError{Op: "write", Net: "tcp", Err: errors.New("connection reset by peer")}
+	releaseErr := &net.OpError{Op: "write", Net: "tcp", Err: errors.New("database is shutting down")}
+	svc.Queue = &failingQueue{fail: 1, reason: queueErr}
+	svc.Release = func(context.Context, []int64) error { return releaseErr }
+	_, err := svc.Schedule(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, queueErr, "the queue failure is not lost")
+	require.ErrorIs(t, err, releaseErr, "the release failure is not lost either")
+	// The release failed, so the lease it was meant to give back stays: that is the real consequence an
+	// operator has to see, and this assertion keeps the test honest about it.
+	for _, id := range ids {
+		require.WithinDuration(t, now.Add(2*time.Hour), sourceState(t, st, id), time.Second, "source %d keeps the lease", id)
+	}
 }
 
 // ClaimChangelogDue is what stops two schedule ticks from enqueuing one source twice: across concurrent
