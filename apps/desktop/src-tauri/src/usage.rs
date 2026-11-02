@@ -183,9 +183,24 @@ async fn tick(
 fn build_client() -> Result<reqwest::Client, AppError> {
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        // Bounded like the catalog sync: a redirect placed in front of the API must not silently end
-        // usage reporting while every other screen keeps working.
-        .redirect(reqwest::redirect::Policy::limited(5))
+        // Follow only the redirects that keep the request a POST with its body. 301, 302 and 303 make
+        // the client rewrite a POST into a GET and drop the payload, so the second hop carries no
+        // activity at all; a 204 answering that GET would otherwise be read as an acknowledgement for
+        // a record the server never received, and the record would be dropped as sent. Those statuses
+        // are returned as-is instead, so `attempt` keeps the whole batch for the next tick.
+        // 307 and 308 preserve the method and body, so they are safe to follow, bounded like the
+        // catalog sync.
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            match attempt.status() {
+                reqwest::StatusCode::TEMPORARY_REDIRECT
+                | reqwest::StatusCode::PERMANENT_REDIRECT
+                    if attempt.previous().len() < 5 =>
+                {
+                    attempt.follow()
+                }
+                _ => attempt.stop(),
+            }
+        }))
         .build()?)
 }
 
@@ -588,30 +603,42 @@ mod tests {
         id
     }
 
-    #[tokio::test]
-    async fn a_redirected_endpoint_is_followed() {
+    /// A one-hop redirect on a POST: reports the method and whether the payload survived, and answers
+    /// the second request with a 204 that names a day. `carry` decides whether the second listener
+    /// answers at all, which is how the "not followed" case proves nothing arrived.
+    fn redirect_once(
+        status: &'static str,
+    ) -> (String, std::thread::JoinHandle<Option<(String, bool)>>) {
         let target = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let target_url = format!("http://{}/usage/activity", target.local_addr().unwrap());
+        target.set_nonblocking(true).unwrap();
+        let target_addr = target.local_addr().unwrap();
+        let target_url = format!("http://{target_addr}/usage/activity");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/usage/activity", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
-            // The API moved behind a redirect; the client must follow it rather than treat 3xx as final.
             let (mut stream, _) = listener.accept().unwrap();
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf).unwrap();
             stream
                 .write_all(
                     format!(
-                        "HTTP/1.1 308 Permanent Redirect\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        target_url
+                        "HTTP/1.1 {status}\r\nLocation: {target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     )
                     .as_bytes(),
                 )
                 .unwrap();
-            let (mut stream, _) = target.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
+            // Give the client until the tick's own timeout to make a second hop it should not make.
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            let mut stream = loop {
+                match target.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(_) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return None,
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
             let mut bytes = Vec::new();
             loop {
                 let n = stream.read(&mut buf).unwrap();
@@ -622,31 +649,139 @@ mod tests {
                     let length: usize = header
                         .lines()
                         .find_map(|line| line.strip_prefix("content-length:"))
-                        .unwrap()
+                        .unwrap_or("0")
                         .trim()
                         .parse()
                         .unwrap();
                     if bytes.len() >= end + 4 + length {
-                        let body: serde_json::Value =
-                            serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+                        let method = header.split(' ').next().unwrap().to_owned();
+                        let carried_body = length > 0;
+                        let body: serde_json::Value = if carried_body {
+                            serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap()
+                        } else {
+                            // A redirected GET carries nothing, so name a day the fixture can answer.
+                            serde_json::json!({ "occurredAt": "2026-11-02T00:00:00Z" })
+                        };
                         stream.write_all(no_content(&body).as_bytes()).unwrap();
-                        return;
+                        return Some((method, carried_body));
                     }
                 }
             }
         });
+        (url, server)
+    }
+
+    /// A 307 or 308 keeps the method and the body, so the second hop really carries the activity and
+    /// its 204 is a true acknowledgement.
+    #[tokio::test]
+    async fn a_redirect_that_keeps_the_post_is_followed() {
+        for status in ["307 Temporary Redirect", "308 Permanent Redirect"] {
+            let (url, server) = redirect_once(status);
+            let tmp = tempfile::tempdir().unwrap();
+            let core = open_core(&tmp);
+            let client = build_client().unwrap();
+            let now = Utc::now();
+            tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+            let hop = server.join().unwrap();
+            let (method, carried_body) =
+                hop.unwrap_or_else(|| panic!("a {status} must be followed"));
+            assert_eq!(method, "post", "a {status} must be followed as a POST");
+            assert!(carried_body, "a {status} must keep the activity body");
+            let history = History::load(&core).unwrap();
+            assert!(
+                history.pending.is_empty(),
+                "the redirected 204 for a {status} acknowledges the record"
+            );
+            assert_eq!(history.sent.len(), 1, "the day is recorded as reported");
+        }
+    }
+
+    /// A 307 that points at itself would otherwise be followed until the tick's timeout. The bound
+    /// stops it, and the batch waits for the next tick like any other unavailable service.
+    #[tokio::test]
+    async fn a_redirect_loop_stops_at_the_bound() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/usage/activity", listener.local_addr().unwrap());
+        let location = url.clone();
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut hops = 0;
+            // Stop at the tick's own deadline: the client is expected to give up after five hops, so
+            // waiting for connection number eight would hang the test instead of failing it.
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while std::time::Instant::now() < deadline {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).unwrap();
+                hops += 1;
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+            }
+            hops
+        });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
         let client = build_client().unwrap();
-        tick(&core, &client, &url, Utc::now(), "0.1.3")
-            .await
-            .unwrap();
-        server.join().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let hops = server.join().unwrap();
+        // `previous()` counts the request being redirected, so the bound allows four redirects after
+        // the original: five requests in total, then the 307 is returned as-is.
+        assert_eq!(hops, 5, "the bound stops a redirect chain at five requests");
         let history = History::load(&core).unwrap();
         assert!(
-            history.pending.is_empty(),
-            "the redirected 204 acknowledges the record"
+            history.sent.is_empty(),
+            "a redirect loop acknowledges nothing"
         );
+        assert_eq!(
+            history.pending.len(),
+            2,
+            "a redirect loop keeps the whole batch for the next tick"
+        );
+    }
+
+    /// 301, 302 and 303 turn the POST into a GET and drop the payload, so the second hop carries no
+    /// activity. Following them would let a 204 for that GET mark the day as reported while the server
+    /// never saw the record — a permanent loss no later tick could repair. They are not followed.
+    #[tokio::test]
+    async fn a_redirect_that_would_drop_the_post_is_not_followed() {
+        for status in ["301 Moved Permanently", "302 Found", "303 See Other"] {
+            let (url, server) = redirect_once(status);
+            let tmp = tempfile::tempdir().unwrap();
+            let core = open_core(&tmp);
+            let now = Utc::now();
+            seed_two_days(&core, now);
+            let client = build_client().unwrap();
+            tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+            assert!(
+                server.join().unwrap().is_none(),
+                "a {status} must not be followed: the client would send a bodyless GET"
+            );
+            let history = History::load(&core).unwrap();
+            assert!(
+                history.sent.is_empty(),
+                "a {status} acknowledges nothing: the payload was never delivered"
+            );
+            assert_eq!(
+                history.pending.len(),
+                2,
+                "a {status} keeps the whole batch for the next tick"
+            );
+        }
     }
 
     #[test]
