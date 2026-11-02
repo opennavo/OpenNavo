@@ -87,6 +87,16 @@ class BootstrapTestCase(unittest.TestCase):
         self.receiver.mkdir()
         (self.receiver / 'current').symlink_to('missing')
 
+    def point_previous_at(self, revision):
+        """Give the host a receiver to fall back to, without assuming a pointer file."""
+        target = self.receiver / revision
+        target.mkdir(parents=True, exist_ok=True)
+        (target / 'github-deploy.py').write_bytes(RECEIVER.encode())
+        previous = self.receiver / 'previous'
+        if previous.is_symlink() or previous.exists():
+            previous.unlink()
+        previous.symlink_to(revision)
+
     def install_revision(self, revision, data=RECEIVER.encode()):
         """Put a version in place without going through the network."""
         target = self.receiver / revision
@@ -299,8 +309,14 @@ class HandoverTests(BootstrapTestCase):
         self.assertEqual(self.run_main(payload()), 0)
 
     def test_the_receiver_exit_status_is_reported(self):
+        # A payload that installs nothing (a desktop publish) runs the installed receiver
+        # and passes its exit status through: only an install can roll back.
         self.serve(REVISION)
-        self.assertEqual(self.run_main(payload(), receiver_status=3), 3)
+        self.install_revision(REVISION)
+        (self.receiver / 'current').unlink()
+        (self.receiver / 'current').symlink_to(REVISION)
+        message = json.dumps({'sha': REVISION, 'action': 'publish-desktop', 'registry_token': SENTINEL}).encode()
+        self.assertEqual(self.run_main(message, receiver_status=3), 3)
 
     def test_a_payload_without_a_receiver_runs_the_installed_one(self):
         # Desktop publishes and older senders carry no receiver field; they must
@@ -433,16 +449,46 @@ class FailureTests(BootstrapTestCase):
         self.assertEqual(self.run_main(payload(data=UNSTARTABLE.encode())), 1)
         self.assertEqual(os.readlink(self.receiver / 'current'), OTHER)
 
-    def test_a_receiver_that_fails_the_deployment_does_not_roll_back(self):
-        # Exit 1 is the receiver's own "this deployment failed". It reached main(),
-        # took its lock and made its own decision; rolling back would hide that
-        # behind an older receiver and the next deploy would start from the wrong one.
+    def test_a_receiver_that_fails_the_deployment_is_rolled_back(self):
+        # Exit 1 is the receiver's own "this deployment failed". The receiver repairs a
+        # failure it can still reach (its own rollback), but a failure before that point
+        # leaves the host on a receiver that cannot deploy: a desktop publish carries no
+        # receiver, so it would keep running the broken one. Put the previous one back.
+        # The next deployment installs its own revision, so this costs one install.
         self.install_revision(OTHER)
+        self.point_previous_at(OTHER)
         (self.receiver / 'current').unlink()
         (self.receiver / 'current').symlink_to(OTHER)
         self.serve(REVISION)
         self.assertEqual(self.run_main(payload(), receiver_status=1), 1)
+        self.assertEqual(os.readlink(self.receiver / 'current'), OTHER)
+
+    def test_a_deployment_that_reports_success_leaves_the_new_receiver_current(self):
+        # The other side of the rule above: a successful deployment must not roll back.
+        self.install_revision(OTHER)
+        (self.receiver / 'current').unlink()
+        (self.receiver / 'current').symlink_to(OTHER)
+        self.serve(REVISION)
+        self.assertEqual(self.run_main(payload()), 0)
         self.assertEqual(os.readlink(self.receiver / 'current'), REVISION)
+
+    def test_a_real_receiver_that_fails_at_runtime_is_rolled_back_and_named(self):
+        # The scenario end to end with a child process, not a patched run(): the receiver
+        # passes --self-check and then exits 1, which is the most realistic way for a new
+        # receiver to be broken. This test would pass on a stub that returned 127; it must
+        # also pass on the real exit status, which is what it asserts here.
+        self.install_revision(OTHER)
+        self.point_previous_at(OTHER)
+        (self.receiver / 'current').unlink()
+        (self.receiver / 'current').symlink_to(OTHER)
+        failing = b"import sys\nif '--self-check' in sys.argv[1:]:\n    sys.exit(0)\nsys.exit(1)\n"
+        self.serve(REVISION, failing)
+        with patch('sys.stderr') as stderr:
+            self.assertEqual(self.run_main(payload(data=failing)), 1)
+        self.assertEqual(os.readlink(self.receiver / 'current'), OTHER)
+        written = ''.join(call[0][0] for call in stderr.write.call_args_list)
+        self.assertIn('exited with status 1', written)
+        self.assertIn(OTHER, written)
 
     def test_a_receiver_that_never_finishes_is_killed_and_rolled_back(self):
         self.install_revision(OTHER)

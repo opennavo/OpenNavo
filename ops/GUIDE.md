@@ -299,6 +299,15 @@ not a main commit, so it has no main revision to name and no reason to change th
 receiver. The bootstrap runs whatever receiver is already `current` and passes the
 payload through untouched. The same path serves a sender older than this file.
 
+**A newly installed receiver that then fails is put back.** If the receiver exits
+nonzero or overruns its 1500-second deadline, `receiver/current` returns to
+`receiver/previous` and the failure names the revision it went back to. The next
+deployment installs its own revision regardless, so the cost is one extra install.
+This matters most for the desktop publish above: it carries no receiver and would
+otherwise keep using a receiver that cannot deploy. Failures *before* the switch —
+a digest mismatch, a failed compile or self-check, a receiver that cannot start —
+never move `current` at all.
+
 **Order matters, and it cannot be reversed.** A receiver without `--self-check`
 fails the bootstrap's verification step on every deployment:
 

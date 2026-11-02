@@ -238,14 +238,17 @@ def main():
         sys.exit(run(receiver, payload))
     receiver = install(config, message)
     status = run(receiver, payload, RUN_TIMEOUT)
-    if status in (EXEC_FAILED, TIMED_OUT):
-        # The receiver never got as far as its own rollback. Put the previous one back
-        # so the next deployment does not start from a receiver that cannot run, and
-        # say so: a silent rollback would look like a deployment that merely failed.
+    if status != STARTED:
+        # The new receiver ran and failed, or never finished. Point current back at the
+        # one that was working. The next deployment installs its own revision anyway,
+        # but a desktop publish carries no receiver and would otherwise keep running a
+        # receiver that cannot deploy. Either way say which one was restored: a silent
+        # rollback would look like a deployment that merely failed.
         previous = Path(config['root']) / 'receiver' / 'previous'
         restored = os.readlink(previous) if previous.is_symlink() else None
         rollback(Path(config['root']) / 'receiver')
-        reason = 'did not finish within %ds' % RUN_TIMEOUT if status == TIMED_OUT else 'could not start'
+        reason = ('did not finish within %ds' % RUN_TIMEOUT if status == TIMED_OUT else
+                  'could not start' if status == EXEC_FAILED else 'exited with status %d' % status)
         fail('the receiver for this deployment %s, so %s; the deployment did not take effect'
              % (reason, 'the previous receiver %s was restored' % restored if restored else
                 'there was no previous receiver to restore'))
