@@ -200,10 +200,16 @@ enum Redirect {
 /// would put the device identifier and the activity records on the wire in clear. Keeping the scheme
 /// while changing host or path is fine, which is also what `Policy::limited` allowed.
 ///
-/// The chain stops at five requests, matching `Policy::limited(5)`. `previous()` holds the initial URL
-/// followed by one entry per request already made, so `requests` is 1 on the first redirect and the
-/// bound is `> 5`, not `>= 5` — the updater's `>= 5` allows only four jumps, which is a separate
-/// pre-existing bug outside this change.
+/// An `http` to `https` upgrade is refused as well, and that is deliberate rather than a side effect:
+/// "the scheme must not change" is one comparison that needs no knowledge of which scheme is safe, and
+/// a local proxy that upgrades would be a configuration error the user should see and fix at
+/// `configured_base()`, not one the client silently works around once per user.
+///
+/// The chain follows five redirects and refuses the sixth request's redirect, matching
+/// `Policy::limited(5)`. `previous()` holds the initial URL followed by one entry per request already
+/// made, so it is 1 on the first redirect and `Policy::limited(5)`'s `previous().len() > 5` is
+/// `requests > 5` here — `>= 5` would allow four. The updater's `>= 5` does exactly that, which is a
+/// separate pre-existing bug outside this change.
 fn redirect(
     status: reqwest::StatusCode,
     initial: Option<&str>,
@@ -1071,7 +1077,9 @@ mod tests {
     }
 
     /// 308 is the permanent form of 307 and is refused for the same reason: the scheme changed from
-    /// the base's `http` to `https`.
+    /// the base's `http` to `https`. That direction is an upgrade, not a leak — it is refused only
+    /// because the rule is "the scheme must not change", which is what makes it checkable without
+    /// knowing which scheme is safe. The dangerous direction is the reverse one.
     #[tokio::test]
     async fn a_308_redirect_to_a_different_scheme_is_not_followed() {
         let (url, server) = redirect_once("308 Permanent Redirect", "https");
