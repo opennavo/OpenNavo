@@ -183,22 +183,23 @@ async fn tick(
 fn build_client() -> Result<reqwest::Client, AppError> {
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        // Follow only the redirects that keep the request a POST with its body. 301, 302 and 303 make
-        // the client rewrite a POST into a GET and drop the payload, so the second hop carries no
-        // activity at all; a 204 answering that GET would otherwise be read as an acknowledgement for
-        // a record the server never received, and the record would be dropped as sent. Those statuses
-        // are returned as-is instead, so `attempt` keeps the whole batch for the next tick.
-        // 307 and 308 preserve the method and body, so they are safe to follow, bounded like the
-        // catalog sync.
+        // Follow only the redirects that keep the request a POST with its body. Following a 301, 302 or
+        // 303 means rewriting the POST into a GET and dropping the payload (tower-http
+        // follow_redirect), so the second hop carries no activity at all; a 204 answering that GET
+        // would otherwise be read as an acknowledgement for a record the server never received, and the
+        // record would be dropped as sent. Those statuses are returned as-is, so `attempt` keeps the
+        // whole batch for the next tick. 307 and 308 preserve the method and body, so they are the only
+        // ones worth following, and the jump count stays bounded like the updater's.
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            match attempt.status() {
-                reqwest::StatusCode::TEMPORARY_REDIRECT
-                | reqwest::StatusCode::PERMANENT_REDIRECT
-                    if attempt.previous().len() < 5 =>
-                {
-                    attempt.follow()
-                }
-                _ => attempt.stop(),
+            let status = attempt.status();
+            if attempt.previous().len() >= 5 {
+                attempt.error("too many usage redirects")
+            } else if status == reqwest::StatusCode::TEMPORARY_REDIRECT
+                || status == reqwest::StatusCode::PERMANENT_REDIRECT
+            {
+                attempt.follow()
+            } else {
+                attempt.stop()
             }
         }))
         .build()?)
@@ -603,20 +604,50 @@ mod tests {
         id
     }
 
-    /// A one-hop redirect on a POST: reports the method and whether the payload survived, and answers
-    /// the second request with a 204 that names a day. `carry` decides whether the second listener
-    /// answers at all, which is how the "not followed" case proves nothing arrived.
-    fn redirect_once(
-        status: &'static str,
-    ) -> (String, std::thread::JoinHandle<Option<(String, bool)>>) {
+    /// The second hop a client may or may not make, as the target listener saw it.
+    struct Hop {
+        method: String,
+        content_length: Option<usize>,
+        body: Vec<u8>,
+    }
+
+    /// Wait for a connection until `deadline`; `None` means nothing arrived in the window. The accepted
+    /// stream is switched back to blocking: on macOS it inherits the listener's non-blocking flag.
+    fn accept_until(
+        listener: &std::net::TcpListener,
+        deadline: std::time::Instant,
+    ) -> Option<std::net::TcpStream> {
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    return Some(stream);
+                }
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
+    /// A one-hop redirect on a POST. The target answers any request with a 204 that names a day, so a
+    /// followed hop would be acknowledged; the handle reports what the target saw, or `None` when the
+    /// client never connected. Nothing here blocks past `WINDOW`, so a client that refuses to follow
+    /// fails an assertion instead of hanging the test.
+    fn redirect_once(status: &'static str) -> (String, std::thread::JoinHandle<Option<Hop>>) {
+        const WINDOW: Duration = Duration::from_secs(5);
         let target = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         target.set_nonblocking(true).unwrap();
         let target_addr = target.local_addr().unwrap();
         let target_url = format!("http://{target_addr}/usage/activity");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}/usage/activity", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let deadline = std::time::Instant::now() + WINDOW;
+            let mut stream = accept_until(&listener, deadline)?;
+            stream.set_read_timeout(Some(WINDOW)).unwrap();
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf).unwrap();
             stream
@@ -627,43 +658,33 @@ mod tests {
                     .as_bytes(),
                 )
                 .unwrap();
-            // Give the client until the tick's own timeout to make a second hop it should not make.
-            let deadline = std::time::Instant::now() + Duration::from_secs(3);
-            let mut stream = loop {
-                match target.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(_) if std::time::Instant::now() < deadline => {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(_) => return None,
-                }
-            };
-            stream.set_nonblocking(false).unwrap();
+            // Give the client until the window ends to make a second hop it should not make.
+            let mut stream = accept_until(&target, deadline)?;
+            stream.set_read_timeout(Some(WINDOW)).unwrap();
             let mut bytes = Vec::new();
             loop {
                 let n = stream.read(&mut buf).unwrap();
-                assert!(n > 0);
+                if n == 0 {
+                    return None;
+                }
                 bytes.extend_from_slice(&buf[..n]);
                 if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
                     let header = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
-                    let length: usize = header
+                    let content_length: Option<usize> = header
                         .lines()
                         .find_map(|line| line.strip_prefix("content-length:"))
-                        .unwrap_or("0")
-                        .trim()
-                        .parse()
-                        .unwrap();
-                    if bytes.len() >= end + 4 + length {
-                        let method = header.split(' ').next().unwrap().to_owned();
-                        let carried_body = length > 0;
-                        let body: serde_json::Value = if carried_body {
-                            serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap()
-                        } else {
-                            // A redirected GET carries nothing, so name a day the fixture can answer.
-                            serde_json::json!({ "occurredAt": "2026-11-02T00:00:00Z" })
-                        };
-                        stream.write_all(no_content(&body).as_bytes()).unwrap();
-                        return Some((method, carried_body));
+                        .map(|value| value.trim().parse().unwrap());
+                    if content_length.is_some_and(|length| bytes.len() >= end + 4 + length) {
+                        let body = bytes[end + 4..].to_vec();
+                        let day: serde_json::Value = serde_json::from_slice(&body).unwrap_or_else(
+                            |_| serde_json::json!({ "occurredAt": "2026-11-02T00:00:00Z" }),
+                        );
+                        stream.write_all(no_content(&day).as_bytes()).unwrap();
+                        return Some(Hop {
+                            method: header.split(' ').next().unwrap().to_owned(),
+                            content_length,
+                            body,
+                        });
                     }
                 }
             }
@@ -671,33 +692,155 @@ mod tests {
         (url, server)
     }
 
-    /// A 307 or 308 keeps the method and the body, so the second hop really carries the activity and
-    /// its 204 is a true acknowledgement.
+    /// 307 keeps the method and the body, so the second hop carries the activity and its 204 is a
+    /// true acknowledgement.
     #[tokio::test]
-    async fn a_redirect_that_keeps_the_post_is_followed() {
-        for status in ["307 Temporary Redirect", "308 Permanent Redirect"] {
-            let (url, server) = redirect_once(status);
-            let tmp = tempfile::tempdir().unwrap();
-            let core = open_core(&tmp);
-            let client = build_client().unwrap();
-            let now = Utc::now();
-            tick(&core, &client, &url, now, "0.1.4").await.unwrap();
-            let hop = server.join().unwrap();
-            let (method, carried_body) =
-                hop.unwrap_or_else(|| panic!("a {status} must be followed"));
-            assert_eq!(method, "post", "a {status} must be followed as a POST");
-            assert!(carried_body, "a {status} must keep the activity body");
-            let history = History::load(&core).unwrap();
-            assert!(
-                history.pending.is_empty(),
-                "the redirected 204 for a {status} acknowledges the record"
-            );
-            assert_eq!(history.sent.len(), 1, "the day is recorded as reported");
-        }
+    async fn a_307_redirect_is_followed_as_a_post() {
+        let (url, server) = redirect_once("307 Temporary Redirect");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let client = build_client().unwrap();
+        let now = Utc::now();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let hop = server
+            .join()
+            .unwrap()
+            .expect("a 307 keeps the POST, so it is followed");
+        assert_eq!(hop.method, "post", "the second hop is still a POST");
+        assert_eq!(
+            hop.content_length,
+            Some(hop.body.len()),
+            "the activity body is carried with a matching Content-Length"
+        );
+        let sent: serde_json::Value = serde_json::from_slice(&hop.body).unwrap();
+        assert_eq!(
+            sent["version"], "0.1.4",
+            "the second hop carries the real activity"
+        );
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.pending.is_empty(),
+            "the redirected 204 acknowledges the record"
+        );
+        assert_eq!(history.sent.len(), 1, "the day is recorded as reported");
+    }
+
+    /// 308 is the permanent form of 307 and behaves the same.
+    #[tokio::test]
+    async fn a_308_redirect_is_followed_as_a_post() {
+        let (url, server) = redirect_once("308 Permanent Redirect");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let client = build_client().unwrap();
+        let now = Utc::now();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let hop = server
+            .join()
+            .unwrap()
+            .expect("a 308 keeps the POST, so it is followed");
+        assert_eq!(hop.method, "post", "the second hop is still a POST");
+        assert_eq!(
+            hop.content_length,
+            Some(hop.body.len()),
+            "the activity body is carried with a matching Content-Length"
+        );
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.pending.is_empty(),
+            "the redirected 204 acknowledges the record"
+        );
+        assert_eq!(history.sent.len(), 1, "the day is recorded as reported");
+    }
+
+    /// 301 rewrites the POST into a GET and drops the payload, so following it would let a 204 for
+    /// that GET mark the day as reported while the server never saw the record.
+    #[tokio::test]
+    async fn a_301_redirect_is_not_followed() {
+        let (url, server) = redirect_once("301 Moved Permanently");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        assert!(
+            server.join().unwrap().is_none(),
+            "a 301 must not be followed: the target sees zero connections"
+        );
+        let history = History::load(&core).unwrap();
+        assert!(history.sent.is_empty(), "a 301 acknowledges nothing");
+        assert_eq!(history.pending.len(), 2, "a 301 keeps the whole batch");
+    }
+
+    /// 302 is the temporary form of 301 and is equally lossy for a POST.
+    #[tokio::test]
+    async fn a_302_redirect_is_not_followed() {
+        let (url, server) = redirect_once("302 Found");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        assert!(
+            server.join().unwrap().is_none(),
+            "a 302 must not be followed: the target sees zero connections"
+        );
+        let history = History::load(&core).unwrap();
+        assert!(history.sent.is_empty(), "a 302 acknowledges nothing");
+        assert_eq!(history.pending.len(), 2, "a 302 keeps the whole batch");
+    }
+
+    /// 303 always becomes a bodyless GET, even for a POST.
+    #[tokio::test]
+    async fn a_303_redirect_is_not_followed() {
+        let (url, server) = redirect_once("303 See Other");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        assert!(
+            server.join().unwrap().is_none(),
+            "a 303 must not be followed: the target sees zero connections"
+        );
+        let history = History::load(&core).unwrap();
+        assert!(history.sent.is_empty(), "a 303 acknowledges nothing");
+        assert_eq!(history.pending.len(), 2, "a 303 keeps the whole batch");
+    }
+
+    /// The regression this guards: the target is willing to answer 204, and a followed 301 would
+    /// collect that 204 and mark a record the server never received as sent. Because the client does
+    /// not follow, the 204 is never reached and `sent` stays empty.
+    #[tokio::test]
+    async fn a_301_target_that_would_answer_204_is_never_reached() {
+        let (url, server) = redirect_once("301 Moved Permanently");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let hop = server.join().unwrap();
+        assert!(
+            hop.is_none(),
+            "the 204-answering target is never contacted, so no acknowledgement can be forged"
+        );
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.sent.is_empty(),
+            "a 204 behind a 301 must not write sent"
+        );
+        assert_eq!(
+            history.pending.len(),
+            2,
+            "both records wait for the next tick"
+        );
     }
 
     /// A 307 that points at itself would otherwise be followed until the tick's timeout. The bound
-    /// stops it, and the batch waits for the next tick like any other unavailable service.
+    /// returns an error at the sixth request, records stay put, and nothing panics.
     #[tokio::test]
     async fn a_redirect_loop_stops_at_the_bound() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -706,18 +849,13 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let server = std::thread::spawn(move || {
             let mut hops = 0;
-            // Stop at the tick's own deadline: the client is expected to give up after five hops, so
-            // waiting for connection number eight would hang the test instead of failing it.
+            // Stop at the window's end: the client is expected to give up after five requests, so
+            // waiting for a sixth would hang the test instead of failing it.
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            while std::time::Instant::now() < deadline {
-                let mut stream = match listener.accept() {
-                    Ok((stream, _)) => stream,
-                    Err(_) => {
-                        std::thread::sleep(Duration::from_millis(5));
-                        continue;
-                    }
-                };
-                stream.set_nonblocking(false).unwrap();
+            while let Some(mut stream) = accept_until(&listener, deadline) {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
                 let mut buf = [0u8; 4096];
                 let _ = stream.read(&mut buf).unwrap();
                 hops += 1;
@@ -739,8 +877,8 @@ mod tests {
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
         let hops = server.join().unwrap();
-        // `previous()` counts the request being redirected, so the bound allows four redirects after
-        // the original: five requests in total, then the 307 is returned as-is.
+        // `previous()` counts the request being redirected, so five requests are made and the fifth
+        // redirect is refused with `attempt.error("too many usage redirects")`.
         assert_eq!(hops, 5, "the bound stops a redirect chain at five requests");
         let history = History::load(&core).unwrap();
         assert!(
@@ -752,36 +890,6 @@ mod tests {
             2,
             "a redirect loop keeps the whole batch for the next tick"
         );
-    }
-
-    /// 301, 302 and 303 turn the POST into a GET and drop the payload, so the second hop carries no
-    /// activity. Following them would let a 204 for that GET mark the day as reported while the server
-    /// never saw the record — a permanent loss no later tick could repair. They are not followed.
-    #[tokio::test]
-    async fn a_redirect_that_would_drop_the_post_is_not_followed() {
-        for status in ["301 Moved Permanently", "302 Found", "303 See Other"] {
-            let (url, server) = redirect_once(status);
-            let tmp = tempfile::tempdir().unwrap();
-            let core = open_core(&tmp);
-            let now = Utc::now();
-            seed_two_days(&core, now);
-            let client = build_client().unwrap();
-            tick(&core, &client, &url, now, "0.1.4").await.unwrap();
-            assert!(
-                server.join().unwrap().is_none(),
-                "a {status} must not be followed: the client would send a bodyless GET"
-            );
-            let history = History::load(&core).unwrap();
-            assert!(
-                history.sent.is_empty(),
-                "a {status} acknowledges nothing: the payload was never delivered"
-            );
-            assert_eq!(
-                history.pending.len(),
-                2,
-                "a {status} keeps the whole batch for the next tick"
-            );
-        }
     }
 
     #[test]
