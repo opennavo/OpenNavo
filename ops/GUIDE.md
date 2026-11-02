@@ -283,15 +283,15 @@ if command -v btrfs >/dev/null 2>&1; then
         echo "no writable temporary directory, so this check did not run:"
         echo "  -> row 1 stays unknown"
     else
-        OUT=$(btrfs subvolume list / 2>"$ERR")
+        OUT=$(btrfs subvolume list -s / 2>"$ERR")
         if [ -s "$ERR" ]; then
             echo "btrfs reported an error, so this check did not run:"
             sed 's/^/  /' "$ERR"
             echo "  -> row 1 stays unknown"
-        elif printf '%s\n' "$OUT" | grep -qi snapshot; then
-            printf '%s\n' "$OUT" | grep -i snapshot
+        elif [ -n "$OUT" ]; then
+            printf '%s\n' "$OUT"
         else
-            echo "btrfs ran cleanly; no subvolume name mentions snapshot"
+            echo "btrfs ran cleanly and listed no snapshots: not btrfs, or btrfs with none"
         fi
         rm -f "$ERR"
     fi
@@ -343,6 +343,33 @@ way. A container cannot load the ZFS kernel module, so the real `zfs list` could
 here — if you have a ZFS host, confirm it there before trusting row 1 on one.
 
 Keep the `-H` if you copy this block.
+
+**`btrfs` needs `-s`, and unlike the other two it is not about headers.** `btrfs subvolume
+list` lists every subvolume, snapshots among them, with nothing but the name to tell them
+apart. Matching the output against the word `snapshot` is not a filter, in either direction.
+Measured on a real btrfs filesystem in a container:
+
+```
+subvolume named snapshot-archive, no snapshot taken
+  btrfs subvolume list /     -> '... path snapshot-archive'   -> the name match reports one
+  btrfs subvolume list -s /  -> ''                            -> correctly reports none
+
+snapshot taken, named backup1
+  btrfs subvolume list /     -> '... path backup1'            -> the name match sees nothing
+  btrfs subvolume list -s /  -> '... path backup1'            -> correctly lists it
+```
+
+`-s` is the tool's own type filter: `btrfs subvolume list --help` prints it under
+`Type filtering:` as `-s   list only snapshots`. It reads what the filesystem recorded when
+the snapshot was made, not what somebody named it afterwards.
+
+Do not add `-o` here. It narrows the listing to subvolumes below the given path, so on a
+host whose snapshots sit at the filesystem root it prints nothing and the block reports "no
+snapshots" on a host that has some. Measured: two snapshots directly under the mount, then
+the same command with `-o <mount>`, which listed neither.
+
+Keep the `-s` if you copy this block. A host where this prints nothing is covered by the
+paragraph below: none of these commands can report a backup as absent.
 
 **A command that fails answers nothing.** None of the commands above can report that a backup
 is *absent*: they can only fail to find one. If one exits non-zero or prints nothing, the row
