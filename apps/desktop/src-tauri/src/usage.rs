@@ -180,29 +180,71 @@ async fn tick(
     Ok(())
 }
 
-fn build_client() -> Result<reqwest::Client, AppError> {
-    Ok(reqwest::Client::builder()
+/// What the usage client does with one redirect, given the status, the scheme the chain started on,
+/// the scheme it is being sent to, and how many requests the chain has already made.
+#[derive(Debug, PartialEq, Eq)]
+enum Redirect {
+    Follow,
+    Stop,
+    TooMany,
+}
+
+/// The usage endpoint carries the activity body on the request, so only a redirect that keeps it can
+/// be followed: 307 and 308 preserve the method and body, while 301, 302 and 303 rewrite the POST
+/// into a GET and drop the payload (tower-http follow_redirect), leaving a second hop that carries no
+/// activity at all. Those are returned as-is, so `attempt` keeps the whole batch for the next tick.
+///
+/// A redirect may not change the scheme. The initial URL comes from `configured_base()`, which accepts
+/// `http` for a self-hosted development server, so requiring `https` outright would break that setup;
+/// what must never happen is a server choosing to take an `https` endpoint down to plaintext, which
+/// would put the device identifier and the activity records on the wire in clear. Keeping the scheme
+/// while changing host or path is fine, which is also what `Policy::limited` allowed.
+///
+/// The chain stops at five requests, matching `Policy::limited(5)`. `previous()` holds the initial URL
+/// followed by one entry per request already made, so `requests` is 1 on the first redirect and the
+/// bound is `> 5`, not `>= 5` — the updater's `>= 5` allows only four jumps, which is a separate
+/// pre-existing bug outside this change.
+fn redirect(
+    status: reqwest::StatusCode,
+    initial: Option<&str>,
+    target: &str,
+    requests: usize,
+) -> Redirect {
+    let keeps_body = status == reqwest::StatusCode::TEMPORARY_REDIRECT
+        || status == reqwest::StatusCode::PERMANENT_REDIRECT;
+    if !keeps_body || initial != Some(target) {
+        Redirect::Stop
+    } else if requests > 5 {
+        Redirect::TooMany
+    } else {
+        Redirect::Follow
+    }
+}
+
+/// The redirect policy, shared by the shipped client and the tests; keeping it in one place is what
+/// makes those tests cover the policy that actually ships.
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        // Follow only the redirects that keep the request a POST with its body. Following a 301, 302 or
-        // 303 means rewriting the POST into a GET and dropping the payload (tower-http
-        // follow_redirect), so the second hop carries no activity at all; a 204 answering that GET
-        // would otherwise be read as an acknowledgement for a record the server never received, and the
-        // record would be dropped as sent. Those statuses are returned as-is, so `attempt` keeps the
-        // whole batch for the next tick. 307 and 308 preserve the method and body, so they are the only
-        // ones worth following, and the jump count stays bounded like the updater's.
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            let status = attempt.status();
-            if attempt.previous().len() >= 5 {
-                attempt.error("too many usage redirects")
-            } else if status == reqwest::StatusCode::TEMPORARY_REDIRECT
-                || status == reqwest::StatusCode::PERMANENT_REDIRECT
-            {
-                attempt.follow()
-            } else {
-                attempt.stop()
+            // `previous()[0]` is the initial URL, not a redirection, so the first scheme is the one the
+            // configured base used.
+            let initial = attempt.previous().first().map(|url| url.scheme());
+            match redirect(
+                attempt.status(),
+                initial,
+                attempt.url().scheme(),
+                attempt.previous().len(),
+            ) {
+                Redirect::Follow => attempt.follow(),
+                Redirect::Stop => attempt.stop(),
+                Redirect::TooMany => attempt.error("too many usage redirects"),
             }
         }))
-        .build()?)
+}
+
+fn build_client() -> Result<reqwest::Client, AppError> {
+    Ok(client_builder().build()?)
 }
 
 pub fn start(core: &Arc<DesktopCore>, version: String) {
@@ -636,12 +678,32 @@ mod tests {
     /// followed hop would be acknowledged; the handle reports what the target saw, or `None` when the
     /// client never connected. Nothing here blocks past `WINDOW`, so a client that refuses to follow
     /// fails an assertion instead of hanging the test.
-    fn redirect_once(status: &'static str) -> (String, std::thread::JoinHandle<Option<Hop>>) {
-        const WINDOW: Duration = Duration::from_secs(5);
+    ///
+    /// `target_scheme` is the scheme written into `Location`. The client only follows when it matches
+    /// the scheme the chain started on, so `"http"` exercises the follow path and `"https"` exercises
+    /// the refusal: the target here is a plain listener either way, which is the point — a refused
+    /// redirect must never reach it.
+    fn redirect_once(
+        status: &'static str,
+        target_scheme: &'static str,
+    ) -> (String, std::thread::JoinHandle<Option<Hop>>) {
         let target = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         target.set_nonblocking(true).unwrap();
-        let target_addr = target.local_addr().unwrap();
-        let target_url = format!("http://{target_addr}/usage/activity");
+        let target_url = format!(
+            "{target_scheme}://{}/usage/activity",
+            target.local_addr().unwrap()
+        );
+        serve_redirect(status, target_url, target)
+    }
+
+    /// Serve one request with a redirect, then report what the target listener saw.
+    fn serve_redirect(
+        status: &'static str,
+        target_url: String,
+        target: std::net::TcpListener,
+    ) -> (String, std::thread::JoinHandle<Option<Hop>>) {
+        const WINDOW: Duration = Duration::from_secs(5);
+        let closure_target_url = target_url;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}/usage/activity", listener.local_addr().unwrap());
@@ -654,7 +716,7 @@ mod tests {
             stream
                 .write_all(
                     format!(
-                        "HTTP/1.1 {status}\r\nLocation: {target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        "HTTP/1.1 {status}\r\nLocation: {closure_target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     )
                     .as_bytes(),
                 )
@@ -706,14 +768,116 @@ mod tests {
         (url, server)
     }
 
+    /// The redirect decision on its own, so the table is pinned without a socket. `requests` is
+    /// `previous().len()`: 1 on the first redirect, because `previous()[0]` is the initial URL.
+    #[test]
+    fn only_a_307_or_308_that_keeps_the_scheme_is_followed() {
+        for (name, status, initial, target, requests, want) in [
+            (
+                "307 keeps the body and the scheme",
+                reqwest::StatusCode::TEMPORARY_REDIRECT,
+                "https",
+                "https",
+                1,
+                Redirect::Follow,
+            ),
+            (
+                "308 keeps the body and the scheme",
+                reqwest::StatusCode::PERMANENT_REDIRECT,
+                "https",
+                "https",
+                1,
+                Redirect::Follow,
+            ),
+            (
+                "a plaintext base follows a plaintext redirect, which is the development setup",
+                reqwest::StatusCode::TEMPORARY_REDIRECT,
+                "http",
+                "http",
+                1,
+                Redirect::Follow,
+            ),
+            (
+                "the fifth request is still followed",
+                reqwest::StatusCode::TEMPORARY_REDIRECT,
+                "https",
+                "https",
+                5,
+                Redirect::Follow,
+            ),
+            (
+                "the sixth is an error, not a seventh request",
+                reqwest::StatusCode::TEMPORARY_REDIRECT,
+                "https",
+                "https",
+                6,
+                Redirect::TooMany,
+            ),
+            (
+                "301 would rewrite the POST into a GET",
+                reqwest::StatusCode::MOVED_PERMANENTLY,
+                "https",
+                "https",
+                1,
+                Redirect::Stop,
+            ),
+            (
+                "302 would rewrite the POST into a GET",
+                reqwest::StatusCode::FOUND,
+                "https",
+                "https",
+                1,
+                Redirect::Stop,
+            ),
+            (
+                "303 would rewrite the POST into a GET",
+                reqwest::StatusCode::SEE_OTHER,
+                "https",
+                "https",
+                1,
+                Redirect::Stop,
+            ),
+        ] {
+            assert_eq!(
+                redirect(status, Some(initial), target, requests),
+                want,
+                "{name}"
+            );
+        }
+    }
+
+    /// A redirect may not change the scheme. The dangerous direction is `https` down to plaintext,
+    /// which puts the device identifier and the records on the wire in clear; `http` up to `https` is
+    /// also refused, because the rule is "no change", not "prefer https". Refusing must not be
+    /// confused with the loop bound, which reports `TooMany` instead.
+    #[test]
+    fn a_redirect_that_changes_the_scheme_is_not_followed() {
+        for (name, initial, target) in [
+            ("a downgrade to plaintext", "https", "http"),
+            ("an upgrade to https", "http", "https"),
+            ("another scheme entirely", "https", "ftp"),
+        ] {
+            for status in [
+                reqwest::StatusCode::TEMPORARY_REDIRECT,
+                reqwest::StatusCode::PERMANENT_REDIRECT,
+            ] {
+                assert_eq!(
+                    redirect(status, Some(initial), target, 1),
+                    Redirect::Stop,
+                    "{name} is refused ({status})"
+                );
+            }
+        }
+    }
+
     /// 307 keeps the method and the body, so the second hop carries the activity and its 204 is a
     /// true acknowledgement.
     #[tokio::test]
     async fn a_307_redirect_is_followed_as_a_post() {
-        let (url, server) = redirect_once("307 Temporary Redirect");
+        let (url, server) = redirect_once("307 Temporary Redirect", "http");
+        let client = build_client().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let client = build_client().unwrap();
         let now = Utc::now();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
         let hop = server
@@ -747,10 +911,10 @@ mod tests {
     /// 308 is the permanent form of 307 and behaves the same.
     #[tokio::test]
     async fn a_308_redirect_is_followed_as_a_post() {
-        let (url, server) = redirect_once("308 Permanent Redirect");
+        let (url, server) = redirect_once("308 Permanent Redirect", "http");
+        let client = build_client().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let client = build_client().unwrap();
         let now = Utc::now();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
         let hop = server
@@ -791,7 +955,7 @@ mod tests {
     /// that GET mark the day as reported while the server never saw the record.
     #[tokio::test]
     async fn a_301_redirect_is_not_followed() {
-        let (url, server) = redirect_once("301 Moved Permanently");
+        let (url, server) = redirect_once("301 Moved Permanently", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
         let now = Utc::now();
@@ -810,7 +974,7 @@ mod tests {
     /// 302 is the temporary form of 301 and is equally lossy for a POST.
     #[tokio::test]
     async fn a_302_redirect_is_not_followed() {
-        let (url, server) = redirect_once("302 Found");
+        let (url, server) = redirect_once("302 Found", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
         let now = Utc::now();
@@ -829,7 +993,7 @@ mod tests {
     /// 303 always becomes a bodyless GET, even for a POST.
     #[tokio::test]
     async fn a_303_redirect_is_not_followed() {
-        let (url, server) = redirect_once("303 See Other");
+        let (url, server) = redirect_once("303 See Other", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
         let now = Utc::now();
@@ -845,12 +1009,69 @@ mod tests {
         assert_eq!(history.pending.len(), 2, "a 303 keeps the whole batch");
     }
 
+    /// The base here is `http` and the redirect names `https`, and a 307 would otherwise keep the
+    /// body. Only the scheme rule refuses it, which is why this is the case that proves the rule: a
+    /// server must not get to move the endpoint to a different scheme than the configured base used.
+    /// The reverse direction, `https` down to plaintext, is the one that leaks; it is covered by the
+    /// decision table, because an `https` origin would need a TLS server just to be reached.
+    #[tokio::test]
+    async fn a_307_redirect_to_a_different_scheme_is_not_followed() {
+        let (url, server) = redirect_once("307 Temporary Redirect", "https");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.sent.is_empty(),
+            "a redirect that changes the scheme must not acknowledge the records"
+        );
+        assert_eq!(
+            history.pending.len(),
+            2,
+            "a refused scheme change keeps the whole batch"
+        );
+        assert!(
+            server.join().unwrap().is_none(),
+            "the target on the other scheme sees zero connections"
+        );
+    }
+
+    /// 308 is the permanent form of 307 and is refused for the same reason: the scheme changed from
+    /// the base's `http` to `https`.
+    #[tokio::test]
+    async fn a_308_redirect_to_a_different_scheme_is_not_followed() {
+        let (url, server) = redirect_once("308 Permanent Redirect", "https");
+        let tmp = tempfile::tempdir().unwrap();
+        let core = open_core(&tmp);
+        let now = Utc::now();
+        seed_two_days(&core, now);
+        let client = build_client().unwrap();
+        tick(&core, &client, &url, now, "0.1.4").await.unwrap();
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.sent.is_empty(),
+            "a redirect that changes the scheme must not acknowledge the records"
+        );
+        assert_eq!(
+            history.pending.len(),
+            2,
+            "a refused scheme change keeps the whole batch"
+        );
+        assert!(
+            server.join().unwrap().is_none(),
+            "the target on the other scheme sees zero connections"
+        );
+    }
+
     /// The regression this guards: the target is willing to answer 204, and a followed 301 would
     /// collect that 204 and mark a record the server never received as sent. Because the client does
     /// not follow, the 204 is never reached and `sent` stays empty.
     #[tokio::test]
     async fn a_301_target_that_would_answer_204_is_never_reached() {
-        let (url, server) = redirect_once("301 Moved Permanently");
+        let (url, server) = redirect_once("301 Moved Permanently", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
         let now = Utc::now();
@@ -877,7 +1098,8 @@ mod tests {
     }
 
     /// A 307 that points at itself would otherwise be followed until the tick's timeout. The bound
-    /// returns an error at the sixth request, records stay put, and nothing panics.
+    /// returns an error at the sixth request, records stay put, and nothing panics. The scheme never
+    /// changes here, so the loop reaches the bound instead of being stopped by the scheme rule.
     #[tokio::test]
     async fn a_redirect_loop_stops_at_the_bound() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -886,8 +1108,8 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let server = std::thread::spawn(move || {
             let mut hops = 0;
-            // Stop at the window's end: the client is expected to give up after five requests, so
-            // waiting for a sixth would hang the test instead of failing it.
+            // Stop at the window's end: the client is expected to give up after six requests, so
+            // waiting for a seventh would hang the test instead of failing it.
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
             while let Some(mut stream) = accept_until(&listener, deadline) {
                 stream
@@ -914,9 +1136,13 @@ mod tests {
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
         let hops = server.join().unwrap();
-        // `previous()` counts the request being redirected, so five requests are made and the fifth
-        // redirect is refused with `attempt.error("too many usage redirects")`.
-        assert_eq!(hops, 5, "the bound stops a redirect chain at five requests");
+        // `previous()` holds the initial URL plus one entry per request made, so the sixth request is
+        // the one whose redirect is refused with `attempt.error("too many usage redirects")`; that is
+        // `Policy::limited(5)` exactly, which allows five jumps rather than four.
+        assert_eq!(
+            hops, 6,
+            "the bound allows five redirects and refuses the sixth"
+        );
         let history = History::load(&core).unwrap();
         assert!(
             history.sent.is_empty(),
