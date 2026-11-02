@@ -466,10 +466,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
         // A fixed clock, not `Utc::now()`. `record()` starts a fresh activity for a new day, so two
-        // ticks at 23:59:30 local and 23:59:30 plus one minute fall on different reporting days: the
-        // second tick would then have a third record to send, reach the two-connection server with one
-        // hop left, and leave the new day pending. That failed once a day at 23:59 local, a window no
-        // longer worth running through to prove behaviour this test is not about.
+        // ticks at 23:59:30 local and 23:59:30 plus one minute fall on different reporting days and the
+        // second tick has a third record to send. The two-connection server below would then be one hop
+        // short, and the count assertions would describe a midnight run rather than this behaviour.
         let now: DateTime<Utc> = "2026-10-22T04:00:00Z".parse().unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
@@ -510,7 +509,17 @@ mod tests {
             2,
             "the next tick resends the whole batch after {status}"
         );
-        assert!(History::load(&core).unwrap().pending.is_empty());
+        // Nothing that was waiting is still waiting. Asserted as "no activity predates this tick"
+        // rather than `pending.is_empty()`: `record()` opens a fresh activity for a new reporting day,
+        // so a run that crosses local midnight legitimately leaves one behind, and an empty-outbox
+        // assertion would fail for a whole minute each night without anything being wrong.
+        let next = now + chrono::Duration::minutes(1);
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.pending.iter().all(|a| a.occurred_at >= next),
+            "every record that was waiting is delivered: {:?}",
+            history.pending
+        );
     }
 
     #[tokio::test]
@@ -545,22 +554,22 @@ mod tests {
         }
 
         let (url, server) = serve(2, |_, body| no_content(body));
-        tick(
-            &core,
-            &client,
-            &url,
-            now + chrono::Duration::minutes(1),
-            "0.1.4",
-        )
-        .await
-        .unwrap();
+        let next = now + chrono::Duration::minutes(1);
+        tick(&core, &client, &url, next, "0.1.4").await.unwrap();
         let delivered = server.join().unwrap();
         assert_eq!(
             delivered.len(),
             2,
             "the next tick resends the whole batch after a 429"
         );
-        assert!(History::load(&core).unwrap().pending.is_empty());
+        // Same assertion as the helper above, for the same reason: a record for a new reporting day is
+        // legitimate, so what must hold is that nothing from before this tick is still queued.
+        let history = History::load(&core).unwrap();
+        assert!(
+            history.pending.iter().all(|a| a.occurred_at >= next),
+            "every record that was waiting is delivered: {:?}",
+            history.pending
+        );
     }
 
     #[tokio::test]
