@@ -2265,8 +2265,8 @@ class Deployment:
             self.ensure_live_manifest()
             self.verify()
             self.update_monitoring(self.services)
-            self.cleanup(self.state.get('previous', {}))
-            self.prune(self.state.get('previous', {}))
+            with phase('Cleanup'):
+                self.clean_up_quietly(self.state.get('previous', {}))
             print('This source revision is already deployed.'); return
         # This read-only gate runs before image pulls, release directories, migrations or Caddy
         # changes. A second web replica therefore fails cleanly when the host cannot overlap it.
@@ -2339,10 +2339,20 @@ class Deployment:
         previous = {key: value for key, value in self.state.items() if key != 'previous'}
         write_private(self.state_path, {'sha': self.payload['sha'], 'release': self.release, 'services': self.services, 'previous': previous})
         print('Production deployed and verified: ' + self.payload['sha'], flush=True)
-        # Cleanup failure must not roll back a verified release; a retry resumes cleanup.
+        # Cleanup failure must not roll back a verified release, and must not turn a
+        # verified release into a failed exit status either: the deploy bootstrap
+        # restores the previous receiver on any nonzero status, and this deployment
+        # succeeded. A retry resumes cleanup.
         with phase('Cleanup'):
+            self.clean_up_quietly(previous)
+
+    def clean_up_quietly(self, previous):
+        """Retire old containers without failing a release that is already serving."""
+        try:
             self.cleanup(previous)
-            self.prune(previous)
+        except Exception as error:
+            print('Cleanup incomplete; the next deployment retries it: ' + str(error), flush=True)
+        self.prune(previous)
 
 
 def self_check():
