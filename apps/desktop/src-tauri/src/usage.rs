@@ -608,6 +608,7 @@ mod tests {
     struct Hop {
         method: String,
         content_length: Option<usize>,
+        content_type: Option<String>,
         body: Vec<u8>,
     }
 
@@ -663,19 +664,26 @@ mod tests {
             stream.set_read_timeout(Some(WINDOW)).unwrap();
             let mut bytes = Vec::new();
             loop {
-                let n = stream.read(&mut buf).unwrap();
-                if n == 0 {
-                    return None;
-                }
-                bytes.extend_from_slice(&buf[..n]);
+                // A request with no body needs no more reads: a followed 301/302/303 arrives here as a
+                // GET with no Content-Length, and waiting for a body it will never send would end in a
+                // read timeout rather than the assertion this test is about.
                 if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
                     let header = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
                     let content_length: Option<usize> = header
                         .lines()
                         .find_map(|line| line.strip_prefix("content-length:"))
                         .map(|value| value.trim().parse().unwrap());
-                    if content_length.is_some_and(|length| bytes.len() >= end + 4 + length) {
-                        let body = bytes[end + 4..].to_vec();
+                    let content_type = header
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-type:"))
+                        .map(|value| value.trim().to_owned());
+                    let body_starts = end + 4;
+                    let complete = match content_length {
+                        Some(length) => bytes.len() >= body_starts + length,
+                        None => true,
+                    };
+                    if complete {
+                        let body = bytes[body_starts..].to_vec();
                         let day: serde_json::Value = serde_json::from_slice(&body).unwrap_or_else(
                             |_| serde_json::json!({ "occurredAt": "2026-11-02T00:00:00Z" }),
                         );
@@ -683,9 +691,15 @@ mod tests {
                         return Some(Hop {
                             method: header.split(' ').next().unwrap().to_owned(),
                             content_length,
+                            content_type,
                             body,
                         });
                     }
+                }
+                match stream.read(&mut buf) {
+                    Ok(0) => return None,
+                    Ok(n) => bytes.extend_from_slice(&buf[..n]),
+                    Err(error) => panic!("the target could not read the request: {error}"),
                 }
             }
         });
@@ -711,6 +725,11 @@ mod tests {
             hop.content_length,
             Some(hop.body.len()),
             "the activity body is carried with a matching Content-Length"
+        );
+        assert_eq!(
+            hop.content_type.as_deref(),
+            Some("application/json"),
+            "the JSON content type survives the redirect"
         );
         let sent: serde_json::Value = serde_json::from_slice(&hop.body).unwrap();
         assert_eq!(
@@ -743,6 +762,22 @@ mod tests {
             hop.content_length,
             Some(hop.body.len()),
             "the activity body is carried with a matching Content-Length"
+        );
+        assert_eq!(
+            hop.content_type.as_deref(),
+            Some("application/json"),
+            "the JSON content type survives the redirect"
+        );
+        // 308 is the permanent form of 307: the payload itself has to arrive unchanged, not merely
+        // some body of the right length.
+        let sent: serde_json::Value = serde_json::from_slice(&hop.body).unwrap();
+        assert_eq!(
+            sent["version"], "0.1.4",
+            "the second hop carries the real activity"
+        );
+        assert!(
+            sent["anonymousId"].is_string() && sent["occurredAt"].is_string(),
+            "every field of the activity reaches the target, not just the version"
         );
         let history = History::load(&core).unwrap();
         assert!(
@@ -822,15 +857,17 @@ mod tests {
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
-        let hop = server.join().unwrap();
-        assert!(
-            hop.is_none(),
-            "the 204-answering target is never contacted, so no acknowledgement can be forged"
-        );
+        // Assert the data outcome first: what matters is that no record is marked sent, and a present
+        // `Hop` below would otherwise mask that assertion when the client wrongly follows.
         let history = History::load(&core).unwrap();
         assert!(
             history.sent.is_empty(),
             "a 204 behind a 301 must not write sent"
+        );
+        let hop = server.join().unwrap();
+        assert!(
+            hop.is_none(),
+            "the 204-answering target is never contacted, so no acknowledgement can be forged"
         );
         assert_eq!(
             history.pending.len(),
