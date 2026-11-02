@@ -375,7 +375,7 @@ mod tests {
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         let id = History::load(&core).unwrap().id;
         // Today's record is the one the server refuses (a clock running ahead of the server), and the
         // record for the day before it is still waiting behind it.
@@ -583,7 +583,7 @@ mod tests {
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -909,7 +909,7 @@ mod tests {
         let client = build_client().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
         let hop = server
             .join()
@@ -946,7 +946,7 @@ mod tests {
         let client = build_client().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
         let hop = server
             .join()
@@ -989,7 +989,7 @@ mod tests {
         let (url, server) = redirect_once("301 Moved Permanently", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -1008,7 +1008,7 @@ mod tests {
         let (url, server) = redirect_once("302 Found", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -1027,7 +1027,7 @@ mod tests {
         let (url, server) = redirect_once("303 See Other", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -1050,7 +1050,7 @@ mod tests {
         let (url, server) = redirect_once("307 Temporary Redirect", "https");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -1077,7 +1077,7 @@ mod tests {
         let (url, server) = redirect_once("308 Permanent Redirect", "https");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -1105,7 +1105,7 @@ mod tests {
         let (url, server) = redirect_once("301 Moved Permanently", "http");
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -1162,7 +1162,7 @@ mod tests {
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -1286,7 +1286,7 @@ mod tests {
         core.replace_settings(serde_json::from_value(legacy).unwrap())
             .await
             .unwrap();
-        let now = Utc::now();
+        let now = Utc.with_ymd_and_hms(2026, 10, 22, 15, 59, 30).unwrap();
         let client = reqwest::Client::new();
         tick(&core, &client, &url, now, "0.1.3").await.unwrap();
         let id = server.join().unwrap();
