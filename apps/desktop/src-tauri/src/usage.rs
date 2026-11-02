@@ -465,11 +465,13 @@ mod tests {
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        // A fixed clock, not `Utc::now()`. `record()` starts a fresh activity for a new day, so two
-        // ticks at 23:59:30 local and 23:59:30 plus one minute fall on different reporting days and the
-        // second tick has a third record to send. The two-connection server below would then be one hop
-        // short, and the count assertions would describe a midnight run rather than this behaviour.
-        let now: DateTime<Utc> = "2026-10-22T04:00:00Z".parse().unwrap();
+        // A fixed clock, not `Utc::now()`, and deliberately one minute before the local day boundary:
+        // `day()` is UTC+8, so 15:59:30Z is 23:59:30 local and the second tick a minute later is the
+        // first tick of the next reporting day. That makes the midnight case the one this test always
+        // covers, instead of a minute a night that only a build landing in that minute would see. The
+        // assertion after the second tick therefore allows a record for the new day; what it requires
+        // is that nothing that was waiting before it is still queued.
+        let now: DateTime<Utc> = "2026-10-22T15:59:30Z".parse().unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         tick(&core, &client, &url, now, "0.1.4").await.unwrap();
@@ -536,9 +538,9 @@ mod tests {
         });
         let tmp = tempfile::tempdir().unwrap();
         let core = open_core(&tmp);
-        // Fixed for the same reason as the helper above: two ticks a minute apart must land on one
-        // reporting day, or the fresh record for the new day outlives the connections this test serves.
-        let now: DateTime<Utc> = "2026-10-22T04:00:00Z".parse().unwrap();
+        // The same clock and the same reason as the helper above: this run always crosses the local
+        // reporting-day boundary, so the midnight case is covered on every run rather than once a night.
+        let now: DateTime<Utc> = "2026-10-22T15:59:30Z".parse().unwrap();
         seed_two_days(&core, now);
         let client = build_client().unwrap();
         // A rate-limited tick is a successful tick: it reports what it could not send and returns.
