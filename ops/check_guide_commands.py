@@ -52,11 +52,21 @@ BLOCK = re.compile(r"^([ \t]*)```(?:sh|bash)\n(.*?)^\1```$", re.S | re.M)
 # .err, because the defect is the fixed name and not the suffix.
 #
 # A path containing a run of six or more `X` is a mktemp template and is not
-# fixed: the unique part is exactly what the two runs differ in. Filtered in
-# `is_template()`, not by a lookbehind here, because a lookbehind placed before
-# `\b` lets the greedy name class backtrack and report `${TMPDIR:-/tmp}/lvs.` as
-# a match inside `.../lvs.XXXXXX` - a false positive on the very idiom this check
-# tells the reader to use.
+# fixed: the unique part is exactly what the two runs differ in. That test runs in
+# the checker loop, against the match, and not as a lookbehind on this pattern.
+#
+# A trailing `(?<!XXXXXX)` here does not express the rule. Measured on
+# `${TMPDIR:-/tmp}/lvs.XXXXXX` with the trailing `\b` the old pattern had:
+#
+#   ...(?<!XXXXXX)      -> `${TMPDIR:-/tmp}/lvs.XXXXX`   one X short, still "fixed"
+#   ...(?<!XXXXXX)\b    -> `${TMPDIR:-/tmp}/lvs.`        reports a fixed path on the
+#                                                        mktemp idiom this check
+#                                                        tells the reader to use
+#
+# The name class is greedy and stops where the lookbehind lets it, so the match
+# is truncated rather than rejected. `\b` sits in a zero-width position where it
+# can satisfy the lookbehind by landing before the X run. Testing the match for a
+# six-X run after the fact has neither failure mode.
 FIXED_TMP = re.compile(
     r"(?<!mktemp )(?<!mktemp -d )"
     r"(?:/tmp/|\$\{TMPDIR:-/tmp\}/)[A-Za-z0-9_.-]+"
