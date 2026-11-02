@@ -2365,6 +2365,30 @@ def self_check():
     print('self-check: receiver loaded and host configuration is valid', flush=True)
 
 
+def probe():
+    """Report whether this receiver can start, without doing anything to the host.
+
+    The deploy bootstrap runs this on a staged receiver before `current` moves. It must
+    reach everything main() does before it reads a payload — import, the host
+    configuration, and its own lock — and nothing after: main() sweeps stale temporary
+    files before reading stdin, so running main() with an empty payload would edit the
+    host just to answer "can you start". No lock is held here, so a deployment that is
+    merely running cannot make a healthy receiver look broken.
+    """
+    config = json.loads(Path('/etc/opennavo/github-deploy.json').read_text())
+    required = ('root', 'project', 'registry', 'compose_file', 'caddy_file')
+    missing = [key for key in required if key not in config]
+    if missing:
+        raise ValueError('host configuration is missing: ' + ', '.join(missing))
+    # main() opens and locks this first; opening it here proves the path is usable
+    # without taking the lock, which a concurrent deployment may legitimately hold.
+    # Append, not write: truncating the file would itself be an edit to the host.
+    lock_path = Path(config['root']) / 'deploy/github-deploy.lock'
+    with lock_path.open('a'):
+        pass
+    print('probe: receiver loaded, host configuration and lock path are usable', flush=True)
+
+
 def main():
     os.umask(0o077)
     config = json.loads(Path('/etc/opennavo/github-deploy.json').read_text())
@@ -2391,9 +2415,11 @@ def main():
 
 if __name__ == '__main__':
     try:
-        # The deploy bootstrap probes a staged receiver with this before switching to it.
+        # The deploy bootstrap probes a staged receiver with these before switching to it.
         if '--self-check' in sys.argv[1:]:
             self_check()
+        elif '--probe' in sys.argv[1:]:
+            probe()
         else:
             main()
     except Exception as error:

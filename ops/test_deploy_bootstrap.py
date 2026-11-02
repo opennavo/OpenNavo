@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,16 +28,16 @@ THIRD = 'c' * 40
 SENTINEL = 'registry-token-do-not-write-this-to-disk'
 
 # Stands in for the receiver: reads the payload from stdin and reports what it
-# got, so a test can prove the bytes crossed the handover unchanged. With an empty
-# payload it behaves like the real receiver's main(): it starts, takes the lock and
-# then fails the validation, which is what the start probe looks for.
+# got, so a test can prove the bytes crossed the handover unchanged. --probe and
+# --self-check answer without reading stdin, like the real receiver. With an empty
+# payload it then fails the same way main() does, so probe() still sees a start.
 RECEIVER = '''\
 import hashlib
 import os
 import sys
-raw = sys.stdin.buffer.read()
-if '--self-check' in sys.argv:
+if '--self-check' in sys.argv or '--probe' in sys.argv:
     sys.exit(0)
+raw = sys.stdin.buffer.read()
 report = os.environ.get('HANDOVER_REPORT')
 if report:
     with open(report, 'w') as stream:
@@ -45,8 +46,9 @@ if not raw:
     sys.exit(1)
 sys.exit(int(os.environ.get('RECEIVER_STATUS', '0')))
 '''
-# Starts, then dies the way the interpreter does when the file cannot even be
-# imported: this is the "cannot start" case, not a failed deployment.
+# Cannot answer --probe either: it dies the way the interpreter does when the file
+# cannot be imported at all. This is the "cannot start" case, not a failed deployment,
+# and it must be refused before current moves.
 UNSTARTABLE = '''\
 import sys
 if '--self-check' in sys.argv:
@@ -55,7 +57,7 @@ sys.exit(2)
 '''
 BROKEN = '''\
 import sys
-if '--self-check' in sys.argv:
+if '--self-check' in sys.argv or '--probe' in sys.argv:
     print('configuration is missing key: example', file=sys.stderr)
     sys.exit(1)
 sys.exit(0)
@@ -385,10 +387,10 @@ class LockTests(BootstrapTestCase):
         original = bootstrap.run
         observed = []
 
-        def run(receiver, data, timeout=None):
+        def run(receiver, data, timeout=None, arguments=()):
             observed.append(Path(receiver).parent.name)
             self.assert_unlocked()
-            return original(receiver, data, timeout)
+            return original(receiver, data, timeout, arguments)
 
         with self.hold(), patch.object(bootstrap, 'run', side_effect=run):
             self.assertEqual(self.run_main(payload()), 0)
@@ -496,7 +498,7 @@ class FailureTests(BootstrapTestCase):
         (self.receiver / 'current').symlink_to(OTHER)
         self.serve(REVISION)
 
-        def hang(receiver, data, timeout=None):
+        def hang(receiver, data, timeout=None, arguments=()):
             if Path(receiver).parent.name == 'current':
                 return bootstrap.TIMED_OUT
             return bootstrap.RUN_TIMEOUT and 1
@@ -571,12 +573,36 @@ class LintTests(unittest.TestCase):
         self.assertLess(source.index('fcntl.flock(guard, fcntl.LOCK_EX)'), source.index('def main()'))
         self.assertEqual(source.count('fcntl.flock('), 1, 'a second lock site can hold it across run()')
 
+    def test_the_run_timeout_leaves_room_under_the_ssh_timeout(self):
+        # Both files are read here because no runtime assertion can span them: the SSH
+        # client enforces its own timeout, so bootstrap must finish first, print which
+        # receiver it restored, and let that reach the workflow log. Equal timeouts make
+        # the SSH failure the only visible one even though the rollback did happen.
+        sender = (Path(__file__).parent.parent / '.github/scripts/send-deployment.py').read_text()
+        ssh_timeout = int(re.search(r'\btimeout=(\d+)\)', sender).group(1))
+        self.assertLess(bootstrap.RUN_TIMEOUT, ssh_timeout - 60,
+                        'the bootstrap must time out well before the SSH client, or its '
+                        'rollback message is replaced by a bare SSH timeout')
+        # And the probe must fit inside the run budget, not be counted beside it.
+        self.assertLess(bootstrap.START_TIMEOUT, bootstrap.RUN_TIMEOUT)
+
+    def test_the_probe_uses_the_side_effect_free_entry_point(self):
+        # Running main() with an empty payload would answer the question and edit the
+        # host: main() sweeps stale temporary files before it reads standard input.
+        # The receiver therefore answers --probe itself, and the bootstrap must use it.
+        source = Path(__file__).with_name('deploy-bootstrap.py').read_text()
+        probe_body = source[source.index('def probe('):source.index('def install(')]
+        self.assertIn("['--probe']", probe_body, 'the probe runs main() and edits the host')
+        receiver = (Path(__file__).parent.parent / 'ops/github-deploy.py').read_text()
+        self.assertIn("'--probe' in sys.argv[1:]", receiver, 'the receiver has no --probe entry point')
+        # Opening the lock path for append proves it is usable without truncating it:
+        # 'w' would empty a file the real deployment relies on.
+        entry = receiver[receiver.index('def probe():'):receiver.index('def main():')]
+        self.assertIn(".open('a')", entry, 'the probe opens the lock path for writing')
+        self.assertNotIn(".open('w')", entry, 'the probe truncates the lock file')
+        self.assertNotIn('sweep_stale_temp_files', entry, 'the probe edits the host')
+
     def test_the_check_steps_cannot_wait_on_standard_input(self):
-        # Neither the compile nor the self-check step takes a payload: the receiver
-        # reads it from run(). A check step left on an inherited stdin blocks until
-        # the 120s timeout, which looks like a broken receiver and delays the deploy.
-        # The stub reads stdin before it looks at --self-check, so only the DEVNULL
-        # in check() keeps this test from hanging.
         steps = []
 
         def fake_run(arguments, **kwargs):

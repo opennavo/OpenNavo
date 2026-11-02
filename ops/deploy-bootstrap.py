@@ -30,8 +30,14 @@ CHECKSUM = re.compile(r'[0-9a-f]{64}\Z')
 MAX_PAYLOAD = 80 * 1024 * 1024
 RETENTION = 5
 # How long a receiver may take to report that it started, and how long it may run.
+# RUN_TIMEOUT must stay well under the SSH client's own timeout in
+# .github/scripts/send-deployment.py (1500s): when they are equal, the SSH client
+# gives up first, the rollback still happens, and the operator sees a bare SSH
+# timeout instead of the message that says which receiver was restored. Recent
+# successful deploys took 2-8 minutes, so 900s is still about twice the observed
+# worst case. test_the_run_timeout_leaves_room_under_the_ssh_timeout guards the gap.
 START_TIMEOUT = 120
-RUN_TIMEOUT = 1500
+RUN_TIMEOUT = 900
 # The only exit statuses the receiver produces: 0 when the deployment succeeded and
 # 1 when it failed. Anything else means the interpreter or the import itself failed,
 # which is the one case where the receiver cannot repair itself.
@@ -153,7 +159,7 @@ def prune(directory):
         entry.rmdir()
 
 
-def run(receiver, payload, timeout=None):
+def run(receiver, payload, timeout=None, arguments=()):
     """Start the receiver with the original payload on its standard input.
 
     A pipe, not a temporary file: the payload carries the registry token. The
@@ -166,14 +172,15 @@ def run(receiver, payload, timeout=None):
     """
     if not receiver.is_file():
         return EXEC_FAILED
-    process = subprocess.Popen([sys.executable, str(receiver)], stdin=subprocess.PIPE)
+    process = subprocess.Popen([sys.executable, str(receiver), *arguments], stdin=subprocess.PIPE)
     try:
         process.communicate(payload, timeout=timeout)
     except BrokenPipeError:
         process.wait()
     except subprocess.TimeoutExpired:
         # Leaving it running would hold the receiver's own lock forever, and the SSH
-        # session above ends at 1500s anyway, leaving nobody able to see what it does.
+        # session above ends at its own timeout anyway, leaving nobody able to see what
+        # it does. RUN_TIMEOUT is kept below that SSH timeout so this message is read.
         process.kill()
         process.wait()
         return TIMED_OUT
@@ -183,13 +190,12 @@ def run(receiver, payload, timeout=None):
 def probe(receiver, timeout):
     """Decide whether the receiver can start at all, before it becomes current.
 
-    Nothing here sends a payload: the receiver's main() reports a missing or short
-    input as an error, which proves it imported, read the host configuration and
-    took its own lock. A receiver that cannot reach that point is broken; one that
-    merely fails the deployment afterwards is not, and rolling back for that would
-    hide the real failure behind an older receiver.
+    The receiver answers this on its own, with --probe: it imports itself, reads the
+    host configuration and opens its lock path, and does nothing else. Running main()
+    with an empty payload instead would be a worse question and a real edit — main()
+    sweeps stale temporary files before it reads standard input.
     """
-    return run(receiver, b'', timeout) in (STARTED, DEPLOY_FAILED)
+    return run(receiver, b'', timeout, ['--probe']) in (STARTED, DEPLOY_FAILED)
 
 
 def install(config, payload):
