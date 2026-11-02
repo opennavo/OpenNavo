@@ -2343,6 +2343,28 @@ class Deployment:
             self.prune(previous)
 
 
+def self_check():
+    """Load this receiver and validate the host configuration without touching the host.
+
+    The deploy bootstrap runs this before it points `current` at a new receiver, so a
+    version that cannot even start never replaces one that works. It reads no payload,
+    takes no lock and changes nothing; it distinguishes a configuration problem from a
+    broken receiver, because a new version may require keys the host does not have yet.
+    """
+    config = json.loads(Path('/etc/opennavo/github-deploy.json').read_text())
+    if not isinstance(config, dict):
+        raise ValueError('host configuration is not an object')
+    required = ('root', 'project', 'registry', 'compose_file', 'caddy_file', 'caddy_container',
+                'postgres_container', 'postgres_user', 'postgres_database', 'local_origin', 'checks')
+    missing = [key for key in required if key not in config]
+    if missing:
+        raise ValueError('host configuration is missing: ' + ', '.join(missing))
+    if not isinstance(config['checks'], list) or any(
+            not isinstance(check, dict) or 'host' not in check or 'path' not in check for check in config['checks']):
+        raise ValueError('host configuration checks must be a list of {host,path} entries')
+    print('self-check: receiver loaded and host configuration is valid', flush=True)
+
+
 def main():
     os.umask(0o077)
     config = json.loads(Path('/etc/opennavo/github-deploy.json').read_text())
@@ -2369,7 +2391,11 @@ def main():
 
 if __name__ == '__main__':
     try:
-        main()
+        # The deploy bootstrap probes a staged receiver with this before switching to it.
+        if '--self-check' in sys.argv[1:]:
+            self_check()
+        else:
+            main()
     except Exception as error:
         # Never echo input payloads, environment or captured subprocess diagnostics.
         print('Deployment failed: ' + str(error), file=sys.stderr)

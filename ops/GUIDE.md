@@ -278,6 +278,40 @@ is `/etc/opennavo/github-deploy.json`, with `root`, `project`, `registry`,
 currently routed Compose service names. Never commit these host files: rendered
 Compose data and release snapshots contain credentials.
 
+### Letting deployments install the receiver
+
+`ops/deploy-bootstrap.py` runs between the SSH key and the receiver. The forced
+command points at it instead of at `ops/github-deploy.py`. It reads the payload,
+fetches `ops/github-deploy.py` for the payload's exact revision from
+`raw.githubusercontent.com`, hashes it three ways (the digest in the payload, the
+bytes it downloaded, the file it wrote), compiles and self-checks it, and only then
+points `receiver/current` at it. It hands the payload to the receiver through a
+pipe and never through a file, because the payload carries the registry token.
+
+The bootstrap is the trust root: a deployment may never replace it, so operators
+still install it by hand, and `ship.mjs` excludes it. It also takes no lock across
+the handover — the receiver takes its own lock unchanged once it starts. Only the
+two pointer renames run under the deployment lock.
+
+**Order matters, and it cannot be reversed.** A receiver without `--self-check`
+fails the bootstrap's verification step on every deployment:
+
+1. Merge the receiver change that adds `--self-check` to `ops/github-deploy.py`.
+2. Merge `ops/deploy-bootstrap.py` and the payload fields that name it.
+3. Only then change the host's forced command, in one window.
+
+Migrating takes about ten minutes to prove the new command works and about thirty
+minutes to include one real deployment. Roll back in two steps, not one: restore
+the previous `authorized_keys` line **and** point `receiver/current` back at
+`receiver/previous`; restoring the key alone leaves the new receiver installed.
+
+**Before copying the bootstrap to the host, confirm the host resolves and reaches
+`raw.githubusercontent.com`.** A host without that route fails closed — it refuses
+to install rather than installing something unverified — but the failure appears
+in the bootstrap, where it looks like a broken receiver. The bootstrap names the
+fetch step explicitly for this reason. This fetch is a dependency the deployment
+channel did not have before.
+
 The receiver validates image digests and source revision labels, checks archive
 paths/checksum, preserves old hashed assets, takes and validates a PostgreSQL
 backup, applies migrations and grants, starts healthy candidates, and switches
