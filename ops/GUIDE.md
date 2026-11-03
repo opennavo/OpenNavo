@@ -387,7 +387,9 @@ the layout that matters: / is the @ subvolume, snapshots sit in @snapshots besid
 So the counter-example is not the first layout — that is where `-o` still works. It is the
 last one, where `/` is a subvolume and every snapshot sits at least one level below it. Every
 empty result above exits 0 and prints nothing, which is exactly the shape this section calls
-"answers nothing": the block would record "no snapshots" on a host that has two.
+"answers nothing": the block would record "no snapshots" on a host that has two. That last
+layout is also the common one on Ubuntu and openSUSE, where `/` is the `@` subvolume and
+snapshots live under `@snapshots` beside it, so it is the case most likely to be met.
 
 `-o` also takes the path itself; it does not add to the one already on the command line.
 `btrfs subvolume list -s -o /mnt/top /mnt/top` prints `exactly 1 argument expected, 2 given`
