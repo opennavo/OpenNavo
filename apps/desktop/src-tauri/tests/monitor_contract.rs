@@ -242,6 +242,8 @@ fn popover_permissions_are_minimal_and_main_has_every_monitor_command() {
         "monitor_open_activity_monitor",
         "monitor_menu_bar_status",
         "monitor_open_menu_bar_settings",
+        "monitor_resident_status",
+        "monitor_resident_register",
     ] {
         assert!(main.contains(&format!("\"{command}\"")));
         assert!(!popover.contains(&format!("\"{command}\"")));
