@@ -1025,7 +1025,7 @@ describe('Menu bar', () => {
     expect(toasts()[0]?.description).toContain('登录项与扩展');
     expect(toasts()[0]?.description).toContain('OpenNavo');
     expect(toasts()[0]?.actionLabel).toBe('打开电脑监控设置');
-    expect(toasts()[0]?.dismissLabel).toBe('知道了');
+    expect(toasts()[0]?.dismissLabel).toBeUndefined();
     await vi.waitFor(() => expect(settings.value?.monitorResidentIntro).toBe(true));
     useToasts().runAction(toasts()[0]!.id);
     await vi.waitFor(() => expect(ctx.router.currentRoute.value.path).toBe('/settings/monitor'));

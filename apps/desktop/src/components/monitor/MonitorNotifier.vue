@@ -87,8 +87,7 @@ function showResidentNotice() {
         loginItemsPane,
         systemMonitor: t('settings.sections.monitor')
       }),
-      actionLabel: t('monitor.settings.resident.noticeAction'),
-      dismissLabel: t('monitor.settings.resident.noticeDismiss')
+      actionLabel: t('monitor.settings.resident.noticeAction')
     },
     () => void router.push('/settings/monitor')
   );
