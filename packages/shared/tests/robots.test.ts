@@ -301,7 +301,7 @@ describe('robots.txt generation', () => {
     expect(text).toContain('User-agent: GPTBot\nUser-agent: CCBot\nDisallow: /\n');
     expect(text).toContain('User-agent: AhrefsBot\nCrawl-delay: 30\n');
     expect(text.indexOf('AhrefsBot')).toBeLessThan(text.indexOf('GPTBot'));
-    for (const bot of LOCKED_CRAWLERS.filter(bot => !RETRIEVAL_CRAWLERS.includes(bot as never)))
+    for (const bot of LOCKED_CRAWLERS.filter(name => !RETRIEVAL_CRAWLERS.includes(name as never)))
       expect(text).not.toContain(`User-agent: ${bot}\n`);
     expect(text).toContain(retrievalGroup);
     expect(text).not.toContain('Sitemap:');
