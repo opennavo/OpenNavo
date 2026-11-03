@@ -1282,6 +1282,16 @@ mod tests {
         }
     }
 
+    /// A `Trash` item: the user's own deleted files. It is never a cache, so the
+    /// cleanup rule refuses it however the selection reached the tool.
+    fn trash_cleanup_item(id: &str) -> crate::cleanup::types::CleanupItem {
+        crate::cleanup::types::CleanupItem {
+            reason: crate::cleanup::types::CleanupReason::Trash,
+            path: format!("/Users/me/.Trash/{id}"),
+            ..cache_cleanup_item(id)
+        }
+    }
+
     fn cleanup_entry(items: Vec<crate::cleanup::types::CleanupItem>) -> crate::cleanup::Entry {
         let mut stored = std::collections::BTreeMap::new();
         for item in items {
@@ -1431,6 +1441,66 @@ mod tests {
         assert!(
             path.core.database.tasks().expect("tasks").is_empty(),
             "no deletion may be persisted once the switch went off"
+        );
+    }
+
+    #[test]
+    fn a_selection_the_recheck_refuses_never_opens_the_dialog() {
+        // `plan_clean` re-runs the cleanup rule against the stored report before
+        // the dialog. A client can hold ids from an older report, or from a scan
+        // it never fully read, so this is the gate that decides whether the user
+        // is even asked. It is reached through `run`, the entry the broker uses.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_path(&dir, "report", vec![trash_cleanup_item("trash")]);
+        let context = WriteContext {
+            connection: 1,
+            peer: None,
+            client_name: Some("test client".into()),
+            still_valid: Arc::new(|| true),
+        };
+        // If the recheck is gone, the dialog opens and this answers it, so the
+        // failure is "a Trash item was queued" rather than a 60s dialog timeout.
+        // `done` lets the watcher stop as soon as `run` returns, so the passing
+        // path does not wait out the whole window.
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let answerer = std::thread::spawn({
+            let service = path.service.clone();
+            let done = done.clone();
+            move || {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                let mut asked = false;
+                while std::time::Instant::now() < deadline {
+                    if let Some(view) = service.window_view() {
+                        asked = true;
+                        service.test_arm();
+                        let _ = service.answer_window(&view.id, true);
+                    }
+                    if done.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                asked
+            }
+        });
+        let result = path.writes.run(
+            WriteRequest::Clean {
+                report_id: "report".into(),
+                item_ids: vec!["trash".into()],
+            },
+            context,
+        );
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            !answerer.join().expect("answer thread"),
+            "the user must not be asked to confirm something the rule already refused"
+        );
+        let error = result.expect_err("a Trash item is not a regenerable cache");
+        assert_eq!(error.code, "E_NOT_REMOVABLE", "{error:?}");
+        assert!(path.core.queue.active().expect("active").is_empty());
+        assert!(
+            path.core.database.tasks().expect("tasks").is_empty(),
+            "nothing may be persisted for a refused selection"
         );
     }
 }
