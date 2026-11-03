@@ -92,7 +92,8 @@ export function edgeCacheHeader(input: EdgeCacheInput): string | undefined {
     (feed ? type === 'feed' : EDGE_CACHE_ROUTES.has(type));
   if (!shareable) return 'no-store';
   if (!feed && RECENT_PATHS.has(input.path.split('?', 1)[0] ?? '')) return RECENT_EDGE_CACHE_VALUE;
-  if (feed) return APP_FEED_PATH.test(input.path.split('?', 1)[0] ?? '') ? LONG_EDGE_CACHE_VALUE : SHORT_EDGE_CACHE_VALUE;
+  if (feed)
+    return APP_FEED_PATH.test(input.path.split('?', 1)[0] ?? '') ? LONG_EDGE_CACHE_VALUE : SHORT_EDGE_CACHE_VALUE;
   if (LONG_EDGE_CACHE_ROUTES.has(type)) return LONG_EDGE_CACHE_VALUE;
   if (APP_EDGE_CACHE_ROUTES.has(type)) return APP_EDGE_CACHE_VALUE;
   return SHORT_EDGE_CACHE_VALUE;
