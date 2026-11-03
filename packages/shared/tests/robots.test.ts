@@ -201,7 +201,7 @@ describe('robots.txt generation', () => {
       training: { mode: 'limit', delaySeconds: 10, bots: ['GPTBot', 'Googlebot', 'Amazonbot'] },
       seoTools: { mode: 'block', delaySeconds: 10, bots: ['MJ12bot'] }
     };
-    const [everyone, blocked, limited, retrieval] = buildRobotsTxt({
+    const [everyone, blocked, limited = '', retrieval = ''] = buildRobotsTxt({
       crawlers: policy,
       indexable: true,
       openLocales
