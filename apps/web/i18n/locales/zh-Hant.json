@@ -138,6 +138,7 @@
     "title": "排行榜",
     "metaTitle": "Homebrew 最受歡迎的 Mac 軟體排行 · OpenNavo",
     "description": "按 Homebrew 官方安裝統計排名，每天更新；變化相對 7 天前。",
+    "metaDescription": "按 Homebrew 官方安裝統計排名，每天更新；變化相對 7 天前。",
     "periodLabel": "統計週期",
     "period": {
       "30d": "近 30 天",
@@ -150,7 +151,8 @@
   "recent": {
     "title": "最近更新",
     "metaTitle": "最近更新的 Mac App · OpenNavo",
-    "description": "Homebrew 中剛釋出新版本的 Mac App，最新的排在最前面，附介紹與版本記錄。"
+    "description": "Homebrew 中剛釋出新版本的 Mac App，最新的排在最前面，附介紹與版本記錄。",
+    "metaDescription": "Homebrew 中剛釋出新版本的 Mac App，最新的排在最前面，附介紹與版本記錄。"
   },
   "search": {
     "title": "搜尋",
