@@ -1136,18 +1136,14 @@ describe('Menu bar', () => {
     expect(popover.findAll('[data-testid="monitor-fan"]').every(fan => fan.element.textContent?.includes('自动'))).toBe(
       true
     );
-    // AC-10a: a manual fan is visible in the read-only panel without opening the app.
-    store.applyFanChange({
-      fans: store.fans!.map(fan => ({ ...fan, mode: 'manual', targetRpm: fan.rpm })),
-      reason: 'user'
-    });
+    // AC-10a: a manual fan is visible in the read-only panel without opening the app. Hold the getter so the mock
+    // sampler's next tick cannot race the assertion back to automatic mode.
+    const manual: FanState[] = store.fans!.map(fan => ({ ...fan, mode: 'manual', targetRpm: fan.rpm }));
+    const fans = vi.spyOn(store, 'fans', 'get').mockReturnValue(manual);
+    store.applyFanChange({ fans: manual, reason: 'user' });
     await flushPromises();
     expect(popover.text()).toContain('手动');
-    store.applyFanChange({
-      fans: store.fans!.map(fan => ({ ...fan, mode: 'auto', targetRpm: null })),
-      reason: 'user'
-    });
-    await flushPromises();
+    fans.mockRestore();
     const adjust = popover.find('[data-testid="monitor-adjust-fans"]');
     expect(adjust.text()).toBe('调整风扇');
     await click(adjust.element as HTMLElement);
