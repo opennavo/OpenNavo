@@ -126,6 +126,7 @@ pub fn default_selected(reason: CleanupReason) -> bool {
             | CleanupReason::XcodeArchive
             | CleanupReason::LargeFile
             | CleanupReason::AiHistory
+            | CleanupReason::BuildArtifact
     )
 }
 /// Whether the never-touch name rules apply below a candidate's root. Generated trees (build products, system
@@ -1005,10 +1006,10 @@ mod tests {
             CleanupRestore::Costly
         );
         assert!(!default_selected(CleanupReason::ToolDownloadCache));
+        // Whole project artifacts are opt-in; the collector preselects only a confidently stale `target`.
+        assert!(!default_selected(CleanupReason::BuildArtifact));
     }
 
-    /// Cargo's fingerprint files decide which units are fresh. Removing them recompiles every dependency, so they are
-    /// not a cheap leaf and must not be offered as one.
     /// History is the one thing this app shows but never removes. Every path sits in the protected list on purpose.
     #[test]
     fn ai_history_is_read_only() {
@@ -1027,6 +1028,8 @@ mod tests {
         }
     }
 
+    /// Cargo's fingerprint files decide which units are fresh. Removing them recompiles every dependency, so they are
+    /// not a cheap leaf and must not be offered as one.
     #[test]
     fn cargo_fingerprints_are_not_a_cheap_leaf() {
         let cargo = PROJECT_LEAVES

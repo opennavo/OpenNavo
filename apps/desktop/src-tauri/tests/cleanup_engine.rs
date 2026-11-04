@@ -2518,7 +2518,8 @@ async fn project_output_of_old_projects_is_offered_and_recent_projects_keep_thei
     let offered: Vec<_> = items(&report);
     assert_eq!(offered.len(), 1, "{offered:?}");
     assert!(offered[0].path.ends_with("code/old-app/node_modules"));
-    assert!(offered[0].selected);
+    // Whole artifacts are opt-in; only a confidently stale `target` is preselected.
+    assert!(!offered[0].selected);
     assert_eq!(offered[0].delete_mode, DeleteMode::Delete);
     assert_eq!(
         category.groups[0].subtitle.as_deref(),
