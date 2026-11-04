@@ -79,8 +79,7 @@ function withoutItem(report: CleanupReport, itemId: string): CleanupReport {
 }
 
 /** `path` is inside `parent` by path component, so `target2` is not inside `target`. */
-const inside = (path: string, parent: string) =>
-  path.startsWith(parent.endsWith('/') ? parent : `${parent}/`);
+const inside = (path: string, parent: string) => path.startsWith(parent.endsWith('/') ? parent : `${parent}/`);
 /** A middle-tier project lists `target` and its leaves; only the outermost row may count its bytes. */
 const nestedIn = (item: CleanupItem, parent: CleanupItem) =>
   item.kind !== 'command' &&
