@@ -64,16 +64,11 @@ pub const PROJECT_ARTIFACTS: &[(&str, &[&str])] = &[
     ("pom.xml", &["target"]),
 ];
 /// Generated leaves inside an active project. Removing one never forces a full rebuild, unlike the whole artifact
-/// directory next to it, so these stay selectable even when the project was touched today.
+/// directory next to it, so these stay selectable even when the project was touched today. Cargo's
+/// `target/debug/.fingerprint` is deliberately absent: without it Cargo rebuilds every dependency, not just the
+/// crate, so it belongs to the whole-`target` decision rather than a cheap leaf.
 pub const PROJECT_LEAVES: &[(&str, &[&str])] = &[
-    (
-        "Cargo.toml",
-        &[
-            "target/debug/incremental",
-            "target/debug/.fingerprint",
-            "target/tmp",
-        ],
-    ),
+    ("Cargo.toml", &["target/debug/incremental", "target/tmp"]),
     (
         "package.json",
         &[
@@ -972,6 +967,20 @@ mod tests {
             CleanupRestore::Costly
         );
         assert!(!default_selected(CleanupReason::ToolDownloadCache));
+    }
+
+    /// Cargo's fingerprint files decide which units are fresh. Removing them recompiles every dependency, so they are
+    /// not a cheap leaf and must not be offered as one.
+    #[test]
+    fn cargo_fingerprints_are_not_a_cheap_leaf() {
+        let cargo = PROJECT_LEAVES
+            .iter()
+            .find(|(marker, _)| *marker == "Cargo.toml")
+            .unwrap()
+            .1;
+        assert!(!cargo.iter().any(|leaf| leaf.contains(".fingerprint")));
+        assert!(cargo.contains(&"target/debug/incremental"));
+        assert!(cargo.contains(&"target/tmp"));
     }
 
     #[test]
