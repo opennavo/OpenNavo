@@ -48,6 +48,32 @@ fn oversize(detail: String) -> AppError {
 fn size_unknown(detail: String) -> AppError {
     AppError::new("E_CLEANUP_SIZE_UNKNOWN", "cleanup_size_unknown").with_detail(detail)
 }
+/// The middle tier offers a `target` and its leaves. The UI keeps them mutually exclusive, but a crafted task could
+/// contain both; keep the parent and drop the children so bytes are never counted twice.
+fn prune_nested(entry: &super::Entry, ids: &[String]) -> Vec<String> {
+    let mut kept = Vec::with_capacity(ids.len());
+    let mut parents: Vec<&str> = vec![];
+    for id in ids {
+        let Some(item) = entry.items.get(id) else {
+            continue;
+        };
+        let path = item.item.path.as_str();
+        if path.is_empty() {
+            kept.push(id.clone());
+            continue;
+        }
+        // Keep the caller's order: removal order is observable (the abort test relies on it).
+        if parents
+            .iter()
+            .any(|parent| path != *parent && Path::new(path).starts_with(parent))
+        {
+            continue;
+        }
+        parents.push(path);
+        kept.push(id.clone());
+    }
+    kept
+}
 
 pub async fn run(
     queue: Arc<TaskQueue>,
@@ -62,6 +88,7 @@ pub async fn run(
         .item_ids
         .as_ref()
         .ok_or_else(super::cached_error)?;
+    let ids = prune_nested(&entry, ids);
     let mut outcome = UninstallOutcome {
         freed_bytes: 0,
         trashed_bytes: 0,
@@ -91,7 +118,7 @@ pub async fn run(
     )?;
     // One reading of what runs and what is open serves the items of the next two seconds.
     let activities = Arc::new(Activities::default());
-    let mut report = Report::new(&entry, ids);
+    let mut report = Report::new(&entry, &ids);
     let mut removed = vec![];
     let mut command_failure = None;
     // Re-measure the whole selection before the first removal: an item that is no longer fully measurable, or larger
@@ -112,7 +139,7 @@ pub async fn run(
         }
         abort
     };
-    for id in ids {
+    for id in &ids {
         if flag.load(Ordering::Acquire) || abort.is_some() {
             break;
         }
@@ -228,7 +255,7 @@ pub async fn run(
         report.emit(&queue, &task.id, &outcome, None, false)?;
     }
     // Include the unattempted selection when a task is canceled so the result accounts for every selected item.
-    for id in ids {
+    for id in &ids {
         if !removed.contains(id) && !outcome.skipped.iter().any(|s| &s.item_id == id) {
             let item = &entry.items[id];
             let reason = if abort.is_some() {

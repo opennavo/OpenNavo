@@ -10,7 +10,7 @@ import RunningTask from '@/components/updates/RunningTask.vue';
 import AppShell from '@/layouts/AppShell.vue';
 import CleanupPage from '@/pages/CleanupPage.vue';
 import { i18n } from '@/i18n';
-import type { CategoryReport, CleanupCategory, CleanupProgress } from '@/ipc/bindings';
+import type { CategoryReport, CleanupCategory, CleanupItem, CleanupProgress } from '@/ipc/bindings';
 import { commands } from '@/ipc/client';
 import { startLocalState, usePermissionsStore, useSettingsStore } from '@/stores';
 import { usePermissionGateStore } from '@/stores/permissionGate';
@@ -723,6 +723,42 @@ describe('AI caches and generated leaves (P0)', () => {
     expect(wrapper.text()).toContain('AI 工具缓存');
     expect(wrapper.text()).toContain('remote_plugin_catalog');
     wrapper.unmount();
+  });
+
+  it('A middle-tier target and its leaf are counted and selected only once', async () => {
+    await context();
+    const store = await scanned();
+    const category = store.report!.categories.find(item => item.key === 'project_artifacts')!;
+    const group = category.groups.find(item => item.title === 'active-rust')!;
+    const leaf = group.items[0]!;
+    const target: CleanupItem = {
+      ...leaf,
+      id: 'middle-target',
+      path: leaf.path.slice(0, leaf.path.lastIndexOf('/target') + '/target'.length),
+      sizeBytes: 20_480,
+      reason: 'build_artifact',
+      restore: 'costly',
+      selected: false
+    };
+    const before = store.totals.reclaimable;
+    const beforeBytes = store.totals.bytes;
+    group.items.unshift(target);
+    expect(store.totals.reclaimable).toBe(before - (leaf.sizeBytes ?? 0) + 20_480);
+
+    // Checking either side of the parent/child pair clears the other.
+    store.setItem(target.id, true);
+    expect(store.isChecked(target)).toBe(true);
+    expect(store.isChecked(leaf)).toBe(false);
+    expect(store.totals.bytes).toBe(beforeBytes - (leaf.sizeBytes ?? 0) + 20_480);
+    store.setItem(leaf.id, true);
+    expect(store.isChecked(leaf)).toBe(true);
+    expect(store.isChecked(target)).toBe(false);
+    expect(store.totals.bytes).toBe(beforeBytes);
+
+    // Select-all keeps the cheap leaf and leaves the whole folder unchecked.
+    store.setGroup(group, true);
+    expect(store.isChecked(leaf)).toBe(true);
+    expect(store.isChecked(target)).toBe(false);
   });
 
   it('Tells a project leaf apart from a full rebuild', async () => {
