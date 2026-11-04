@@ -51,26 +51,29 @@ fn size_unknown(detail: String) -> AppError {
 /// The middle tier offers a `target` and its leaves. The UI keeps them mutually exclusive, but a crafted task could
 /// contain both; keep the parent and drop the children so bytes are never counted twice.
 fn prune_nested(entry: &super::Entry, ids: &[String]) -> Vec<String> {
-    let mut kept = Vec::with_capacity(ids.len());
-    let mut parents: Vec<&str> = vec![];
-    for id in ids {
-        let Some(item) = entry.items.get(id) else {
-            continue;
-        };
+    let selected: Vec<(&EntryItem, &String)> = ids
+        .iter()
+        .filter_map(|id| entry.items.get(id).map(|item| (item, id)))
+        .collect();
+    let mut kept = Vec::with_capacity(selected.len());
+    for (item, id) in &selected {
         let path = item.item.path.as_str();
-        if path.is_empty() {
-            kept.push(id.clone());
+        if item.item.kind == CleanupItemKind::Command || path.is_empty() {
+            kept.push((*id).clone());
             continue;
         }
-        // Keep the caller's order: removal order is observable (the abort test relies on it).
-        if parents
-            .iter()
-            .any(|parent| path != *parent && Path::new(path).starts_with(parent))
-        {
-            continue;
+        // Look at the whole selection, not only what came before: `[leaf, parent]` must drop the leaf too. The
+        // caller's order is kept because removal order is observable (the abort test relies on it).
+        let nested = selected.iter().any(|(parent, other)| {
+            other != id
+                && parent.item.kind != CleanupItemKind::Command
+                && !parent.item.path.is_empty()
+                && path != parent.item.path
+                && Path::new(path).starts_with(&parent.item.path)
+        });
+        if !nested {
+            kept.push((*id).clone());
         }
-        parents.push(path);
-        kept.push(id.clone());
     }
     kept
 }
@@ -1098,5 +1101,74 @@ mod progress_tests {
         assert_eq!(error.code, "E_TEST_REPORT");
         assert!(flag.load(Ordering::Acquire));
         assert!(finished.load(Ordering::Acquire));
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    fn entry_item(id: &str, path: &str) -> EntryItem {
+        EntryItem {
+            item: CleanupItem {
+                id: id.into(),
+                path: path.into(),
+                kind: CleanupItemKind::Dir,
+                command: None,
+                size_bytes: Some(10),
+                size_complete: true,
+                kept_open_files: 0,
+                modified_at: None,
+                reason: CleanupReason::CacheDir,
+                restore: CleanupRestore::Auto,
+                selected: true,
+                delete_mode: DeleteMode::Delete,
+                needs_admin: false,
+                note: None,
+            },
+            owner: crate::cleanup::owner::Owner::default(),
+            title: id.into(),
+            tree: None,
+            action: ItemAction::Path {
+                empty_only: false,
+                bootout: None,
+            },
+            docker_endpoint: None,
+        }
+    }
+    fn entry(items: Vec<EntryItem>) -> super::super::Entry {
+        super::super::Entry {
+            category_millis: BTreeMap::new(),
+            report: CleanupReport {
+                report_id: "prune".into(),
+                scanned_at: 0,
+                expires_at: 0,
+                volume: CleanupVolume {
+                    name: String::new(),
+                    total_bytes: 0,
+                    free_bytes: 0,
+                },
+                categories: vec![],
+                incomplete: vec![],
+            },
+            items: items
+                .into_iter()
+                .map(|item| (item.item.id.clone(), item))
+                .collect(),
+        }
+    }
+    /// The child must be dropped even when it is listed before its parent.
+    #[test]
+    fn nested_items_are_pruned_in_either_order() {
+        let entry = entry(vec![
+            entry_item("parent", "/p/target"),
+            entry_item("leaf", "/p/target/debug/incremental"),
+        ]);
+        for ids in [
+            vec!["leaf".to_string(), "parent".to_string()],
+            vec!["parent".to_string(), "leaf".to_string()],
+        ] {
+            assert_eq!(prune_nested(&entry, &ids), vec!["parent".to_string()]);
+        }
     }
 }

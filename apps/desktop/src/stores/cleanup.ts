@@ -78,6 +78,29 @@ function withoutItem(report: CleanupReport, itemId: string): CleanupReport {
   };
 }
 
+/** `path` is inside `parent` by path component, so `target2` is not inside `target`. */
+const inside = (path: string, parent: string) =>
+  path.startsWith(parent.endsWith('/') ? parent : `${parent}/`);
+/** A middle-tier project lists `target` and its leaves; only the outermost row may count its bytes. */
+const nestedIn = (item: CleanupItem, parent: CleanupItem) =>
+  item.kind !== 'command' &&
+  parent.kind !== 'command' &&
+  item.path.length > 0 &&
+  parent.path.length > 0 &&
+  inside(item.path, parent.path);
+/** Rows covered by another row in the same list: only the parent's bytes count. */
+export const outermostItems = (items: readonly CleanupItem[]) => {
+  const sorted = [...items].sort((a, b) => a.path.length - b.path.length);
+  const kept: CleanupItem[] = [];
+  for (const item of sorted) {
+    if (!kept.some(parent => nestedIn(item, parent))) kept.push(item);
+  }
+  return kept;
+};
+/** Select-all prefers the cheap leaves over the whole `target` they sit in. */
+const innermostItems = (items: readonly CleanupItem[]) =>
+  items.filter(item => !items.some(other => other.id !== item.id && nestedIn(other, item)));
+
 export const useCleanupStore = defineStore('cleanup', () => {
   const tasks = useTasksStore();
   const permissions = usePermissionsStore();
@@ -115,35 +138,14 @@ export const useCleanupStore = defineStore('cleanup', () => {
   /** A size that is only a lower bound is never selectable (#116); read-only rows (AI history) never are either. */
   const selectable = (item: CleanupItem) => item.sizeComplete && item.restore !== 'never';
   const isChecked = (item: CleanupItem) => selectable(item) && Boolean(selected.value[item.id]);
-  /** `path` is inside `parent` by path component, so `target2` is not inside `target`. */
-  const inside = (path: string, parent: string) =>
-    path.startsWith(parent.endsWith('/') ? parent : `${parent}/`);
-  /** A middle-tier project lists `target` and its leaves; only the outermost row may count its bytes. */
-  const nestedIn = (item: CleanupItem, parent: CleanupItem) =>
-    item.kind !== 'command' &&
-    parent.kind !== 'command' &&
-    item.path.length > 0 &&
-    parent.path.length > 0 &&
-    inside(item.path, parent.path);
-  const outermost = (items: readonly CleanupItem[]) => {
-    const sorted = [...items].sort((a, b) => a.path.length - b.path.length);
-    const kept: CleanupItem[] = [];
-    for (const item of sorted) {
-      if (!kept.some(parent => nestedIn(item, parent))) kept.push(item);
-    }
-    return kept;
-  };
-  /** Select-all prefers the cheap leaves over the whole `target` they sit in. */
-  const innermost = (items: readonly CleanupItem[]) =>
-    items.filter(item => !items.some(other => other.id !== item.id && nestedIn(other, item)));
   const chosen = computed(() => entries.value.filter(entry => isChecked(entry.item)));
   const totals = computed(() => {
-    const items = outermost(chosen.value.map(entry => entry.item));
+    const items = outermostItems(chosen.value.map(entry => entry.item));
     const bytes = sizeOf(items);
     const nowBytes = sizeOf(items.filter(freesNow));
     return {
       reclaimable: sizeOf(
-        outermost(
+        outermostItems(
           entries.value
             .filter(entry => entry.category.risk !== 'personal' && selectable(entry.item))
             .map(entry => entry.item)
@@ -200,7 +202,7 @@ export const useCleanupStore = defineStore('cleanup', () => {
     const next = { ...selected.value };
     for (const item of items) next[item.id] = false;
     if (value) {
-      for (const item of innermost(items.filter(selectable))) next[item.id] = true;
+      for (const item of innermostItems(items.filter(selectable))) next[item.id] = true;
     }
     selected.value = next;
   }

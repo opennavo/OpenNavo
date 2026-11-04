@@ -761,6 +761,33 @@ describe('AI caches and generated leaves (P0)', () => {
     expect(store.isChecked(target)).toBe(false);
   });
 
+  it('Group header counts a middle-tier target once', async () => {
+    const { pinia } = await context();
+    await scanned();
+    const category = unfold('project_artifacts');
+    const group = category.groups.find(item => item.title === 'active-rust')!;
+    const leaf = group.items[0]!;
+    const parent: CleanupItem = {
+      ...leaf,
+      id: 'middle-parent',
+      path: leaf.path.slice(0, leaf.path.lastIndexOf('/target') + '/target'.length),
+      sizeBytes: (leaf.sizeBytes ?? 0) + 20_480,
+      reason: 'build_artifact',
+      restore: 'costly',
+      selected: false
+    };
+    group.items.unshift(parent);
+
+    const wrapper = mount(CleanupCategoryCard, { props: { category }, global: { plugins: [pinia, i18n] } });
+    const header = wrapper
+      .findAll('button')
+      .find(node => node.text().includes('active-rust'))!
+      .element.closest('div.flex')!;
+    expect(header.textContent).toContain(size(parent.sizeBytes!));
+    expect(header.textContent).not.toContain(size((parent.sizeBytes ?? 0) + (leaf.sizeBytes ?? 0)));
+    wrapper.unmount();
+  });
+
   it('Tells a project leaf apart from a full rebuild', async () => {
     const { pinia } = await context();
     const store = await scanned();
