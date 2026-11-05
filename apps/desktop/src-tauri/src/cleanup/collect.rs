@@ -16,6 +16,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "checkouts.rs"]
+mod checkouts;
+
 struct RequestGuard {
     engine: Arc<Engine>,
     id: String,
@@ -45,6 +48,7 @@ impl Collected {
                     CleanupCategory::Leftovers
                     | CleanupCategory::Installers
                     | CleanupCategory::ProjectArtifacts
+                    | CleanupCategory::ProjectCheckouts
                     | CleanupCategory::Docker
                     | CleanupCategory::AiHistory
                     | CleanupCategory::Trash => CleanupRisk::Review,
@@ -1699,6 +1703,7 @@ impl Engine {
                                 CleanupCategory::Temp => collector.temp(),
                                 CleanupCategory::Installers => collector.installers(),
                                 CleanupCategory::ProjectArtifacts => collector.project_artifacts(),
+                                CleanupCategory::ProjectCheckouts => collector.checkouts(),
                                 CleanupCategory::Trash => collector.trash(),
                                 CleanupCategory::DeviceBackups => collector.device_backups(),
                                 _ => unreachable!(),
@@ -2747,5 +2752,187 @@ mod leaf_scan_tests {
                 .any(|g| g.reason == SkippedGroupReason::Recent),
             "the whole artifact folder must stay listed as recent"
         );
+    }
+    #[tokio::test]
+    async fn linked_worktrees_are_listed_read_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap().join("User");
+        let repo = home.join("code/app");
+        fs::create_dir_all(&repo).unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&repo, &["init", "-b", "main"]);
+        fs::write(repo.join("Cargo.toml"), "[package]\nname = \"app\"\n").unwrap();
+        fs::write(repo.join("main.rs"), "fn main() {}\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "init"]);
+        let worktree = home.join("code/app-wt");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                worktree.to_str().unwrap(),
+                "-b",
+                "feature",
+            ],
+        );
+        let report = engine(&home)
+            .scan(
+                "checkouts".into(),
+                Some(vec![CleanupCategory::ProjectCheckouts]),
+                granted(),
+                None,
+            )
+            .await
+            .unwrap();
+        let category = report
+            .categories
+            .iter()
+            .find(|category| category.key == CleanupCategory::ProjectCheckouts)
+            .expect("the checkouts category must be reported");
+        assert_eq!(category.risk, CleanupRisk::Review);
+        let group = category
+            .groups
+            .iter()
+            .find(|group| group.items.iter().any(|item| item.path.ends_with("app-wt")))
+            .expect("the linked worktree must be listed");
+        assert_eq!(
+            group.title, "app",
+            "the group is named after the repository"
+        );
+        let item = group
+            .items
+            .iter()
+            .find(|item| item.path.ends_with("app-wt"))
+            .unwrap();
+        assert_eq!(item.reason, CleanupReason::Worktree);
+        assert_eq!(item.restore, CleanupRestore::Never);
+        assert!(!item.selected);
+        assert!(item.size_bytes.is_some_and(|bytes| bytes > 0));
+    }
+    #[tokio::test]
+    async fn duplicate_clones_are_listed_only_when_clean_and_idle() {
+        use std::time::{Duration as StdDuration, SystemTime};
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap().join("User");
+        let code = home.join("code");
+        fs::create_dir_all(&code).unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        let origin = code.join("origin.git");
+        git(&code, &["init", "--bare", origin.to_str().unwrap()]);
+        let seed = home.join("seed");
+        fs::create_dir_all(&seed).unwrap();
+        git(&seed, &["init", "-b", "main"]);
+        fs::write(seed.join("README.md"), "seed\n").unwrap();
+        git(&seed, &["add", "."]);
+        git(&seed, &["commit", "-m", "init"]);
+        git(
+            &seed,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        git(&seed, &["push", "-u", "origin", "main"]);
+        for name in ["a", "b"] {
+            let clone = code.join(name);
+            git(
+                &code,
+                &[
+                    "clone",
+                    "-b",
+                    "main",
+                    origin.to_str().unwrap(),
+                    clone.to_str().unwrap(),
+                ],
+            );
+            git(&clone, &["status", "--porcelain"]);
+            let old = SystemTime::now() - StdDuration::from_secs(31 * 86_400);
+            fs::File::options()
+                .write(true)
+                .open(clone.join(".git/index"))
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(old))
+                .unwrap();
+        }
+        let scan = |home: &Path| {
+            let home = home.to_path_buf();
+            async move {
+                engine(&home)
+                    .scan(
+                        "checkouts".into(),
+                        Some(vec![CleanupCategory::ProjectCheckouts]),
+                        granted(),
+                        None,
+                    )
+                    .await
+                    .unwrap()
+            }
+        };
+        let report = scan(&home).await;
+        let category = report
+            .categories
+            .iter()
+            .find(|category| category.key == CleanupCategory::ProjectCheckouts)
+            .expect("the checkouts category must be reported");
+        let listed: Vec<&str> = category
+            .groups
+            .iter()
+            .flat_map(|group| &group.items)
+            .filter(|item| item.reason == CleanupReason::DuplicateCheckout)
+            .map(|item| item.path.as_str())
+            .collect();
+        assert_eq!(listed.len(), 2, "both clean idle clones: {listed:?}");
+        assert!(
+            category
+                .groups
+                .iter()
+                .flat_map(|g| &g.items)
+                .all(|item| { item.restore == CleanupRestore::Never && !item.selected })
+        );
+
+        fs::write(code.join("a/dirty.txt"), "dirty\n").unwrap();
+        let report = scan(&home).await;
+        let category = report
+            .categories
+            .iter()
+            .find(|category| category.key == CleanupCategory::ProjectCheckouts)
+            .unwrap();
+        let listed: Vec<&str> = category
+            .groups
+            .iter()
+            .flat_map(|group| &group.items)
+            .filter(|item| item.reason == CleanupReason::DuplicateCheckout)
+            .map(|item| item.path.as_str())
+            .collect();
+        assert_eq!(
+            listed.len(),
+            1,
+            "the dirty clone must be skipped: {listed:?}"
+        );
+        assert!(listed[0].ends_with("/b"));
     }
 }
