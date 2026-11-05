@@ -21,6 +21,15 @@ struct Worktree {
     main: bool,
 }
 impl Collector<'_> {
+    fn checkout_expired(&mut self) -> bool {
+        if Instant::now() < self.deadline {
+            return false;
+        }
+        let home = self.engine.uninstall.roots.home.clone();
+        self.result
+            .incomplete(&home, SkippedLocationReason::Timeout);
+        true
+    }
     /// Read-only P2 discovery: linked worktrees and clones that share an origin. Nothing here is offered for
     /// removal; a later slice adds the gated `git worktree remove` / Trash actions.
     pub(super) fn checkouts(&mut self) -> Result<(), AppError> {
@@ -34,15 +43,16 @@ impl Collector<'_> {
         let mut found: BTreeMap<PathBuf, Vec<(PathBuf, Option<String>)>> = BTreeMap::new();
         for dir in candidates {
             self.check()?;
-            let Some(top) = git(&dir, &["rev-parse", "--show-toplevel"], GIT_TIMEOUT) else {
+            let Some(top) = git_until(&dir, &["rev-parse", "--show-toplevel"], self.deadline)
+            else {
                 continue;
             };
             let root = PathBuf::from(top.trim());
             let root = root.canonicalize().unwrap_or(root);
-            let Some(common) = common_dir(&root) else {
+            let Some(common) = common_dir(&root, self.deadline) else {
                 continue;
             };
-            let remote = git(&root, &["remote", "get-url", "origin"], GIT_TIMEOUT)
+            let remote = git_until(&root, &["remote", "get-url", "origin"], self.deadline)
                 .map(|url| normalize_remote(url.trim()))
                 .filter(|url| !url.is_empty());
             found.entry(common).or_default().push((root, remote));
@@ -87,7 +97,10 @@ impl Collector<'_> {
                 break;
             }
             for repo in group {
-                if !duplicate_candidate(&repo.root) {
+                if self.checkout_expired() {
+                    break;
+                }
+                if !duplicate_candidate(&repo.root, self.deadline) {
                     continue;
                 }
                 let owner = duplicate_owner(repo);
@@ -113,7 +126,7 @@ impl Collector<'_> {
         depth: usize,
         out: &mut Vec<PathBuf>,
     ) -> Result<(), AppError> {
-        if depth > rules::PROJECT_MAX_DEPTH {
+        if depth > rules::PROJECT_MAX_DEPTH || self.checkout_expired() {
             return Ok(());
         }
         self.check()?;
@@ -142,22 +155,27 @@ impl Collector<'_> {
     }
     fn worktrees(&mut self, repo: &Repo, listed: &mut BTreeSet<PathBuf>) -> Result<(), AppError> {
         let home = self.engine.uninstall.roots.home.clone();
+        // The main checkout may sit outside the roots; derive the repository name from the common dir instead.
         let group_title = repo
-            .root
-            .file_name()
+            .common
+            .parent()
+            .and_then(|root| root.file_name())
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| repo.root.display().to_string());
-        let Some(output) = git(
+        let Some(output) = git_until(
             &repo.root,
             &["worktree", "list", "--porcelain"],
-            GIT_TIMEOUT,
+            self.deadline,
         ) else {
+            self.checkout_expired();
             return Ok(());
         };
         for worktree in parse_worktrees(&output) {
             self.check()?;
+            if self.checkout_expired() {
+                break;
+            }
             if worktree.main
-                || worktree.path == repo.root
                 || !worktree.path.starts_with(&home)
                 || !worktree.path.is_dir()
                 || !belongs_to(&worktree.path, &repo.common)
@@ -263,7 +281,11 @@ fn checkout_owner(repo: &Repo) -> Owner {
     Owner {
         tool_key: Some("git".into()),
         group_key: Some(format!("checkout:{}", repo.common.display())),
-        group_subtitle: repo.root.parent().map(|dir| dir.display().to_string()),
+        group_subtitle: repo
+            .common
+            .parent()
+            .and_then(|root| root.parent())
+            .map(|dir| dir.display().to_string()),
         ..Owner::default()
     }
 }
@@ -306,21 +328,31 @@ fn remote_name(remote: &str) -> String {
         .to_string()
 }
 /// A clean clone with nothing unpushed, no stash, and an idle index can be re-fetched if it is removed.
-fn duplicate_candidate(root: &Path) -> bool {
+fn duplicate_candidate(root: &Path, deadline: Instant) -> bool {
     // Check the index first: `git status` can refresh its mtime, which would hide an otherwise idle clone.
     if !index_older_than(root, DUPLICATE_IDLE_DAYS) {
         return false;
     }
-    let clean =
-        git(root, &["status", "--porcelain"], GIT_TIMEOUT).is_some_and(|out| out.trim().is_empty());
-    let unpushed = git(
+    // `status.showUntrackedFiles=no` must not make an untracked file look clean.
+    let clean = git_until(
+        root,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        ],
+        deadline,
+    )
+    .is_some_and(|out| out.trim().is_empty());
+    let unpushed = git_until(
         root,
         &["rev-list", "--count", "HEAD", "--not", "--remotes"],
-        GIT_TIMEOUT,
+        deadline,
     )
     .is_some_and(|out| out.trim() == "0");
     let no_stash =
-        git(root, &["stash", "list"], GIT_TIMEOUT).is_some_and(|out| out.trim().is_empty());
+        git_until(root, &["stash", "list"], deadline).is_some_and(|out| out.trim().is_empty());
     clean && unpushed && no_stash
 }
 fn index_older_than(root: &Path, days: i64) -> bool {
@@ -330,13 +362,13 @@ fn index_older_than(root: &Path, days: i64) -> bool {
         .and_then(|time| time.elapsed().ok())
         .is_some_and(|elapsed| elapsed.as_secs() >= days as u64 * 86_400)
 }
-fn common_dir(root: &Path) -> Option<PathBuf> {
-    let raw = git(
+fn common_dir(root: &Path, deadline: Instant) -> Option<PathBuf> {
+    let raw = git_until(
         root,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        GIT_TIMEOUT,
+        deadline,
     )
-    .or_else(|| git(root, &["rev-parse", "--git-common-dir"], GIT_TIMEOUT))?;
+    .or_else(|| git_until(root, &["rev-parse", "--git-common-dir"], deadline))?;
     let path = PathBuf::from(raw.trim());
     let path = if path.is_absolute() {
         path
@@ -376,6 +408,14 @@ fn parse_worktrees(output: &str) -> Vec<Worktree> {
         }
     }
     worktrees
+}
+/// One git call bounded by both the category deadline and the per-call cap.
+fn git_until(dir: &Path, args: &[&str], deadline: Instant) -> Option<String> {
+    let timeout = deadline.saturating_duration_since(Instant::now());
+    if timeout.is_zero() {
+        return None;
+    }
+    git(dir, args, timeout.min(GIT_TIMEOUT))
 }
 fn git(dir: &Path, args: &[&str], timeout: Duration) -> Option<String> {
     let mut child = Command::new("git")
@@ -439,6 +479,10 @@ mod tests {
             normalize_remote("https://user:token@example.com/a.git"),
             "https://example.com/a"
         );
+    }
+    #[test]
+    fn an_expired_budget_skips_git() {
+        assert!(git_until(Path::new("."), &["--version"], Instant::now()).is_none());
     }
     #[test]
     fn a_recent_index_is_not_a_duplicate_yet() {

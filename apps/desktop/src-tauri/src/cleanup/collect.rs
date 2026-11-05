@@ -2914,6 +2914,10 @@ mod leaf_scan_tests {
                 .all(|item| { item.restore == CleanupRestore::Never && !item.selected })
         );
 
+        git(
+            &code.join("a"),
+            &["config", "status.showUntrackedFiles", "no"],
+        );
         fs::write(code.join("a/dirty.txt"), "dirty\n").unwrap();
         let report = scan(&home).await;
         let category = report
@@ -2934,5 +2938,69 @@ mod leaf_scan_tests {
             "the dirty clone must be skipped: {listed:?}"
         );
         assert!(listed[0].ends_with("/b"));
+    }
+    #[tokio::test]
+    async fn a_linked_worktree_is_found_when_its_main_checkout_is_outside_the_roots() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap().join("User");
+        let main = home.join("outside/app");
+        let worktree = home.join("code/app-wt");
+        fs::create_dir_all(&main).unwrap();
+        fs::create_dir_all(worktree.parent().unwrap()).unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&main, &["init", "-b", "main"]);
+        fs::write(main.join("README.md"), "main\n").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-m", "init"]);
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                worktree.to_str().unwrap(),
+                "-b",
+                "feature",
+            ],
+        );
+        let report = engine(&home)
+            .scan(
+                "checkouts-outside".into(),
+                Some(vec![CleanupCategory::ProjectCheckouts]),
+                granted(),
+                None,
+            )
+            .await
+            .unwrap();
+        let category = report
+            .categories
+            .iter()
+            .find(|category| category.key == CleanupCategory::ProjectCheckouts)
+            .unwrap();
+        let group = category
+            .groups
+            .iter()
+            .find(|group| group.items.iter().any(|item| item.path.ends_with("app-wt")))
+            .expect("the worktree inside the project root must be listed");
+        assert_eq!(group.title, "app", "named after the main checkout");
+        let item = group
+            .items
+            .iter()
+            .find(|item| item.path.ends_with("app-wt"))
+            .unwrap();
+        assert_eq!(item.reason, CleanupReason::Worktree);
+        assert_eq!(item.restore, CleanupRestore::Never);
     }
 }
