@@ -2823,27 +2823,24 @@ mod leaf_scan_tests {
         assert!(!item.selected);
         assert!(item.size_bytes.is_some_and(|bytes| bytes > 0));
     }
-    #[tokio::test]
-    async fn duplicate_clones_are_listed_only_when_clean_and_idle() {
-        use std::time::{Duration as StdDuration, SystemTime};
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().canonicalize().unwrap().join("User");
+    fn checkout_git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    fn idle_clones(home: &Path) -> PathBuf {
         let code = home.join("code");
         fs::create_dir_all(&code).unwrap();
-        let git = |dir: &Path, args: &[&str]| {
-            let status = std::process::Command::new("git")
-                .current_dir(dir)
-                .args(args)
-                .env("GIT_AUTHOR_NAME", "t")
-                .env("GIT_AUTHOR_EMAIL", "t@example.com")
-                .env("GIT_COMMITTER_NAME", "t")
-                .env("GIT_COMMITTER_EMAIL", "t@example.com")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .unwrap();
-            assert!(status.success(), "git {args:?}");
-        };
+        let git = checkout_git;
         let origin = code.join("origin.git");
         git(&code, &["init", "--bare", origin.to_str().unwrap()]);
         let seed = home.join("seed");
@@ -2870,7 +2867,7 @@ mod leaf_scan_tests {
                 ],
             );
             git(&clone, &["status", "--porcelain"]);
-            let old = SystemTime::now() - StdDuration::from_secs(31 * 86_400);
+            let old = SystemTime::now() - Duration::from_secs(31 * 86_400);
             fs::File::options()
                 .write(true)
                 .open(clone.join(".git/index"))
@@ -2878,6 +2875,14 @@ mod leaf_scan_tests {
                 .set_times(fs::FileTimes::new().set_modified(old))
                 .unwrap();
         }
+        code
+    }
+    #[tokio::test]
+    async fn duplicate_clones_are_listed_only_when_clean_and_idle() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap().join("User");
+        let code = idle_clones(&home);
+        let git = checkout_git;
         let scan = |home: &Path| {
             let home = home.to_path_buf();
             async move {
@@ -2938,6 +2943,131 @@ mod leaf_scan_tests {
             "the dirty clone must be skipped: {listed:?}"
         );
         assert!(listed[0].ends_with("/b"));
+    }
+    #[tokio::test]
+    async fn duplicate_clones_with_case_distinct_remote_paths_are_not_grouped() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap().join("User");
+        let code = idle_clones(&home);
+        for (name, remote) in [
+            ("a", "ssh://git@example.com/repos/App.git"),
+            ("b", "ssh://git@example.com/repos/app.git"),
+        ] {
+            checkout_git(&code.join(name), &["remote", "set-url", "origin", remote]);
+        }
+        let report = engine(&home)
+            .scan(
+                "case-distinct-checkouts".into(),
+                Some(vec![CleanupCategory::ProjectCheckouts]),
+                granted(),
+                None,
+            )
+            .await
+            .unwrap();
+        let category = report
+            .categories
+            .iter()
+            .find(|category| category.key == CleanupCategory::ProjectCheckouts);
+        // Complete categories without items are omitted from the report.
+        assert!(report.incomplete.is_empty(), "{report:#?}");
+        assert!(
+            category.is_none_or(|category| category.complete && category.groups.is_empty()),
+            "{report:#?}"
+        );
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn duplicate_clones_timeout_on_the_last_clone_is_incomplete() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap().join("User");
+        let code = idle_clones(&home);
+        let slow = code.join("b");
+        let hook = slow.join(".git/hooks/slow-fsmonitor");
+        fs::write(&hook, "#!/bin/sh\nexec sleep 3\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+        checkout_git(&slow, &["config", "core.fsmonitor", hook.to_str().unwrap()]);
+        let engine = engine(&home);
+        let engine = Engine::with_processes(
+            engine.uninstall.clone(),
+            Arc::new(NoProcesses),
+            Duration::from_secs(1),
+        );
+        let report = engine
+            .scan(
+                "last-checkout-timeout".into(),
+                Some(vec![CleanupCategory::ProjectCheckouts]),
+                granted(),
+                None,
+            )
+            .await
+            .unwrap();
+        let category = report
+            .categories
+            .iter()
+            .find(|category| category.key == CleanupCategory::ProjectCheckouts)
+            .unwrap();
+        let listed: Vec<_> = category
+            .groups
+            .iter()
+            .flat_map(|group| &group.items)
+            .collect();
+        assert_eq!(listed.len(), 1, "the first clone stays listed: {report:#?}");
+        assert!(listed[0].path.ends_with("/a"));
+        assert!(!category.complete, "{report:#?}");
+        assert!(
+            report.incomplete.iter().any(|location| {
+                location.path == slow.to_string_lossy()
+                    && location.reason == SkippedLocationReason::Timeout
+            }),
+            "{report:#?}"
+        );
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn checkout_metadata_timeouts_on_the_last_repository_are_incomplete() {
+        use nix::{sys::stat::Mode, unistd::mkfifo};
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap().join("User");
+        let repo = home.join("code/app");
+        fs::create_dir_all(&repo).unwrap();
+        checkout_git(&repo, &["init", "-b", "main"]);
+        // Reading this include blocks the very first rev-parse; there are no discovered repos to check later.
+        let include = repo.join(".git/slow-config");
+        mkfifo(&include, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+        checkout_git(
+            &repo,
+            &["config", "include.path", include.to_str().unwrap()],
+        );
+        let engine = engine(&home);
+        // Exercise both the category budget and the per-command cap (before the category deadline).
+        for timeout in [Duration::from_secs(1), Duration::from_secs(30)] {
+            let engine =
+                Engine::with_processes(engine.uninstall.clone(), Arc::new(NoProcesses), timeout);
+            let report = engine
+                .scan(
+                    "checkout-metadata-timeout".into(),
+                    Some(vec![CleanupCategory::ProjectCheckouts]),
+                    granted(),
+                    None,
+                )
+                .await
+                .unwrap();
+            let category = report
+                .categories
+                .iter()
+                .find(|category| category.key == CleanupCategory::ProjectCheckouts)
+                .expect("a timed-out category must be reported even without items");
+            assert!(category.groups.is_empty());
+            assert!(!category.complete, "{report:#?}");
+            assert!(
+                report.incomplete.iter().any(|location| {
+                    location.path == repo.to_string_lossy()
+                        && location.reason == SkippedLocationReason::Timeout
+                }),
+                "{report:#?}"
+            );
+        }
     }
     #[tokio::test]
     async fn a_linked_worktree_is_found_when_its_main_checkout_is_outside_the_roots() {

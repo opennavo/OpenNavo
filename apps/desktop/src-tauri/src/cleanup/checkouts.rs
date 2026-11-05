@@ -9,6 +9,12 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// A duplicate clone must have been idle this long before it is even listed.
 const DUPLICATE_IDLE_DAYS: i64 = 30;
 
+#[derive(Debug, PartialEq, Eq)]
+enum GitError {
+    Failed,
+    Timeout,
+}
+
 #[derive(Debug)]
 struct Repo {
     root: PathBuf,
@@ -21,6 +27,17 @@ struct Worktree {
     main: bool,
 }
 impl Collector<'_> {
+    /// A failed probe can mean "not a repository/candidate"; a timed-out probe always leaves a gap in discovery.
+    fn checkout_result<T>(&mut self, path: &Path, result: Result<T, GitError>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(GitError::Timeout) => {
+                self.result.incomplete(path, SkippedLocationReason::Timeout);
+                None
+            }
+            Err(GitError::Failed) => None,
+        }
+    }
     fn checkout_expired(&mut self) -> bool {
         if Instant::now() < self.deadline {
             return false;
@@ -43,16 +60,22 @@ impl Collector<'_> {
         let mut found: BTreeMap<PathBuf, Vec<(PathBuf, Option<String>)>> = BTreeMap::new();
         for dir in candidates {
             self.check()?;
-            let Some(top) = git_until(&dir, &["rev-parse", "--show-toplevel"], self.deadline)
-            else {
+            if self.checkout_expired() {
+                break;
+            }
+            let top = git_until(&dir, &["rev-parse", "--show-toplevel"], self.deadline);
+            let Some(top) = self.checkout_result(&dir, top) else {
                 continue;
             };
             let root = PathBuf::from(top.trim());
             let root = root.canonicalize().unwrap_or(root);
-            let Some(common) = common_dir(&root, self.deadline) else {
+            let common = common_dir(&root, self.deadline);
+            let Some(common) = self.checkout_result(&root, common) else {
                 continue;
             };
-            let remote = git_until(&root, &["remote", "get-url", "origin"], self.deadline)
+            let remote = git_until(&root, &["remote", "get-url", "origin"], self.deadline);
+            let remote = self
+                .checkout_result(&root, remote)
                 .map(|url| normalize_remote(url.trim()))
                 .filter(|url| !url.is_empty());
             found.entry(common).or_default().push((root, remote));
@@ -74,12 +97,9 @@ impl Collector<'_> {
                 }
             })
             .collect();
-        let home = self.engine.uninstall.roots.home.clone();
         let mut listed = BTreeSet::new();
         for repo in &repos {
-            if Instant::now() >= self.deadline {
-                self.result
-                    .incomplete(&home, SkippedLocationReason::Timeout);
+            if self.checkout_expired() {
                 break;
             }
             self.worktrees(repo, &mut listed)?;
@@ -91,16 +111,15 @@ impl Collector<'_> {
             }
         }
         for group in by_remote.values().filter(|group| group.len() > 1) {
-            if Instant::now() >= self.deadline {
-                self.result
-                    .incomplete(&home, SkippedLocationReason::Timeout);
+            if self.checkout_expired() {
                 break;
             }
             for repo in group {
                 if self.checkout_expired() {
                     break;
                 }
-                if !duplicate_candidate(&repo.root, self.deadline) {
+                let candidate = duplicate_candidate(&repo.root, self.deadline);
+                if self.checkout_result(&repo.root, candidate) != Some(true) {
                     continue;
                 }
                 let owner = duplicate_owner(repo);
@@ -162,12 +181,12 @@ impl Collector<'_> {
             .and_then(|root| root.file_name())
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| repo.root.display().to_string());
-        let Some(output) = git_until(
+        let output = git_until(
             &repo.root,
             &["worktree", "list", "--porcelain"],
             self.deadline,
-        ) else {
-            self.checkout_expired();
+        );
+        let Some(output) = self.checkout_result(&repo.root, output) else {
             return Ok(());
         };
         for worktree in parse_worktrees(&output) {
@@ -328,10 +347,10 @@ fn remote_name(remote: &str) -> String {
         .to_string()
 }
 /// A clean clone with nothing unpushed, no stash, and an idle index can be re-fetched if it is removed.
-fn duplicate_candidate(root: &Path, deadline: Instant) -> bool {
+fn duplicate_candidate(root: &Path, deadline: Instant) -> Result<bool, GitError> {
     // Check the index first: `git status` can refresh its mtime, which would hide an otherwise idle clone.
     if !index_older_than(root, DUPLICATE_IDLE_DAYS) {
-        return false;
+        return Ok(false);
     }
     // `status.showUntrackedFiles=no` must not make an untracked file look clean.
     let clean = git_until(
@@ -343,17 +362,25 @@ fn duplicate_candidate(root: &Path, deadline: Instant) -> bool {
             "--ignore-submodules=none",
         ],
         deadline,
-    )
-    .is_some_and(|out| out.trim().is_empty());
-    let unpushed = git_until(
+    )?
+    .trim()
+    .is_empty();
+    if !clean {
+        return Ok(false);
+    }
+    let no_unpushed = git_until(
         root,
         &["rev-list", "--count", "HEAD", "--not", "--remotes"],
         deadline,
-    )
-    .is_some_and(|out| out.trim() == "0");
-    let no_stash =
-        git_until(root, &["stash", "list"], deadline).is_some_and(|out| out.trim().is_empty());
-    clean && unpushed && no_stash
+    )?
+    .trim()
+        == "0";
+    if !no_unpushed {
+        return Ok(false);
+    }
+    Ok(git_until(root, &["stash", "list"], deadline)?
+        .trim()
+        .is_empty())
 }
 fn index_older_than(root: &Path, days: i64) -> bool {
     fs::symlink_metadata(root.join(".git/index"))
@@ -362,32 +389,77 @@ fn index_older_than(root: &Path, days: i64) -> bool {
         .and_then(|time| time.elapsed().ok())
         .is_some_and(|elapsed| elapsed.as_secs() >= days as u64 * 86_400)
 }
-fn common_dir(root: &Path, deadline: Instant) -> Option<PathBuf> {
+fn common_dir(root: &Path, deadline: Instant) -> Result<PathBuf, GitError> {
     let raw = git_until(
         root,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
         deadline,
     )
-    .or_else(|| git_until(root, &["rev-parse", "--git-common-dir"], deadline))?;
+    .or_else(|error| match error {
+        GitError::Failed => git_until(root, &["rev-parse", "--git-common-dir"], deadline),
+        GitError::Timeout => Err(error),
+    })?;
     let path = PathBuf::from(raw.trim());
     let path = if path.is_absolute() {
         path
     } else {
         root.join(path)
     };
-    Some(path.canonicalize().unwrap_or(path))
+    Ok(path.canonicalize().unwrap_or(path))
 }
 fn normalize_remote(url: &str) -> String {
     let url = redact_remote(url.trim()).trim_end_matches('/').to_string();
-    url.strip_suffix(".git").unwrap_or(&url).to_lowercase()
+    let url = url.strip_suffix(".git").unwrap_or(&url);
+    // Schemes and DNS hosts are case-insensitive; repository paths (including local paths) are not.
+    if let Some((scheme, host, path)) = remote_url_parts(url) {
+        return format!(
+            "{}://{}{path}",
+            scheme.to_ascii_lowercase(),
+            host.to_ascii_lowercase()
+        );
+    }
+    // SCP-style [user@]host:path. Preserve the SSH user and don't interpret local paths as authorities.
+    let host_start = url
+        .split(':')
+        .next()
+        .and_then(|authority| authority.rfind('@'))
+        .map_or(0, |at| at + 1);
+    let separator = if url[host_start..].starts_with('[') {
+        url.find("]:").map(|end| end + 1)
+    } else {
+        url.find(':')
+    };
+    if let Some(separator) = separator {
+        let (authority, path) = url.split_at(separator);
+        let windows_drive = authority.len() == 1 && path[1..].starts_with(['/', '\\']);
+        if !authority.contains(['/', '\\']) && !windows_drive && host_start <= authority.len() {
+            return format!(
+                "{}{}{path}",
+                &authority[..host_start],
+                authority[host_start..].to_ascii_lowercase()
+            );
+        }
+    }
+    url.to_string()
+}
+fn remote_url_parts(url: &str) -> Option<(&str, &str, &str)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let mut bytes = scheme.bytes();
+    if !bytes.next()?.is_ascii_alphabetic()
+        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    {
+        return None;
+    }
+    let (authority, path) = rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
+    Some((scheme, authority, path))
 }
 /// Remotes are shown in the UI; a token embedded in `https://user:token@host/...` must never reach it.
 fn redact_remote(url: &str) -> String {
-    let Some((scheme, rest)) = url.split_once("://") else {
+    let Some((scheme, authority, path)) = remote_url_parts(url) else {
         return url.to_string();
     };
-    match rest.split_once('@') {
-        Some((_, host)) => format!("{scheme}://{host}"),
+    match authority.rsplit_once('@') {
+        Some((_, host)) => format!("{scheme}://{host}{path}"),
         None => url.to_string(),
     }
 }
@@ -410,14 +482,14 @@ fn parse_worktrees(output: &str) -> Vec<Worktree> {
     worktrees
 }
 /// One git call bounded by both the category deadline and the per-call cap.
-fn git_until(dir: &Path, args: &[&str], deadline: Instant) -> Option<String> {
+fn git_until(dir: &Path, args: &[&str], deadline: Instant) -> Result<String, GitError> {
     let timeout = deadline.saturating_duration_since(Instant::now());
     if timeout.is_zero() {
-        return None;
+        return Err(GitError::Timeout);
     }
     git(dir, args, timeout.min(GIT_TIMEOUT))
 }
-fn git(dir: &Path, args: &[&str], timeout: Duration) -> Option<String> {
+fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String, GitError> {
     let mut child = Command::new("git")
         .current_dir(dir)
         .arg("--no-optional-locks")
@@ -429,31 +501,38 @@ fn git(dir: &Path, args: &[&str], timeout: Duration) -> Option<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
-    let stdout = child.stdout.take()?;
+        .map_err(|_| GitError::Failed)?;
+    let stdout = child.stdout.take().ok_or(GitError::Failed)?;
     let reader = std::thread::spawn(move || {
         let mut bytes = vec![];
         stdout.take(1 << 20).read_to_end(&mut bytes).ok()?;
         Some(bytes)
     });
     let deadline = Instant::now() + timeout;
-    let succeeded = loop {
+    let result = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
+            Ok(Some(status)) => {
+                break if status.success() {
+                    Ok(())
+                } else {
+                    Err(GitError::Failed)
+                };
+            }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            _ => {
+            state => {
                 let _ = child.kill();
                 let _ = child.wait();
-                break false;
+                break Err(if state.is_ok() {
+                    GitError::Timeout
+                } else {
+                    GitError::Failed
+                });
             }
         }
     };
-    if !succeeded {
-        let _ = reader.join();
-        return None;
-    }
-    let bytes = reader.join().ok()??;
-    String::from_utf8(bytes).ok()
+    let bytes = reader.join().ok().flatten();
+    result?;
+    String::from_utf8(bytes.ok_or(GitError::Failed)?).map_err(|_| GitError::Failed)
 }
 
 #[cfg(test)]
@@ -472,8 +551,8 @@ mod tests {
     #[test]
     fn remotes_compare_without_scheme_specific_suffixes() {
         assert_eq!(
-            normalize_remote("https://github.com/OpenNavo/OpenNavo.git/"),
-            "https://github.com/opennavo/opennavo"
+            normalize_remote("HTTPS://GITHUB.COM/OpenNavo/OpenNavo.git/"),
+            "https://github.com/OpenNavo/OpenNavo"
         );
         assert_eq!(
             normalize_remote("https://user:token@example.com/a.git"),
@@ -481,8 +560,65 @@ mod tests {
         );
     }
     #[test]
+    fn remote_paths_keep_their_case() {
+        for (upper, lower) in [
+            (
+                "ssh://git@example.com/repos/App.git",
+                "ssh://git@example.com/repos/app.git",
+            ),
+            (
+                "git@example.com:repos/App.git",
+                "git@example.com:repos/app.git",
+            ),
+            ("https://example.com/App.git", "https://example.com/app.git"),
+            ("file:///repos/App.git", "file:///repos/app.git"),
+            ("/repos/App.git", "/repos/app.git"),
+            ("../App.git", "../app.git"),
+        ] {
+            assert_ne!(normalize_remote(upper), normalize_remote(lower), "{upper}");
+        }
+    }
+    #[test]
+    fn only_remote_schemes_and_hosts_are_case_insensitive() {
+        for (remote, expected) in [
+            (
+                "SSH://git@EXAMPLE.COM/repos/App.git/",
+                "ssh://example.com/repos/App",
+            ),
+            ("Git@EXAMPLE.COM:repos/App.git", "Git@example.com:repos/App"),
+            (
+                "Git@[FE80::ABCD]:repos/App.git",
+                "Git@[fe80::abcd]:repos/App",
+            ),
+            ("C:/repos/App.git", "C:/repos/App"),
+            ("./Repos:App.git", "./Repos:App"),
+            ("/Repos/ssh://App.git", "/Repos/ssh://App"),
+            (
+                "EXAMPLE.COM:Repos/App@Work.git",
+                "example.com:Repos/App@Work",
+            ),
+            (
+                "https://user:token@EXAMPLE.COM/Repos/App@Work.git",
+                "https://example.com/Repos/App@Work",
+            ),
+            (
+                "https://EXAMPLE.COM/Repos/App@Work.git",
+                "https://example.com/Repos/App@Work",
+            ),
+        ] {
+            assert_eq!(normalize_remote(remote), expected, "{remote}");
+        }
+        assert_ne!(
+            normalize_remote("Git@example.com:repos/App.git"),
+            normalize_remote("git@example.com:repos/App.git")
+        );
+    }
+    #[test]
     fn an_expired_budget_skips_git() {
-        assert!(git_until(Path::new("."), &["--version"], Instant::now()).is_none());
+        assert_eq!(
+            git_until(Path::new("."), &["--version"], Instant::now()),
+            Err(GitError::Timeout)
+        );
     }
     #[test]
     fn a_recent_index_is_not_a_duplicate_yet() {
