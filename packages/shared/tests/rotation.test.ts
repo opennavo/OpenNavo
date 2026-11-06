@@ -44,6 +44,9 @@ describe('rotateDaily', () => {
       vi.setSystemTime(new Date('1970-01-03T12:00:00Z'));
       expect(utcDay()).toBe(2);
       expect(rotateDaily([0, 1, 2, 3, 4], 2)).toEqual([4, 0]);
+      const items = Array.from({ length: 10 }, (_, index) => index);
+      const day = new Date('1970-01-03T12:00:00Z');
+      expect(rotateDaily(items, 4, undefined, day)).toEqual(rotateDaily(items, 4, 4, day));
     } finally {
       vi.useRealTimers();
     }
