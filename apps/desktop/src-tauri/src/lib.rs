@@ -13,6 +13,7 @@ mod error;
 pub mod events;
 pub mod firewall;
 pub mod guide;
+pub mod hermes;
 pub mod install_preflight;
 pub mod installer;
 pub mod library;
@@ -61,6 +62,24 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<security::SecuritySettings>()
         .typ::<firewall::FirewallErrorCode>()
         .commands(collect_commands![
+            commands::hermes::hermes_runtime_status,
+            commands::hermes::hermes_chat,
+            commands::hermes::hermes_stop,
+            commands::hermes::hermes_approval_respond,
+            commands::hermes::hermes_interrupt,
+            commands::hermes::hermes_steer,
+            commands::hermes::hermes_secret_set,
+            commands::hermes::hermes_secret_status,
+            commands::hermes::hermes_secret_delete,
+            commands::hermes::hermes_audit_open,
+            commands::hermes::hermes_runtime_install,
+            commands::hermes::hermes_runtime_uninstall,
+            commands::hermes::hermes_login_status,
+            commands::hermes::hermes_model_options,
+            commands::hermes::hermes_test_connection,
+            commands::hermes::hermes_login_start,
+            commands::hermes::hermes_login_input,
+            commands::hermes::hermes_login_cancel,
             commands::firewall::firewall_status,
             commands::firewall::firewall_enable,
             commands::firewall::firewall_disable,
@@ -477,6 +496,10 @@ pub fn run() {
             }))?;
             core.install_settings_save(save)?;
             app.manage(core.clone());
+            app.manage(std::sync::Arc::new(hermes::HermesRuntimeState::default()));
+            app.manage(std::sync::Arc::new(
+                hermes::login_session::HermesLoginState::default(),
+            ));
             resident::install(app.handle());
             resident::set_activation(app.handle(), hidden);
             mcp::broker::install(app.handle().clone());
