@@ -52,10 +52,10 @@ WebKit's own WebsiteData remains under `~/Library/WebKit/com.opennavo.desktop/`.
 - `hermes_chat` starts a local `hermes serve` gateway and streams
   `message.delta` frames from `/api/ws` as `hermes-chunk` Tauri events. The
   final `message.complete` frame becomes the persisted assistant message.
-- The CLI `hermes chat -Q` path remains a fallback only when the gateway
-  process cannot start; it returns the final answer without token streaming.
+- The desktop uses the gateway only. CLI fallback is intentionally disabled so
+  steering, approvals and tool events always share one transport contract.
 - Full control enables the session-scoped gateway YOLO flag; guarded and
-  OpenNavo-only modes do not, and approvals are denied unless the user grants
+  safe modes do not, and approvals are denied unless the user grants
   them. The gateway toolsets are selected with `HERMES_TUI_TOOLSETS`.
 - `hermes_stop` interrupts the active child and stops the gateway.
 - Provider keys live in the macOS Keychain (`com.opennavo.desktop.hermes`);
@@ -72,8 +72,7 @@ WebKit's own WebsiteData remains under `~/Library/WebKit/com.opennavo.desktop/`.
   Terminal or screen control is enabled. Hermes' file tool denies `auth.json` as
   defence in depth, not as a boundary.
 - Each conversation stores the gateway's `stored_session_id` and resumes it
-  with `session.resume` (the CLI fallback uses `--resume`), so follow-up turns
-  keep agent context.
+  with `session.resume`, so follow-up turns keep agent context.
 
 ## Mac control and TCC
 
@@ -100,9 +99,9 @@ still be used.
 
 ## Known gaps
 
-- The gateway streams token deltas; the CLI fallback is final-only.
-- Nous Portal OAuth needs an in-app login flow; key-based providers are wired.
-- Live provider/model discovery is not wired; the model field accepts a raw id.
+- The gateway streams token deltas and tool/reasoning events.
+- Skills/tools/cron are viewable and have basic management; MCP server config editing is not exposed.
+- The model catalog is official metadata when available, with a clearly-marked static fallback.
 - Computer-use TCC validation and notarization are release-environment work.
 - Hermes's own session store is used for continuity; OpenNavo keeps the visible
   transcript for history and search.

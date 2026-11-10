@@ -6,6 +6,7 @@ import HermesMessage from '@/components/hermes/HermesMessage.vue';
 import AssistantHistory from '@/components/hermes/AssistantHistory.vue';
 import HermesSettings from '@/components/hermes/HermesSettings.vue';
 import { useHermesStore } from '@/stores/hermes';
+import { commands, unwrap } from '@/ipc/client';
 import { useHermesUiStore } from '@/stores/hermesUi';
 import { useHermesContent } from '@/composables/useHermesContent';
 import { useToasts } from '@/composables/useToasts';
@@ -19,10 +20,14 @@ const input = ref('');
 const historyOpen = ref(false);
 const installOpen = ref(false);
 const contextOpen = ref(false);
-const attachments = ref<{ path: string; name: string; isImage: boolean }[]>([]);
+const attachments = ref<{ path: string; name: string; isImage: boolean; size?: number }[]>([]);
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const attachmentPreviews = ref<Record<string, string>>({});
 const fileInput = ref<HTMLInputElement>();
 const scroll = ref<HTMLElement>();
 const composer = ref<HTMLTextAreaElement>();
+const dragging = ref(false);
+let unlistenDrop: (() => void) | undefined;
 const SUGGESTIONS = ['rectangle', 'cleanup', 'updates', 'explain'] as const;
 
 const modelLabel = computed(
@@ -39,6 +44,17 @@ const macTone = computed<'success' | 'neutral'>(() =>
   store.mac.enabled && store.mac.level !== 'open' ? 'success' : 'neutral'
 );
 
+function enableMac() {
+  // Header shortcut only restores the existing policy. It must not silently
+  // enable every capability or turn off write confirmation.
+  store.saveMac({ ...store.mac, enabled: true });
+  toasts.push({
+    tone: 'success',
+    title: content.value.common.settingsSaved,
+    description: content.value.settings.mac.masterHint
+  });
+}
+
 function scrollToBottom() {
   void nextTick(() => {
     const element = scroll.value;
@@ -52,10 +68,51 @@ const directoryLabel = computed(() => {
   return dir.split('/').filter(Boolean).at(-1) ?? dir;
 });
 
-function addAttachment(path: string) {
-  const name = path.split('/').filter(Boolean).at(-1) ?? path;
-  const isImage = /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff)$/i.test(name);
-  if (!attachments.value.some(item => item.path === path)) attachments.value.push({ path, name, isImage });
+function addAttachment(path: string, name?: string, size?: number, image?: boolean) {
+  const displayName = name || path.split('/').filter(Boolean).at(-1) || path;
+  if (size && size > MAX_ATTACHMENT_BYTES) {
+    toasts.push({ tone: 'warning', title: content.value.composer.attach, description: `${displayName} > 50 MB` });
+    return;
+  }
+  const isImage = image ?? /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff)$/i.test(displayName);
+  if (!attachments.value.some(item => item.path === path)) {
+    attachments.value.push({ path, name: displayName, isImage, size });
+    if (isImage) void loadAttachmentPreview(path);
+  }
+}
+
+async function addAttachmentPaths(paths: string[]) {
+  if (!paths.length) return;
+  try {
+    const info = await commands.hermesAttachmentInfo(paths);
+    info.forEach(item => addAttachment(item.path, item.name, item.size, item.isImage));
+  } catch {
+    paths.forEach(path => addAttachment(path));
+  }
+}
+
+async function loadAttachmentPreview(path: string) {
+  if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) return;
+  try {
+    const preview = await unwrap(commands.hermesAttachmentPreview(path));
+    if (preview) attachmentPreviews.value = { ...attachmentPreviews.value, [path]: preview };
+  } catch {
+    // Preview is optional; the attachment still sends.
+  }
+}
+
+function attachmentSrc(path: string) {
+  return attachmentPreviews.value[path] ?? '';
+}
+
+async function openAttachment(path: string) {
+  if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) return;
+  try {
+    const { openPath } = await import('@tauri-apps/plugin-opener');
+    await openPath(path);
+  } catch (error) {
+    toasts.push({ tone: 'warning', title: content.value.composer.attach, description: String(error) });
+  }
 }
 
 async function pickFiles() {
@@ -64,7 +121,7 @@ async function pickFiles() {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({ multiple: true, directory: false });
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
-      paths.forEach(addAttachment);
+      await addAttachmentPaths(paths);
     } catch (error) {
       toasts.push({ tone: 'warning', title: content.value.composer.attach, description: String(error) });
     }
@@ -73,9 +130,29 @@ async function pickFiles() {
   fileInput.value?.click();
 }
 
+async function onPaste(event: ClipboardEvent) {
+  if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) return;
+  if (!event.clipboardData?.getData('text/plain')) {
+    try {
+      const path = await unwrap(commands.hermesClipboardImage());
+      if (path) {
+        event.preventDefault();
+        await addAttachmentPaths([path]);
+      }
+    } catch {
+      // Clipboard images are optional.
+    }
+  }
+}
+
 function onFileInput(event: Event) {
   const target = event.target as HTMLInputElement;
-  for (const file of Array.from(target.files ?? [])) addAttachment(file.name);
+  // The browser input has no native path. Tauri uses the dialog path instead.
+  toasts.push({
+    tone: 'warning',
+    title: content.value.composer.attach,
+    description: 'Use the desktop app file picker to attach local files.'
+  });
   target.value = '';
 }
 
@@ -215,13 +292,35 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 onMounted(async () => {
+  const history = store.loadHistory();
   await store.loadRuntime();
+  await history;
   if (!store.runtimeReady) installOpen.value = true;
   window.addEventListener('keydown', onKeydown);
+  window.addEventListener('paste', onPaste);
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    try {
+      const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+      unlistenDrop = await getCurrentWebview().onDragDropEvent(event => {
+        if (event.payload.type === 'over') dragging.value = true;
+        if (event.payload.type === 'leave') dragging.value = false;
+        if (event.payload.type === 'drop') {
+          dragging.value = false;
+          void addAttachmentPaths(event.payload.paths);
+        }
+      });
+    } catch {
+      // Native drag/drop is an enhancement; the file picker still works.
+    }
+  }
   scrollToBottom();
   void nextTick(() => composer.value?.focus());
 });
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown);
+  window.removeEventListener('paste', onPaste);
+  unlistenDrop?.();
+});
 </script>
 
 <template>
@@ -239,6 +338,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
           >{{ store.runtimeReady ? content.header.local : content.header.demo }}</span
         >
         <OnChip :tone="macTone" dot>{{ macLabel }}</OnChip>
+        <OnButton v-if="!store.mac.enabled" variant="ghost" size="xs" icon="lucide:power" @click="enableMac">{{
+          content.header.enableMac
+        }}</OnButton>
       </div>
       <div class="ml-auto flex shrink-0 items-center gap-8px">
         <OnButton
@@ -350,26 +452,38 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
       <div class="shrink-0 pb-16px pt-10px">
         <div class="mx-auto w-full max-w-720px">
           <form
-            class="rounded-big border border-solid border-line-default bg-surface-control px-10px pb-8px pt-9px transition-colors focus-within:border-line-strong"
+            class="rounded-big border border-solid bg-surface-control px-10px pb-8px pt-9px transition-colors focus-within:border-line-strong"
+            :class="dragging ? 'border-accent-coral bg-accent-coral-subtle' : 'border-line-default'"
             @submit.prevent="send"
           >
             <div v-if="attachments.length" class="flex flex-wrap gap-5px px-4px pb-7px">
               <span
                 v-for="(file, index) in attachments"
                 :key="file.path"
-                class="inline-flex max-w-full items-center gap-5px rounded-tiny border border-solid border-line-subtle bg-surface-raised px-7px py-4px text-11px text-ink-secondary"
+                class="inline-flex max-w-full cursor-pointer items-center gap-5px rounded-tiny border border-solid border-line-subtle bg-surface-raised px-7px py-4px text-11px text-ink-secondary hover:border-line-strong"
+                @click="openAttachment(file.path)"
               >
+                <img
+                  v-if="file.isImage && attachmentSrc(file.path)"
+                  :src="attachmentSrc(file.path)"
+                  :alt="file.name"
+                  class="h-22px w-22px shrink-0 rounded-3px object-cover"
+                />
                 <OnIcon
+                  v-else
                   :name="file.isImage ? 'lucide:image' : 'lucide:paperclip'"
                   :size="12"
                   class="shrink-0 text-ink-tertiary"
                 />
                 <span class="min-w-0 truncate">{{ file.name }}</span>
+                <span v-if="file.size" class="shrink-0 text-10px text-ink-tertiary"
+                  >{{ Math.ceil(file.size / 1024) }} KB</span
+                >
                 <button
                   type="button"
                   class="flex shrink-0 items-center justify-center text-ink-tertiary outline-none hover:text-ink-primary focus-visible:shadow-focus-ring"
                   :aria-label="`Remove ${file.name}`"
-                  @click="removeAttachment(index)"
+                  @click.stop="removeAttachment(index)"
                 >
                   <OnIcon name="lucide:x" :size="11" />
                 </button>
@@ -552,8 +666,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
         <OnButton variant="ghost" :disabled="store.installing" @click="closeInstall">{{
           content.install.later
         }}</OnButton>
-        <OnButton variant="accent" :disabled="store.installing" icon="lucide:download" @click="installRuntime">
-          {{ store.installing ? content.install.installing : content.install.install }}
+        <OnButton v-if="store.installing" variant="ghost" @click="store.cancelInstall">{{
+          content.install.cancelInstall
+        }}</OnButton>
+        <OnButton v-else variant="accent" icon="lucide:download" @click="installRuntime">
+          {{ content.install.install }}
         </OnButton>
       </template>
     </OnModal>

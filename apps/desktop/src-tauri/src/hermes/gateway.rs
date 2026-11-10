@@ -176,7 +176,7 @@ async fn ensure_server(
     kill_pid(pid);
     Err(AppError::new(
         "E_HERMES_GATEWAY",
-        "Hermes gateway did not become ready. The non-streaming fallback will be used.",
+        "Hermes gateway did not become ready. Restart Hermes and try again.",
     ))
 }
 
@@ -319,7 +319,7 @@ async fn open_session(
     Ok((live, stored))
 }
 
-/// Stream a turn through the local Hermes gateway. The caller owns the fallback
+/// Stream a turn through the local Hermes gateway. The desktop has no fallback
 /// to the CLI when the gateway itself cannot start.
 pub async fn chat(
     bin: &Path,
@@ -458,6 +458,49 @@ pub async fn chat(
                             delta: delta.to_owned(),
                         },
                     );
+                }
+            }
+            "tool.start" => {
+                deadline = Instant::now() + MESSAGE_TIMEOUT;
+                if let Some(app) = app {
+                    let _ = app.emit(
+                        "hermes-tool",
+                        json!({
+                            "requestId": input.request_id,
+                            "phase": "start",
+                            "toolId": payload.get("tool_id").and_then(Value::as_str).unwrap_or_default(),
+                            "name": payload.get("name").and_then(Value::as_str).unwrap_or("tool"),
+                            "label": payload.get("preview").and_then(Value::as_str).unwrap_or("")
+                        }),
+                    );
+                }
+            }
+            "tool.complete" => {
+                deadline = Instant::now() + MESSAGE_TIMEOUT;
+                if let Some(app) = app {
+                    let _ = app.emit(
+                        "hermes-tool",
+                        json!({
+                            "requestId": input.request_id,
+                            "phase": "complete",
+                            "toolId": payload.get("tool_id").and_then(Value::as_str).unwrap_or_default(),
+                            "name": payload.get("name").and_then(Value::as_str).unwrap_or("tool"),
+                            "label": payload.get("summary").and_then(Value::as_str).unwrap_or(""),
+                            "duration": payload.get("duration_s").and_then(Value::as_f64).unwrap_or(0.0)
+                        }),
+                    );
+                }
+            }
+            "reasoning.delta" | "thinking.delta" => {
+                deadline = Instant::now() + MESSAGE_TIMEOUT;
+                if let Some(app) = app {
+                    let delta = payload.get("text").and_then(Value::as_str).unwrap_or("");
+                    if !delta.is_empty() {
+                        let _ = app.emit(
+                            "hermes-reasoning",
+                            json!({"requestId": input.request_id, "delta": delta}),
+                        );
+                    }
                 }
             }
             "message.complete" => {

@@ -25,9 +25,11 @@ pub(crate) mod gateway;
 pub(crate) mod install;
 pub(crate) mod login;
 pub(crate) mod login_session;
+pub(crate) mod permissions;
 pub(crate) mod test_connection;
 use gateway::GatewayServer;
 
+#[allow(dead_code)]
 const CHAT_TIMEOUT: Duration = Duration::from_secs(180);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(15);
 const DATA_ROOT_DIR: &str = "OpenNavoData";
@@ -45,6 +47,7 @@ pub struct HermesRuntimeStatus {
     pub path: Option<String>,
     pub data_path: Option<String>,
     pub computer_use: bool,
+    pub outdated: bool,
     pub message: Option<String>,
 }
 
@@ -79,6 +82,29 @@ pub struct HermesChatInput {
     pub mac_files: bool,
     pub mac_cron: bool,
     pub confirm_writes: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HermesAuditEntry {
+    pub at: String,
+    pub provider: String,
+    pub model: String,
+    pub toolsets: String,
+    pub control_level: String,
+    pub prompt_chars: u64,
+    pub outcome: String,
+    pub session_id: Option<String>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HermesAttachmentInfo {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub is_image: bool,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -173,6 +199,7 @@ pub struct HermesRuntimeState {
     pub(crate) approval: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>,
     pub(crate) approval_cancel: tokio::sync::Notify,
     installing: AtomicBool,
+    pub(crate) install_cancel: AtomicBool,
 }
 
 fn data_root(app: &AppHandle) -> Result<PathBuf, AppError> {
@@ -225,6 +252,7 @@ fn clean_output(value: &str) -> String {
     ansi.replace_all(value, "").trim().to_owned()
 }
 
+#[allow(dead_code)]
 fn clean_response(value: &str) -> String {
     clean_output(value)
         .lines()
@@ -235,6 +263,7 @@ fn clean_response(value: &str) -> String {
         .to_owned()
 }
 
+#[allow(dead_code)]
 fn session_id(stderr: &str) -> Option<String> {
     stderr
         .lines()
@@ -632,11 +661,168 @@ fn toolsets(input: &HermesChatInput) -> String {
     }
 }
 
+fn runtime_is_current(version: &str) -> bool {
+    let Ok(pattern) = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)") else {
+        return false;
+    };
+    let Some(captures) = pattern.captures(version) else {
+        return false;
+    };
+    let parse = |index: usize| {
+        captures
+            .get(index)
+            .and_then(|value| value.as_str().parse::<u64>().ok())
+    };
+    matches!((parse(1), parse(2), parse(3)), (Some(0), Some(23), Some(0)))
+}
+
 fn reasoning_effort(effort: &str) -> Option<&str> {
     match effort {
         "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" => Some(effort),
         _ => None,
     }
+}
+
+fn history_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(hermes_home(app)?.join("history.json"))
+}
+
+pub fn history_load(app: &AppHandle) -> Result<Option<String>, AppError> {
+    let path = history_path(app)?;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(&path)?;
+    if raw.len() > 20 * 1024 * 1024 {
+        return Err(AppError::new(
+            "E_HERMES_HISTORY",
+            "Hermes history is too large.",
+        ));
+    }
+    Ok(Some(raw))
+}
+
+pub fn history_save(app: &AppHandle, json: &str) -> Result<(), AppError> {
+    if json.len() > 20 * 1024 * 1024 {
+        return Err(AppError::new(
+            "E_HERMES_HISTORY",
+            "Hermes history is too large.",
+        ));
+    }
+    serde_json::from_str::<serde_json::Value>(json).map_err(|error| {
+        AppError::new("E_HERMES_HISTORY", "Hermes history is not valid JSON.")
+            .with_detail(error.to_string())
+    })?;
+    let path = history_path(app)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+pub fn attachment_preview(path: &str) -> Result<Option<String>, AppError> {
+    let path_ref = std::path::Path::new(path);
+    let ext = path_ref
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "heic" | "heif" => "image/heic",
+        "bmp" => "image/bmp",
+        "tiff" => "image/tiff",
+        _ => return Ok(None),
+    };
+    let metadata = match std::fs::metadata(path_ref) {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(None),
+    };
+    if metadata.len() > 8 * 1024 * 1024 {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path_ref)?;
+    use base64::Engine;
+    Ok(Some(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )))
+}
+
+pub fn clipboard_image(app: &AppHandle) -> Result<Option<String>, AppError> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| {
+        AppError::new("E_HERMES_CLIPBOARD", "Could not open the clipboard.")
+            .with_detail(error.to_string())
+    })?;
+    let image = match clipboard.get_image() {
+        Ok(image) => image,
+        Err(_) => return Ok(None),
+    };
+    let dir = data_root(app)?.join("clipboard");
+    std::fs::create_dir_all(&dir)?;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(86_400);
+        for entry in entries.flatten() {
+            if entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .map(|modified| modified < cutoff)
+                .unwrap_or(false)
+            {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let path = dir.join(format!("clipboard-{}.png", uuid::Uuid::new_v4()));
+    image::save_buffer(
+        &path,
+        &image.bytes,
+        image.width as u32,
+        image.height as u32,
+        image::ColorType::Rgba8,
+    )
+    .map_err(|error| {
+        AppError::new("E_HERMES_CLIPBOARD", "Could not save the clipboard image.")
+            .with_detail(error.to_string())
+    })?;
+    Ok(Some(path.display().to_string()))
+}
+
+pub fn attachment_info(paths: Vec<String>) -> Vec<HermesAttachmentInfo> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone());
+            let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            let is_image = std::path::Path::new(&path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| {
+                    matches!(
+                        ext.to_ascii_lowercase().as_str(),
+                        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" | "heif" | "bmp" | "tiff"
+                    )
+                })
+                .unwrap_or(false);
+            HermesAttachmentInfo {
+                path,
+                name,
+                size,
+                is_image,
+            }
+        })
+        .collect()
 }
 
 fn append_audit(
@@ -669,6 +855,375 @@ fn append_audit(
 
 fn audit_path(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(hermes_home(app)?.join(AUDIT_FILE))
+}
+
+pub async fn logout(app: &AppHandle, provider: &str) -> Result<(), AppError> {
+    let Some(bin) = runtime_bin(app) else {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime is not installed.",
+        ));
+    };
+    let home = hermes_home(app)?;
+    let hermes_provider = provider_id(provider);
+    let mut command = runtime_command(&bin)?;
+    command
+        .arg("auth")
+        .arg("logout")
+        .arg(hermes_provider)
+        .env("HERMES_HOME", &home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    scrub_credential_env(&mut command);
+    let output = timeout(VERSION_TIMEOUT, command.output())
+        .await
+        .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes logout timed out."))?
+        .map_err(|error| {
+            AppError::new("E_HERMES_RUNTIME", "Hermes logout could not start.")
+                .with_detail(error.to_string())
+        })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(300)
+            .collect::<String>();
+        return Err(AppError::new("E_HERMES_RUNTIME", "Hermes logout failed.").with_detail(detail));
+    }
+    Ok(())
+}
+
+pub async fn mcp_action(
+    app: &AppHandle,
+    action: &str,
+    name: &str,
+    url: &str,
+) -> Result<String, AppError> {
+    let name = name.trim();
+    if !matches!(action, "list" | "add" | "remove") {
+        return Err(AppError::new("E_HERMES_INPUT", "Unknown MCP action."));
+    }
+    if action != "list" && (name.is_empty() || name.starts_with('-') || name.len() > 128) {
+        return Err(AppError::new(
+            "E_HERMES_INPUT",
+            "A valid MCP server name is required.",
+        ));
+    }
+    let Some(bin) = runtime_bin(app) else {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime is not installed.",
+        ));
+    };
+    let home = hermes_home(app)?;
+    let mut command = runtime_command(&bin)?;
+    command.arg("mcp");
+    match action {
+        "list" => {
+            command.arg("list");
+        }
+        "remove" => {
+            command.arg("remove").arg(name);
+        }
+        "add" => {
+            let url = url.trim();
+            if !(url.starts_with("https://") || url.starts_with("http://")) {
+                return Err(AppError::new(
+                    "E_HERMES_INPUT",
+                    "MCP URL must start with http:// or https://.",
+                ));
+            }
+            command.arg("add").arg(name).arg("--url").arg(url);
+        }
+        _ => {}
+    }
+    command
+        .env("HERMES_HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    scrub_credential_env(&mut command);
+    let output = timeout(VERSION_TIMEOUT, command.output())
+        .await
+        .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes MCP action timed out."))?
+        .map_err(|error| {
+            AppError::new("E_HERMES_RUNTIME", "Hermes MCP action could not start.")
+                .with_detail(error.to_string())
+        })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(400)
+            .collect::<String>();
+        return Err(
+            AppError::new("E_HERMES_RUNTIME", "Hermes MCP action failed.").with_detail(detail),
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub async fn skill_action(
+    app: &AppHandle,
+    action: &str,
+    identifier: &str,
+) -> Result<String, AppError> {
+    let action = match action {
+        "install" | "uninstall" => action,
+        _ => return Err(AppError::new("E_HERMES_INPUT", "Unknown skill action.")),
+    };
+    let identifier = identifier.trim();
+    if identifier.is_empty() || identifier.starts_with('-') || identifier.len() > 512 {
+        return Err(AppError::new(
+            "E_HERMES_INPUT",
+            "A valid skill identifier is required.",
+        ));
+    }
+    let Some(bin) = runtime_bin(app) else {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime is not installed.",
+        ));
+    };
+    let home = hermes_home(app)?;
+    let mut command = runtime_command(&bin)?;
+    command
+        .arg("skills")
+        .arg(action)
+        .arg(identifier)
+        .arg("--yes")
+        .env("HERMES_HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    scrub_credential_env(&mut command);
+    let output = timeout(VERSION_TIMEOUT, command.output())
+        .await
+        .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes skill action timed out."))?
+        .map_err(|error| {
+            AppError::new("E_HERMES_RUNTIME", "Hermes skill action could not start.")
+                .with_detail(error.to_string())
+        })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(400)
+            .collect::<String>();
+        return Err(
+            AppError::new("E_HERMES_RUNTIME", "Hermes skill action failed.").with_detail(detail),
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub async fn tool_action(app: &AppHandle, action: &str, name: &str) -> Result<String, AppError> {
+    let action = match action {
+        "enable" | "disable" => action,
+        _ => return Err(AppError::new("E_HERMES_INPUT", "Unknown tool action.")),
+    };
+    let name = name.trim();
+    if name.is_empty() || name.starts_with('-') || name.len() > 512 {
+        return Err(AppError::new(
+            "E_HERMES_INPUT",
+            "A valid toolset or MCP tool name is required.",
+        ));
+    }
+    let Some(bin) = runtime_bin(app) else {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime is not installed.",
+        ));
+    };
+    let home = hermes_home(app)?;
+    let mut command = runtime_command(&bin)?;
+    command
+        .arg("tools")
+        .arg(action)
+        .arg(name)
+        .env("HERMES_HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    scrub_credential_env(&mut command);
+    let output = timeout(VERSION_TIMEOUT, command.output())
+        .await
+        .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes tool action timed out."))?
+        .map_err(|error| {
+            AppError::new("E_HERMES_RUNTIME", "Hermes tool action could not start.")
+                .with_detail(error.to_string())
+        })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(400)
+            .collect::<String>();
+        return Err(
+            AppError::new("E_HERMES_RUNTIME", "Hermes tool action failed.").with_detail(detail),
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub async fn cron_action(app: &AppHandle, action: &str, job_id: &str) -> Result<String, AppError> {
+    let action = match action {
+        "pause" | "resume" | "remove" => action,
+        _ => return Err(AppError::new("E_HERMES_INPUT", "Unknown cron action.")),
+    };
+    let job_id = job_id.trim();
+    if job_id.is_empty() || job_id.starts_with('-') {
+        return Err(AppError::new(
+            "E_HERMES_INPUT",
+            "A valid cron job id is required.",
+        ));
+    }
+    let Some(bin) = runtime_bin(app) else {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime is not installed.",
+        ));
+    };
+    let home = hermes_home(app)?;
+    let mut command = runtime_command(&bin)?;
+    command
+        .arg("cron")
+        .arg(action)
+        .arg(job_id)
+        .env("HERMES_HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    scrub_credential_env(&mut command);
+    let output = timeout(VERSION_TIMEOUT, command.output())
+        .await
+        .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes cron action timed out."))?
+        .map_err(|error| {
+            AppError::new("E_HERMES_RUNTIME", "Hermes cron action could not start.")
+                .with_detail(error.to_string())
+        })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(400)
+            .collect::<String>();
+        return Err(
+            AppError::new("E_HERMES_RUNTIME", "Hermes cron action failed.").with_detail(detail),
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub async fn cli_read(app: &AppHandle, kind: &str) -> Result<String, AppError> {
+    let Some(bin) = runtime_bin(app) else {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime is not installed.",
+        ));
+    };
+    let home = hermes_home(app)?;
+    let args: &[&str] = match kind {
+        "tools" => &["tools", "list"],
+        "skills" => &["skills", "list"],
+        "cron" => &["cron", "list", "--all"],
+        _ => {
+            return Err(AppError::new(
+                "E_HERMES_INPUT",
+                "Unknown Hermes diagnostics section.",
+            ));
+        }
+    };
+    let mut command = runtime_command(&bin)?;
+    command
+        .args(args)
+        .env("HERMES_HOME", home)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    scrub_credential_env(&mut command);
+    let output = timeout(VERSION_TIMEOUT, command.output())
+        .await
+        .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes diagnostics timed out."))?
+        .map_err(|error| {
+            AppError::new("E_HERMES_RUNTIME", "Hermes diagnostics could not start.")
+                .with_detail(error.to_string())
+        })?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(400)
+            .collect::<String>();
+        return Err(
+            AppError::new("E_HERMES_RUNTIME", "Hermes diagnostics failed.").with_detail(detail),
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+pub fn audit_entries(app: &AppHandle, limit: usize) -> Result<Vec<HermesAuditEntry>, AppError> {
+    let path = audit_path(app)?;
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Ok(Vec::new());
+    };
+    let mut entries = raw
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .map(|value| HermesAuditEntry {
+            at: value
+                .get("at")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            provider: value
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            model: value
+                .get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            toolsets: value
+                .get("toolsets")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            control_level: value
+                .get("controlLevel")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            prompt_chars: value
+                .get("promptChars")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            outcome: value
+                .get("outcome")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            session_id: value
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
+            detail: value
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
+        })
+        .collect::<Vec<_>>();
+    if entries.len() > limit {
+        entries = entries.split_off(entries.len() - limit);
+    }
+    entries.reverse();
+    Ok(entries)
+}
+
+pub fn open_logs(app: &AppHandle) -> Result<(), AppError> {
+    let path = hermes_home(app)?.join("logs");
+    if !path.is_dir() {
+        return Err(AppError::new("E_HERMES_LOGS", "No Hermes logs exist yet."));
+    }
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|error| {
+            AppError::new("E_HERMES_LOGS", "Could not open the Hermes logs.")
+                .with_detail(error.to_string())
+        })?;
+    Ok(())
 }
 
 pub fn open_audit(app: &AppHandle) -> Result<(), AppError> {
@@ -1195,6 +1750,7 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
             path: None,
             data_path: data_root(&app).ok().map(|path| path.display().to_string()),
             computer_use: false,
+            outdated: false,
             message: Some("Hermes runtime is not installed. Install it from the assistant.".into()),
         });
     };
@@ -1226,6 +1782,7 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
             path: Some(bin.display().to_string()),
             data_path: data_root(&app).ok().map(|path| path.display().to_string()),
             computer_use: false,
+            outdated: false,
             message: Some(clean_output(&String::from_utf8_lossy(&output.stderr))),
         });
     }
@@ -1242,6 +1799,7 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
                 .is_file()
         })
         .unwrap_or(false);
+    let outdated = !runtime_is_current(&version);
     log::info!("Hermes runtime status: ready {version} (computer_use={computer_use})");
     Ok(HermesRuntimeStatus {
         ready: true,
@@ -1250,6 +1808,7 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
         path: Some(bin.display().to_string()),
         data_path: data_root(&app).ok().map(|path| path.display().to_string()),
         computer_use,
+        outdated,
         message: None,
     })
 }
@@ -1266,17 +1825,10 @@ pub async fn chat(
         ));
     };
     let home = hermes_home(&app)?;
-    let fallback = input.clone();
-    match gateway::chat(&bin, &home, state, input, Some(&app), None).await {
-        Ok(reply) => Ok(reply),
-        Err(error) if error.code == "E_HERMES_GATEWAY" => {
-            log::warn!("Hermes gateway unavailable, using CLI fallback: {}", error);
-            chat_with_bin(&bin, &home, state, fallback, Some(&app), None).await
-        }
-        Err(error) => Err(error),
-    }
+    gateway::chat(&bin, &home, state, input, Some(&app), None).await
 }
 
+#[allow(dead_code)]
 async fn chat_with_bin(
     bin: &Path,
     home: &Path,
@@ -1443,11 +1995,13 @@ async fn chat_with_bin(
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 struct StreamFilter {
     initial: String,
     checked: bool,
 }
 
+#[allow(dead_code)]
 impl StreamFilter {
     /// Hold the first line long enough to drop Hermes' optional scanner warning,
     /// then release tokens immediately so the UI can render them as they arrive.
@@ -1488,6 +2042,7 @@ impl StreamFilter {
     }
 }
 
+#[allow(dead_code)]
 async fn consume_stdout<R: AsyncRead + Unpin>(
     mut reader: R,
     app: Option<AppHandle>,

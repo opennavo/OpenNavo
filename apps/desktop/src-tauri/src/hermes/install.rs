@@ -7,7 +7,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
@@ -70,6 +70,7 @@ pub async fn install(
             "Hermes is already being installed.",
         ));
     }
+    state.install_cancel.store(false, Ordering::SeqCst);
     let result = install_inner(&app, state).await;
     state.installing.store(false, Ordering::SeqCst);
     result
@@ -79,6 +80,12 @@ async fn install_inner(
     app: &AppHandle,
     state: &HermesRuntimeState,
 ) -> Result<HermesRuntimeStatus, AppError> {
+    if std::env::consts::ARCH != "aarch64" {
+        return Err(AppError::new(
+            "E_HERMES_INSTALL",
+            "This Hermes runtime build is for Apple Silicon (arm64).",
+        ));
+    }
     let _ = stop(state).await;
     let root = data_root(app)?;
     let runtime = runtime_root(app)?;
@@ -105,7 +112,7 @@ async fn install_inner(
         let url =
             std::env::var("HERMES_RUNTIME_URL").unwrap_or_else(|_| DEFAULT_RUNTIME_URL.to_owned());
         let archive = root.join("runtime.tar.gz");
-        download(app, &url, &archive).await?;
+        download(app, &url, &archive, &state.install_cancel).await?;
         emit(app, "verifying", 0, None, 80);
         let expected = std::env::var("HERMES_RUNTIME_SHA256")
             .unwrap_or_else(|_| DEFAULT_RUNTIME_SHA256.to_owned());
@@ -120,6 +127,14 @@ async fn install_inner(
         emit(app, "extracting", 0, None, 85);
         extract_tar(&archive, &temp).await?;
         let _ = std::fs::remove_file(&archive);
+    }
+
+    if state.install_cancel.load(Ordering::SeqCst) {
+        let _ = std::fs::remove_dir_all(&temp);
+        return Err(AppError::new(
+            "E_HERMES_INSTALL_CANCELLED",
+            "Hermes install cancelled.",
+        ));
     }
 
     let bundled_plugins = temp.join("plugins");
@@ -183,7 +198,12 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn download(app: &AppHandle, url: &str, archive: &Path) -> Result<(), AppError> {
+async fn download(
+    app: &AppHandle,
+    url: &str,
+    archive: &Path,
+    cancel: &AtomicBool,
+) -> Result<(), AppError> {
     let response = reqwest::Client::new()
         .get(url)
         .send()
@@ -206,6 +226,14 @@ async fn download(app: &AppHandle, url: &str, archive: &Path) -> Result<(), AppE
     let mut stream = response.bytes_stream();
     let mut downloaded = 0_u64;
     while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::SeqCst) {
+            let _ = file.flush().await;
+            let _ = std::fs::remove_file(archive);
+            return Err(AppError::new(
+                "E_HERMES_INSTALL_CANCELLED",
+                "Hermes install cancelled.",
+            ));
+        }
         let chunk = chunk.map_err(|error| {
             AppError::new("E_HERMES_INSTALL", "Hermes download interrupted.")
                 .with_detail(error.to_string())
@@ -258,6 +286,10 @@ async fn sha256_file(path: &Path) -> Result<String, AppError> {
     .map_err(|error| {
         AppError::new("E_HERMES_INSTALL", "Hermes checksum failed.").with_detail(error.to_string())
     })?
+}
+
+pub fn cancel(state: &HermesRuntimeState) {
+    state.install_cancel.store(true, Ordering::SeqCst);
 }
 
 pub async fn uninstall(

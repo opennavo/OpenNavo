@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { OnIcon } from '@opennavo/ui';
 import { useHermesStore } from '@/stores/hermes';
 import { useHermesContent } from '@/composables/useHermesContent';
-import { useAppLocale } from '@/composables/useAppLocale';
 import type { HermesMessage } from '@/stores/hermes';
 
 const props = defineProps<{ open: boolean }>();
@@ -11,9 +10,10 @@ const emit = defineEmits<{ close: []; select: [id: string] }>();
 
 const store = useHermesStore();
 const content = useHermesContent();
-const { appLocale } = useAppLocale();
 const search = ref('');
 const root = ref<HTMLElement>();
+const editingId = ref('');
+const editTitle = ref('');
 
 const icons: Record<string, string> = {
   rectangle: 'lucide:mouse-pointer-click',
@@ -39,6 +39,7 @@ function historyItem(key?: string): { title: string; preview: string } | undefin
 
 function titleOf(id: string): string {
   const conversation = store.conversations.find(item => item.id === id);
+  if (conversation?.title) return conversation.title;
   const curated = historyItem(conversation?.titleKey);
   if (curated) return curated.title;
   const firstUser = conversation?.messages.find(item => item.role === 'user');
@@ -67,10 +68,6 @@ function groupOf(value: number): 'today' | 'yesterday' | 'earlier' {
   return 'earlier';
 }
 
-function timeOf(value: number): string {
-  return new Date(value).toLocaleTimeString(appLocale.value, { hour: '2-digit', minute: '2-digit' });
-}
-
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase();
   return store.history
@@ -95,6 +92,31 @@ const groups = computed(() => {
     { key: 'earlier', label: content.value.history.earlier, items: buckets.earlier }
   ].filter(group => group.items.length > 0);
 });
+
+function startRename(id: string) {
+  const conversation = store.conversations.find(item => item.id === id);
+  if (!conversation) return;
+  editingId.value = id;
+  editTitle.value = titleOf(id);
+}
+
+function commitRename() {
+  if (!editingId.value) return;
+  store.renameConversation(editingId.value, editTitle.value);
+  editingId.value = '';
+  editTitle.value = '';
+}
+
+function removeConversation(id: string) {
+  if (!window.confirm(content.value.history.deleteConfirm)) return;
+  store.deleteConversation(id);
+}
+
+function clearHistory() {
+  if (!window.confirm(content.value.history.clearConfirm)) return;
+  store.clearHistory();
+  close();
+}
 
 function close() {
   emit('close');
@@ -148,6 +170,22 @@ onBeforeUnmount(() => {
         >⌘Y</kbd
       >
       <button
+        v-if="store.history.length"
+        type="button"
+        class="ml-auto text-11px text-ink-tertiary outline-none hover:text-ink-secondary focus-visible:shadow-focus-ring"
+        @click="store.exportHistory()"
+      >
+        {{ content.history.exportHistory }}
+      </button>
+      <button
+        v-if="store.history.length"
+        type="button"
+        class="text-11px text-ink-tertiary outline-none hover:text-status-danger focus-visible:shadow-focus-ring"
+        @click="clearHistory"
+      >
+        {{ content.history.clear }}
+      </button>
+      <button
         type="button"
         class="flex h-24px w-24px items-center justify-center rounded-small text-ink-tertiary outline-none hover:bg-surface-raised hover:text-ink-primary focus-visible:shadow-focus-ring"
         :aria-label="content.history.close"
@@ -175,13 +213,18 @@ onBeforeUnmount(() => {
       </div>
       <div v-for="group in groups" :key="group.key">
         <div class="px-8px pb-4px pt-8px text-11px font-600 tracking-[0.04em] text-ink-tertiary">{{ group.label }}</div>
-        <button
+        <div
           v-for="item in group.items"
           :key="item.conversation.id"
-          type="button"
-          class="flex w-full items-start gap-9px rounded-small px-8px py-8px text-left outline-none transition-colors hover:bg-surface-raised focus-visible:shadow-focus-ring"
+          class="group flex w-full items-start gap-9px rounded-small px-8px py-8px text-left outline-none transition-colors hover:bg-surface-raised"
           :class="{ 'bg-surface-raised': item.conversation.id === store.activeId }"
+          role="button"
+          tabindex="0"
           @click="
+            emit('select', item.conversation.id);
+            close();
+          "
+          @keydown.enter="
             emit('select', item.conversation.id);
             close();
           "
@@ -197,13 +240,38 @@ onBeforeUnmount(() => {
             <OnIcon :name="icons[item.conversation.id] ?? 'lucide:message-circle'" :size="14" />
           </span>
           <span class="min-w-0 flex-1">
-            <b class="block truncate text-11.5px font-600 text-ink-primary">{{ item.title }}</b>
+            <input
+              v-if="editingId === item.conversation.id"
+              v-model="editTitle"
+              class="w-full rounded-tiny border border-solid border-line-default bg-surface-inset px-4px text-11.5px text-ink-primary outline-none"
+              autofocus
+              @click.stop
+              @keydown.enter.stop="commitRename"
+              @keydown.esc.stop="editingId = ''"
+              @blur="commitRename"
+            />
+            <b v-else class="block truncate text-11.5px font-600 text-ink-primary">{{ item.title }}</b>
             <span class="mt-1px block truncate text-11px text-ink-tertiary">{{ item.preview }}</span>
           </span>
-          <time class="mt-1px shrink-0 text-11px tabular-nums text-ink-tertiary">{{
-            timeOf(item.conversation.updatedAt)
-          }}</time>
-        </button>
+          <span class="flex shrink-0 items-center gap-2px">
+            <button
+              type="button"
+              class="flex h-20px w-20px items-center justify-center rounded-tiny text-ink-tertiary opacity-0 outline-none hover:bg-surface-control hover:text-ink-primary focus-visible:opacity-100 group-hover:opacity-100"
+              :aria-label="content.history.rename"
+              @click.stop="startRename(item.conversation.id)"
+            >
+              <OnIcon name="lucide:pencil" :size="11" />
+            </button>
+            <button
+              type="button"
+              class="flex h-20px w-20px items-center justify-center rounded-tiny text-ink-tertiary opacity-0 outline-none hover:bg-surface-control hover:text-status-danger focus-visible:opacity-100 group-hover:opacity-100"
+              :aria-label="content.history.delete"
+              @click.stop="removeConversation(item.conversation.id)"
+            >
+              <OnIcon name="lucide:trash-2" :size="11" />
+            </button>
+          </span>
+        </div>
       </div>
     </div>
     <div

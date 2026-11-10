@@ -23,6 +23,7 @@ const toasts = useToasts();
 const { appLocale } = useAppLocale();
 
 const confirmOpen = ref(false);
+const demoCards = import.meta.env.MODE === 'web';
 const pkg = computed(() => props.message.package ?? null);
 const packageState = computed(() =>
   pkg.value ? pkgState.stateOf(pkg.value.kind, pkg.value.token, pkg.value.disabled) : null
@@ -81,14 +82,6 @@ function onPackageAction() {
     });
     return;
   }
-  if (!hermes.mac.install) {
-    toasts.push({
-      tone: 'warning',
-      title: content.value.common.installPaused,
-      description: content.value.common.installPausedBody
-    });
-    return;
-  }
   if (hermes.mac.confirmWrites) {
     confirmOpen.value = true;
     return;
@@ -144,6 +137,23 @@ function onPackageCancel() {
       </div>
 
       <details
+        v-if="message.reasoning"
+        class="group overflow-hidden rounded-small border border-solid border-line-subtle bg-surface-card"
+      >
+        <summary
+          class="flex h-32px cursor-pointer list-none items-center gap-8px px-10px text-11px text-ink-tertiary outline-none focus-visible:shadow-focus-ring"
+        >
+          <OnIcon name="lucide:brain" :size="13" />
+          {{ content.composer.thinking }}
+          <OnIcon name="lucide:chevron-down" :size="13" class="ml-auto transition-transform group-open:rotate-180" />
+        </summary>
+        <pre
+          class="m-0 max-h-220px overflow-auto whitespace-pre-wrap break-words border-t border-t-solid border-line-subtle px-10px py-8px font-sans text-11px leading-[1.55] text-ink-tertiary"
+          >{{ message.reasoning }}</pre
+        >
+      </details>
+
+      <details
         v-if="message.tools?.length"
         class="group overflow-hidden rounded-small border border-solid border-line-subtle bg-surface-card"
       >
@@ -183,7 +193,7 @@ function onPackageCancel() {
       </div>
 
       <div
-        v-if="pkg && packageState"
+        v-if="demoCards && pkg && packageState"
         class="flex flex-col gap-12px rounded-big border border-solid border-line-subtle bg-surface-card p-14px"
       >
         <div class="flex items-start gap-12px">
@@ -247,7 +257,7 @@ function onPackageCancel() {
       </div>
 
       <div
-        v-if="message.card === 'cleanup'"
+        v-if="demoCards && message.card === 'cleanup'"
         class="flex flex-col gap-12px rounded-big border border-solid border-line-subtle bg-surface-card p-14px"
       >
         <div class="flex items-start gap-12px">
@@ -302,7 +312,7 @@ function onPackageCancel() {
       </div>
 
       <div
-        v-if="message.card === 'updates'"
+        v-if="demoCards && message.card === 'updates'"
         class="flex flex-col gap-12px rounded-big border border-solid border-line-subtle bg-surface-card p-14px"
       >
         <div class="flex items-start gap-12px">
@@ -345,7 +355,7 @@ function onPackageCancel() {
       </div>
 
       <div
-        v-if="message.card === 'explain'"
+        v-if="demoCards && message.card === 'explain'"
         class="flex flex-col gap-12px rounded-big border border-solid border-line-subtle bg-surface-card p-14px"
       >
         <div class="flex items-start gap-12px">

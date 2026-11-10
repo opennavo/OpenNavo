@@ -88,6 +88,68 @@ pub fn hermes_secret_delete(provider: String) -> Result<(), AppError> {
 
 #[tauri::command]
 #[specta::specta]
+pub fn hermes_audit_read(
+    app: tauri::AppHandle,
+    limit: usize,
+) -> Result<Vec<crate::hermes::HermesAuditEntry>, AppError> {
+    crate::hermes::audit_entries(&app, limit)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_mcp_action(
+    app: tauri::AppHandle,
+    action: String,
+    name: String,
+    url: String,
+) -> Result<String, AppError> {
+    crate::hermes::mcp_action(&app, &action, &name, &url).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_skill_action(
+    app: tauri::AppHandle,
+    action: String,
+    identifier: String,
+) -> Result<String, AppError> {
+    crate::hermes::skill_action(&app, &action, &identifier).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_tool_action(
+    app: tauri::AppHandle,
+    action: String,
+    name: String,
+) -> Result<String, AppError> {
+    crate::hermes::tool_action(&app, &action, &name).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_cron_action(
+    app: tauri::AppHandle,
+    action: String,
+    job_id: String,
+) -> Result<String, AppError> {
+    crate::hermes::cron_action(&app, &action, &job_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_cli_read(app: tauri::AppHandle, kind: String) -> Result<String, AppError> {
+    crate::hermes::cli_read(&app, &kind).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_logs_open(app: tauri::AppHandle) -> Result<(), AppError> {
+    crate::hermes::open_logs(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn hermes_audit_open(app: tauri::AppHandle) -> Result<(), AppError> {
     hermes::open_audit(&app)
 }
@@ -103,11 +165,70 @@ pub async fn hermes_runtime_install(
 
 #[tauri::command]
 #[specta::specta]
+pub fn hermes_runtime_install_cancel(
+    state: State<'_, Arc<HermesRuntimeState>>,
+) -> Result<(), AppError> {
+    crate::hermes::install::cancel(state.inner());
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn hermes_runtime_uninstall(
     app: tauri::AppHandle,
     state: State<'_, Arc<HermesRuntimeState>>,
 ) -> Result<HermesRuntimeStatus, AppError> {
     hermes::install::uninstall(app, state.inner()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_logout(app: tauri::AppHandle, provider: String) -> Result<(), AppError> {
+    crate::hermes::logout(&app, &provider).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_history_load(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+    crate::hermes::history_load(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_history_save(app: tauri::AppHandle, json: String) -> Result<(), AppError> {
+    crate::hermes::history_save(&app, &json)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_attachment_preview(path: String) -> Result<Option<String>, AppError> {
+    crate::hermes::attachment_preview(&path)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_clipboard_image(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+    crate::hermes::clipboard_image(&app)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_attachment_info(paths: Vec<String>) -> Vec<crate::hermes::HermesAttachmentInfo> {
+    crate::hermes::attachment_info(paths)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_permissions_request_screen() -> bool {
+    crate::hermes::permissions::request_screen_capture()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_permissions_status(
+    app: tauri::AppHandle,
+) -> Result<crate::hermes::permissions::HermesPermissions, AppError> {
+    crate::hermes::permissions::status(&app)
 }
 
 #[tauri::command]

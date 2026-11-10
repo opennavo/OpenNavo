@@ -18,6 +18,7 @@ import {
 } from '@/hermes/providers';
 import type { HermesProvider } from '@/hermes/providers';
 import type { HermesMacSettings, HermesModelSettings } from '@/stores/hermes';
+import type { HermesAuditEntry, HermesPermissions } from '@/ipc/bindings';
 import type { HermesSettingsTab } from '@/stores/hermesUi';
 
 const props = defineProps<{ open: boolean; tab: HermesSettingsTab }>();
@@ -35,10 +36,26 @@ const uninstallOpen = ref(false);
 const modelOpen = ref(false);
 const auxOpen = ref(false);
 const testing = ref(false);
+const permissions = ref<HermesPermissions | null>(null);
+const auditOpen = ref(false);
+const auditEntries = ref<HermesAuditEntry[]>([]);
+const auditLoading = ref(false);
+const cliKind = ref('tools');
+const cliOutput = ref('');
+const cliLoading = ref(false);
+const cronJobId = ref('');
+const cronBusy = ref(false);
+const skillName = ref('');
+const toolName = ref('');
+const actionBusy = ref(false);
+const mcpName = ref('');
+const mcpUrl = ref('');
+const mcpBusy = ref(false);
 const testMessage = ref('');
 const testOk = ref<boolean | null>(null);
 const modelPicker = ref<HTMLElement>();
 const LEVELS = ['open', 'guarded', 'full'] as const;
+const MAC_CAPABILITIES = ['terminal', 'screen', 'files', 'cron'] as const;
 
 const provider = computed(() => HERMES_PROVIDER_MAP[draftModel.value.provider]);
 const providerCopy = computed(() => content.value.providers[draftModel.value.provider]);
@@ -62,7 +79,7 @@ const officialProvider = computed(() => {
 });
 const officialAuthenticated = computed(() => officialProvider.value?.authenticated ?? false);
 const models = computed(() => {
-  const official = officialAuthenticated.value ? (officialProvider.value?.models ?? []) : [];
+  const official = officialProvider.value?.models ?? [];
   return official.length ? official : providerModels(draftModel.value.provider);
 });
 const needsImport = computed(() => loginDetected.value && !officialAuthenticated.value);
@@ -75,6 +92,7 @@ const modelOptionsUpdated = computed(() => {
   return content.value.settings.model.updatedHours.replace('{count}', String(Math.round(minutes / 60)));
 });
 const officialWarning = computed(() => {
+  if (!officialProvider.value?.models?.length) return content.value.settings.model.fallbackModels;
   if (provider.value.login && needsImport.value) return '';
   if (provider.value.localAuth && (draftModel.value.keySet || localAuthDetected.value)) return '';
   return officialProvider.value?.warning ?? '';
@@ -242,6 +260,22 @@ async function openLogin() {
   }
 }
 
+async function logout() {
+  const key = provider.value.login;
+  if (!key) return;
+  try {
+    await unwrap(commands.hermesLogout(key));
+    await refreshLogin();
+    store.resetSession();
+    await store.loadModelOptions(true, draftModel.value, secret.value);
+    alignOfficialModel();
+    toasts.push({ tone: 'success', title: content.value.settings.model.logout, description: providerCopy.value.name });
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.model.logout, description: detail });
+  }
+}
+
 async function cancelLogin() {
   try {
     await unwrap(commands.hermesLoginCancel());
@@ -303,6 +337,7 @@ watch(
     auxOpen.value = false;
     resetTest();
     void refreshSecret();
+    void refreshPermissions();
     if (store.modelOptions) alignOfficialModel();
     else if (!store.modelOptionsLoading) {
       void store.loadModelOptions(false, draftModel.value, secret.value).then(alignOfficialModel);
@@ -312,7 +347,10 @@ watch(
 watch(
   () => props.tab,
   tab => {
-    if (props.open) activeTab.value = tab;
+    if (props.open) {
+      activeTab.value = tab;
+      if (tab === 'mac') void refreshPermissions();
+    }
   }
 );
 
@@ -335,6 +373,19 @@ async function selectProvider(id: HermesProvider) {
   );
   if (!hasCachedModels) await store.loadModelOptions(false, draftModel.value, secret.value);
   alignOfficialModel();
+}
+
+function toggleMaster(enabled: boolean) {
+  draftMac.value.enabled = enabled;
+  // Turning Mac control on is an explicit grant: enable every capability in one
+  // step. Individual switches below can still be turned off afterwards.
+  if (enabled) {
+    for (const key of MAC_CAPABILITIES) draftMac.value[key] = true;
+    if (draftMac.value.level === 'open') {
+      draftMac.value.level = 'guarded';
+      draftMac.value.confirmWrites = true;
+    }
+  }
 }
 
 function selectLevel(level: HermesMacSettings['level']) {
@@ -382,6 +433,19 @@ async function save() {
   emit('close');
 }
 
+async function removeApiKey() {
+  try {
+    await unwrap(commands.hermesSecretDelete(draftModel.value.provider));
+    draftModel.value.keySet = false;
+    secret.value = '';
+    resetTest();
+    toasts.push({ tone: 'success', title: content.value.settings.model.keyRemoved });
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.model.removeKey, description: detail });
+  }
+}
+
 async function testConnection() {
   if (testing.value) return;
   testing.value = true;
@@ -411,6 +475,37 @@ function stopMac() {
   toasts.push({ tone: 'warning', title: content.value.common.stopped, description: content.value.common.stoppedBody });
 }
 
+async function requestScreenPermission() {
+  try {
+    await commands.hermesPermissionsRequestScreen();
+    await refreshPermissions();
+  } catch {
+    // The system may deny without surfacing an error.
+  }
+}
+
+async function refreshPermissions() {
+  try {
+    permissions.value = await unwrap(commands.hermesPermissionsStatus());
+  } catch {
+    permissions.value = null;
+  }
+}
+
+function permissionText(value: boolean | undefined) {
+  if (value === undefined) return content.value.settings.mac.unknown;
+  return value ? content.value.settings.mac.granted : content.value.settings.mac.notGranted;
+}
+
+function permissionDot(value: boolean | undefined) {
+  if (value === undefined) return 'bg-status-warning';
+  return value ? 'bg-status-success' : 'bg-status-warning';
+}
+
+function openPermission(pane: string) {
+  void openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+}
+
 function checkPermissions() {
   void openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
   toasts.push({
@@ -420,13 +515,118 @@ function checkPermissions() {
   });
 }
 
+async function updateRuntime() {
+  const ok = await store.installRuntime();
+  if (ok) {
+    toasts.push({ tone: 'success', title: content.value.install.complete, description: store.runtime?.version ?? '' });
+  }
+}
+
 async function uninstallHermes() {
   const ok = await store.uninstallRuntime();
   uninstallOpen.value = false;
   if (ok) emit('close');
 }
 
+async function loadCli(kind: string) {
+  cliKind.value = kind;
+  cliLoading.value = true;
+  try {
+    cliOutput.value = await unwrap(commands.hermesCliRead(kind));
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    cliOutput.value = detail;
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.title, description: detail });
+  } finally {
+    cliLoading.value = false;
+  }
+}
+
+async function runCronAction(action: 'pause' | 'resume' | 'remove') {
+  if (!cronJobId.value.trim() || cronBusy.value) return;
+  if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.cronConfirm)) return;
+  cronBusy.value = true;
+  try {
+    await unwrap(commands.hermesCronAction(action, cronJobId.value.trim()));
+    await loadCli('cron');
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.cron, description: detail });
+  } finally {
+    cronBusy.value = false;
+  }
+}
+
+async function runMcp(action: 'list' | 'add' | 'remove') {
+  if (action !== 'list' && !mcpName.value.trim()) return;
+  if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.mcpRemoveConfirm)) return;
+  mcpBusy.value = true;
+  try {
+    const output = await unwrap(commands.hermesMcpAction(action, mcpName.value.trim(), mcpUrl.value.trim()));
+    if (action === 'list') cliOutput.value = output;
+    else await loadCli('tools');
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: 'MCP', description: detail });
+  } finally {
+    mcpBusy.value = false;
+  }
+}
+
+async function runSkillAction(action: 'install' | 'uninstall') {
+  if (!skillName.value.trim() || actionBusy.value) return;
+  if (action === 'install' && !window.confirm(content.value.settings.diagnostics.installConfirm)) return;
+  if (action === 'uninstall' && !window.confirm(content.value.settings.diagnostics.uninstallConfirm)) return;
+  actionBusy.value = true;
+  try {
+    await unwrap(commands.hermesSkillAction(action, skillName.value.trim()));
+    await loadCli('skills');
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.skills, description: detail });
+  } finally {
+    actionBusy.value = false;
+  }
+}
+
+async function runToolAction(action: 'enable' | 'disable') {
+  if (!toolName.value.trim() || actionBusy.value) return;
+  if (action === 'disable' && !window.confirm(content.value.settings.diagnostics.disableConfirm)) return;
+  actionBusy.value = true;
+  try {
+    await unwrap(commands.hermesToolAction(action, toolName.value.trim()));
+    await loadCli('tools');
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.tools, description: detail });
+  } finally {
+    actionBusy.value = false;
+  }
+}
+
 async function openAudit() {
+  auditOpen.value = true;
+  auditLoading.value = true;
+  try {
+    auditEntries.value = await unwrap(commands.hermesAuditRead(100));
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.mac.audit, description: detail });
+  } finally {
+    auditLoading.value = false;
+  }
+}
+
+async function openLogs() {
+  try {
+    await unwrap(commands.hermesLogsOpen());
+  } catch (error) {
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.mac.openLogs, description: detail });
+  }
+}
+
+async function openAuditFile() {
   try {
     await unwrap(commands.hermesAuditOpen());
   } catch (error) {
@@ -501,6 +701,21 @@ onBeforeUnmount(() => {
               @click="activeTab = 'mac'"
             >
               {{ content.settings.tabs.mac }}
+            </button>
+            <button
+              type="button"
+              class="h-32px rounded-small px-10px text-left font-sans text-12px outline-none transition-colors focus-visible:shadow-focus-ring"
+              :class="
+                activeTab === 'tools'
+                  ? 'bg-surface-raised font-600 text-ink-primary'
+                  : 'text-ink-tertiary hover:bg-surface-raised hover:text-ink-secondary'
+              "
+              @click="
+                activeTab = 'tools';
+                loadCli(cliKind);
+              "
+            >
+              {{ content.settings.tabs.tools }}
             </button>
           </nav>
 
@@ -679,6 +894,9 @@ onBeforeUnmount(() => {
                       <OnButton variant="ghost" size="sm" @click="openLogin">{{
                         content.settings.model.login
                       }}</OnButton>
+                      <OnButton v-if="officialAuthenticated" variant="ghost" size="sm" @click="logout">{{
+                        content.settings.model.logout
+                      }}</OnButton>
                     </div>
                   </div>
                   <span class="text-11px leading-[1.45] text-ink-tertiary">{{ content.settings.model.loginHint }}</span>
@@ -731,6 +949,13 @@ onBeforeUnmount(() => {
                   <OnButton variant="ghost" size="sm" :disabled="testing" @click="testConnection">{{
                     testing ? content.settings.model.testing : content.common.test
                   }}</OnButton>
+                  <OnButton
+                    v-if="!provider.login && draftModel.keySet"
+                    variant="ghost"
+                    size="sm"
+                    @click="removeApiKey"
+                    >{{ content.settings.model.removeKey }}</OnButton
+                  >
                   <span
                     class="text-11px"
                     :class="
@@ -788,7 +1013,11 @@ onBeforeUnmount(() => {
                     content.settings.mac.masterHint
                   }}</span>
                 </div>
-                <OnToggle v-model="draftMac.enabled" :aria-label="content.settings.mac.master" />
+                <OnToggle
+                  :model-value="draftMac.enabled"
+                  :aria-label="content.settings.mac.master"
+                  @update:model-value="toggleMaster"
+                />
               </div>
 
               <section class="mb-18px">
@@ -873,19 +1102,6 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="flex items-center gap-12px border-b border-b-solid border-line-subtle py-10px">
                   <div class="min-w-0 flex-1">
-                    <b class="block text-12px font-500 text-ink-primary">{{ content.settings.mac.install }}</b
-                    ><span class="mt-2px block text-11px text-ink-tertiary">{{
-                      content.settings.mac.installHint
-                    }}</span>
-                  </div>
-                  <OnToggle
-                    v-model="draftMac.install"
-                    :disabled="!draftMac.enabled"
-                    :aria-label="content.settings.mac.install"
-                  />
-                </div>
-                <div class="flex items-center gap-12px border-b border-b-solid border-line-subtle py-10px">
-                  <div class="min-w-0 flex-1">
                     <b class="block text-12px font-500 text-ink-primary">{{ content.settings.mac.cron }}</b
                     ><span class="mt-2px block text-11px text-ink-tertiary">{{ content.settings.mac.cronHint }}</span>
                   </div>
@@ -902,21 +1118,61 @@ onBeforeUnmount(() => {
                 <div
                   class="flex items-center gap-8px border-b border-b-solid border-line-subtle py-7px text-11px text-ink-secondary"
                 >
-                  <span class="h-6px w-6px rounded-full bg-status-warning"></span>{{ content.settings.mac.accessibility
-                  }}<b class="ml-auto text-11px font-500 text-ink-tertiary">{{ content.settings.mac.onFirstUse }}</b>
+                  <span class="h-6px w-6px rounded-full" :class="permissionDot(permissions?.accessibility)"></span
+                  >{{ content.settings.mac.accessibility
+                  }}<b class="ml-auto text-11px font-500 text-ink-tertiary">{{
+                    permissionText(permissions?.accessibility)
+                  }}</b>
+                  <button
+                    type="button"
+                    class="flex text-ink-tertiary outline-none hover:text-ink-secondary"
+                    :aria-label="content.settings.mac.accessibilitySettings"
+                    @click="openPermission('Privacy_Accessibility')"
+                  >
+                    <OnIcon name="lucide:arrow-up-right" :size="12" />
+                  </button>
                 </div>
                 <div
                   class="flex items-center gap-8px border-b border-b-solid border-line-subtle py-7px text-11px text-ink-secondary"
                 >
-                  <span class="h-6px w-6px rounded-full bg-status-warning"></span
+                  <span class="h-6px w-6px rounded-full" :class="permissionDot(permissions?.screenRecording)"></span
                   >{{ content.settings.mac.screenRecording
-                  }}<b class="ml-auto text-11px font-500 text-ink-tertiary">{{ content.settings.mac.onFirstUse }}</b>
+                  }}<b class="ml-auto text-11px font-500 text-ink-tertiary">{{
+                    permissionText(permissions?.screenRecording)
+                  }}</b>
+                  <button
+                    v-if="!permissions?.screenRecording"
+                    type="button"
+                    class="text-11px text-ink-tertiary outline-none hover:text-ink-secondary"
+                    @click="requestScreenPermission"
+                  >
+                    {{ content.settings.mac.requestPermission }}
+                  </button>
+                  <button
+                    type="button"
+                    class="flex text-ink-tertiary outline-none hover:text-ink-secondary"
+                    :aria-label="content.settings.mac.screenRecordingSettings"
+                    @click="openPermission('Privacy_ScreenCapture')"
+                  >
+                    <OnIcon name="lucide:arrow-up-right" :size="12" />
+                  </button>
                 </div>
                 <div
                   class="flex items-center gap-8px border-b border-b-solid border-line-subtle py-7px text-11px text-ink-secondary"
                 >
-                  <span class="h-6px w-6px rounded-full bg-status-warning"></span>{{ content.settings.mac.fullDisk
-                  }}<b class="ml-auto text-11px font-500 text-ink-tertiary">{{ content.settings.mac.onFirstUse }}</b>
+                  <span class="h-6px w-6px rounded-full" :class="permissionDot(permissions?.fullDisk)"></span
+                  >{{ content.settings.mac.fullDisk
+                  }}<b class="ml-auto text-11px font-500 text-ink-tertiary">{{
+                    permissionText(permissions?.fullDisk)
+                  }}</b>
+                  <button
+                    type="button"
+                    class="flex text-ink-tertiary outline-none hover:text-ink-secondary"
+                    :aria-label="content.settings.mac.fullDiskSettings"
+                    @click="openPermission('Privacy_AllFiles')"
+                  >
+                    <OnIcon name="lucide:arrow-up-right" :size="12" />
+                  </button>
                 </div>
                 <div
                   class="flex items-center gap-8px border-b border-b-solid border-line-subtle py-7px text-11px text-ink-secondary"
@@ -928,12 +1184,22 @@ onBeforeUnmount(() => {
                   <OnButton variant="ghost" size="sm" @click="checkPermissions">{{
                     content.settings.mac.openSettings
                   }}</OnButton>
+                  <OnButton variant="ghost" size="sm" @click="refreshPermissions">{{
+                    content.settings.mac.refreshPermissions
+                  }}</OnButton>
                   <button
                     type="button"
                     class="inline-flex items-center gap-5px font-sans text-11px text-ink-tertiary outline-none hover:text-ink-secondary focus-visible:shadow-focus-ring"
                     @click="openAudit"
                   >
                     {{ content.settings.mac.audit }} <OnIcon name="lucide:arrow-up-right" :size="12" />
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-5px font-sans text-11px text-ink-tertiary outline-none hover:text-ink-secondary focus-visible:shadow-focus-ring"
+                    @click="openLogs"
+                  >
+                    {{ content.settings.mac.openLogs }} <OnIcon name="lucide:arrow-up-right" :size="12" />
                   </button>
                 </div>
               </section>
@@ -945,10 +1211,139 @@ onBeforeUnmount(() => {
                   class="mt-8px block break-all rounded-small bg-surface-inset px-9px py-7px font-mono text-10.5px text-ink-tertiary"
                   >{{ store.runtime?.dataPath ?? '…' }}</code
                 >
+                <div v-if="store.runtime?.outdated" class="mt-10px flex items-center gap-8px">
+                  <span class="text-11px text-status-warning">{{ content.install.updateAvailable }}</span>
+                  <OnButton variant="accent" size="sm" :disabled="store.installing" @click="updateRuntime">{{
+                    content.install.updateRuntime
+                  }}</OnButton>
+                </div>
                 <OnButton class="mt-10px" variant="danger" size="sm" @click="uninstallOpen = true">{{
                   content.install.uninstall
                 }}</OnButton>
               </section>
+            </template>
+            <template v-if="activeTab === 'tools'">
+              <section class="mb-18px">
+                <h3 class="m-0 text-12px font-600 text-ink-primary">{{ content.settings.diagnostics.title }}</h3>
+                <p class="m-0 mt-3px text-11px leading-[1.5] text-ink-tertiary">
+                  {{ content.settings.diagnostics.body }}
+                </p>
+                <div class="mt-10px flex flex-wrap gap-7px">
+                  <OnButton variant="ghost" size="sm" @click="loadCli('tools')">{{
+                    content.settings.diagnostics.tools
+                  }}</OnButton>
+                  <OnButton variant="ghost" size="sm" @click="loadCli('skills')">{{
+                    content.settings.diagnostics.skills
+                  }}</OnButton>
+                  <OnButton variant="ghost" size="sm" @click="loadCli('cron')">{{
+                    content.settings.diagnostics.cron
+                  }}</OnButton>
+                </div>
+                <div class="mt-10px flex flex-wrap items-center gap-6px">
+                  <input
+                    v-model="cronJobId"
+                    class="h-30px w-220px rounded-small border border-solid border-line-default bg-surface-inset px-9px font-mono text-11px text-ink-primary outline-none focus-visible:shadow-focus-ring"
+                    :placeholder="content.settings.diagnostics.cronJobId"
+                    @keydown.enter="runCronAction('pause')"
+                  />
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="cronBusy || !cronJobId.trim()"
+                    @click="runCronAction('pause')"
+                    >{{ content.settings.diagnostics.pause }}</OnButton
+                  >
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="cronBusy || !cronJobId.trim()"
+                    @click="runCronAction('resume')"
+                    >{{ content.settings.diagnostics.resume }}</OnButton
+                  >
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="cronBusy || !cronJobId.trim()"
+                    @click="runCronAction('remove')"
+                    >{{ content.settings.diagnostics.remove }}</OnButton
+                  >
+                </div>
+                <div class="mt-10px flex flex-wrap items-center gap-6px">
+                  <input
+                    v-model="skillName"
+                    class="h-30px w-260px rounded-small border border-solid border-line-default bg-surface-inset px-9px font-mono text-11px text-ink-primary outline-none focus-visible:shadow-focus-ring"
+                    :placeholder="content.settings.diagnostics.skillName"
+                  />
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="actionBusy || !skillName.trim()"
+                    @click="runSkillAction('install')"
+                    >{{ content.settings.diagnostics.install }}</OnButton
+                  >
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="actionBusy || !skillName.trim()"
+                    @click="runSkillAction('uninstall')"
+                    >{{ content.settings.diagnostics.uninstall }}</OnButton
+                  >
+                </div>
+                <div class="mt-10px flex flex-wrap items-center gap-6px">
+                  <input
+                    v-model="toolName"
+                    class="h-30px w-260px rounded-small border border-solid border-line-default bg-surface-inset px-9px font-mono text-11px text-ink-primary outline-none focus-visible:shadow-focus-ring"
+                    :placeholder="content.settings.diagnostics.toolName"
+                  />
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="actionBusy || !toolName.trim()"
+                    @click="runToolAction('enable')"
+                    >{{ content.settings.diagnostics.enable }}</OnButton
+                  >
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="actionBusy || !toolName.trim()"
+                    @click="runToolAction('disable')"
+                    >{{ content.settings.diagnostics.disable }}</OnButton
+                  >
+                </div>
+                <div class="mt-10px flex flex-wrap items-center gap-6px">
+                  <input
+                    v-model="mcpName"
+                    class="h-30px w-180px rounded-small border border-solid border-line-default bg-surface-inset px-9px font-mono text-11px text-ink-primary outline-none focus-visible:shadow-focus-ring"
+                    :placeholder="content.settings.diagnostics.mcpName"
+                  />
+                  <input
+                    v-model="mcpUrl"
+                    class="h-30px w-260px rounded-small border border-solid border-line-default bg-surface-inset px-9px font-mono text-11px text-ink-primary outline-none focus-visible:shadow-focus-ring"
+                    :placeholder="content.settings.diagnostics.mcpUrl"
+                  />
+                  <OnButton variant="ghost" size="sm" :disabled="mcpBusy" @click="runMcp('list')">{{
+                    content.settings.diagnostics.mcpList
+                  }}</OnButton>
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="mcpBusy || !mcpName.trim() || !mcpUrl.trim()"
+                    @click="runMcp('add')"
+                    >{{ content.settings.diagnostics.mcpAdd }}</OnButton
+                  >
+                  <OnButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="mcpBusy || !mcpName.trim()"
+                    @click="runMcp('remove')"
+                    >{{ content.settings.diagnostics.mcpRemove }}</OnButton
+                  >
+                </div>
+              </section>
+              <pre
+                class="m-0 max-h-460px overflow-auto whitespace-pre-wrap break-words rounded-small border border-solid border-line-subtle bg-surface-inset px-12px py-10px font-mono text-11px leading-[1.55] text-ink-secondary"
+                >{{ cliLoading ? content.common.loading : cliOutput || content.settings.diagnostics.empty }}</pre
+              >
             </template>
           </div>
         </div>
@@ -960,6 +1355,42 @@ onBeforeUnmount(() => {
         </footer>
       </div>
     </div>
+
+    <OnModal
+      :open="auditOpen"
+      :title="content.settings.mac.auditTitle"
+      :description="content.settings.mac.auditNote"
+      size="lg"
+      role="dialog"
+      @close="auditOpen = false"
+    >
+      <div v-if="auditLoading" class="py-24px text-center text-11px text-ink-tertiary">
+        {{ content.common.loading }}
+      </div>
+      <div v-else-if="!auditEntries.length" class="py-24px text-center text-11px text-ink-tertiary">
+        {{ content.settings.mac.auditEmpty }}
+      </div>
+      <div v-else class="max-h-420px overflow-auto">
+        <div
+          v-for="entry in auditEntries"
+          :key="`${entry.at}-${entry.sessionId ?? ''}`"
+          class="flex flex-col gap-3px border-b border-b-solid border-line-subtle py-8px text-11px"
+        >
+          <div class="flex items-center gap-8px">
+            <span class="text-ink-tertiary">{{ entry.at }}</span>
+            <b class="text-ink-primary">{{ entry.provider }} · {{ entry.model }}</b>
+            <span class="ml-auto text-ink-tertiary">{{ entry.outcome }}</span>
+          </div>
+          <div class="text-ink-tertiary">
+            {{ entry.toolsets || 'safe' }} · {{ entry.controlLevel }} · {{ entry.promptChars }} chars
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <OnButton variant="ghost" @click="openAuditFile">{{ content.settings.mac.auditOpenFile }}</OnButton>
+        <OnButton variant="accent" @click="auditOpen = false">{{ content.common.close }}</OnButton>
+      </template>
+    </OnModal>
 
     <OnModal
       :open="uninstallOpen"

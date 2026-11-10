@@ -72,6 +72,7 @@ tar = "0.4"
 plist = "1.10"
 icns = "0.5"
 image = { version = "0.25", default-features = false, features = ["png", "tiff"] }
+arboard = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

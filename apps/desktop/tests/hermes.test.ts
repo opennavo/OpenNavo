@@ -89,6 +89,27 @@ describe('Hermes conversation store', () => {
     expect(store.history[0]?.id).toBe(store.activeId);
   });
 
+  it('Renames, deletes and clears local conversations', async () => {
+    vi.useFakeTimers();
+    const store = useHermesStore();
+    store.send('hello');
+    vi.advanceTimersByTime(600);
+    await nextTick();
+    const id = store.activeId;
+    expect(id).toBeTruthy();
+    store.renameConversation(id!, 'Renamed chat');
+    expect(store.conversations.find(item => item.id === id)?.title).toBe('Renamed chat');
+    store.deleteConversation(id!);
+    expect(store.conversations).toHaveLength(0);
+    expect(store.activeId).toBeNull();
+    store.send('another');
+    vi.advanceTimersByTime(600);
+    await nextTick();
+    store.clearHistory();
+    expect(store.conversations).toHaveLength(0);
+    expect(store.activeId).toBeNull();
+  });
+
   it('Persists model, effort and Mac control settings across store instances', async () => {
     const store = useHermesStore();
     store.saveModel({ ...store.model, provider: 'openai', model: 'GPT-5.6', effort: 'high' });
@@ -118,6 +139,7 @@ describe('Hermes conversation store', () => {
         path: '/tmp/hermes',
         dataPath: '/tmp/OpenNavoData',
         computerUse: true,
+        outdated: false,
         message: null
       }
     });
@@ -159,6 +181,7 @@ describe('Hermes conversation store', () => {
         path: '/tmp/hermes',
         dataPath: '/tmp/OpenNavoData',
         computerUse: true,
+        outdated: false,
         message: null
       }
     });
@@ -209,6 +232,7 @@ describe('Hermes conversation store', () => {
         path: '/tmp/hermes',
         dataPath: '/tmp/OpenNavoData',
         computerUse: true,
+        outdated: false,
         message: null
       }
     });
@@ -255,6 +279,7 @@ describe('Hermes conversation store', () => {
         path: '/tmp/hermes',
         dataPath: '/tmp/OpenNavoData',
         computerUse: true,
+        outdated: false,
         message: null
       }
     });
@@ -309,6 +334,7 @@ describe('Hermes conversation store', () => {
         path: '/tmp/hermes',
         dataPath: '/tmp/OpenNavoData',
         computerUse: true,
+        outdated: false,
         message: null
       }
     });

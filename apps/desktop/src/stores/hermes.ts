@@ -41,10 +41,20 @@ export interface HermesModelSettings {
   keySet: boolean;
 }
 
+export interface HermesToolEvent {
+  requestId: string;
+  phase: 'start' | 'complete';
+  toolId?: string;
+  name: string;
+  label?: string;
+  duration?: number;
+}
+
 export interface HermesToolCall {
   name: string;
   label: string;
   time: string;
+  toolId?: string;
 }
 
 export type HermesCard = 'cleanup' | 'updates' | 'explain';
@@ -65,6 +75,7 @@ export interface HermesMessage {
   steering?: boolean;
   /** True while Hermes is still streaming this message. */
   streaming?: boolean;
+  reasoning?: string;
   at: number;
 }
 
@@ -107,6 +118,7 @@ export interface HermesInstallProgress {
 
 export interface HermesConversation {
   id: string;
+  title?: string;
   messages: HermesMessage[];
   updatedAt: number;
   titleKey?: string;
@@ -269,6 +281,7 @@ export const useHermesStore = defineStore('hermes', () => {
   const activeId = ref<string | null>(initial.activeId);
   const thinking = ref(false);
   const approvalRequest = ref<HermesApprovalRequest | null>(null);
+  const historyReady = ref(false);
   const stopping = ref(false);
   const stopRequested = ref(false);
   const runtime = ref<HermesRuntimeStatus | null>(null);
@@ -289,6 +302,15 @@ export const useHermesStore = defineStore('hermes', () => {
   let activeTurn = 0;
   let stopKillTimer: number | undefined;
   let stopFinalizeTimer: number | undefined;
+  let historySaveTimer: number | undefined;
+  let historyLoaded = false;
+  let historyLoadStarted = false;
+  let historySaveEnabled = true;
+  let historySaveErrorShown = false;
+  let resolveHistoryReady: () => void = () => {};
+  const historyReadyPromise = new Promise<void>(resolve => {
+    resolveHistoryReady = resolve;
+  });
   const pendingSteers = new Map<string, string[]>();
   const queuedAfterTurn = new Map<string, string[]>();
 
@@ -308,6 +330,57 @@ export const useHermesStore = defineStore('hermes', () => {
         .length
   );
 
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+    historyLoaded = true;
+    resolveHistoryReady();
+  }
+
+  function flushHistorySave() {
+    if (!historyLoaded || !historySaveEnabled || typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window))
+      return;
+    if (historySaveTimer) window.clearTimeout(historySaveTimer);
+    const json = JSON.stringify({
+      version: STORAGE_VERSION,
+      conversations: conversations.value,
+      activeId: activeId.value
+    });
+    void commands.hermesHistorySave(json).then(result => {
+      if (result.status === 'error' && !historySaveErrorShown) {
+        historySaveErrorShown = true;
+        toasts.push({
+          tone: 'warning',
+          title: 'Hermes history',
+          description: 'Could not write history.json; keeping the local copy.'
+        });
+      }
+      if (result.status === 'ok') historySaveErrorShown = false;
+    });
+  }
+
+  function scheduleHistorySave() {
+    if (!historyLoaded || !historySaveEnabled || typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window))
+      return;
+    if (historySaveTimer) window.clearTimeout(historySaveTimer);
+    historySaveTimer = window.setTimeout(() => {
+      const json = JSON.stringify({
+        version: STORAGE_VERSION,
+        conversations: conversations.value,
+        activeId: activeId.value
+      });
+      void commands.hermesHistorySave(json).then(result => {
+        if (result.status === 'error' && !historySaveErrorShown) {
+          historySaveErrorShown = true;
+          toasts.push({
+            tone: 'warning',
+            title: 'Hermes history',
+            description: 'Could not write history.json; keeping the local copy.'
+          });
+        }
+        if (result.status === 'ok') historySaveErrorShown = false;
+      });
+    }, 300);
+  }
+
   function persist() {
     if (typeof localStorage === 'undefined') return;
     try {
@@ -324,6 +397,7 @@ export const useHermesStore = defineStore('hermes', () => {
           forceAuxVision: forceAuxVision.value
         } satisfies PersistedHermes)
       );
+      scheduleHistorySave();
     } catch {
       // A full or unavailable localStorage must not break the assistant.
     }
@@ -342,6 +416,7 @@ export const useHermesStore = defineStore('hermes', () => {
         path: null,
         dataPath: null,
         computerUse: false,
+        outdated: false,
         message: error instanceof IpcError ? error.message : String(error)
       };
     }
@@ -372,11 +447,86 @@ export const useHermesStore = defineStore('hermes', () => {
       return runtime.value.ready;
     } catch (error) {
       const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-      toasts.push({ tone: 'danger', title: 'Hermes install', description: detail });
+      const cancelled = /cancel/i.test(detail);
+      toasts.push({ tone: cancelled ? 'info' : 'danger', title: 'Hermes install', description: detail });
       return false;
     } finally {
       unlisten?.();
       installing.value = false;
+    }
+  }
+
+  async function cancelInstall() {
+    try {
+      await unwrap(commands.hermesRuntimeInstallCancel());
+    } catch {
+      // The install may already have finished.
+    }
+  }
+
+  async function loadHistory() {
+    if (historyLoadStarted) {
+      await historyReadyPromise;
+      return;
+    }
+    historyLoadStarted = true;
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+      historyLoaded = true;
+      historyReady.value = true;
+      resolveHistoryReady();
+      return;
+    }
+    let hasBackend = false;
+    try {
+      const raw = await unwrap(commands.hermesHistoryLoad());
+      if (raw) {
+        hasBackend = true;
+        const parsed = JSON.parse(raw) as { conversations?: unknown; activeId?: unknown };
+        if (!Array.isArray(parsed.conversations)) throw new Error('history conversations missing');
+        const restored = parsed.conversations.map(conversation => {
+          if (!conversation || typeof conversation !== 'object') throw new Error('invalid conversation');
+          const entry = conversation as HermesConversation;
+          if (typeof entry.id !== 'string' || !Array.isArray(entry.messages))
+            throw new Error('invalid conversation shape');
+          return {
+            ...entry,
+            messages: entry.messages.map(entryMessage => {
+              if (
+                !entryMessage ||
+                typeof entryMessage !== 'object' ||
+                typeof entryMessage.id !== 'string' ||
+                (entryMessage.role !== 'user' && entryMessage.role !== 'assistant')
+              ) {
+                throw new Error('invalid message');
+              }
+              return { ...entryMessage, streaming: false };
+            }),
+            liveSessionId: undefined
+          };
+        });
+        const localLatest = conversations.value.reduce((latest, item) => Math.max(latest, item.updatedAt || 0), 0);
+        const backendLatest = restored.reduce((latest, item) => Math.max(latest, item.updatedAt || 0), 0);
+        if (localLatest > backendLatest && conversations.value.length) {
+          // Keep local unsaved work and write it back after load instead of
+          // letting an older file erase the current conversation.
+          hasBackend = false;
+        } else {
+          conversations.value = restored;
+          activeId.value = typeof parsed.activeId === 'string' ? parsed.activeId : null;
+        }
+      }
+    } catch {
+      historySaveEnabled = false;
+      toasts.push({
+        tone: 'warning',
+        title: 'Hermes history',
+        description: 'history.json is unreadable; keeping the local copy and leaving the file untouched.'
+      });
+    } finally {
+      historyLoaded = true;
+      historyReady.value = true;
+      if (!hasBackend && historySaveEnabled) scheduleHistorySave();
+      resolveHistoryReady();
     }
   }
 
@@ -492,6 +642,56 @@ export const useHermesStore = defineStore('hermes', () => {
     activeId.value = null;
   }
 
+  async function deleteConversation(idValue: string) {
+    if (historyLoadStarted && !historyLoaded) await historyReadyPromise;
+    const index = conversations.value.findIndex(item => item.id === idValue);
+    if (index < 0) return;
+    if (activeId.value === idValue) {
+      stopThinking();
+      activeId.value = null;
+    }
+    conversations.value = conversations.value.filter(item => item.id !== idValue);
+    persist();
+    flushHistorySave();
+  }
+
+  async function renameConversation(idValue: string, title: string) {
+    if (historyLoadStarted && !historyLoaded) await historyReadyPromise;
+    const target = conversations.value.find(item => item.id === idValue);
+    if (!target) return;
+    const next = title.trim();
+    if (!next) return;
+    target.title = next;
+    target.updatedAt = Date.now();
+    persist();
+    flushHistorySave();
+  }
+
+  async function clearHistory() {
+    if (historyLoadStarted && !historyLoaded) await historyReadyPromise;
+    stopThinking();
+    conversations.value = [];
+    activeId.value = null;
+    persist();
+    flushHistorySave();
+  }
+
+  function exportHistory() {
+    if (typeof document === 'undefined') return;
+    const payload = JSON.stringify(
+      { version: STORAGE_VERSION, exportedAt: new Date().toISOString(), conversations: conversations.value },
+      null,
+      2
+    );
+    const blob = new Blob([payload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `opennavo-hermes-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function ensureConversation(): HermesConversation {
     if (active.value) return active.value;
     const conversation: HermesConversation = { id: id('c'), messages: [], updatedAt: Date.now() };
@@ -576,6 +776,9 @@ export const useHermesStore = defineStore('hermes', () => {
   }
 
   async function send(text: string, attachments: string[] = []) {
+    if (historyLoadStarted && !historyLoaded) {
+      await historyReadyPromise;
+    }
     const value = text.trim();
     if (!value && !attachments.length) return;
     if (thinking.value) {
@@ -673,10 +876,49 @@ export const useHermesStore = defineStore('hermes', () => {
           const unlistenApproval = await listen<HermesApprovalRequest>('hermes-approval', event => {
             approvalRequest.value = event.payload;
           });
+          const unlistenTool = await listen<HermesToolEvent>('hermes-tool', event => {
+            if (event.payload.requestId !== requestId) return;
+            const target = conversations.value.find(item => item.id === conversation.id);
+            const entry = target?.messages.find(item => item.id === assistant.id);
+            if (!entry) return;
+            const calls = [...(entry.tools ?? [])];
+            const existing = event.payload.toolId
+              ? calls.find(call => call.toolId === event.payload.toolId)
+              : [...calls].reverse().find(call => call.name === event.payload.name && call.time === '…');
+            if (event.payload.phase === 'start') {
+              if (!existing) {
+                calls.push({
+                  name: event.payload.name,
+                  label: event.payload.label || event.payload.name,
+                  time: '…',
+                  toolId: event.payload.toolId
+                });
+              }
+            } else if (existing) {
+              existing.label = event.payload.label || existing.label;
+              existing.time = `${event.payload.duration?.toFixed(1) ?? '0.0'}s`;
+            } else {
+              calls.push({
+                name: event.payload.name,
+                label: event.payload.label || event.payload.name,
+                time: `${event.payload.duration?.toFixed(1) ?? '0.0'}s`,
+                toolId: event.payload.toolId
+              });
+            }
+            entry.tools = calls;
+          });
+          const unlistenReasoning = await listen<{ requestId: string; delta: string }>('hermes-reasoning', event => {
+            if (event.payload.requestId !== requestId) return;
+            const target = conversations.value.find(item => item.id === conversation.id);
+            const entry = target?.messages.find(item => item.id === assistant.id);
+            if (entry) entry.reasoning = `${entry.reasoning ?? ''}${event.payload.delta}`;
+          });
           unlisten = () => {
             unlistenChunk();
             unlistenSession();
             unlistenApproval();
+            unlistenTool();
+            unlistenReasoning();
           };
         } catch {
           // Streaming is an enhancement; the final IPC reply still renders.
@@ -925,6 +1167,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     messages,
     history,
     thinking,
+    historyReady,
     approvalRequest,
     respondApproval,
     stopping,
@@ -941,6 +1184,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     installing,
     installProgress,
     installRuntime,
+    cancelInstall,
     uninstallRuntime,
     loginStatus,
     workingDir,
@@ -953,6 +1197,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     loadModelOptions,
     apiKey,
     loadRuntime,
+    loadHistory,
     setApiKey,
     modelShort,
     macActive,
@@ -960,6 +1205,10 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     providers: providerModels,
     select,
     newChat,
+    deleteConversation,
+    renameConversation,
+    clearHistory,
+    exportHistory,
     send,
     stopThinking,
     saveModel,
