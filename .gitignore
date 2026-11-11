@@ -68,6 +68,8 @@ __pycache__/
 !/docs/design/
 /docs/design/*
 !/docs/design/logo/
+!/docs/design/developer-map/
+!/docs/design/developer-submission/
 /AGENTS.md
 /CLAUDE.md
 /docs/design/opennavo-mockups.html

@@ -133,4 +133,29 @@ CROSS JOIN (VALUES ('zh-CN'), ('en-US')) l(locale);
 
 SELECT (SELECT count(*) FROM demo_new_collections) AS added_collections,
        (SELECT count(*) FROM demo_new_features) AS added_features;
+
+-- Developer map demo data: per-App locations and Discover developer picks.
+INSERT INTO package_locations (package_id, country_code, city, city_key, region, lat, lng, source, status, confidence, verified_at)
+SELECT p.id, v.country_code, v.city, v.city_key, v.region, v.lat, v.lng, 'admin', 'approved', 'verified', now()
+FROM (VALUES
+  ('visual-studio-code', 'US', '西雅图', 'seattle', 'americas', 47.6062, -122.3321),
+  ('ghostty', 'US', '旧金山', 'bay-area', 'americas', 37.7749, -122.4194),
+  ('ollama', 'US', '旧金山', 'bay-area', 'americas', 37.7749, -122.4194),
+  ('codex', 'US', '旧金山', 'bay-area', 'americas', 37.7749, -122.4194),
+  ('maestri', 'US', '旧金山', 'bay-area', 'americas', 37.7749, -122.4194),
+  ('masscode', 'DE', '柏林', 'berlin', 'europe', 52.52, 13.405)
+) AS v(token, country_code, city, city_key, region, lat, lng)
+JOIN packages p ON p.kind = 'cask' AND p.token = v.token
+ON CONFLICT (package_id) DO NOTHING;
+
+INSERT INTO developer_picks (package_id, quote, sort, active, published_at)
+SELECT p.id, v.quote, v.sort, TRUE, now()
+FROM (VALUES
+  ('ghostty', '我们把 Ghostty 做成一个原生、快速的终端，希望更多 Mac 用户能用上。', 10),
+  ('visual-studio-code', '从第一次提交到今天，我们一直希望编辑器能更懂开发者。', 20),
+  ('ollama', '让本地模型在 Mac 上跑起来，是我们最想做的事。', 30)
+) AS v(token, quote, sort)
+JOIN packages p ON p.kind = 'cask' AND p.token = v.token
+ON CONFLICT (package_id) DO NOTHING;
+
 COMMIT;

@@ -88,6 +88,7 @@ export type {
   OnDiscoverFeature,
   OnDiscoverHero,
   OnDiscoverLabels,
+  OnDiscoverPick,
   OnDiscoverViewProps
 } from './components/OnDiscoverView.vue';
 export type { OnCommandGroup, OnCommandItem, OnCommandPaletteProps } from './components/OnCommandPalette.vue';

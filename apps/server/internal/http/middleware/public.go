@@ -179,6 +179,13 @@ func PublicCacheHeaders() gin.HandlerFunc {
 		c.Next()
 		c.Writer = writer.ResponseWriter
 		status := writer.Status()
+		// A handler that marks a response private (for example a receipt lookup) wins over
+		// the path-level public cache policy.
+		if c.Writer.Header().Get("Cache-Control") == "no-store" {
+			c.Writer.WriteHeader(status)
+			_, _ = c.Writer.Write(writer.body.Bytes())
+			return
+		}
 		if status == 200 {
 			hash := sha256.Sum256(writer.body.Bytes())
 			etag := c.Writer.Header().Get("ETag")

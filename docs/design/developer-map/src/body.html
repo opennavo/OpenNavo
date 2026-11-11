@@ -1,0 +1,718 @@
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <!--LOGO_DEFS-->
+  <symbol id="brand-mark" viewBox="0 0 24 24">
+    <path fill="url(#onv-n)" d="M5.507,23.52A0.465,0.465 0 0 1 5.042,23.055L5.042,9.839A1.961,1.961 0 0 1 7.003,7.878L8.237,7.878A1.268,1.268 0 0 1 9.331,8.504L14.266,16.909A0.211,0.211 0 0 0 14.659,16.802L14.659,13.205A0.465,0.465 0 0 1 15.124,12.74L17.682,12.74A0.465,0.465 0 0 1 18.147,13.205L18.147,21.559A1.961,1.961 0 0 1 16.186,23.52L14.951,23.52A1.268,1.268 0 0 1 13.857,22.894L8.923,14.489A0.211,0.211 0 0 0 8.529,14.596L8.529,23.055A0.465,0.465 0 0 1 8.064,23.52Z"/>
+    <path fill="url(#onv-s)" d="M16.403,0.48C16.403,4.133 18.007,7.244 19.891,7.244C18.007,7.244 16.403,8.897 16.403,10.837C16.403,8.897 14.799,7.244 12.915,7.244C14.799,7.244 16.403,4.133 16.403,0.48Z"/>
+  </symbol>
+  <!--WORDMARK-->
+  <!--ICONS-->
+</svg>
+
+<div class="review-bar" id="reviewBar" role="group" aria-label="设计评审">
+  <span class="review-label"><svg class="icon"><use href="#ic-sparkles"/></svg>设计评审</span>
+  <div class="review-seg" data-control="mode">
+    <button type="button" data-value="web" class="is-on">网页</button>
+    <button type="button" data-value="desktop">客户端</button>
+  </div>
+  <div class="review-seg" data-control="theme">
+    <button type="button" data-value="dark" class="is-on">深色</button>
+    <button type="button" data-value="light">浅色</button>
+  </div>
+  <button type="button" class="review-action" id="focusMap">定位到地图</button>
+  <button type="button" class="review-action icon-only" id="hideUi" aria-label="隐藏工具条">
+    <svg class="icon"><use href="#ic-x"/></svg>
+  </button>
+</div>
+
+<div class="proto-toast" id="toast" role="status" hidden>
+  <svg class="icon"><use href="#ic-check"/></svg>
+  <span id="toastText"></span>
+</div>
+
+<div class="stage">
+  <div class="window" id="window">
+    <div class="window-chrome" aria-hidden="true">
+      <div class="traffic"><span></span><span></span><span></span></div>
+    </div>
+
+    <div class="app">
+      <aside class="sidebar" aria-label="主导航">
+        <a class="brand" href="#" aria-label="OpenNavo 首页">
+          <svg class="mark" viewBox="0 0 24 24"><use href="#brand-mark"/></svg>
+          <svg class="wordmark" viewBox="0 0 639.616 129.664" aria-hidden="true"><use href="#brand-wordmark"/></svg>
+        </a>
+
+        <div class="only-web">
+          <div class="dl-top-label">MAC 客户端</div>
+          <a class="dl-card" href="#">
+            <svg class="mark" viewBox="0 0 24 24"><use href="#brand-mark"/></svg>
+            <span class="dl-main">
+              <span class="dl-title">OpenNavo for Mac</span>
+              <span class="dl-hint">macOS 13+ · 免费</span>
+            </span>
+            <svg class="icon dl-arrow"><use href="#ic-download"/></svg>
+          </a>
+        </div>
+
+        <nav class="sidebar-nav">
+          <div class="nav-group">
+            <div class="nav-label">浏览</div>
+            <a class="nav-item" href="#discover" data-nav="discover">
+              <svg class="icon"><use href="#ic-compass"/></svg><span>发现</span>
+            </a>
+            <a class="nav-item is-active" href="#developer-map" data-nav="map" aria-current="page">
+              <svg class="icon"><use href="#ic-map"/></svg><span>开发者地图</span>
+            </a>
+            <a class="nav-item only-web" href="#">
+              <svg class="icon"><use href="#ic-layers"/></svg><span>全部应用</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-layout-grid"/></svg><span>分类</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-chart-no-axes-column"/></svg><span>排行榜</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-clock"/></svg><span>最近更新</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-newspaper"/></svg><span>文章</span>
+            </a>
+          </div>
+
+          <div class="nav-group">
+            <div class="nav-label">清单</div>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-library"/></svg><span>合集</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-file-text"/></svg><span>我的清单</span><span class="nav-tail">0</span>
+            </a>
+          </div>
+
+          <div class="nav-group only-desktop">
+            <div class="nav-label">工具</div>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-shield-check"/></svg><span>安全防护</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-brick-wall-fire"/></svg><span>防火墙</span><span class="nav-badge">2</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-activity"/></svg><span>系统监控</span>
+            </a>
+          </div>
+
+          <div class="nav-group only-desktop">
+            <div class="nav-label">我的</div>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-package"/></svg><span>已安装</span><span class="nav-tail">218</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-circle-arrow-down"/></svg><span>更新</span><span class="nav-badge">4</span>
+            </a>
+            <a class="nav-item" href="#">
+              <svg class="icon"><use href="#ic-eraser"/></svg><span>清理工具</span><span class="nav-tail">12.4 GB</span>
+            </a>
+          </div>
+        </nav>
+
+        <div class="sidebar-foot">
+          <a class="nav-item only-web" href="#">
+            <svg class="icon"><use href="#ic-info"/></svg><span>关于</span>
+          </a>
+          <a class="nav-item only-web" href="#">
+            <svg class="icon"><use href="#ic-message-circle"/></svg><span>反馈</span>
+          </a>
+          <a class="nav-item only-desktop" href="#">
+            <svg class="icon"><use href="#ic-sliders-horizontal"/></svg><span>设置</span>
+          </a>
+        </div>
+      </aside>
+
+      <div class="content-col">
+        <header class="compact-bar">
+          <svg class="mark" viewBox="0 0 24 24"><use href="#brand-mark"/></svg>
+          <div class="compact-search"><svg class="icon"><use href="#ic-search"/></svg><span>搜索 App</span></div>
+          <button type="button" class="tool-btn" aria-label="切换外观">
+            <svg class="icon"><use href="#ic-sun"/></svg>
+          </button>
+        </header>
+
+        <header class="toolbar">
+          <div class="toolbar-nav only-desktop">
+            <button type="button" class="tool-btn" aria-label="后退" disabled>
+              <svg class="icon"><use href="#ic-chevron-left"/></svg>
+            </button>
+            <button type="button" class="tool-btn" aria-label="前进" disabled>
+              <svg class="icon"><use href="#ic-chevron-right"/></svg>
+            </button>
+          </div>
+          <div class="toolbar-spacer"></div>
+          <div class="search" role="button" tabindex="0" aria-label="搜索 App，快捷键 Command K">
+            <svg class="icon"><use href="#ic-search"/></svg>
+            <span>搜索 App</span>
+            <kbd>⌘K</kbd>
+          </div>
+          <div class="toolbar-end">
+            <button type="button" class="tool-btn" aria-label="切换外观">
+              <svg class="icon"><use href="#ic-sun"/></svg>
+            </button>
+            <button type="button" class="lang-btn" aria-label="选择语言">
+              <svg class="icon"><use href="#ic-globe"/></svg>
+              <span>简体中文</span>
+              <svg class="icon" style="width: 12px; height: 12px"><use href="#ic-chevron-down"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="content-row">
+          <main class="main" id="main">
+            <div class="view" id="view-discover" hidden>
+              <h1 class="sr-only">发现</h1>
+              <div class="page">
+                <div class="chips" role="list" aria-label="分类">
+                  <a class="chip is-on" href="#" role="listitem">全部</a>
+                  <a class="chip" href="#" role="listitem">AI 工具</a>
+                  <a class="chip" href="#" role="listitem">开发工具</a>
+                  <a class="chip" href="#" role="listitem">终端与 Shell</a>
+                  <a class="chip" href="#" role="listitem">编程语言与运行时</a>
+                  <a class="chip" href="#" role="listitem">数据库</a>
+                  <a class="chip" href="#" role="listitem">虚拟化与容器</a>
+                  <a class="chip" href="#" role="listitem">效率</a>
+                  <a class="chip" href="#" role="listitem">写作与笔记</a>
+                </div>
+
+                <section class="section dev-picks" aria-labelledby="dev-picks-title">
+                <div class="section-head">
+                  <div class="section-head-left">
+                    <h2 id="dev-picks-title">开发者精选</h2>
+                    <p>由开发者提交、认领并维护</p>
+                  </div>
+                  <a class="section-more" href="#">
+                    查看全部
+                    <svg class="icon"><use href="#ic-arrow-right"/></svg>
+                  </a>
+                </div>
+                <div class="dev-picks-grid" id="developerPicks"></div>
+              </section>
+
+              <section class="section" aria-labelledby="popular-title">
+                  <div class="section-head">
+                    <div class="section-head-left">
+                      <h2 id="popular-title">热门 App</h2>
+                      <p>近 30 天 Homebrew 安装量</p>
+                    </div>
+                    <a class="section-more" href="#">
+                      查看排行榜
+                      <svg class="icon"><use href="#ic-arrow-right"/></svg>
+                    </a>
+                  </div>
+                  <div class="app-grid" id="popularGrid"></div>
+                </section>
+
+                <section class="section" aria-labelledby="recent-title">
+                  <div class="section-head">
+                    <div class="section-head-left">
+                      <h2 id="recent-title">最近更新</h2>
+                      <p>刚发布新版本</p>
+                    </div>
+                    <a class="section-more" href="#">
+                      查看全部
+                      <svg class="icon"><use href="#ic-arrow-right"/></svg>
+                    </a>
+                  </div>
+                  <div class="app-grid" id="recentGrid"></div>
+                </section>
+
+                <section class="section" aria-labelledby="collections-title">
+                  <div class="section-head">
+                    <div class="section-head-left">
+                      <h2 id="collections-title">合集</h2>
+                    </div>
+                    <a class="section-more" href="#">
+                      查看全部
+                      <svg class="icon"><use href="#ic-arrow-right"/></svg>
+                    </a>
+                  </div>
+                  <div class="collection-grid" id="collectionGrid"></div>
+                </section>
+              </div>
+            </div>
+
+                        <div class="view map-page" id="view-map">
+              <header class="page-head">
+                <div class="page-head-main">
+                  <h1>开发者地图</h1>
+                  <p class="lede">
+                    <b>7,712</b> 个 App 背后的 <b>1,284</b> 位开发者，来自 46 个国家的 24 个主要城市。
+                  </p>
+                  <div class="map-stats">
+                    <span><b>1,284</b> 收录开发者</span>
+                    <span><b>1,058</b> 已定位</span>
+                    <span><b>24</b> 主要城市</span>
+                    <span><b>46</b> 国家 / 地区</span>
+                  </div>
+                </div>
+                <div class="page-head-actions">
+                  <a class="btn-ghost" data-go="developers">API 文档</a>
+                  <button class="btn-soft" type="button" data-go="submit">提交 App</button>
+                </div>
+              </header>
+
+              <div class="map-tabs" role="tablist" aria-label="开发者地图">
+                <button type="button" class="is-on" data-map-tab="map" role="tab" aria-selected="true"><svg class="icon"><use href="#ic-map"/></svg>地图</button>
+                <button type="button" data-map-tab="submit" role="tab" aria-selected="false"><svg class="icon"><use href="#ic-package-plus"/></svg>提交 App</button>
+                <button type="button" data-map-tab="claim" role="tab" aria-selected="false"><svg class="icon"><use href="#ic-badge-check"/></svg>认领与更新</button>
+                <button type="button" data-map-tab="docs" role="tab" aria-selected="false"><svg class="icon"><use href="#ic-code-xml"/></svg>文档</button>
+              </div>
+              <section class="map-panel" data-map-panel="map">
+              <section class="devmap" id="devmap" aria-label="开发者地图">
+                <div class="dm-card">
+                  <div class="dm-map" id="dmMap">
+                    <svg
+                      class="dm-world"
+                      id="dmWorld"
+                      viewBox="0 0 1000 420"
+                      role="group"
+                      aria-label="世界地图，圆点表示开发者所在城市，圆点越大开发者越多"
+                    >
+                      <defs>
+                        <radialGradient id="dmGlow" cx="50%" cy="50%" r="50%">
+                          <stop offset="0%" stop-color="var(--dm-dot)" stop-opacity=".34" />
+                          <stop offset="52%" stop-color="var(--dm-dot)" stop-opacity=".11" />
+                          <stop offset="100%" stop-color="var(--dm-dot)" stop-opacity="0" />
+                        </radialGradient>
+                      </defs>
+                      <g class="dm-countries" id="dmCountries"><!--COUNTRIES--></g>
+                      <g class="dm-labels" id="dmLabels"></g>
+                      <g class="dm-cities" id="dmCities"></g>
+                    </svg>
+
+                    <div class="dm-controls">
+                      <div class="dm-seg" role="radiogroup" aria-label="圆点大小">
+                        <button type="button" data-metric="developers" class="is-on" role="radio" aria-checked="true">开发者</button>
+                        <button type="button" data-metric="installs" role="radio" aria-checked="false">安装量</button>
+                      </div>
+                    </div>
+
+                    <div class="dm-regions" role="radiogroup" aria-label="地区">
+                      <button type="button" data-region="all" class="is-on" role="radio" aria-checked="true">全球</button>
+                      <button type="button" data-region="americas" role="radio" aria-checked="false">美洲</button>
+                      <button type="button" data-region="europe" role="radio" aria-checked="false">欧洲</button>
+                      <button type="button" data-region="apac" role="radio" aria-checked="false">亚太</button>
+                      <button type="button" data-region="other" role="radio" aria-checked="false">其他</button>
+                    </div>
+
+                    <div class="dm-legend">
+                      <span class="dm-legend-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                      <span>圆点大小 = 开发者数量</span>
+                    </div>
+                    <div class="dm-stamp">更新于 11 月 10 日</div>
+                    <div class="dm-tip" id="dmTip" role="tooltip"></div>
+                  </div>
+
+                  <div class="dm-panel">
+                    <div class="dm-panel-head">
+                      <div class="dm-panel-title" id="dmPanelTitle">开发者最多的城市</div>
+                      <span class="spacer"></span>
+                      <div class="dm-tabs" role="tablist" aria-label="榜单">
+                        <button type="button" data-tab="cities" class="is-on" role="tab" aria-selected="true">城市</button>
+                        <button type="button" data-tab="countries" role="tab" aria-selected="false">国家</button>
+                      </div>
+                      <span class="dm-coverage" id="dmCoverage">已定位 1,058 / 1,284</span>
+                    </div>
+                    <div id="dmGridWrap">
+                      <div class="dm-grid" id="dmGrid"></div>
+                    </div>
+                    <div class="dm-detail" id="dmDetail" hidden></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="all-cities" aria-labelledby="all-cities-title">
+                <div class="section-head">
+                  <div class="section-head-left">
+                    <h2 id="all-cities-title">全部城市</h2>
+                    <p>按开发者数量排序 · 24 个</p>
+                  </div>
+                  <a class="section-more" href="#">
+                    导出 CSV
+                    <svg class="icon"><use href="#ic-download"/></svg>
+                  </a>
+                </div>
+                <div class="city-grid" id="cityGrid"></div>
+              </section>
+              </section>
+
+              <section class="map-panel" data-map-panel="submit" hidden>
+              <section class="link-card">
+                <div class="link-card-head">
+                  <span class="badge accent"><svg class="icon"><use href="#ic-sparkles"/></svg>30 秒提交</span>
+                  <h2>先贴一个链接</h2>
+                  <p>支持 GitHub 仓库、Mac App Store 和官网。抓取失败也可以手动填写。</p>
+                </div>
+                <div class="source-tabs" role="tablist" aria-label="链接类型">
+                  <button type="button" data-source="github" class="is-on" role="tab" aria-selected="true">
+                    <svg class="icon"><use href="#ic-github"/></svg>GitHub
+                  </button>
+                  <button type="button" data-source="appstore" role="tab" aria-selected="false">
+                    <svg class="icon"><use href="#ic-badge-check"/></svg>App Store
+                  </button>
+                  <button type="button" data-source="website" role="tab" aria-selected="false">
+                    <svg class="icon"><use href="#ic-globe"/></svg>官网
+                  </button>
+                </div>
+                <div class="link-row">
+                  <div class="link-input">
+                    <svg class="icon"><use href="#ic-link"/></svg>
+                    <input id="appLink" value="https://github.com/ghostty-org/ghostty" placeholder="https://github.com/owner/app" aria-label="App 链接">
+                  </div>
+                  <button class="btn-soft" type="button" id="fetchInfo">抓取信息</button>
+                </div>
+                <p class="field-hint">只读取公开信息：名称、简介、图标、版本和开发者；不会修改你的仓库或网站。</p>
+              </section>
+
+              <div class="fetch-status" id="fetchStatus" hidden>
+                <span class="fetch-spinner" aria-hidden="true"></span>
+                <div class="fetch-status-main">
+                  <b id="fetchTitle">正在抓取…</b>
+                  <span id="fetchHint">读取公开页面和 API</span>
+                </div>
+              </div>
+
+              <form class="form-shell" id="submitForm" hidden>
+                <div class="form-main">
+                  <div class="form-section">
+                    <div class="form-section-head">
+                      <div class="form-section-title">
+                        <h2>抓取到的信息</h2>
+                        <span class="auto-chip"><svg class="icon"><use href="#ic-sparkles"/></svg>自动抓取</span>
+                      </div>
+                      <p>所有字段都可以修改；编辑审核时还会再核对一遍。</p>
+                    </div>
+                    <div class="field-grid">
+                      <label class="field"><span class="field-label">App 名称 <i>*</i></span><input class="input" id="appName" value="Ghostty"></label>
+                      <label class="field"><span class="field-label">分类 <i>*</i></span><select class="input select" id="appCategory"><option>终端与 Shell</option><option>开发工具</option><option>AI 工具</option><option>效率</option><option>数据库</option></select></label>
+                      <label class="field field-full"><span class="field-label">一句话简介 <i>*</i></span><input class="input" id="appSummary" value="Fast, native terminal emulator for macOS."></label>
+                      <label class="field"><span class="field-label">开发者 / 公司 <i>*</i></span><input class="input" id="devName" value="Ghostty"></label>
+                      <label class="field"><span class="field-label">国家 / 地区 <i>*</i></span><select class="input select" id="devCountry"><option value="US" selected>美国</option><option value="CN">中国</option><option value="GB">英国</option><option value="JP">日本</option><option value="DE">德国</option><option value="FR">法国</option><option value="CA">加拿大</option><option value="AU">澳大利亚</option><option value="NL">荷兰</option><option value="SE">瑞典</option></select></label>
+                      <label class="field"><span class="field-label">城市 <span class="opt">可选</span></span><input class="input" id="devCity" value="西雅图"></label>
+                      <label class="field"><span class="field-label">官网</span><input class="input" id="appHomepage" value="https://ghostty.org"></label>
+                      <label class="field"><span class="field-label">下载链接</span><input class="input" id="appDownload" placeholder="自动抓取或手动填写"></label>
+                      <label class="field field-full"><span class="field-label">GitHub Repo</span><input class="input" id="appGithub" value="https://github.com/ghostty-org/ghostty"></label>
+                      <div class="field field-full">
+                        <span class="field-label">图标</span>
+                        <div class="fetched-media">
+                          <span class="app-icon is-letter" id="fetchedIcon" style="--tile-from:#1C1C1C;--tile-to:#111111"><span class="letter">G</span></span>
+                          <span><b>从链接抓取</b><span>可以替换为 1024×1024 PNG</span></span>
+                          <button class="btn-ghost" type="button">替换</button>
+                        </div>
+                      </div>
+                      <div class="field field-full">
+                        <span class="field-label">截图</span>
+                        <div class="shot-grid">
+                          <button class="shot-add" type="button" aria-label="添加截图"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                          <div class="shot-mock"></div>
+                          <div class="shot-mock alt"></div>
+                        </div>
+                        <span class="field-hint">抓取到 0 张；可以稍后在后台补充。</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="form-section">
+                    <div class="form-section-head"><h2>补充材料（可选）</h2><p>不需要验证。可选填域名、仓库或说明，审核时编辑会自行核对。</p></div>
+                    <div class="verify-options compact" id="verifyOptions">
+                      <label class="verify is-on">
+                        <input type="radio" name="verify" checked>
+                        <span class="verify-icon"><svg class="icon"><use href="#ic-github"/></svg></span>
+                        <span class="verify-main"><b>GitHub 仓库</b><span id="verifyGithubHint">ghostty-org/ghostty · 用仓库 owner 账号登录即可</span></span>
+                      </label>
+                      <label class="verify">
+                        <input type="radio" name="verify">
+                        <span class="verify-icon"><svg class="icon"><use href="#ic-globe"/></svg></span>
+                        <span class="verify-main"><b>官网域名</b><span id="verifyDomainHint">在官网加一条 TXT 记录，或放一个 /.well-known/opennavo.txt。</span></span>
+                      </label>
+                    </div>
+                    <label class="check field-full" style="margin-top: 14px"><input type="checkbox" id="terms"><span>我确认拥有发布权，并授权 OpenNavo 展示图标、截图和简介。</span></label>
+                    <p class="form-error" id="formError" hidden>请补全必填项并勾选授权确认。</p>
+                  </div>
+
+                  <div class="form-actions">
+                    <span class="form-hint">提交后 3–5 个工作日审核；通过后进入发现页「开发者精选」</span>
+                    <button class="btn-soft" type="submit">提交审核</button>
+                  </div>
+                </div>
+
+                <aside class="form-aside">
+                  <div class="preview-card">
+                    <span class="preview-label">卡片预览</span>
+                    <div class="preview-app">
+                      <span class="app-icon is-letter" id="previewIcon" style="--tile-from:#1C1C1C;--tile-to:#111111"><span class="letter">G</span></span>
+                      <div class="preview-app-main"><b id="previewName">Ghostty</b><p id="previewSummary">Fast, native terminal emulator for macOS.</p></div>
+                    </div>
+                    <div class="preview-foot">
+                      <span>开发者</span><b id="previewDev">Ghostty</b>
+                      <span>位置</span><b id="previewLoc">美国 · 西雅图</b>
+                    </div>
+                  </div>
+                  <div class="aside-note">
+                    <h3>抓取到什么</h3>
+                    <ul class="fetched-list" id="fetchedList">
+                      <li><svg class="icon"><use href="#ic-check"/></svg>名称</li>
+                      <li><svg class="icon"><use href="#ic-check"/></svg>简介</li>
+                      <li><svg class="icon"><use href="#ic-check"/></svg>图标</li>
+                      <li><svg class="icon"><use href="#ic-check"/></svg>版本</li>
+                    </ul>
+                  </div>
+                  <div class="aside-note">
+                    <h3>发布后</h3>
+                    <p>通过审核的 App 会进入发现页「开发者精选」，并带上「开发者已认领」标。</p>
+                  </div>
+                </aside>
+              </form>
+
+              <section class="submit-success" id="submitSuccess" hidden>
+                <span class="success-icon"><svg class="icon"><use href="#ic-check"/></svg></span>
+                <h2>提交成功，进入审核</h2>
+                <p id="submitSuccessText">我们已收到「Ghostty」的提交，预计 3–5 个工作日。状态变化会发到 hello@example.com。</p>
+                <div class="success-actions">
+                  <button class="btn-soft" type="button" data-go="map">回到地图</button>
+                  <button class="btn-ghost" type="button" data-go="submit" data-reset-submit>再提交一个</button>
+                </div>
+              </section>
+              </section>
+
+              <section class="map-panel" data-map-panel="claim" hidden>
+              <div class="form-shell">
+                <div class="form-main">
+                  <div class="form-section">
+                    <div class="form-section-head"><h2>选择 App</h2><p>认领后可以更新位置、简介、图标和截图；从客户端打开会自动带入当前 App。</p></div>
+                    <div class="claim-search"><svg class="icon"><use href="#ic-search"/></svg><input placeholder="搜索 App 名称或 token" id="claimSearch"></div>
+                    <div class="claim-results" id="claimResults">
+                      <button class="claim-item is-on" type="button" data-claim-key="visual-studio-code" data-claim-name="Visual Studio Code" data-claim-meta="Microsoft · cask · 1.140.1" data-claim-proof="Microsoft Corporation · Team ID UBF8T346G9" data-claim-verified="true">
+                        <svg class="icon brand"><use href="#ic-vscode"/></svg>
+                        <span class="claim-item-main"><b>Visual Studio Code</b><span>Microsoft · cask · 1.140.1</span></span>
+                        <span class="badge">已收录</span>
+                      </button>
+                      <button class="claim-item" type="button" data-claim-key="ghostty" data-claim-name="Ghostty" data-claim-meta="Ghostty · cask · 1.3.1" data-claim-proof="可选补充材料，编辑会人工核对" data-claim-verified="false">
+                        <svg class="icon brand dark"><use href="#ic-ghostty"/></svg>
+                        <span class="claim-item-main"><b>Ghostty</b><span>Ghostty · cask · 1.3.1</span></span>
+                        <span class="badge">已收录</span>
+                      </button>
+                      <button class="claim-item" type="button" data-claim-key="ollama" data-claim-name="Ollama" data-claim-meta="Ollama · cask · 0.40.1" data-claim-proof="可选补充材料，编辑会人工核对" data-claim-verified="false">
+                        <svg class="icon brand"><use href="#ic-ollama"/></svg>
+                        <span class="claim-item-main"><b>Ollama</b><span>Ollama · cask · 0.40.1</span></span>
+                        <span class="badge">已收录</span>
+                      </button>
+                      <button class="claim-item" type="button" data-claim-key="codex" data-claim-name="Codex" data-claim-meta="OpenAI · cask · 0.161.0" data-claim-proof="可选补充材料，编辑会人工核对" data-claim-verified="false">
+                        <svg class="icon brand"><use href="#ic-openai"/></svg>
+                        <span class="claim-item-main"><b>Codex</b><span>OpenAI · cask · 0.161.0</span></span>
+                        <span class="badge">已收录</span>
+                      </button>
+                    </div>
+
+                    <div class="proof-box">
+                      <span class="proof-icon"><svg class="icon"><use href="#ic-badge-check"/></svg></span>
+                      <div class="proof-main"><b>从客户端识别到签名</b><span id="claimProof">Microsoft Corporation · Team ID UBF8T346G9</span></div>
+                      <span class="badge success" id="claimProofBadge">已审核</span>
+                    </div>
+
+                    <div class="field-grid" style="margin-top: 16px">
+                      <label class="check field-full"><input type="checkbox" id="claimLocationToggle" checked><span>更新开发者位置</span></label>
+                      <label class="check field-full"><input type="checkbox" checked><span>更新简介和分类</span></label>
+                      <label class="check field-full"><input type="checkbox"><span>更新图标和截图</span></label>
+                      <label class="field field-full"><span class="field-label">补充说明</span><textarea class="input textarea" rows="3" placeholder="例如：我们换了官网，想同时更新下载链接"></textarea></label>
+                    </div>
+
+                    <div class="claim-location" id="claimLocationFields">
+                      <div class="form-section-head"><h3>开发者位置</h3><p>只到城市 / 国家；不会展示街道地址。</p></div>
+                      <div class="field-grid">
+                        <label class="field"><span class="field-label">国家 / 地区 <i>*</i></span><select class="input select" id="claimCountry"><option>美国</option><option>中国</option><option>英国</option><option>日本</option><option>德国</option><option>法国</option><option>加拿大</option><option>澳大利亚</option><option>荷兰</option><option>瑞典</option></select></label>
+                        <label class="field"><span class="field-label">城市 <span class="opt">可选</span></span><input class="input" value="旧金山"></label>
+                        <label class="check field-full"><input type="checkbox"><span>远程 / 分布式团队，不绑定固定城市</span></label>
+                        <label class="field field-full"><span class="field-label">证据链接</span><input class="input" placeholder="https://example.com/about"><span class="field-hint">公司 About / Imprint / 联系我们页面，或仓库、说明；只作为审核参考。</span></label>
+                      </div>
+                      <p class="form-note"><svg class="icon"><use href="#ic-info"/></svg>只有国家也能提交；审核通过后才会更新这个 App 在地图上的位置。</p>
+                    </div>
+                    <p class="form-error" id="claimError" hidden>请选择 App；如果要更新位置，请选择国家。</p>
+                  </div>
+                  <div class="form-actions"><button class="btn-ghost" type="button" data-go="map">取消</button><button class="btn-soft" type="button" id="claimSubmit">提交认领与更新</button></div>
+                </div>
+                <aside class="form-aside">
+                  <div class="aside-note">
+                    <h3>认领后能做什么</h3>
+                    <ul>
+                      <li>更新开发者国家 / 城市</li>
+                      <li>更新简介、分类、图标和截图</li>
+                      <li>展示「开发者已认领」标</li>
+                    </ul>
+                  </div>
+                  <div class="aside-note">
+                    <h3>位置会怎么用</h3>
+                    <ul>
+                      <li>这个 App 在开发者地图上的圆点</li>
+                      <li>App 详情的「开发者所在地」</li>
+                      <li>国家 / 地区榜</li>
+                    </ul>
+                  </div>
+                  <div class="aside-note">
+                    <h3>审核方式</h3>
+                    <p>不需要账号或自动验证。编辑会人工核对提交内容，必要时通过邮箱联系。</p>
+                  </div>
+                </aside>
+              </div>
+              </section>
+
+              <section class="map-panel" data-map-panel="docs" hidden>
+              
+
+              <div class="dev-status-strip">
+                <span class="badge accent">提交状态</span>
+                <span>登录后可以查看提交进度、补充材料；审核通常 3–5 个工作日，通过后进入发现页「开发者精选」。</span>
+                <a class="section-more" href="#">查看提交 <svg class="icon"><use href="#ic-arrow-right"/></svg></a>
+              </div>
+
+              <section class="dev-docs" aria-labelledby="dev-api-title">
+                <div class="section-head">
+                  <div class="section-head-left"><h2 id="dev-api-title">API / MCP</h2><p>程序化读取目录、版本、分类和排行榜</p></div>
+                  <a class="section-more" href="#">完整文档 <svg class="icon"><use href="#ic-arrow-up-right"/></svg></a>
+                </div>
+                <div class="dev-docs-grid">
+                  <article class="dev-doc-card">
+                    <span class="dev-doc-icon"><svg class="icon"><use href="#ic-code-xml"/></svg></span>
+                    <h3>REST API</h3>
+                    <p>搜索、App 详情、版本、分类和排行榜；只读，CDN 缓存。</p>
+                    <code>https://api.opennavo.com/api/v1</code>
+                    <a href="#">OpenAPI <svg class="icon"><use href="#ic-arrow-up-right"/></svg></a>
+                  </article>
+                  <article class="dev-doc-card">
+                    <span class="dev-doc-icon"><svg class="icon"><use href="#ic-link"/></svg></span>
+                    <h3>MCP</h3>
+                    <p>让 Claude、Cursor、Codex 等 agent 直接查询目录。</p>
+                    <code>https://opennavo.com/mcp</code>
+                    <a href="#">接入说明 <svg class="icon"><use href="#ic-arrow-up-right"/></svg></a>
+                  </article>
+                  <article class="dev-doc-card">
+                    <span class="dev-doc-icon"><svg class="icon"><use href="#ic-file-check"/></svg></span>
+                    <h3>数据与许可</h3>
+                    <p>目录来自 Homebrew 和开发者提交；保留署名，只读使用。</p>
+                    <code>CC BY 4.0 · GPL-3.0</code>
+                    <a href="#">使用条款 <svg class="icon"><use href="#ic-arrow-up-right"/></svg></a>
+                  </article>
+                </div>
+              </section>
+
+              <section class="dev-docs" aria-labelledby="dev-modes-title">
+                <div class="section-head">
+                  <div class="section-head-left"><h2 id="dev-modes-title">上架方式</h2><p>审核后由编辑选择合适的方式</p></div>
+                </div>
+                <div class="dev-modes">
+                  <article class="dev-mode">
+                    <span class="badge">LINK</span>
+                    <h3>Link 上架</h3>
+                    <p>官网、直接下载或 GitHub，适合不在 Homebrew 的 App；审核通过后直接发布。</p>
+                  </article>
+                  <article class="dev-mode">
+                    <span class="badge">CASK</span>
+                    <h3>Cask 上架</h3>
+                    <p>符合 Homebrew Cask 条件的 App，由编辑代为提 PR，合并后站点同步。</p>
+                  </article>
+                </div>
+              </section>
+              </section>
+            </div>
+</main>
+
+          <aside class="rail" aria-label="统计">
+            <div class="rail-view" id="rail-discover" hidden>
+              <div class="rail-stack">
+                <div class="stat-grid only-desktop">
+                  <div class="stat-tile">
+                    <span class="label">已安装</span>
+                    <span class="value">218</span>
+                    <span class="hint">Homebrew Cask</span>
+                  </div>
+                  <div class="stat-tile">
+                    <span class="label">更新</span>
+                    <span class="value">4<span class="unit">个</span></span>
+                    <span class="hint">1.2 GB 可下载</span>
+                  </div>
+                  <div class="stat-tile">
+                    <span class="label">磁盘</span>
+                    <span class="value">42.6<span class="unit">GB</span></span>
+                    <span class="hint">缓存 8.3 GB</span>
+                  </div>
+                  <div class="stat-tile">
+                    <span class="label">上次检查</span>
+                    <span class="value">2<span class="unit">小时前</span></span>
+                    <span class="hint">每天 09:00</span>
+                  </div>
+                </div>
+
+                <section class="rail-section">
+                  <h2>本周热门</h2>
+                  <p class="rail-sub">近 30 天安装量排行</p>
+                  <ol class="rail-rows" id="railWeekly"></ol>
+                </section>
+
+                <section class="rail-section">
+                  <h2>精选合集</h2>
+                  <div class="collection-card">
+                    <div class="collection-icons" id="railCollectionIcons"></div>
+                    <h3>独立开发者的 Mac 工具箱</h3>
+                    <p class="sub">编辑器、终端、数据库和一点点魔法。</p>
+                    <div class="collection-more">查看 18 个 App</div>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <div class="rail-view" id="rail-map">
+              <div class="rail-stack">
+                <section class="rail-section">
+                  <h2>数据说明</h2>
+                  <div class="rail-note">
+                    <p>由编辑人工维护，只使用公开的团队所在地；不推断个人住址。覆盖率不足时会显示「整理中」。</p>
+                    <div class="rail-note-row"><span>已定位</span><b>1,058 / 1,284</b></div>
+                    <div class="rail-note-row"><span>国家 / 地区</span><b>46</b></div>
+                    <div class="rail-note-row"><span>更新</span><b>每周一</b></div>
+                    <a class="rail-note-link" href="#">
+                      了解数据来源
+                      <svg class="icon"><use href="#ic-arrow-up-right"/></svg>
+                    </a>
+                  </div>
+                </section>
+
+                <section class="rail-section">
+                  <h2>开发者最多的国家</h2>
+                  <ol class="rail-rows" id="railCountries"></ol>
+                </section>
+
+                <section class="rail-section">
+                  <h2>最近加入</h2>
+                  <ul class="recent-devs" id="railRecent"></ul>
+                </section>
+              </div>
+            </div>
+
+          </aside>
+        </div>
+
+<footer class="footer only-web">
+          <div class="footer-brand">
+            <svg class="mark" viewBox="0 0 24 24"><use href="#brand-mark"/></svg>
+            OpenNavo · Mac 上的 Homebrew 应用商店
+          </div>
+          <div class="footer-links">
+            <a href="#">关于</a>
+            <a href="#" data-go="developers">开发者</a>
+            <a href="#">反馈</a>
+            <a href="#">隐私</a>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </div>
+</div>
