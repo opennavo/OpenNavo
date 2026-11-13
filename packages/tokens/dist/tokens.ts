@@ -125,7 +125,9 @@ export const color = {
     "letterIconText": "#FFFFFF",
     "segmentActive": "#262626",
     "menuBarBg": "rgba(38, 38, 40, 0.96)",
-    "menuBarText": "#E6E6E6"
+    "menuBarText": "#E6E6E6",
+    "scrollbarThumb": "rgba(255, 255, 255, 0.28)",
+    "scrollbarThumbHover": "rgba(255, 255, 255, 0.45)"
   },
   "macos": {
     "close": "#FF5F57",
@@ -506,7 +508,9 @@ export const lightTheme = {
       "letterIconText": "#FFFFFF",
       "segmentActive": "#FFFFFF",
       "menuBarBg": "rgba(246, 246, 246, 0.96)",
-      "menuBarText": "#1F1F1F"
+      "menuBarText": "#1F1F1F",
+      "scrollbarThumb": "rgba(0, 0, 0, 0.28)",
+      "scrollbarThumbHover": "rgba(0, 0, 0, 0.45)"
     },
     "macos": {
       "close": "#FF5F57",
@@ -652,6 +656,8 @@ export type TokenVariable =
   | 'component-segment-active'
   | 'component-menu-bar-bg'
   | 'component-menu-bar-text'
+  | 'component-scrollbar-thumb'
+  | 'component-scrollbar-thumb-hover'
   | 'macos-close'
   | 'macos-minimize'
   | 'macos-zoom'

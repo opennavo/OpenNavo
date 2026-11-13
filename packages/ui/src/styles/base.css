@@ -21,6 +21,46 @@ body {
   margin: 0;
 }
 
+/* Scrollbars: a 6px pill in a 10px transparent gutter with no track, so a pane stays quiet and keeps its width.
+   A painted thumb no longer follows the system's overlay behaviour, so it stays visible; the narrow gutter is what
+   keeps that acceptable. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-track-piece,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The 2px transparent border keeps a comfortable grab target while the painted thumb stays 6px wide. */
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--on-radius-full);
+  background-color: var(--on-component-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--on-component-scrollbar-thumb-hover);
+}
+
+/* Arrow buttons belong to Windows scrollbars; the app draws none. */
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* Engines without the pseudo-elements (Firefox) get their own thin bar in the same colour. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--on-component-scrollbar-thumb) transparent;
+  }
+}
+
 /* applyThemePreference sets this for one frame: colors switch together instead of each control fading. */
 [data-theme-switching] *,
 [data-theme-switching] *::before,

@@ -117,7 +117,9 @@ export const theme = {
       "letter-icon-text": "var(--on-component-letter-icon-text)",
       "segment-active": "var(--on-component-segment-active)",
       "menu-bar-bg": "var(--on-component-menu-bar-bg)",
-      "menu-bar-text": "var(--on-component-menu-bar-text)"
+      "menu-bar-text": "var(--on-component-menu-bar-text)",
+      "scrollbar-thumb": "var(--on-component-scrollbar-thumb)",
+      "scrollbar-thumb-hover": "var(--on-component-scrollbar-thumb-hover)"
     },
     "macos": {
       "close": "var(--on-macos-close)",
