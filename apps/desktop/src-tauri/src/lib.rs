@@ -92,6 +92,22 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::hermes::hermes_logout,
             commands::hermes::hermes_login_status,
             commands::hermes::hermes_model_options,
+            commands::hermes::hermes_panel_login,
+            commands::hermes::hermes_panel_sessions,
+            commands::hermes::hermes_panel_session_messages,
+            commands::hermes::hermes_panel_session_rename,
+            commands::hermes::hermes_panel_session_delete,
+            commands::hermes::hermes_panel_logout,
+            commands::hermes::hermes_agent_profiles,
+            commands::hermes::hermes_agent_profile_create,
+            commands::hermes::hermes_agent_profile_rename,
+            commands::hermes::hermes_agent_profile_delete,
+            commands::hermes::hermes_agent_profile_soul,
+            commands::hermes::hermes_agent_profile_soul_save,
+            commands::hermes::hermes_agent_profile_export,
+            commands::hermes::hermes_open_profile_window,
+            commands::hermes::hermes_connection_probe,
+            commands::hermes::hermes_agent_profile_import,
             commands::hermes::hermes_test_connection,
             commands::hermes::hermes_login_start,
             commands::hermes::hermes_login_input,
@@ -302,24 +318,42 @@ pub async fn blocking<T: Send + 'static>(
         .map_err(|e| AppError::new("E_UNKNOWN", "blocking_task").with_detail(e.to_string()))?
 }
 
-/// Export TS bindings to src/ipc/bindings.ts relative to src-tauri.
-pub fn write_bindings(builder: &Builder<tauri::Wry>) -> Result<(), String> {
-    builder
-        .export(
-            specta_typescript::Typescript::default().header(BINDINGS_HEADER),
-            "../src/ipc/bindings.ts",
-        )
-        .map_err(|error| error.to_string())?;
+/// Path of the generated TypeScript bindings, relative to `src-tauri`.
+const BINDINGS_PATH: &str = "../src/ipc/bindings.ts";
+
+/// Render the TypeScript bindings without touching the tracked file.
+///
+/// `tauri-specta` can only export to a path, so render into a scratch file and read it
+/// back. Keeping rendering separate from [`write_bindings`] is what lets `cargo test`
+/// verify the committed bindings instead of silently rewriting a tracked file.
+pub fn render_bindings(builder: &Builder<tauri::Wry>) -> Result<String, String> {
+    let scratch = std::env::temp_dir().join(format!(
+        "opennavo-bindings-{}-{:?}.ts",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let result = builder.export(
+        specta_typescript::Typescript::default().header(BINDINGS_HEADER),
+        &scratch,
+    );
+    let generated = match result {
+        Ok(()) => std::fs::read_to_string(&scratch).map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    };
+    let _ = std::fs::remove_file(&scratch);
     // Specta can leave trailing spaces when wrapping long union types.
-    let path = "../src/ipc/bindings.ts";
-    let generated = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let normalized = generated
+    Ok(generated?
         .lines()
         .map(str::trim_end)
         .collect::<Vec<_>>()
         .join("\n")
-        + "\n";
-    std::fs::write(path, normalized).map_err(|error| error.to_string())
+        + "\n")
+}
+
+/// Export TS bindings to src/ipc/bindings.ts relative to src-tauri.
+pub fn write_bindings(builder: &Builder<tauri::Wry>) -> Result<(), String> {
+    let normalized = render_bindings(builder)?;
+    std::fs::write(BINDINGS_PATH, normalized).map_err(|error| error.to_string())
 }
 
 /// A Finder-launched app gets a soft limit of 256 open files. Cleanup walks and removes folders on several threads,
@@ -359,7 +393,10 @@ pub fn run() {
     let specta = specta_builder();
     let hidden = lifecycle::hidden_launch(&std::env::args().collect::<Vec<_>>());
 
-    // Export bindings synchronously on development startup to match frontend types and commands; failure does not prevent running.
+    // Export bindings synchronously on development startup so the frontend always matches the
+    // commands being run; failure does not prevent running. This is the only implicit writer:
+    // `cargo test` verifies the committed file instead (see `export_bindings`), and `pnpm gen`
+    // writes it explicitly.
     #[cfg(debug_assertions)]
     if let Err(error) = write_bindings(&specta) {
         eprintln!("Failed to export IPC bindings: {error}");
@@ -512,6 +549,7 @@ pub fn run() {
             }))?;
             core.install_settings_save(save)?;
             app.manage(core.clone());
+            hermes::init(app.handle());
             app.manage(std::sync::Arc::new(hermes::HermesRuntimeState::default()));
             app.manage(std::sync::Arc::new(
                 hermes::login_session::HermesLoginState::default(),
@@ -577,12 +615,45 @@ pub fn run() {
     }
 }
 
+/// One-line description of where the committed bindings diverge, so a stale file does
+/// not dump a whole TypeScript diff into the test output.
+#[cfg(test)]
+fn first_binding_difference(committed: &str, generated: &str) -> String {
+    for (index, (left, right)) in committed.lines().zip(generated.lines()).enumerate() {
+        if left != right {
+            return format!(
+                "line {}: committed {left:?}, generated {right:?}",
+                index + 1
+            );
+        }
+    }
+    format!(
+        "committed {} lines, generated {} lines",
+        committed.lines().count(),
+        generated.lines().count()
+    )
+}
+
 /// The root-level name matches gen's --exact filter, avoiding successful commands that run zero tests.
+///
+/// Writing is opt-in through `OPENNAVO_WRITE_BINDINGS` (`pnpm gen` sets it). A plain
+/// `cargo test` must never modify a tracked file, so by default this verifies that the
+/// committed bindings match the Rust commands and fails with a one-line diff hint.
 #[cfg(test)]
 #[test]
 fn export_bindings() {
-    write_bindings(&specta_builder()).expect("binding export must succeed");
-    let bindings = std::fs::read_to_string("../src/ipc/bindings.ts").unwrap();
+    let bindings = render_bindings(&specta_builder()).expect("binding export must succeed");
+    if std::env::var_os("OPENNAVO_WRITE_BINDINGS").is_some() {
+        std::fs::write(BINDINGS_PATH, &bindings).expect("binding export must succeed");
+    } else {
+        let committed = std::fs::read_to_string(BINDINGS_PATH).unwrap_or_default();
+        if committed != bindings {
+            panic!(
+                "{BINDINGS_PATH} is stale ({}); regenerate with `pnpm --filter @opennavo/desktop gen`",
+                first_binding_difference(&committed, &bindings)
+            );
+        }
+    }
     for expected in [
         "permissionSettingsOpen: (pane: PrivacyPane)",
         "relaunchIneffective: boolean",

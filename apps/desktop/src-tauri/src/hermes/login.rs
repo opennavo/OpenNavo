@@ -7,7 +7,7 @@ use std::process::Command;
 use serde::Serialize;
 use tauri::AppHandle;
 
-use super::{AppError, hermes_home};
+use super::{AppError, hermes_home, profiles};
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -120,23 +120,6 @@ fn has_hermes_provider_at(home: &std::path::Path, provider: &str) -> bool {
     active || legacy || pooled
 }
 
-fn claude_keychain_exists() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("security")
-            .args(["find-generic-password", "-s", "Claude Code-credentials"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        false
-    }
-}
-
 fn gh_token_exists() -> bool {
     Command::new("gh")
         .args(["auth", "token"])
@@ -145,15 +128,21 @@ fn gh_token_exists() -> bool {
         .unwrap_or(false)
 }
 
-pub fn hermes_authenticated(app: &AppHandle, provider: &str) -> bool {
-    hermes_home(app)
-        .ok()
+/// Hermes home whose `auth.json` holds this login: the root for `default`, otherwise
+/// `<root>/profiles/<name>`. The OAuth store is per profile, so a login performed while a
+/// named profile is selected must be looked up there and not in the shared root.
+pub fn profile_home(app: &AppHandle, profile: Option<&str>) -> Result<PathBuf, AppError> {
+    profiles::resolve_home(&hermes_home(app)?, profile)
+}
+
+pub fn hermes_authenticated(app: &AppHandle, provider: &str, profile: Option<&str>) -> bool {
+    profile_home(app, profile)
         .map(|home| has_hermes_provider_at(&home, provider))
         .unwrap_or(false)
 }
 
-pub fn status(app: &AppHandle) -> Result<HermesLoginStatus, AppError> {
-    let hermes = hermes_home(app).ok();
+pub fn status(app: &AppHandle, profile: Option<&str>) -> Result<HermesLoginStatus, AppError> {
+    let hermes = profile_home(app, profile).ok();
     let has = |provider: &str| {
         hermes
             .as_ref()
@@ -161,7 +150,7 @@ pub fn status(app: &AppHandle) -> Result<HermesLoginStatus, AppError> {
             .unwrap_or(false)
     };
     let codex = has_codex_tokens() || has("openai-codex");
-    let claude_code = claude_file().is_file() || claude_keychain_exists() || has("anthropic");
+    let claude_code = claude_file().is_file() || has("anthropic");
     let copilot = copilot_file().is_file() || gh_token_exists() || has("copilot");
     let opencode = opencode_key("opencode").is_some() || opencode_key("opencode-zen").is_some();
     let opencode_go = opencode_key("opencode-go").is_some();
@@ -178,14 +167,14 @@ pub fn status(app: &AppHandle) -> Result<HermesLoginStatus, AppError> {
             if claude_file().is_file() {
                 claude_file().display().to_string()
             } else {
-                "macOS Keychain · Claude Code-credentials".into()
+                "Hermes auth store · anthropic".into()
             }
         }),
         copilot_source: copilot.then(|| "GitHub CLI / Copilot hosts.json".into()),
         opencode_source: opencode.then(|| opencode_auth_path().display().to_string()),
         opencode_go_source: opencode_go.then(|| opencode_auth_path().display().to_string()),
         nous_source: nous.then(|| {
-            hermes_home(app)
+            profile_home(app, profile)
                 .map(|path| path.display().to_string())
                 .unwrap_or_default()
         }),
@@ -234,7 +223,7 @@ mod tests {
     fn detects_local_cli_credentials() {
         assert!(has_codex_tokens(), "Codex CLI auth not detected");
         assert!(
-            claude_keychain_exists() || claude_file().is_file(),
+            claude_file().is_file() || has_codex_tokens(),
             "Claude Code auth not detected"
         );
         assert!(gh_token_exists(), "GitHub CLI auth not detected");

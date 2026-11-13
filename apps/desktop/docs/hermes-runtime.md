@@ -33,10 +33,11 @@ All Hermes runtime/state lives under:
 - `runtime/hermes/` — optional runtime
 - `hermes/` — HERMES_HOME, sessions, memory, logs, audit
 
-API keys are stored in the macOS Keychain (`com.opennavo.desktop.hermes`). The
-gateway receives the resolved key at process start through an inherited file
-descriptor and keeps it only in an in-memory `os.environ` overlay; it is never
-written to `hermes/`, `.env`, `config.yaml`, or the process exec environment.
+Provider API keys live in `hermes/.env` (`HERMES_HOME/.env`), the same file the
+official `hermes` CLI and dashboard read and write, as `KEY=value` lines in a
+`0600` file. Nothing is written to `config.yaml`, and the app does not maintain a
+credential store of its own. The accepted threat model is upstream's: plaintext,
+owner-only, no encryption and no Keychain.
 WebKit's own WebsiteData remains under `~/Library/WebKit/com.opennavo.desktop/`.
 
 ## Runtime contract
@@ -47,8 +48,8 @@ WebKit's own WebsiteData remains under `~/Library/WebKit/com.opennavo.desktop/`.
 - `hermes_runtime_install` downloads/copies the runtime into
   `OpenNavoData/runtime/hermes`, emits `hermes-install-progress`, and verifies
   the optional SHA-256. `hermes_runtime_uninstall` removes `OpenNavoData` and
-  deletes the provider Keychain items; CuaDriver and macOS TCC grants are left
-  alone.
+  deletes the stored keys and panel sessions with it; CuaDriver and macOS TCC
+  grants are left alone.
 - `hermes_chat` starts a local `hermes serve` gateway and streams
   `message.delta` frames from `/api/ws` as `hermes-chunk` Tauri events. The
   final `message.complete` frame becomes the persisted assistant message.
@@ -58,11 +59,11 @@ WebKit's own WebsiteData remains under `~/Library/WebKit/com.opennavo.desktop/`.
   safe modes do not, and approvals are denied unless the user grants
   them. The gateway toolsets are selected with `HERMES_TUI_TOOLSETS`.
 - `hermes_stop` interrupts the active child and stops the gateway.
-- Provider keys live in the macOS Keychain (`com.opennavo.desktop.hermes`);
-  the commands are `hermes_secret_set`, `hermes_secret_status`, and
-  `hermes_secret_delete`. Before each turn the app reads the key, removes any
-  app-managed row older builds wrote to `HERMES_HOME/auth.json` (and any managed
-  line in `.env`), then starts the runtime with the key on an inherited file
+- Provider keys live in `HERMES_HOME/.env`; the commands are
+  `hermes_secret_set`, `hermes_secret_status`, and `hermes_secret_delete`. A key
+  supplied with a turn is written to that file; the runtime reads it itself.
+  `HERMES_HOME/auth.json` belongs to Hermes (OAuth grants and the credential pool)
+  and is never read, rewritten or scrubbed by the app. Legacy note: before this
   descriptor. A bootstrap installs an `os.environ` overlay before Hermes imports:
   lookups by name see the key, while iteration, `copy()`, and child process
   environments do not. The key is also absent from the exec environment, so

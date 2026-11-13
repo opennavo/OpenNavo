@@ -17,28 +17,13 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 
 use super::{
-    AppError, HermesRuntimeState, HermesRuntimeStatus, data_root, hermes_home, runtime_root,
-    secret_delete, status, stop,
+    AppError, HermesRuntimeState, HermesRuntimeStatus, data_root, hermes_home,
+    panel_sessions_forget, runtime_root, status, stop,
 };
 
 const DEFAULT_RUNTIME_URL: &str = "https://github.com/opennavo/OpenNavo/releases/download/hermes-runtime-v0.23.0/runtime-0.23.0-macos-arm64.tar.gz";
 const DEFAULT_RUNTIME_SHA256: &str =
     "36601db39c3a20b381192dfa08969b7f0a4fe52d70d8e8a1475a0986d7c244fc";
-const PROVIDERS: &[&str] = &[
-    "nous",
-    "openai",
-    "anthropic",
-    "google",
-    "openrouter",
-    "local",
-    "custom",
-    "codex",
-    "claude-code",
-    "copilot",
-    "opencode",
-    "opencode-go",
-];
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HermesInstallProgress {
@@ -301,9 +286,9 @@ pub async fn uninstall(
     if root.exists() {
         std::fs::remove_dir_all(&root)?;
     }
-    for provider in PROVIDERS {
-        let _ = secret_delete(provider);
-    }
+    // `.env` (provider keys) and `.opennavo/session.json` (panel sessions) live under
+    // the data root that was just removed; drop the in-process cache as well.
+    panel_sessions_forget();
     status(app).await
 }
 

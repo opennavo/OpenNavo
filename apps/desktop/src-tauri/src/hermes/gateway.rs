@@ -21,7 +21,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use super::{
     AppError, HermesChatInput, HermesChatReply, HermesChunk, HermesModelOptions,
     HermesRuntimeState, HermesUsage, append_audit, clean_output, kill_pid, provider_id,
-    reasoning_effort, scrub_credential_env, toolsets, write_config,
+    reasoning_effort, toolsets, write_catalog_config, write_config,
 };
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -53,12 +53,13 @@ impl GatewayServer {
     }
 }
 
-fn server_fingerprint(input: &HermesChatInput, key: Option<&str>, env_cleaned: bool) -> String {
+fn server_fingerprint(input: &HermesChatInput, key: Option<&str>) -> String {
     format!(
         "{}|{}|{}|{}|{}|{}|{}",
+        input.profile.as_deref().unwrap_or("default"),
         provider_id(&input.provider),
         input.endpoint.as_deref().unwrap_or(""),
-        key.unwrap_or(""),
+        key.map(key_digest).unwrap_or_default(),
         toolsets(input),
         input
             .auxiliary
@@ -67,10 +68,18 @@ fn server_fingerprint(input: &HermesChatInput, key: Option<&str>, env_cleaned: b
             .map(|entry| format!("{}:{}:{}", entry.task, entry.provider, entry.model))
             .collect::<Vec<_>>()
             .join(","),
-        input.force_aux_vision,
-        // A migrated `.env` must not keep its secret in an already-running gateway.
-        if env_cleaned { "env-cleaned" } else { "" }
+        input.force_aux_vision
     )
+}
+
+/// A running gateway keeps whatever key it loaded at startup, so a changed key has to
+/// restart it. Digest the key rather than holding the secret in the fingerprint.
+fn key_digest(key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    digest[..16].to_owned()
 }
 
 fn apply_runtime_env(command: &mut Command, bin: &Path) {
@@ -121,9 +130,8 @@ async fn ensure_server(
     state: &HermesRuntimeState,
     input: &HermesChatInput,
     api_key: Option<&str>,
-    env_cleaned: bool,
 ) -> Result<Arc<GatewayServer>, AppError> {
-    let fingerprint = server_fingerprint(input, api_key, env_cleaned);
+    let fingerprint = server_fingerprint(input, api_key);
     let mut guard = state.gateway.lock().await;
     if let Some(server) = guard.as_ref()
         && server.matches(&fingerprint)
@@ -135,8 +143,27 @@ async fn ensure_server(
     let port = free_port()?;
     let token = uuid::Uuid::new_v4().to_string();
     let mut command = super::runtime_command(bin)?;
+    // Always name the profile explicitly: without the flag the runtime follows the sticky
+    // `active_profile` file, so a profile picked in the CLI could silently replace the
+    // default profile whose config/.env we just wrote.
+    let profile = input
+        .profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|profile| !profile.is_empty())
+        .unwrap_or("default");
+    if !super::profiles::name_ok(profile) {
+        return Err(AppError::new(
+            "E_HERMES_PROFILE_NAME",
+            "Profile names must be lowercase letters, digits, dashes or underscores.",
+        ));
+    }
+    command.arg("--profile").arg(profile);
+    command.arg("serve");
+    if profile != "default" {
+        command.arg("--isolated");
+    }
     command
-        .arg("serve")
         .arg("--skip-build")
         .arg("--port")
         .arg(port.to_string())
@@ -147,16 +174,10 @@ async fn ensure_server(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     apply_runtime_env(&mut command, bin);
-    scrub_credential_env(&mut command);
-    let secret = match (api_key, super::secret_env_var(&input.provider)) {
-        (Some(key), Some(name)) => Some(super::attach_secret(&mut command, name, key)?),
-        _ => None,
-    };
     let child = command.spawn().map_err(|error| {
         AppError::new("E_HERMES_GATEWAY", "Hermes gateway could not start.")
             .with_detail(error.to_string())
     })?;
-    drop(secret);
     let pid = child.id().unwrap_or(0);
     let deadline = Instant::now() + START_TIMEOUT;
     while Instant::now() < deadline {
@@ -258,8 +279,13 @@ async fn open_session(
     socket: &mut Socket,
     input: &HermesChatInput,
     home: &Path,
+    remote: bool,
 ) -> Result<(String, String), AppError> {
-    let provider = provider_id(&input.provider);
+    let provider = if remote {
+        input.provider.clone()
+    } else {
+        provider_id(&input.provider).to_owned()
+    };
     let model = input.model.clone();
     let effort = reasoning_effort(&input.effort);
     if let Some(stored) = input
@@ -281,24 +307,38 @@ async fn open_session(
             return Ok((live.to_owned(), stored_id));
         }
     }
-    let cwd = input
-        .cwd
-        .as_deref()
-        .map(str::trim)
-        .filter(|dir| !dir.is_empty() && Path::new(dir).is_dir())
-        .map(str::to_owned)
-        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| home.display().to_string()));
     let mut params = json!({
         "cols": 120,
         "title": input.prompt.chars().take(60).collect::<String>(),
         "source": "desktop",
-        "cwd": cwd,
         "model": model,
         "provider": provider,
         "fast": input.fast
     });
+    // A remote host cannot see this Mac's paths, so never send `cwd` (or fall back to this
+    // Mac's HOME) on a remote request: it only leaked the local working directory.
+    if !remote {
+        let cwd = input
+            .cwd
+            .as_deref()
+            .map(str::trim)
+            .filter(|dir| !dir.is_empty() && Path::new(dir).is_dir())
+            .map(str::to_owned)
+            .or_else(|| Some(std::env::var("HOME").unwrap_or_else(|_| home.display().to_string())));
+        if let Some(cwd) = cwd {
+            params["cwd"] = Value::String(cwd);
+        }
+    }
     if let Some(effort) = effort {
         params["reasoning_effort"] = Value::String(effort.to_owned());
+    }
+    if let Some(profile) = input
+        .profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|profile| !profile.is_empty() && *profile != "default")
+    {
+        params["profile"] = Value::String(profile.to_owned());
     }
     let result = rpc(socket, 1, "session.create", params).await?;
     let live = result
@@ -329,27 +369,110 @@ pub async fn chat(
     app: Option<&AppHandle>,
     sink: Option<UnboundedSender<String>>,
 ) -> Result<HermesChatReply, AppError> {
-    let (api_key, env_cleaned) = write_config(home, &input)?;
-    let server = ensure_server(bin, home, state, &input, api_key.as_deref(), env_cleaned).await?;
+    // `--profile` makes the runtime re-home to `<root>/profiles/<name>` before it reads any
+    // config, so the model and `.env` must be written there rather than to the shared root.
+    let config_home = super::profiles::resolve_home(home, input.profile.as_deref())?;
+    let api_key = write_config(&config_home, &input)?;
+    let server = ensure_server(bin, &config_home, state, &input, api_key.as_deref()).await?;
     let url = format!(
         "ws://127.0.0.1:{}/api/ws?token={}",
         server.port, server.token
     );
-    let (mut socket, _) = connect_async(url).await.map_err(|error| {
+    let (socket, _) = connect_async(url).await.map_err(|error| {
         AppError::new(
             "E_HERMES_GATEWAY_STREAM",
             "Could not connect to the Hermes gateway.",
         )
         .with_detail(error.to_string())
     })?;
-    let (live_sid, stored_sid) = open_session(&mut socket, &input, home).await?;
+    chat_over_socket(socket, home, state, input, app, sink, false).await
+}
+
+fn remote_ws_url_auth(url: &str, query: &str) -> Result<String, AppError> {
+    let url = url.trim();
+    let url = if let Some(rest) = url.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        url.to_owned()
+    };
+    if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+        return Err(AppError::new(
+            "E_HERMES_REMOTE_URL",
+            "Remote gateway URL must start with ws://, wss://, http:// or https://.",
+        ));
+    }
+    let (mut base, existing) = match url.split_once('?') {
+        Some((base, query)) => (base.to_owned(), Some(query)),
+        None => (url, None),
+    };
+    // Keep any panel mount prefix (`https://host/hermes`) instead of treating it as the
+    // WebSocket endpoint; only append `/api/ws` when the path is not already that endpoint.
+    base = base.trim_end_matches('/').to_owned();
+    if let Some(trimmed) = base.strip_suffix("/login") {
+        base = trimmed.trim_end_matches('/').to_owned();
+    }
+    if !base.ends_with("/api/ws") {
+        base.push_str("/api/ws");
+    }
+    let query = existing
+        .map(|existing| format!("{existing}&{query}"))
+        .unwrap_or_else(|| query.to_owned());
+    Ok(format!("{base}?{query}"))
+}
+
+async fn connect_remote_auth(url: &str, query: &str) -> Result<Socket, AppError> {
+    let ws_url = remote_ws_url_auth(url, query)?;
+    let (socket, _) = timeout(START_TIMEOUT, connect_async(ws_url))
+        .await
+        .map_err(|_| {
+            AppError::new(
+                "E_HERMES_REMOTE_TIMEOUT",
+                "Remote gateway connection timed out.",
+            )
+        })?
+        .map_err(|error| {
+            AppError::new(
+                "E_HERMES_REMOTE_CONNECT",
+                "Could not connect to the remote Hermes gateway.",
+            )
+            .with_detail(error.to_string())
+        })?;
+    Ok(socket)
+}
+
+pub async fn chat_remote_auth(
+    url: &str,
+    query: &str,
+    home: &Path,
+    state: &HermesRuntimeState,
+    input: HermesChatInput,
+    app: Option<&AppHandle>,
+    sink: Option<UnboundedSender<String>>,
+) -> Result<HermesChatReply, AppError> {
+    let socket = connect_remote_auth(url, query).await?;
+    chat_over_socket(socket, home, state, input, app, sink, true).await
+}
+
+async fn chat_over_socket(
+    mut socket: Socket,
+    home: &Path,
+    state: &HermesRuntimeState,
+    input: HermesChatInput,
+    app: Option<&AppHandle>,
+    sink: Option<UnboundedSender<String>>,
+    remote: bool,
+) -> Result<HermesChatReply, AppError> {
+    let (live_sid, stored_sid) = open_session(&mut socket, &input, home, remote).await?;
     if let Some(app) = app {
         let _ = app.emit(
             "hermes-session",
             json!({"requestId": input.request_id, "liveSessionId": live_sid, "sessionId": stored_sid}),
         );
     }
-    let full_control = input.mac_enabled && input.control_level == "full" && !input.confirm_writes;
+    let full_control =
+        !remote && input.mac_enabled && input.control_level == "full" && !input.confirm_writes;
     if full_control {
         let _ = rpc(
             &mut socket,
@@ -358,6 +481,12 @@ pub async fn chat(
             json!({"session_id": live_sid, "key": "yolo", "value": true, "scope": "session"}),
         )
         .await;
+    }
+    if remote && !input.attachments.is_empty() {
+        return Err(AppError::new(
+            "E_HERMES_REMOTE_ATTACHMENT",
+            "Remote gateways do not accept local attachment paths yet.",
+        ));
     }
     let mut prompt = input.prompt.clone();
     for (index, attachment) in input.attachments.iter().enumerate() {
@@ -545,7 +674,11 @@ pub async fn chat(
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                let choice = if input.confirm_writes {
+                // A remote host still owns its tools, so its approval must reach the user even
+                // though this Mac's capabilities are forced off. The old branch silently
+                // denied every remote tool because `full_control` requires `!remote`.
+                let ask_user = input.confirm_writes || remote;
+                let choice = if ask_user {
                     if let Some(app) = app {
                         let _ = app.emit("hermes-approval", payload.clone());
                     }
@@ -620,6 +753,48 @@ pub async fn interrupt(state: &HermesRuntimeState, live_session_id: &str) -> Res
     Ok(())
 }
 
+pub async fn interrupt_remote_auth(
+    url: &str,
+    query: &str,
+    live_session_id: &str,
+) -> Result<(), AppError> {
+    let mut socket = connect_remote_auth(url, query).await?;
+    rpc(
+        &mut socket,
+        1,
+        "session.interrupt",
+        json!({"session_id": live_session_id}),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn steer_remote_auth(
+    url: &str,
+    query: &str,
+    live_session_id: &str,
+    text: &str,
+) -> Result<(), AppError> {
+    if text.trim().is_empty() {
+        return Err(AppError::new("E_HERMES_INPUT", "The message is empty."));
+    }
+    let mut socket = connect_remote_auth(url, query).await?;
+    let result = rpc(
+        &mut socket,
+        1,
+        "session.steer",
+        json!({"session_id": live_session_id, "text": text}),
+    )
+    .await?;
+    if result.get("status").and_then(Value::as_str) == Some("rejected") {
+        return Err(AppError::new(
+            "E_HERMES_STEER",
+            "The running agent did not accept the steering message.",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn steer(
     state: &HermesRuntimeState,
     live_session_id: &str,
@@ -654,19 +829,39 @@ pub async fn model_options(
     refresh: bool,
     include_unconfigured: bool,
 ) -> Result<HermesModelOptions, AppError> {
-    let (api_key, env_cleaned) = write_config(home, &input)?;
-    let server = ensure_server(bin, home, state, &input, api_key.as_deref(), env_cleaned).await?;
+    let config_home = super::profiles::resolve_home(home, input.profile.as_deref())?;
+    // A catalog read must not rewrite the profile's model, agent or auxiliary settings: the
+    // settings sheet loads a profile's catalog just by selecting it, passing that profile's
+    // saved draft (or the built-in default when this window never opened it), so a full write
+    // here replaced the profile's own model with whatever the draft happened to hold.
+    let api_key = write_catalog_config(&config_home, &input)?;
+    let server = ensure_server(bin, &config_home, state, &input, api_key.as_deref()).await?;
     let url = format!(
         "ws://127.0.0.1:{}/api/ws?token={}",
         server.port, server.token
     );
-    let (mut socket, _) = connect_async(url).await.map_err(|error| {
+    let (socket, _) = connect_async(url).await.map_err(|error| {
         AppError::new(
             "E_HERMES_GATEWAY_STREAM",
             "Could not connect to the Hermes gateway.",
         )
         .with_detail(error.to_string())
     })?;
+    model_options_over_socket(
+        socket,
+        refresh,
+        include_unconfigured,
+        input.profile.as_deref(),
+    )
+    .await
+}
+
+async fn model_options_over_socket(
+    mut socket: Socket,
+    refresh: bool,
+    include_unconfigured: bool,
+    profile: Option<&str>,
+) -> Result<HermesModelOptions, AppError> {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(45),
         rpc(
@@ -675,7 +870,8 @@ pub async fn model_options(
             "model.options",
             json!({
                 "include_unconfigured": include_unconfigured,
-                "refresh": refresh
+                "refresh": refresh,
+                "profile": profile.filter(|value| !value.trim().is_empty() && *value != "default")
             }),
         ),
     )
@@ -695,6 +891,17 @@ pub async fn model_options(
     })
 }
 
+pub async fn model_options_remote_auth(
+    url: &str,
+    query: &str,
+    profile: Option<&str>,
+    refresh: bool,
+    include_unconfigured: bool,
+) -> Result<HermesModelOptions, AppError> {
+    let socket = connect_remote_auth(url, query).await?;
+    model_options_over_socket(socket, refresh, include_unconfigured, profile).await
+}
+
 /// Test seam used by the ignored real-runtime tests.
 #[cfg(test)]
 pub async fn chat_for_test(
@@ -710,6 +917,34 @@ pub async fn chat_for_test(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn login_path_normalizes_to_the_ws_endpoint() {
+        assert_eq!(
+            remote_ws_url_auth("http://panel.tail1234.ts.net:9119/login", "ticket=abc").unwrap(),
+            "ws://panel.tail1234.ts.net:9119/api/ws?ticket=abc"
+        );
+    }
+
+    #[test]
+    fn keeps_a_panel_prefix_when_building_the_ws_endpoint() {
+        assert_eq!(
+            remote_ws_url_auth("https://host/hermes", "ticket=abc").unwrap(),
+            "wss://host/hermes/api/ws?ticket=abc"
+        );
+        assert_eq!(
+            remote_ws_url_auth("https://host/hermes/", "ticket=abc").unwrap(),
+            "wss://host/hermes/api/ws?ticket=abc"
+        );
+        assert_eq!(
+            remote_ws_url_auth("https://host/hermes/api/ws", "ticket=abc").unwrap(),
+            "wss://host/hermes/api/ws?ticket=abc"
+        );
+        assert_eq!(
+            remote_ws_url_auth("https://host/hermes/login", "ticket=abc").unwrap(),
+            "wss://host/hermes/api/ws?ticket=abc"
+        );
+    }
 
     #[tokio::test]
     #[ignore = "requires HERMES_RUNTIME_BIN, HERMES_TEST_ENDPOINT, HERMES_TEST_API_KEY and HERMES_TEST_MODEL"]
@@ -732,6 +967,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: Some(key.clone()),
             endpoint: Some(endpoint.clone()),
             mac_enabled: false,
@@ -759,6 +998,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: Some(key),
             endpoint: Some(endpoint),
             mac_enabled: false,
@@ -803,6 +1046,10 @@ mod tests {
             attachments: vec![file.display().to_string()],
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: Some(key),
             endpoint: Some(endpoint),
             mac_enabled: false,
@@ -845,6 +1092,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+        profile: None,
+        panel_auth: false,
             api_key: Some(key),
             endpoint: Some(endpoint),
             mac_enabled: true,
@@ -883,6 +1134,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: None,
             endpoint: None,
             mac_enabled: false,
@@ -927,6 +1182,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+        profile: None,
+        panel_auth: false,
             api_key: Some(key),
             endpoint: Some(endpoint),
             mac_enabled: false,

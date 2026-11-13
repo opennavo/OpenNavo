@@ -14,7 +14,7 @@ use regex::Regex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use super::{AppError, data_root, hermes_home, login, runtime_bin};
+use super::{AppError, data_root, env_store, login, runtime_bin};
 
 #[derive(Default)]
 pub struct HermesLoginState {
@@ -59,57 +59,52 @@ fn open_url(url: &str) {
     let _ = std::process::Command::new("/usr/bin/open").arg(url).spawn();
 }
 
-fn login_command(bin: &Path, provider: &str) -> Result<Vec<String>, AppError> {
-    let bin = bin.display().to_string();
-    Ok(match provider {
-        "codex" => vec![
-            bin,
-            "auth".into(),
-            "add".into(),
-            "openai-codex".into(),
-            "--type".into(),
-            "oauth".into(),
-            "--no-browser".into(),
-        ],
-        "claude-code" => vec![
-            bin,
-            "auth".into(),
-            "add".into(),
-            "anthropic".into(),
-            "--type".into(),
-            "oauth".into(),
-            "--no-browser".into(),
-        ],
-        "copilot" => vec![
-            bin,
-            "auth".into(),
-            "add".into(),
-            "copilot".into(),
-            "--type".into(),
-            "oauth".into(),
-            "--no-browser".into(),
-        ],
-        "nous" => vec![
-            bin,
-            "auth".into(),
-            "add".into(),
-            "nous".into(),
-            "--type".into(),
-            "oauth".into(),
-        ],
-        other => {
-            return Err(AppError::new(
-                "E_HERMES_LOGIN",
-                format!("Unknown login provider: {other}"),
-            ));
+fn login_command(bin: &Path, provider: &str, pin_default: bool) -> Result<Vec<String>, AppError> {
+    // The flag goes before the subcommand: the runtime scans argv for it before argparse, and
+    // without it a sticky `<root>/active_profile` re-homes a default-profile login.
+    let mut args = vec![bin.display().to_string()];
+    if pin_default {
+        args.push("--profile".into());
+        args.push("default".into());
+    }
+    args.extend(
+        match provider {
+            "codex" => vec![
+                "auth",
+                "add",
+                "openai-codex",
+                "--type",
+                "oauth",
+                "--no-browser",
+            ],
+            "claude-code" => vec![
+                "auth",
+                "add",
+                "anthropic",
+                "--type",
+                "oauth",
+                "--no-browser",
+            ],
+            "copilot" => vec!["auth", "add", "copilot", "--type", "oauth", "--no-browser"],
+            "nous" => vec!["auth", "add", "nous", "--type", "oauth"],
+            other => {
+                return Err(AppError::new(
+                    "E_HERMES_LOGIN",
+                    format!("Unknown login provider: {other}"),
+                ));
+            }
         }
-    })
+        .into_iter()
+        .map(str::to_owned),
+    );
+    Ok(args)
 }
 
 pub fn start(
     app: &AppHandle,
     state: Arc<HermesLoginState>,
     provider: &str,
+    profile: Option<&str>,
 ) -> Result<(), AppError> {
     let bin = runtime_bin(app).ok_or_else(|| {
         AppError::new(
@@ -117,10 +112,14 @@ pub fn start(
             "Install the Hermes runtime before logging in.",
         )
     })?;
-    let home = hermes_home(app)?;
+    // A named profile keeps its OAuth store in `<root>/profiles/<name>/auth.json`; the login
+    // command must run against that home or the token lands in the default profile and the
+    // gateway serving the named profile reports the provider as unauthenticated.
+    let home = login::profile_home(app, profile)?;
+    env_store::ensure_dir(&home)?;
     let empty_codex = data_root(app)?.join("codex-login-empty");
     std::fs::create_dir_all(&empty_codex)?;
-    let args = login_command(&bin, provider)?;
+    let args = login_command(&bin, provider, super::profiles::is_default_profile(profile))?;
 
     let mut guard = state
         .inner
@@ -198,6 +197,7 @@ pub fn start(
         cancelled,
         provider.to_owned(),
         failure,
+        profile.map(str::to_owned),
     );
     Ok(())
 }
@@ -336,6 +336,7 @@ fn spawn_waiter(
     cancelled: Arc<AtomicBool>,
     provider: String,
     failure: Arc<Mutex<Option<String>>>,
+    profile: Option<String>,
 ) {
     thread::spawn(move || {
         let status = child.wait();
@@ -348,10 +349,10 @@ fn spawn_waiter(
         }
         let exit_ok = status.map(|value| value.success()).unwrap_or(false);
         let authenticated = match provider.as_str() {
-            "codex" => login::hermes_authenticated(&app, "openai-codex"),
-            "claude-code" => login::hermes_authenticated(&app, "anthropic"),
-            "copilot" => login::hermes_authenticated(&app, "copilot"),
-            "nous" => login::hermes_authenticated(&app, "nous"),
+            "codex" => login::hermes_authenticated(&app, "openai-codex", profile.as_deref()),
+            "claude-code" => login::hermes_authenticated(&app, "anthropic", profile.as_deref()),
+            "copilot" => login::hermes_authenticated(&app, "copilot", profile.as_deref()),
+            "nous" => login::hermes_authenticated(&app, "nous", profile.as_deref()),
             _ => false,
         };
         let ok = !was_cancelled && exit_ok && authenticated && failure_line.is_none();
@@ -397,9 +398,22 @@ mod tests {
     #[test]
     fn builds_provider_commands() {
         let bin = PathBuf::from("/tmp/hermes");
-        assert_eq!(login_command(&bin, "codex").unwrap()[1], "auth");
-        assert_eq!(login_command(&bin, "copilot").unwrap()[1], "auth");
-        assert_eq!(login_command(&bin, "nous").unwrap()[1], "auth");
-        assert!(login_command(&bin, "unknown").is_err());
+        let codex = login_command(&bin, "codex", false).unwrap();
+        assert_eq!(codex[1], "auth");
+        assert_eq!(login_command(&bin, "copilot", false).unwrap()[1], "auth");
+        assert_eq!(login_command(&bin, "nous", false).unwrap()[1], "auth");
+        assert!(login_command(&bin, "unknown", false).is_err());
+    }
+
+    #[test]
+    fn pins_a_default_profile_login_to_the_root_home() {
+        let bin = PathBuf::from("/tmp/hermes");
+        let pinned = login_command(&bin, "codex", true).unwrap();
+        assert_eq!(pinned[1], "--profile");
+        assert_eq!(pinned[2], "default");
+        assert_eq!(pinned[3], "auth");
+        // A named profile is already re-homed by HERMES_HOME pointing inside `profiles/`.
+        let named = login_command(&bin, "codex", false).unwrap();
+        assert!(!named.contains(&"--profile".to_owned()));
     }
 }

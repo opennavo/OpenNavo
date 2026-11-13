@@ -5,7 +5,7 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use super::{AppError, local_opencode_key, login, stored_secret};
+use super::{AppError, env_store, local_opencode_key, login, provider_key_env};
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -13,6 +13,8 @@ pub struct HermesTestInput {
     pub provider: String,
     pub api_key: Option<String>,
     pub endpoint: Option<String>,
+    /// Agent profile whose stored key is probed; `None`/`default` is the root home.
+    pub profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -23,22 +25,28 @@ pub struct HermesTestResult {
     pub message: String,
 }
 
-fn resolve_key(input: &HermesTestInput) -> Option<String> {
-    input
+/// Key the probe should use: an explicit one, else whatever the selected profile's `.env` holds,
+/// else a key from the OpenCode CLI's own store.
+fn resolve_key(app: &AppHandle, input: &HermesTestInput) -> Option<String> {
+    if let Some(key) = input
         .api_key
         .as_deref()
         .map(str::trim)
         .filter(|key| !key.is_empty())
-        .map(str::to_owned)
-        .or_else(|| stored_secret(&input.provider))
-        .or_else(|| local_opencode_key(&input.provider))
+    {
+        return Some(key.to_owned());
+    }
+    let stored = login::profile_home(app, input.profile.as_deref())
+        .ok()
+        .and_then(|home| env_store::env_value(&home, provider_key_env(&input.provider)));
+    stored.or_else(|| local_opencode_key(&input.provider))
 }
 
 pub async fn test(app: AppHandle, input: HermesTestInput) -> Result<HermesTestResult, AppError> {
-    let key = resolve_key(&input);
+    let key = resolve_key(&app, &input);
     let provider = input.provider.as_str();
     if matches!(provider, "codex" | "claude-code" | "copilot" | "nous") {
-        let local = login::status(&app).ok();
+        let local = login::status(&app, input.profile.as_deref()).ok();
         let (hermes_provider, local_detected) = match provider {
             "codex" => (
                 "openai-codex",
@@ -61,7 +69,8 @@ pub async fn test(app: AppHandle, input: HermesTestInput) -> Result<HermesTestRe
             ),
             _ => (provider, false),
         };
-        let authenticated = login::hermes_authenticated(&app, hermes_provider);
+        let authenticated =
+            login::hermes_authenticated(&app, hermes_provider, input.profile.as_deref());
         if authenticated {
             return Ok(HermesTestResult {
                 ok: true,

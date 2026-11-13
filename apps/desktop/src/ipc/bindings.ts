@@ -10,18 +10,18 @@ export const commands = {
 	hermesChat: (input: HermesChatInput) => typedError<HermesChatReply, AppError>(__TAURI_INVOKE("hermes_chat", { input })),
 	hermesStop: () => typedError<null, AppError>(__TAURI_INVOKE("hermes_stop")),
 	hermesApprovalRespond: (choice: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_approval_respond", { choice })),
-	hermesInterrupt: (liveSessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_interrupt", { liveSessionId })),
-	hermesSteer: (liveSessionId: string, text: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_steer", { liveSessionId, text })),
-	hermesSecretSet: (provider: string, key: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_secret_set", { provider, key })),
-	hermesSecretStatus: (provider: string) => typedError<boolean, AppError>(__TAURI_INVOKE("hermes_secret_status", { provider })),
-	hermesSecretDelete: (provider: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_secret_delete", { provider })),
+	hermesInterrupt: (liveSessionId: string, gatewayUrl: string | null, profileId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_interrupt", { liveSessionId, gatewayUrl, profileId })),
+	hermesSteer: (liveSessionId: string, text: string, gatewayUrl: string | null, profileId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_steer", { liveSessionId, text, gatewayUrl, profileId })),
+	hermesSecretSet: (provider: string, key: string, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_secret_set", { provider, key, profile })),
+	hermesSecretStatus: (provider: string, profile: string | null) => typedError<boolean, AppError>(__TAURI_INVOKE("hermes_secret_status", { provider, profile })),
+	hermesSecretDelete: (provider: string, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_secret_delete", { provider, profile })),
 	hermesAuditOpen: () => typedError<null, AppError>(__TAURI_INVOKE("hermes_audit_open")),
 	hermesLogsOpen: () => typedError<null, AppError>(__TAURI_INVOKE("hermes_logs_open")),
-	hermesCliRead: (kind: string) => typedError<string, AppError>(__TAURI_INVOKE("hermes_cli_read", { kind })),
-	hermesCronAction: (action: string, jobId: string) => typedError<string, AppError>(__TAURI_INVOKE("hermes_cron_action", { action, jobId })),
-	hermesMcpAction: (action: string, name: string, url: string) => typedError<string, AppError>(__TAURI_INVOKE("hermes_mcp_action", { action, name, url })),
-	hermesSkillAction: (action: string, identifier: string) => typedError<string, AppError>(__TAURI_INVOKE("hermes_skill_action", { action, identifier })),
-	hermesToolAction: (action: string, name: string) => typedError<string, AppError>(__TAURI_INVOKE("hermes_tool_action", { action, name })),
+	hermesCliRead: (kind: string, profile: string | null) => typedError<string, AppError>(__TAURI_INVOKE("hermes_cli_read", { kind, profile })),
+	hermesCronAction: (action: string, jobId: string, profile: string | null) => typedError<string, AppError>(__TAURI_INVOKE("hermes_cron_action", { action, jobId, profile })),
+	hermesMcpAction: (action: string, name: string, url: string, profile: string | null) => typedError<string, AppError>(__TAURI_INVOKE("hermes_mcp_action", { action, name, url, profile })),
+	hermesSkillAction: (action: string, identifier: string, profile: string | null) => typedError<string, AppError>(__TAURI_INVOKE("hermes_skill_action", { action, identifier, profile })),
+	hermesToolAction: (action: string, name: string, profile: string | null) => typedError<string, AppError>(__TAURI_INVOKE("hermes_tool_action", { action, name, profile })),
 	hermesAuditRead: (limit: number) => typedError<HermesAuditEntry[], AppError>(__TAURI_INVOKE("hermes_audit_read", { limit })),
 	hermesRuntimeInstall: () => typedError<HermesRuntimeStatus, AppError>(__TAURI_INVOKE("hermes_runtime_install")),
 	hermesRuntimeUninstall: () => typedError<HermesRuntimeStatus, AppError>(__TAURI_INVOKE("hermes_runtime_uninstall")),
@@ -31,13 +31,29 @@ export const commands = {
 	hermesAttachmentInfo: (paths: string[]) => __TAURI_INVOKE<HermesAttachmentInfo[]>("hermes_attachment_info", { paths }),
 	hermesClipboardImage: () => typedError<string | null, AppError>(__TAURI_INVOKE("hermes_clipboard_image")),
 	hermesAttachmentPreview: (path: string) => typedError<string | null, AppError>(__TAURI_INVOKE("hermes_attachment_preview", { path })),
-	hermesHistoryLoad: () => typedError<string | null, AppError>(__TAURI_INVOKE("hermes_history_load")),
-	hermesHistorySave: (json: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_history_save", { json })),
-	hermesLogout: (provider: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_logout", { provider })),
-	hermesLoginStatus: () => typedError<HermesLoginStatus, AppError>(__TAURI_INVOKE("hermes_login_status")),
+	hermesHistoryLoad: (profile: string | null) => typedError<string | null, AppError>(__TAURI_INVOKE("hermes_history_load", { profile })),
+	hermesHistorySave: (json: string, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_history_save", { json, profile })),
+	hermesLogout: (provider: string, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_logout", { provider, profile })),
+	hermesLoginStatus: (profile: string | null) => typedError<HermesLoginStatus, AppError>(__TAURI_INVOKE("hermes_login_status", { profile })),
 	hermesModelOptions: (input: HermesModelOptionsInput) => typedError<HermesModelOptions, AppError>(__TAURI_INVOKE("hermes_model_options", { input })),
+	hermesPanelLogin: (profileId: string, baseUrl: string, username: string, password: string) => typedError<PanelLoginResult, AppError>(__TAURI_INVOKE("hermes_panel_login", { profileId, baseUrl, username, password })),
+	hermesPanelSessions: (profileId: string, profile: string | null, limit: number, offset: number) => typedError<string, AppError>(__TAURI_INVOKE("hermes_panel_sessions", { profileId, profile, limit, offset })),
+	hermesPanelSessionMessages: (profileId: string, sessionId: string, profile: string | null, limit: number, offset: number) => typedError<string, AppError>(__TAURI_INVOKE("hermes_panel_session_messages", { profileId, sessionId, profile, limit, offset })),
+	hermesPanelSessionRename: (profileId: string, sessionId: string, title: string, expectedRevision: number, expectedGeneration: number, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_panel_session_rename", { profileId, sessionId, title, expectedRevision, expectedGeneration, profile })),
+	hermesPanelSessionDelete: (profileId: string, sessionId: string, expectedRevision: number, expectedGeneration: number, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_panel_session_delete", { profileId, sessionId, expectedRevision, expectedGeneration, profile })),
+	hermesPanelLogout: (profileId: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_panel_logout", { profileId })),
+	hermesAgentProfiles: (connectionId: string | null, gatewayUrl: string | null) => typedError<HermesAgentProfile[], AppError>(__TAURI_INVOKE("hermes_agent_profiles", { connectionId, gatewayUrl })),
+	hermesAgentProfileCreate: (connectionId: string | null, gatewayUrl: string | null, name: string, cloneFrom: string | null, soul: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_agent_profile_create", { connectionId, gatewayUrl, name, cloneFrom, soul })),
+	hermesAgentProfileRename: (connectionId: string | null, gatewayUrl: string | null, name: string, newName: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_agent_profile_rename", { connectionId, gatewayUrl, name, newName })),
+	hermesAgentProfileDelete: (connectionId: string | null, gatewayUrl: string | null, name: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_agent_profile_delete", { connectionId, gatewayUrl, name })),
+	hermesAgentProfileSoul: (connectionId: string | null, gatewayUrl: string | null, name: string) => typedError<string, AppError>(__TAURI_INVOKE("hermes_agent_profile_soul", { connectionId, gatewayUrl, name })),
+	hermesAgentProfileSoulSave: (connectionId: string | null, gatewayUrl: string | null, name: string, content: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_agent_profile_soul_save", { connectionId, gatewayUrl, name, content })),
+	hermesAgentProfileExport: (connectionId: string | null, gatewayUrl: string | null, name: string, output: string | null) => typedError<string, AppError>(__TAURI_INVOKE("hermes_agent_profile_export", { connectionId, gatewayUrl, name, output })),
+	hermesOpenProfileWindow: (connectionId: string | null, profile: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_open_profile_window", { connectionId, profile })),
+	hermesConnectionProbe: (connectionId: string, gatewayUrl: string) => typedError<HermesConnectionProbe, AppError>(__TAURI_INVOKE("hermes_connection_probe", { connectionId, gatewayUrl })),
+	hermesAgentProfileImport: (connectionId: string | null, gatewayUrl: string | null, archive: string, name: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_agent_profile_import", { connectionId, gatewayUrl, archive, name })),
 	hermesTestConnection: (input: HermesTestInput) => typedError<HermesTestResult, AppError>(__TAURI_INVOKE("hermes_test_connection", { input })),
-	hermesLoginStart: (provider: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_login_start", { provider })),
+	hermesLoginStart: (provider: string, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_login_start", { provider, profile })),
 	hermesLoginInput: (text: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_login_input", { text })),
 	hermesLoginCancel: () => typedError<null, AppError>(__TAURI_INVOKE("hermes_login_cancel")),
 	firewallStatus: () => typedError<FirewallStatus, AppError>(__TAURI_INVOKE("firewall_status")),
@@ -1380,6 +1396,21 @@ export type HealthIssueLevel = "info" | "attention" | "critical";
 
 export type HealthLevel = "good" | "attention" | "critical";
 
+export type HermesAgentProfile = {
+	name: string,
+	displayName: string | null,
+	path: string,
+	isDefault: boolean,
+	model: string | null,
+	provider: string | null,
+	skillCount: number,
+	hasEnv: boolean,
+	description: string | null,
+	botTitle: string | null,
+	distributionName: string | null,
+	distributionVersion: string | null,
+};
+
 export type HermesAttachmentInfo = {
 	path: string,
 	name: string,
@@ -1419,6 +1450,10 @@ export type HermesChatInput = {
 	attachments: string[],
 	auxiliary: HermesAuxAssignment[],
 	forceAuxVision: boolean,
+	gatewayUrl: string | null,
+	profileId: string | null,
+	profile: string | null,
+	panelAuth: boolean,
 	macEnabled: boolean,
 	controlLevel: string,
 	macTerminal: boolean,
@@ -1433,6 +1468,13 @@ export type HermesChatReply = {
 	sessionId: string | null,
 	liveSessionId: string | null,
 	usage: HermesUsage | null,
+};
+
+export type HermesConnectionProbe = {
+	ok: boolean,
+	latencyMs: number,
+	version: string | null,
+	profiles: number,
 };
 
 export type HermesLoginStatus = {
@@ -1470,6 +1512,10 @@ export type HermesModelOptionsInput = {
 	endpoint: string | null,
 	refresh: boolean,
 	includeUnconfigured: boolean,
+	gatewayUrl: string | null,
+	profileId: string | null,
+	profile: string | null,
+	panelAuth: boolean,
 };
 
 export type HermesModelPricing = {
@@ -1520,6 +1566,8 @@ export type HermesTestInput = {
 	provider: string,
 	apiKey: string | null,
 	endpoint: string | null,
+	/**  Agent profile whose stored key is probed; `None`/`default` is the root home. */
+	profile: string | null,
 };
 
 export type HermesTestResult = {
@@ -2114,6 +2162,11 @@ export type OutdatedItem_Serialize = {
 export type Page<T> = {
 	total: number,
 	items: T[],
+};
+
+export type PanelLoginResult = {
+	baseUrl: string,
+	provider: string,
 };
 
 export type PasteAction = "allow_once" | "discard";
