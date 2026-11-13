@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 import type { PackageSummary } from '@opennavo/api';
 import type { HermesEffort, HermesProvider } from '@/hermes/providers';
@@ -14,6 +14,7 @@ import {
   type HermesProviderInfo
 } from '@/hermes/providers';
 import { commands, unwrap, IpcError } from '@/ipc/client';
+import { isMessagingSource } from '@/hermes/platforms';
 import type { HermesLoginStatus, HermesModelOptions, HermesRuntimeStatus } from '@/ipc/bindings';
 import { useToasts } from '@/composables/useToasts';
 import rectangleIcon from '@/assets/hermes/rectangle.png';
@@ -123,6 +124,8 @@ export interface HermesMessage {
   package?: PackageSummary;
   card?: HermesCard;
   footKey?: string;
+  /** Rows showing what the user allowed, denied or answered during this turn. */
+  decisions?: HermesDecision[];
   /** Files attached to this user turn. */
   attachments?: string[];
   /** This user message was injected into the running turn. */
@@ -139,11 +142,76 @@ export function defaultAuxSettings(): HermesAuxSettings {
   return Object.fromEntries(HERMES_AUX_TASKS.map(task => [task, { provider: 'auto', model: '' }])) as HermesAuxSettings;
 }
 
+/** The scopes the runtime's `approval` request can offer (`contracts/server_requests.py`). */
+export type HermesApprovalChoice = 'once' | 'session' | 'always' | 'deny';
+
 export interface HermesApprovalRequest {
+  /** `srq-…` id of the request this card answers. */
+  requestId: string;
+  /** Epoch ms after which the runtime stops waiting (`approvals.timeout`). */
+  deadline?: number | null;
   request_id?: string;
   command?: string;
   description?: string;
+  /** The tool that raised the gate (`tool_name` on the request). */
+  tool_name?: string | null;
+  /** Exactly what the runtime allows: `session`/`always` disappear when nothing may be persisted, and a
+   *  smart-approval denial reduces the set to `once`/`deny`. */
   choices?: string[];
+  smart_denied?: boolean | null;
+  allow_session?: boolean | null;
+  allow_permanent?: boolean | null;
+}
+
+export type HermesAskKind = 'approval' | 'clarify' | 'secret';
+
+export interface HermesClarifyQuestion {
+  qid: string;
+  question: string;
+  choices?: string[] | null;
+  multi_select?: boolean | null;
+}
+
+export interface HermesClarifyRequest {
+  requestId: string;
+  deadline?: number | null;
+  questions: HermesClarifyQuestion[];
+}
+
+/** One masked string the agent needs: a sudo password, an env secret, a vault unlock. */
+export interface HermesSecretRequest {
+  requestId: string;
+  deadline?: number | null;
+  /** What the runtime calls the value; also what the transcript note names (never the value). */
+  label: string;
+  /** The runtime's own sentence, when it sent one. */
+  prompt?: string;
+}
+
+export interface HermesAsk {
+  requestId: string;
+  kind: HermesAskKind;
+  deadline: number | null;
+  params: Record<string, unknown>;
+}
+
+export interface HermesClarifyAnswer {
+  qid: string;
+  answer: string | null;
+}
+
+export type HermesAskOutcome = 'allowed' | 'denied' | 'submitted' | 'skipped' | 'cancelled' | 'timeout';
+
+/** What the runtime reported after a card was answered; recorded in the transcript. */
+export interface HermesDecision {
+  requestId: string;
+  kind: HermesAskKind;
+  outcome: HermesAskOutcome;
+  scope?: HermesApprovalChoice | null;
+  /** The command, env var or first question — never a secret value. */
+  summary?: string;
+  count?: number | null;
+  at?: number;
 }
 
 export interface HermesSessionEvent {
@@ -156,6 +224,29 @@ export interface HermesContextUsage {
   used: number;
   max: number;
   percent: number;
+}
+
+/**
+ * The four views of the panel's session store. They mirror the panel's own desktop: local
+ * chats, gateway threads, scheduled jobs and the archive are separate lists, because one
+ * busy platform would otherwise bury everything else on a single page.
+ */
+export type PanelHistorySlice = 'recents' | 'messaging' | 'cron' | 'archived';
+
+export const PANEL_HISTORY_SLICES: readonly PanelHistorySlice[] = ['recents', 'messaging', 'cron', 'archived'];
+
+/** Paging state for one slice of one (connection, agent profile). */
+export interface PanelSliceState {
+  /** Rows already read from the host, counted from the newest one. */
+  offset: number;
+  total: number;
+  hasMore: boolean;
+  /** Set only after a successful page: a failed read must be retried, not cached as empty. */
+  loaded: boolean;
+  loading: boolean;
+  error: string | null;
+  /** The host has no aggregated endpoint, so this is the current profile only. */
+  degraded: boolean;
 }
 
 export interface HermesChunk {
@@ -191,6 +282,21 @@ export interface HermesConversation {
   panelRevision?: number;
   /** Panel row's `runtime_generation`: the panel requires it for a delete. */
   panelGeneration?: number;
+  /** Gateway platform that produced the row (`telegram`, `discord`, `desktop`, …). */
+  panelSource?: string;
+  /**
+   * The host's own `last_activity_at` in ms, without the local `updatedAt` fallback: only a
+   * value the host actually reported can prove a row moved on since its transcript was read.
+   */
+  panelActivity?: number;
+  /** Profile that owns the row, stamped by the host's aggregated list. */
+  panelProfile?: string;
+  /** The host archived the row: it only appears in the archive view. */
+  panelArchived?: boolean;
+  /** The host pinned the row. */
+  panelPinned?: boolean;
+  /** History slice this row was read through, so a slice refresh only drops its own rows. */
+  panelSlice?: PanelHistorySlice;
   /** Rows already read from the host, counted back from the newest one. */
   panelOffset?: number;
   /** A full page came back, so older rows probably exist on the host. */
@@ -216,6 +322,9 @@ const STORAGE_KEY = 'ONV_HERMES_STATE_V2';
 const STORAGE_VERSION = 3;
 /** Panel transcript page size: the same tail window the Hermes desktop hydrates. */
 const PANEL_TRANSCRIPT_PAGE = 120;
+/** History page size per slice. The host caps a page at 200 (500 through the aggregated route). */
+const PANEL_HISTORY_PAGE = 40;
+const PANEL_HISTORY_MAX = 200;
 const MODEL_OPTIONS_CACHE_KEY = 'ONV_HERMES_MODEL_OPTIONS_V2';
 const PROFILES_KEY = 'ONV_HERMES_PROFILES_V1';
 
@@ -351,7 +460,10 @@ function stripInjectedPreamble(text: string): string {
  * One `GET /api/sessions` row as a conversation. The host already ships a title and a preview,
  * so the list never needs a per-session transcript read (that used to cost 21 requests a page).
  */
-function panelConversationFromRow(row: Record<string, unknown>): HermesConversation | null {
+function panelConversationFromRow(
+  row: Record<string, unknown>,
+  slice: PanelHistorySlice = 'recents'
+): HermesConversation | null {
   const sessionId = panelText(row.id);
   if (!sessionId) return null;
   const preview = stripInjectedPreamble(panelText(row.preview));
@@ -360,12 +472,20 @@ function panelConversationFromRow(row: Record<string, unknown>): HermesConversat
   const seconds = [row.last_activity_at, row.last_active, row.started_at].find(
     value => typeof value === 'number' && Number.isFinite(value) && value > 0
   ) as number | undefined;
+  const source = panelText(row.source) || panelText(row.created_source);
+  const profile = panelText(row.profile);
   return {
     id: sessionId,
     title,
     messages: [],
     messagesLoaded: false,
     panel: true,
+    panelSlice: slice,
+    panelSource: source || undefined,
+    panelProfile: profile || undefined,
+    panelArchived: row.archived === true,
+    panelPinned: row.pinned === true,
+    panelActivity: seconds ? seconds * 1000 : undefined,
     panelPreview: preview.slice(0, 120),
     panelMessages: typeof row.message_count === 'number' ? row.message_count : undefined,
     panelRevision: typeof row.runtime_revision === 'number' ? row.runtime_revision : 0,
@@ -559,7 +679,40 @@ export const useHermesStore = defineStore('hermes', () => {
   const conversations = ref<HermesConversation[]>(initial.conversations);
   const activeId = ref<string | null>(initial.activeId);
   const thinking = ref(false);
-  const approvalRequest = ref<HermesApprovalRequest | null>(null);
+  /** Server→client requests the running turn is parked on: approval, clarify, masked prompts. */
+  const asks = ref<HermesAsk[]>([]);
+  /** The runtime coalesces its own approval queue, so the cards are answered one at a time. */
+  const headAsk = computed(() => asks.value[0] ?? null);
+  const approvalRequest = computed<HermesApprovalRequest | null>(() => {
+    const ask = headAsk.value;
+    if (!ask || ask.kind !== 'approval') return null;
+    return {
+      ...(ask.params as Omit<HermesApprovalRequest, 'requestId'>),
+      requestId: ask.requestId,
+      deadline: ask.deadline
+    };
+  });
+  const clarifyRequest = computed<HermesClarifyRequest | null>(() => {
+    const ask = headAsk.value;
+    if (!ask || ask.kind !== 'clarify') return null;
+    const questions = Array.isArray(ask.params.questions) ? (ask.params.questions as HermesClarifyQuestion[]) : [];
+    return { requestId: ask.requestId, deadline: ask.deadline, questions };
+  });
+  const secretRequest = computed<HermesSecretRequest | null>(() => {
+    const ask = headAsk.value;
+    if (!ask || ask.kind !== 'secret') return null;
+    const text = (name: string) => {
+      const value = ask.params[name];
+      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    };
+    return {
+      requestId: ask.requestId,
+      deadline: ask.deadline,
+      // The runtime names the value differently per gate: an env var, a vault, a site, a sudo command.
+      label: text('env_var') ?? text('display_name') ?? text('site') ?? text('backend') ?? text('command') ?? '',
+      prompt: text('prompt') ?? text('hint')
+    };
+  });
   const historyReady = ref(false);
   const stopping = ref(false);
   const stopRequested = ref(false);
@@ -627,12 +780,18 @@ export const useHermesStore = defineStore('hermes', () => {
   let historySeq = 0;
   /** Serializes history writes; a read waits for this before trusting the file on disk. */
   let pendingHistorySave: Promise<void> = Promise.resolve();
-  const panelHistoryLoaded = new Set<string>();
-  const panelHistoryLoading = new Set<string>();
+  /**
+   * Paging state per `connection::agentProfile`, one record per history slice.
+   *
+   * A `reactive` map, not a `ref` holding plain objects: the loader mutates `state.loading`
+   * and `state.error` in place, and mutating a raw object behind a ref notifies nothing — the
+   * popover then keeps rendering its first render (a silent empty list) even after a failure.
+   */
+  const panelSlices = reactive<Record<string, Record<PanelHistorySlice, PanelSliceState>>>({});
+  /** Read every profile on the host through `/api/profiles/sessions`. */
+  const panelAllProfiles = ref(false);
   /** Connection ids whose profile list is in flight (the rail shows a spinner meanwhile). */
   const agentProfilesLoadingIds = ref<Set<string>>(new Set());
-  const panelHistoryOffsets = new Map<string, number>();
-  const panelHistoryHasMore = ref(false);
   /** Panel session id whose transcript is being read, so the chat area can say it is loading. */
   const panelConversationLoading = ref<string | null>(null);
   let historySaveEnabled = true;
@@ -690,11 +849,12 @@ export const useHermesStore = defineStore('hermes', () => {
   const gatewayUrl = computed(() => (remoteActive.value ? activeProfile.value.endpoint : null));
   const gatewayProfileId = computed(() => (remoteActive.value ? activeProfile.value.id : null));
 
-  function currentProfileState(): HermesProfileState {
+  function currentProfileState(owner = activeAgentProfileName.value): HermesProfileState {
+    const owned = conversations.value.filter(item => ownsPanelRow(item, owner));
     return {
       model: { ...model.value },
-      conversations: conversations.value,
-      activeId: activeId.value,
+      conversations: owned,
+      activeId: owned.some(item => item.id === activeId.value) ? activeId.value : null,
       workingDir: workingDir.value,
       auxiliary: { ...auxiliary.value },
       forceAuxVision: forceAuxVision.value,
@@ -702,9 +862,38 @@ export const useHermesStore = defineStore('hermes', () => {
     };
   }
 
-  function applyProfileState(state: HermesProfileState) {
+  /**
+   * Which list a panel row belongs to, inferring it for rows persisted by an older build (or by
+   * a run before slices existed). Without this, an unowned row is never dropped by any slice
+   * refresh and leaks into every view as a phantom conversation.
+   */
+  function sliceOf(conversation: HermesConversation): PanelHistorySlice {
+    if (conversation.panelSlice) return conversation.panelSlice;
+    if (conversation.panelArchived) return 'archived';
+    const source = conversation.panelSource ?? '';
+    if (source === 'cron') return 'cron';
+    if (isMessagingSource(source)) return 'messaging';
+    return 'recents';
+  }
+
+  /**
+   * Whether a panel row belongs to `owner`'s session store.
+   *
+   * Only the aggregated read stamps an owner onto a row, so an unstamped row belongs to whichever
+   * profile listed it. Without this the rows another profile contributed to the aggregated list
+   * stayed in the active profile's state and came back on the next profile switch or restart.
+   */
+  function ownsPanelRow(conversation: HermesConversation, owner: string): boolean {
+    return !conversation.panel || !conversation.panelProfile || conversation.panelProfile === owner;
+  }
+
+  function applyProfileState(state: HermesProfileState, owner = activeAgentProfileName.value) {
     model.value = { ...state.model };
-    conversations.value = state.conversations;
+    conversations.value = state.conversations
+      .filter(conversation => ownsPanelRow(conversation, owner))
+      .map(conversation =>
+        conversation.panel ? { ...conversation, panelSlice: sliceOf(conversation) } : conversation
+      );
     activeId.value = state.activeId;
     workingDir.value = state.workingDir;
     auxiliary.value = { ...state.auxiliary };
@@ -713,7 +902,9 @@ export const useHermesStore = defineStore('hermes', () => {
   }
 
   function saveActiveProfileState() {
-    profileStates.value = { ...profileStates.value, [stateKey()]: currentProfileState() };
+    const key = stateKey();
+    const [, owner = 'default'] = key.split('::');
+    profileStates.value = { ...profileStates.value, [key]: currentProfileState(owner) };
   }
 
   function blankProfileState(): HermesProfileState {
@@ -781,7 +972,7 @@ export const useHermesStore = defineStore('hermes', () => {
       return pendingHistorySave;
     const json = JSON.stringify({
       version: STORAGE_VERSION,
-      conversations: conversations.value,
+      conversations: conversations.value.filter(item => ownsPanelRow(item, profileName)),
       activeId: activeId.value
     });
     const profileArg = profileName === 'default' ? null : profileName;
@@ -832,6 +1023,8 @@ export const useHermesStore = defineStore('hermes', () => {
   function persist() {
     if (typeof localStorage === 'undefined') return;
     saveActiveProfileState();
+    const owner = activeAgentProfileName.value;
+    const owned = conversations.value.filter(item => ownsPanelRow(item, owner));
     try {
       if (!windowScopedRoute) {
         localStorage.setItem(
@@ -840,8 +1033,8 @@ export const useHermesStore = defineStore('hermes', () => {
             version: STORAGE_VERSION,
             model: model.value,
             mac: mac.value,
-            conversations: conversations.value,
-            activeId: activeId.value,
+            conversations: owned,
+            activeId: owned.some(item => item.id === activeId.value) ? activeId.value : null,
             workingDir: workingDir.value,
             auxiliary: auxiliary.value,
             forceAuxVision: forceAuxVision.value
@@ -1327,6 +1520,18 @@ export const useHermesStore = defineStore('hermes', () => {
     return name && name !== 'default' ? name : null;
   }
 
+  /**
+   * The profile argument for a specific panel row.
+   *
+   * The aggregated list mixes several stores, so a write has to name the row's own profile; the
+   * active one would address the wrong store (404 on read, wrong row on a fenced delete).
+   */
+  function panelProfileArg(conversation: HermesConversation): string | null {
+    const name = conversation.panelProfile?.trim();
+    if (!name) return agentProfileArg();
+    return name === 'default' ? null : name;
+  }
+
   function connectionArgs() {
     return {
       connectionId: remoteActive.value ? activeProfile.value.id : null,
@@ -1407,51 +1612,265 @@ export const useHermesStore = defineStore('hermes', () => {
     await Promise.all(profiles.value.map(connection => loadAgentProfilesFor(connection)));
   }
 
-  async function loadPanelHistory(append = false) {
+  /** Paging state for one slice of the active profile, created on first use. */
+  function sliceState(slice: PanelHistorySlice, key = stateKey()): PanelSliceState {
+    if (!panelSlices[key]) panelSlices[key] = emptySlices();
+    const record = panelSlices[key];
+    return record[slice];
+  }
+
+  /**
+   * Forget every cached slice of every connection+profile.
+   *
+   * A host write can change more than the active profile's list (the aggregated read spans all of
+   * them), and the cursor counted rows against the list that just changed: keeping it would make
+   * the next append skip a row.
+   */
+  function invalidatePanelSlices() {
+    for (const record of Object.values(panelSlices)) {
+      for (const slice of PANEL_HISTORY_SLICES) {
+        const state = record[slice];
+        state.loaded = false;
+        state.offset = 0;
+      }
+    }
+  }
+
+  /** Read-only view for the UI: rendering must never create store state. */
+  const IDLE_SLICE: PanelSliceState = Object.freeze({
+    offset: 0,
+    total: 0,
+    hasMore: false,
+    loaded: false,
+    loading: false,
+    error: null,
+    degraded: false
+  });
+
+  function panelSliceState(slice: PanelHistorySlice): PanelSliceState {
+    const record = panelSlices[stateKey()];
+    return record ? record[slice] : IDLE_SLICE;
+  }
+
+  function emptySlices(): Record<PanelHistorySlice, PanelSliceState> {
+    const fresh = (): PanelSliceState => ({
+      offset: 0,
+      total: 0,
+      hasMore: false,
+      loaded: false,
+      loading: false,
+      error: null,
+      degraded: false
+    });
+    return { recents: fresh(), messaging: fresh(), cron: fresh(), archived: fresh() };
+  }
+
+  /** Rows of one slice, newest first. Local conversations only belong to the recents view. */
+  function panelRowsFor(slice: PanelHistorySlice): HermesConversation[] {
+    // Outside the aggregated read the list only owns the active profile's rows: anything another
+    // profile contributed is hidden instead of shown as a row that cannot be opened.
+    const owner = activeAgentProfileName.value;
+    const scoped = panelAllProfiles.value ? history.value : history.value.filter(item => ownsPanelRow(item, owner));
+    if (slice === 'recents') return scoped.filter(item => !item.panel || sliceOf(item) === 'recents');
+    return scoped.filter(item => item.panel && sliceOf(item) === slice);
+  }
+
+  /**
+   * Whether the host reports that a row changed since its transcript was read. A turn from this
+   * window only appends locally, so the host's own signals are the ones that matter.
+   */
+  function hostMovedOn(before: HermesConversation, after: HermesConversation): boolean {
+    if (before.panelMessages !== after.panelMessages) return true;
+    // Both sides have to carry a host timestamp: `updatedAt` falls back to the local clock, so a
+    // missing one would look newer on every read.
+    return (
+      before.panelActivity !== undefined &&
+      after.panelActivity !== undefined &&
+      after.panelActivity > before.panelActivity
+    );
+  }
+
+  /**
+   * Fold one page into the conversation store without losing what another slice owns.
+   *
+   * A transcript already read for a row is kept, and a replace only drops rows *this* slice
+   * listed before: a row that moved to another view (archived, another platform) is re-tagged
+   * by its own read, never silently discarded.
+   */
+  function mergePanelPage(slice: PanelHistorySlice, loaded: HermesConversation[], append: boolean) {
+    const byId = new Map(loaded.map(item => [item.id, item] as const));
+    const next: HermesConversation[] = [];
+    let activeInvalidated = false;
+    for (const conversation of conversations.value) {
+      if (!conversation.panel) {
+        next.push(conversation);
+        continue;
+      }
+      const fresh = byId.get(conversation.id);
+      if (fresh) {
+        byId.delete(conversation.id);
+        // The row moved on the host since its transcript was read (a new turn, a rename from
+        // another client). Keeping the cached transcript then sticks forever, because
+        // `messagesLoaded` says it is already read; local-only turns are still kept.
+        const moved = hostMovedOn(conversation, fresh);
+        if (moved) {
+          fresh.messages = conversation.messages.filter(entry => !entry.id.startsWith('panel-'));
+          fresh.messagesLoaded = false;
+          fresh.panelOffset = 0;
+          fresh.panelHasOlder = false;
+          if (conversation.id === activeId.value) activeInvalidated = true;
+        } else {
+          fresh.messages = conversation.messages;
+          fresh.messagesLoaded = conversation.messagesLoaded;
+          fresh.panelOffset = conversation.panelOffset;
+          fresh.panelHasOlder = conversation.panelHasOlder;
+        }
+        fresh.context = conversation.context;
+        next.push(fresh);
+        continue;
+      }
+      // Keep rows from other slices, and (on an append) the pages already loaded here.
+      const owned = panelAllProfiles.value || ownsPanelRow(conversation, activeAgentProfileName.value);
+      if ((sliceOf(conversation) !== slice || append) && owned) next.push(conversation);
+    }
+    next.push(...byId.values());
+    // Conversations this window owns locally (an in-flight turn, or a chat started here that
+    // the host has not listed yet) are never dropped by a panel page.
+    conversations.value = next.sort((left, right) => right.updatedAt - left.updatedAt);
+    // The open conversation just lost its transcript: read it again instead of showing an empty
+    // chat area until the user selects the row a second time.
+    if (activeInvalidated && activeId.value) void loadPanelConversation(activeId.value);
+  }
+
+  /**
+   * Read one history slice. Slices are separate requests because one busy gateway would
+   * otherwise fill the first page on its own; each slice also has its own paging cursor.
+   */
+  async function loadPanelHistory(slice: PanelHistorySlice = 'recents', append = false) {
     if (!panelActive.value) return;
     const key = stateKey();
-    if (panelHistoryLoading.has(key)) return;
-    if (!append && panelHistoryLoaded.has(key)) return;
-    const offset = append ? (panelHistoryOffsets.get(key) ?? 0) : 0;
-    panelHistoryLoading.add(key);
+    const state = sliceState(slice, key);
+    if (state.loading) return;
+    if (!append && state.loaded) return;
+    // A replace re-reads everything already on screen, so the page it drops and the page it
+    // draws are the same window; an append asks for the next one.
+    const loadedRows = conversations.value.filter(item => item.panel && sliceOf(item) === slice).length;
+    const limit = append ? PANEL_HISTORY_PAGE : Math.min(PANEL_HISTORY_MAX, Math.max(PANEL_HISTORY_PAGE, loadedRows));
+    const offset = append ? state.offset : 0;
+    state.loading = true;
+    state.error = null;
     try {
-      const raw = await unwrap(commands.hermesPanelSessions(activeProfile.value.id, agentProfileArg(), 20, offset));
-      const parsed = JSON.parse(raw) as { sessions?: unknown[]; total?: unknown };
+      const raw = await unwrap(
+        commands.hermesPanelHistory(
+          activeProfile.value.id,
+          agentProfileArg(),
+          panelAllProfiles.value,
+          slice,
+          limit,
+          offset
+        )
+      );
+      const parsed = JSON.parse(raw) as {
+        sessions?: unknown[];
+        total?: unknown;
+        hasMore?: unknown;
+        degraded?: unknown;
+      };
       const rows = Array.isArray(parsed.sessions) ? parsed.sessions : [];
       const loaded = rows
-        .map(row => (row && typeof row === 'object' ? panelConversationFromRow(row as Record<string, unknown>) : null))
+        .map(row =>
+          row && typeof row === 'object' ? panelConversationFromRow(row as Record<string, unknown>, slice) : null
+        )
         .filter(Boolean) as HermesConversation[];
-      // Conversations this window owns locally (an in-flight turn, or a chat started here that
-      // the host has not listed yet) survive the page replacement.
-      const localOnly = conversations.value.filter(
-        conversation =>
-          !conversation.panel &&
-          !loaded.some(item => item.id === conversation.id) &&
-          conversation.messages.some(entry => entry.streaming)
-      );
-      const merged = append
-        ? [
-            ...conversations.value,
-            ...loaded.filter(item => !conversations.value.some(existing => existing.id === item.id))
-          ]
-        : [...loaded, ...localOnly];
-      conversations.value = merged.sort((left, right) => right.updatedAt - left.updatedAt);
+      mergePanelPage(slice, loaded, append);
+      const total = typeof parsed.total === 'number' ? parsed.total : rows.length;
+      state.offset = append ? state.offset + rows.length : rows.length;
+      state.total = total;
+      state.hasMore = parsed.hasMore === true;
+      state.degraded = parsed.degraded === true;
+      // An empty first page is a real answer (this profile has no rows), so it is cached too.
+      state.loaded = true;
       // Keep the conversation the user is reading; only fall back when it is gone from the list.
       if (!append && !conversations.value.some(item => item.id === activeId.value)) {
         activeId.value = conversations.value[0]?.id ?? null;
       }
-      // An empty first page is a real answer (this profile has no history), so it is cached too.
-      if (loaded.length || !append) panelHistoryLoaded.add(key);
-      panelHistoryOffsets.set(key, offset + rows.length);
-      const total = typeof parsed.total === 'number' ? parsed.total : 0;
-      panelHistoryHasMore.value = rows.length > 0 && offset + rows.length < total;
       persist();
     } catch (error) {
       notePanelAuthError(error);
-      // Panel history is best-effort; keep local state when it is unavailable.
+      // Not cached as empty: the next open retries instead of showing "no history".
+      state.error = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
     } finally {
-      panelHistoryLoading.delete(key);
+      state.loading = false;
     }
+  }
+
+  function loadMorePanelHistory(slice: PanelHistorySlice = 'recents') {
+    return loadPanelHistory(slice, true);
+  }
+
+  /** Re-read a slice after the host refused a fenced write or a row changed. */
+  async function refreshPanelHistory(slice: PanelHistorySlice = 'recents') {
+    if (!panelActive.value) return;
+    const state = sliceState(slice);
+    state.loaded = false;
+    state.offset = 0;
+    await loadPanelHistory(slice);
+  }
+
+  /**
+   * Aggregate every profile on the host. The panel's aggregated endpoint tags rows with their
+   * owner; an older host degrades to the current profile and the UI says so.
+   */
+  async function setPanelAllProfiles(all: boolean) {
+    if (panelAllProfiles.value === all) return;
+    panelAllProfiles.value = all;
+    // Rows were read under the previous scope: every cached profile has to be read again, and the
+    // caller (the open history view) decides which slice to fetch now.
+    invalidatePanelSlices();
+    for (const record of Object.values(panelSlices)) {
+      for (const slice of PANEL_HISTORY_SLICES) record[slice].error = null;
+    }
+    // Turning the aggregate off drops the rows other profiles contributed, so they cannot linger in
+    // this profile's list (and in its persisted state) after the scope changed.
+    const owner = activeAgentProfileName.value;
+    conversations.value = all ? conversations.value : conversations.value.filter(item => ownsPanelRow(item, owner));
+  }
+
+  /** Archive or restore a panel row; the archive is its own slice on the host. */
+  async function setConversationArchived(idValue: string, archived: boolean) {
+    const target = conversations.value.find(item => item.id === idValue);
+    if (!target?.panel) return;
+    try {
+      await unwrap(
+        commands.hermesPanelSessionArchive(
+          activeProfile.value.id,
+          idValue,
+          archived,
+          target.panelRevision ?? 0,
+          target.panelGeneration ?? 0,
+          panelProfileArg(target)
+        )
+      );
+    } catch (error) {
+      notePanelAuthError(error);
+      toasts.push({
+        tone: 'warning',
+        title: 'Hermes history',
+        description: archived
+          ? 'Could not archive this panel conversation.'
+          : 'Could not restore this panel conversation.'
+      });
+      void refreshPanelHistory(target.panelSlice ?? 'recents');
+      return;
+    }
+    target.panelArchived = archived;
+    target.panelRevision = (target.panelRevision ?? 0) + 1;
+    // The row belongs to another list now: drop it from the one on screen and reload that list
+    // once the user comes back to it.
+    conversations.value = conversations.value.filter(item => item.id !== idValue);
+    if (activeId.value === idValue) activeId.value = conversations.value[0]?.id ?? null;
+    invalidatePanelSlices();
+    persist();
   }
 
   /**
@@ -1468,7 +1887,7 @@ export const useHermesStore = defineStore('hermes', () => {
         commands.hermesPanelSessionMessages(
           activeProfile.value.id,
           idValue,
-          agentProfileArg(),
+          panelProfileArg(target),
           PANEL_TRANSCRIPT_PAGE,
           0
         )
@@ -1514,7 +1933,7 @@ export const useHermesStore = defineStore('hermes', () => {
         commands.hermesPanelSessionMessages(
           activeProfile.value.id,
           target.id,
-          agentProfileArg(),
+          panelProfileArg(target),
           PANEL_TRANSCRIPT_PAGE,
           target.panelOffset ?? 0
         )
@@ -1537,18 +1956,6 @@ export const useHermesStore = defineStore('hermes', () => {
     } finally {
       if (panelConversationLoading.value === target.id) panelConversationLoading.value = null;
     }
-  }
-
-  async function loadMorePanelHistory() {
-    await loadPanelHistory(true);
-  }
-
-  /** Re-read the first page after the host refused a fenced write or the row changed. */
-  async function refreshPanelHistory() {
-    if (!panelActive.value) return;
-    panelHistoryLoaded.delete(stateKey());
-    panelHistoryOffsets.delete(stateKey());
-    await loadPanelHistory();
   }
 
   async function activateCurrentProfile() {
@@ -1748,7 +2155,7 @@ export const useHermesStore = defineStore('hermes', () => {
             idValue,
             target.panelRevision ?? 0,
             target.panelGeneration ?? 0,
-            agentProfileArg()
+            panelProfileArg(target)
           )
         );
       } catch (error) {
@@ -1758,8 +2165,9 @@ export const useHermesStore = defineStore('hermes', () => {
           title: 'Hermes history',
           description: 'Could not delete this panel conversation.'
         });
-        // The row moved on the host: re-read so the retry carries the fresh fence.
-        void refreshPanelHistory();
+        // The row moved on the host: re-read the list it came from so the retry carries the fresh
+        // fence instead of failing against the same stale one.
+        void refreshPanelHistory(target.panelSlice ?? 'recents');
         return;
       }
     }
@@ -1768,6 +2176,8 @@ export const useHermesStore = defineStore('hermes', () => {
       activeId.value = null;
     }
     conversations.value = conversations.value.filter(item => item.id !== idValue);
+    // The host dropped the row: other slices still list it until they are re-read.
+    if (target?.panel) invalidatePanelSlices();
     persist();
     flushHistorySave();
   }
@@ -1788,7 +2198,7 @@ export const useHermesStore = defineStore('hermes', () => {
             next,
             target.panelRevision ?? 0,
             target.panelGeneration ?? 0,
-            agentProfileArg()
+            panelProfileArg(target)
           )
         );
       } catch (error) {
@@ -1798,8 +2208,9 @@ export const useHermesStore = defineStore('hermes', () => {
           title: 'Hermes history',
           description: 'Could not rename this panel conversation.'
         });
-        // The row moved on the host: re-read so the next attempt carries the fresh fence.
-        void refreshPanelHistory();
+        // The row moved on the host: re-read the list it came from so the next attempt carries the
+        // fresh fence.
+        void refreshPanelHistory(target.panelSlice ?? 'recents');
         return;
       }
     }
@@ -2044,8 +2455,15 @@ export const useHermesStore = defineStore('hermes', () => {
             target.liveSessionId = event.payload.liveSessionId;
             void flushSteers(target);
           });
-          const unlistenApproval = await listen<HermesApprovalRequest>('hermes-approval', event => {
-            approvalRequest.value = event.payload;
+          // The turn is parked on a human answer: approval, clarify questions or a masked prompt.
+          const unlistenAsk = await listen<HermesAsk>('hermes-ask', event => {
+            asks.value = [...asks.value.filter(ask => ask.requestId !== event.payload.requestId), event.payload];
+          });
+          // The runtime settled the request (answered here, withdrawn, or its own deadline passed):
+          // drop the card and keep the decision visible in the transcript.
+          const unlistenSettled = await listen<HermesDecision>('hermes-ask-settled', event => {
+            asks.value = asks.value.filter(ask => ask.requestId !== event.payload.requestId);
+            recordDecision(event.payload);
           });
           const unlistenTool = await listen<HermesToolEvent>('hermes-tool', event => {
             if (event.payload.requestId !== requestId) return;
@@ -2087,7 +2505,8 @@ export const useHermesStore = defineStore('hermes', () => {
           unlisten = () => {
             unlistenChunk();
             unlistenSession();
-            unlistenApproval();
+            unlistenAsk();
+            unlistenSettled();
             unlistenTool();
             unlistenReasoning();
           };
@@ -2186,7 +2605,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
           thinking.value = false;
           stopping.value = false;
           stopRequested.value = false;
-          approvalRequest.value = null;
+          asks.value = [];
           const queued = queuedAfterTurn.get(conversation.id);
           if (queued?.length) {
             const [next, ...rest] = queued;
@@ -2229,7 +2648,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     thinking.value = false;
     stopping.value = false;
     stopRequested.value = false;
-    approvalRequest.value = null;
+    asks.value = [];
     // Read the live id before clearing it: the remote interrupt below used to run with
     // `undefined` and never stopped the turn on a remote gateway.
     const live = active.value?.liveSessionId;
@@ -2250,19 +2669,56 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     }
   }
 
-  async function respondApproval(choice: 'once' | 'session' | 'always' | 'deny') {
-    if (!approvalRequest.value) return;
+  /**
+   * Record what the runtime did with a card at the end of the turn's assistant message, so a granted
+   * command is visible after the fact (the runtime redacts what it sends; a secret never travels).
+   */
+  function recordDecision(decision: HermesDecision) {
+    const target = conversations.value.find(item => item.id === activeId.value);
+    if (!target) return;
+    const entry = [...target.messages].reverse().find(item => item.role === 'assistant');
+    if (!entry) return;
+    entry.decisions = [...(entry.decisions ?? []), { ...decision, at: Date.now() }];
+    target.updatedAt = Date.now();
+  }
+
+  async function answerAsk(
+    requestId: string,
+    reply:
+      | { kind: 'approval'; choice: HermesApprovalChoice }
+      | { kind: 'clarify'; answers: HermesClarifyAnswer[]; cancelled: boolean }
+      | { kind: 'secret'; value: string }
+  ) {
+    // Drop the card before the IPC round-trip: the settled event only records the outcome, so a hung
+    // send would otherwise leave a card that can be answered twice.
+    asks.value = asks.value.filter(ask => ask.requestId !== requestId);
     try {
-      await unwrap(commands.hermesApprovalRespond(choice));
+      await unwrap(commands.hermesAskRespond(requestId, reply));
     } catch (error) {
       toasts.push({
         tone: 'warning',
-        title: 'Hermes approval',
+        title: 'Hermes',
         description: error instanceof IpcError ? (error.detail ?? error.message) : String(error)
       });
-    } finally {
-      approvalRequest.value = null;
     }
+  }
+
+  function respondApproval(choice: HermesApprovalChoice) {
+    const ask = approvalRequest.value;
+    if (!ask) return Promise.resolve();
+    return answerAsk(ask.requestId, { kind: 'approval', choice });
+  }
+
+  function respondClarify(answers: HermesClarifyAnswer[], cancelled = false) {
+    const ask = clarifyRequest.value;
+    if (!ask) return Promise.resolve();
+    return answerAsk(ask.requestId, { kind: 'clarify', answers, cancelled });
+  }
+
+  function respondSecret(value: string) {
+    const ask = secretRequest.value;
+    if (!ask) return Promise.resolve();
+    return answerAsk(ask.requestId, { kind: 'secret', value });
   }
 
   function armStopFallbacks(turn: number, conversationId: string | undefined) {
@@ -2288,7 +2744,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     }
     const turn = activeTurn;
     const stoppedConversation = active.value?.id;
-    approvalRequest.value = null;
+    asks.value = [];
     stopRequested.value = true;
     stopping.value = true;
     armStopFallbacks(turn, stoppedConversation);
@@ -2399,6 +2855,10 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     historyReady,
     approvalRequest,
     respondApproval,
+    clarifyRequest,
+    respondClarify,
+    secretRequest,
+    respondSecret,
     stopping,
     stop,
     profiles,
@@ -2476,7 +2936,12 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     loadOlderPanelMessages,
     refreshPanelHistory,
     panelConversationLoading,
-    panelHistoryHasMore,
+    panelSlices,
+    panelAllProfiles,
+    panelRowsFor,
+    setPanelAllProfiles,
+    setConversationArchived,
+    panelSliceState,
     setApiKey,
     modelShort,
     macActive,

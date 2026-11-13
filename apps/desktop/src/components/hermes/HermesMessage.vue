@@ -11,7 +11,7 @@ import { usePackageState } from '@/composables/usePackageState';
 import { useToasts } from '@/composables/useToasts';
 import { useHermesStore } from '@/stores/hermes';
 import { useTasksStore } from '@/stores';
-import type { HermesMessage } from '@/stores/hermes';
+import type { HermesDecision, HermesMessage } from '@/stores/hermes';
 
 const props = defineProps<{ message: HermesMessage }>();
 
@@ -93,6 +93,37 @@ function onPackageCancel() {
   if (!pkg.value) return;
   const task = tasks.forPackage(pkg.value.kind, pkg.value.token);
   if (task) void tasks.cancel(task.id);
+}
+
+/** One transcript row per answer the user gave to an approval, clarify or secret card. */
+function decisionLabel(decision: HermesDecision): string {
+  const copy = content.value.ask.decision;
+  if (decision.kind === 'clarify' && decision.outcome === 'submitted') {
+    return `${copy.answered} · ${copy.questions.replace('{count}', String(decision.count ?? 0))}`;
+  }
+  if (decision.outcome === 'allowed') {
+    if (decision.scope === 'always') return copy.allowedAlways;
+    if (decision.scope === 'session') return copy.allowedSession;
+    return copy.allowedOnce;
+  }
+  if (decision.outcome === 'denied') return copy.denied;
+  if (decision.outcome === 'skipped') return copy.skipped;
+  if (decision.outcome === 'timeout') return copy.timeout;
+  if (decision.outcome === 'submitted') return copy.answered;
+  return copy.cancelled;
+}
+
+function decisionIcon(decision: HermesDecision): string {
+  if (decision.outcome === 'allowed' || decision.outcome === 'submitted') return 'lucide:check';
+  if (decision.outcome === 'timeout') return 'lucide:clock';
+  if (decision.outcome === 'skipped' || decision.outcome === 'cancelled') return 'lucide:minus';
+  return 'lucide:x';
+}
+
+function decisionTone(decision: HermesDecision): string {
+  if (decision.outcome === 'allowed' || decision.outcome === 'submitted') return 'text-status-success';
+  if (decision.outcome === 'denied') return 'text-status-danger';
+  return 'text-ink-tertiary';
 }
 </script>
 
@@ -231,6 +262,26 @@ function onPackageCancel() {
           </div>
         </div>
       </details>
+
+      <!--
+        What the user allowed, denied or answered during this turn: a granted command stays
+        visible after the fact, and a secret only ever names its variable.
+      -->
+      <div v-if="message.decisions?.length" class="flex flex-col gap-4px">
+        <div
+          v-for="(decision, index) in message.decisions"
+          :key="`${decision.requestId}-${index}`"
+          class="flex items-center gap-6px text-11px leading-[1.5] text-ink-tertiary"
+        >
+          <OnIcon :name="decisionIcon(decision)" :size="12" :class="decisionTone(decision)" />
+          <span class="font-500">{{ decisionLabel(decision) }}</span>
+          <code
+            v-if="decision.summary"
+            class="max-w-260px truncate rounded-tiny bg-surface-inset px-5px py-1px font-mono text-10.5px text-ink-tertiary"
+            >{{ decision.summary }}</code
+          >
+        </div>
+      </div>
 
       <div class="min-w-0" aria-live="polite">
         <div v-if="message.streaming && !text" class="flex items-center gap-8px pt-1px text-11px text-ink-tertiary">

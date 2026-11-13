@@ -9,7 +9,7 @@ export const commands = {
 	hermesRuntimeStatus: () => typedError<HermesRuntimeStatus, AppError>(__TAURI_INVOKE("hermes_runtime_status")),
 	hermesChat: (input: HermesChatInput) => typedError<HermesChatReply, AppError>(__TAURI_INVOKE("hermes_chat", { input })),
 	hermesStop: () => typedError<null, AppError>(__TAURI_INVOKE("hermes_stop")),
-	hermesApprovalRespond: (choice: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_approval_respond", { choice })),
+	hermesAskRespond: (requestId: string, reply: HermesAskReply) => typedError<null, AppError>(__TAURI_INVOKE("hermes_ask_respond", { requestId, reply })),
 	hermesInterrupt: (liveSessionId: string, gatewayUrl: string | null, profileId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_interrupt", { liveSessionId, gatewayUrl, profileId })),
 	hermesSteer: (liveSessionId: string, text: string, gatewayUrl: string | null, profileId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_steer", { liveSessionId, text, gatewayUrl, profileId })),
 	hermesSecretSet: (provider: string, key: string, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_secret_set", { provider, key, profile })),
@@ -38,9 +38,15 @@ export const commands = {
 	hermesModelOptions: (input: HermesModelOptionsInput) => typedError<HermesModelOptions, AppError>(__TAURI_INVOKE("hermes_model_options", { input })),
 	hermesPanelLogin: (profileId: string, baseUrl: string, username: string, password: string) => typedError<PanelLoginResult, AppError>(__TAURI_INVOKE("hermes_panel_login", { profileId, baseUrl, username, password })),
 	hermesPanelSessions: (profileId: string, profile: string | null, limit: number, offset: number) => typedError<string, AppError>(__TAURI_INVOKE("hermes_panel_sessions", { profileId, profile, limit, offset })),
+	/**
+	 *  One history slice (recents, gateways, scheduled, archived), optionally aggregated across
+	 *  every profile on the host.
+	 */
+	hermesPanelHistory: (profileId: string, profile: string | null, allProfiles: boolean, slice: string, limit: number, offset: number) => typedError<string, AppError>(__TAURI_INVOKE("hermes_panel_history", { profileId, profile, allProfiles, slice, limit, offset })),
 	hermesPanelSessionMessages: (profileId: string, sessionId: string, profile: string | null, limit: number, offset: number) => typedError<string, AppError>(__TAURI_INVOKE("hermes_panel_session_messages", { profileId, sessionId, profile, limit, offset })),
 	hermesPanelSessionRename: (profileId: string, sessionId: string, title: string, expectedRevision: number, expectedGeneration: number, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_panel_session_rename", { profileId, sessionId, title, expectedRevision, expectedGeneration, profile })),
 	hermesPanelSessionDelete: (profileId: string, sessionId: string, expectedRevision: number, expectedGeneration: number, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_panel_session_delete", { profileId, sessionId, expectedRevision, expectedGeneration, profile })),
+	hermesPanelSessionArchive: (profileId: string, sessionId: string, archived: boolean, expectedRevision: number, expectedGeneration: number, profile: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_panel_session_archive", { profileId, sessionId, archived, expectedRevision, expectedGeneration, profile })),
 	hermesPanelLogout: (profileId: string) => typedError<null, AppError>(__TAURI_INVOKE("hermes_panel_logout", { profileId })),
 	hermesAgentProfiles: (connectionId: string | null, gatewayUrl: string | null) => typedError<HermesAgentProfile[], AppError>(__TAURI_INVOKE("hermes_agent_profiles", { connectionId, gatewayUrl })),
 	hermesAgentProfileCreate: (connectionId: string | null, gatewayUrl: string | null, name: string, cloneFrom: string | null, soul: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hermes_agent_profile_create", { connectionId, gatewayUrl, name, cloneFrom, soul })),
@@ -1411,6 +1417,15 @@ export type HermesAgentProfile = {
 	distributionVersion: string | null,
 };
 
+/**  One answer the renderer gave to a server→client request (`approval`, `clarify`, `sudo`/`secret`). */
+export type HermesAskReply =
+/**  `scope` is one of the `choices` the runtime offered: once / session / always / deny. */
+{ kind: "approval"; choice: string } |
+/**  `cancelled` answers "the user dismissed the card", which the runtime reads as cancel-all. */
+{ kind: "clarify"; answers: HermesClarifyAnswer[]; cancelled: boolean } |
+/**  One masked string (sudo password, env secret, vault unlock). `""` means skipped. */
+{ kind: "secret"; value: string };
+
 export type HermesAttachmentInfo = {
 	path: string,
 	name: string,
@@ -1468,6 +1483,12 @@ export type HermesChatReply = {
 	sessionId: string | null,
 	liveSessionId: string | null,
 	usage: HermesUsage | null,
+};
+
+export type HermesClarifyAnswer = {
+	qid: string,
+	/**  `None` is a skipped question (`clarify`'s `null` answer). */
+	answer: string | null,
 };
 
 export type HermesConnectionProbe = {

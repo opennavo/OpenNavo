@@ -28,6 +28,7 @@ import type {
 import { events, packageKey } from './client';
 import type { AppSettings } from './client';
 import { getCatalogItem, listCatalog, listCategories, searchCatalog } from './mock-data/catalog';
+import { isMessagingSource, normalizeSource } from '@/hermes/platforms';
 import {
   catalogCursor,
   catalogItems,
@@ -443,12 +444,14 @@ export function installMockIpc(
     ['research', 'You are a careful research assistant.']
   ]);
   // Hermes Panel session store: rows carry the host's own title/preview, so the history list can
-  // render without reading a transcript (the real backend filters cron rows and sorts by activity).
+  // render without reading a transcript. The real backend also stamps `profile` and splits the
+  // store into source slices (recents / gateways / scheduled / archived), which the mock mirrors.
   const mockPanelSeconds = Math.floor(Date.now() / 1000);
   let mockPanelSessions: Array<Record<string, unknown>> = [
     {
       id: 'mock-session-1',
       profile_name: 'default',
+      profile: 'default',
       title: 'Panel ok confirmation',
       preview: 'Reply with exactly PANEL_OK',
       display_name: null,
@@ -461,6 +464,7 @@ export function installMockIpc(
     {
       id: 'mock-session-2',
       profile_name: 'default',
+      profile: 'default',
       title: '每日检查 Hermes 更新',
       preview: '检查今天有没有新版本',
       display_name: null,
@@ -473,6 +477,7 @@ export function installMockIpc(
     {
       id: 'mock-session-3',
       profile_name: 'default',
+      profile: 'default',
       title: null,
       preview: '了解当前 Telegram 接入方式',
       display_name: 'Telegram 接入',
@@ -485,6 +490,7 @@ export function installMockIpc(
     {
       id: 'mock-session-long',
       profile_name: 'default',
+      profile: 'default',
       title: '长会话分页',
       preview: '第 130 条消息',
       display_name: null,
@@ -497,6 +503,7 @@ export function installMockIpc(
     {
       id: 'mock-session-4',
       profile_name: 'default',
+      profile: 'default',
       title: '整理 ASO 关键词',
       preview: '帮我查一下班级宠物的排名',
       display_name: null,
@@ -505,6 +512,76 @@ export function installMockIpc(
       started_at: mockPanelSeconds - 7200,
       last_activity_at: mockPanelSeconds - 7000,
       last_active: mockPanelSeconds - 7000
+    },
+    // Gateway threads: enough rows to exercise a platform section's three-row cap.
+    ...Array.from({ length: 5 }, (_, index) => ({
+      id: `mock-telegram-${index + 1}`,
+      profile_name: 'default',
+      profile: 'default',
+      title: `Telegram 讨论 ${index + 1}`,
+      preview: `第 ${index + 1} 条网关消息`,
+      display_name: null,
+      source: 'telegram',
+      message_count: 3,
+      started_at: mockPanelSeconds - 900 * (index + 1),
+      last_activity_at: mockPanelSeconds - 900 * (index + 1),
+      last_active: mockPanelSeconds - 900 * (index + 1)
+    })),
+    {
+      id: 'mock-discord-1',
+      profile_name: 'default',
+      profile: 'default',
+      title: 'Discord 值班频道',
+      preview: '今晚的部署谁来跟',
+      display_name: null,
+      source: 'discord',
+      message_count: 6,
+      started_at: mockPanelSeconds - 5000,
+      last_activity_at: mockPanelSeconds - 4200,
+      last_active: mockPanelSeconds - 4200
+    },
+    // Scheduled runs: the host titles them `<job> · <timestamp>`, one session per run, so the
+    // sidebar groups them per job instead of stacking every run in the conversation list.
+    ...Array.from({ length: 4 }, (_, index) => ({
+      id: `mock-cron-${index + 1}`,
+      profile_name: 'default',
+      profile: 'default',
+      title: `每小时检查更新 · Nov 13 0${6 - index}:00`,
+      preview: '[IMPORTANT: cron job] 检查 Hermes 版本',
+      display_name: null,
+      source: 'cron',
+      message_count: 2,
+      started_at: mockPanelSeconds - 1200 - index * 3600,
+      last_activity_at: mockPanelSeconds - 1100 - index * 3600,
+      last_active: mockPanelSeconds - 1100 - index * 3600
+    })),
+    {
+      id: 'mock-archived-1',
+      profile_name: 'default',
+      profile: 'default',
+      title: '上周的排查记录',
+      preview: '归档前最后一条消息',
+      display_name: null,
+      source: 'desktop',
+      archived: true,
+      message_count: 8,
+      started_at: mockPanelSeconds - 9 * 86_400,
+      last_activity_at: mockPanelSeconds - 8 * 86_400,
+      last_active: mockPanelSeconds - 8 * 86_400
+    },
+    // Another profile on the host: only the aggregated view lists it.
+    {
+      id: 'mock-aso-1',
+      profile_name: 'aso-u4e13-u5bb6',
+      profile: 'aso-u4e13-u5bb6',
+      title: 'ASO 关键词周报',
+      preview: '这周排名变化不大',
+      display_name: null,
+      source: 'telegram',
+      message_count: 9,
+      started_at: mockPanelSeconds - 400,
+      last_activity_at: mockPanelSeconds - 300,
+      last_active: mockPanelSeconds - 300
     }
   ];
   const mockPanelMessages = new Map<string, Array<Record<string, unknown>>>([
@@ -1305,6 +1382,45 @@ export function installMockIpc(
       const rows = mockPanelSessions.filter(row => (row.profile_name ?? 'default') === profile);
       return JSON.stringify({ sessions: rows.slice(offset, offset + limit), total: rows.length, limit, offset });
     },
+    // Mirrors `GET /api/sessions` / `GET /api/profiles/sessions` with the client's source slices.
+    // `panel-no-aggregate` simulates a host that predates the aggregated endpoint.
+    hermes_panel_history: args => {
+      // `panel-history-fails` simulates a backend/route failure so the UI's retry path is
+      // exercised the way a stale build or a busy store would fail in real life.
+      if (flags.has('panel-history-fails')) {
+        throw { code: 'E_HERMES_PANEL', message: 'Panel request returned 503.', detail: 'busy' };
+      }
+      const slice = String(args.slice ?? 'recents');
+      const allProfiles = Boolean(args.allProfiles);
+      const degraded = allProfiles && flags.has('panel-no-aggregate');
+      const profile = typeof args.profile === 'string' ? args.profile : 'default';
+      const limit = Math.max(1, Number(args.limit ?? 40));
+      const offset = Math.max(0, Number(args.offset ?? 0));
+      const platform = (row: Record<string, unknown>) => normalizeSource(String(row.source ?? ''));
+      const rows = mockPanelSessions
+        .filter(row => {
+          const archived = row.archived === true;
+          if (slice === 'archived') return archived;
+          if (archived) return false;
+          if (!allProfiles || degraded) {
+            if ((row.profile_name ?? 'default') !== profile) return false;
+          }
+          if (slice === 'cron') return platform(row) === 'cron';
+          if (slice === 'messaging') return isMessagingSource(platform(row));
+          return platform(row) !== 'cron' && !isMessagingSource(platform(row));
+        })
+        .sort((left, right) => Number(right.last_activity_at ?? 0) - Number(left.last_activity_at ?? 0));
+      return JSON.stringify({
+        slice,
+        allProfiles: allProfiles && !degraded,
+        degraded,
+        sessions: rows.slice(offset, offset + limit),
+        total: rows.length,
+        limit,
+        offset,
+        hasMore: offset + limit < rows.length
+      });
+    },
     // Mirrors the panel's newest-anchored paging: `offset` counts back from the last row.
     hermes_panel_session_messages: args => {
       const sessionId = String(args.sessionId);
@@ -1332,6 +1448,11 @@ export function installMockIpc(
     hermes_panel_session_delete: args => {
       mockPanelSessions = mockPanelSessions.filter(item => item.id !== args.sessionId);
       mockPanelMessages.delete(String(args.sessionId));
+      return null;
+    },
+    hermes_panel_session_archive: args => {
+      const row = mockPanelSessions.find(item => item.id === args.sessionId);
+      if (row) row.archived = Boolean(args.archived);
       return null;
     },
     hermes_agent_profile_create: args => {

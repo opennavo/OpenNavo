@@ -237,6 +237,20 @@ export const en = {
     yesterday: 'Yesterday',
     earlier: 'Earlier',
     empty: 'No conversations yet',
+    loadingList: 'Loading conversations…',
+    failed: 'Could not read this list from the panel.',
+    retry: 'Retry',
+    showMore: 'Show more',
+    archive: 'Archive',
+    restore: 'Restore',
+    allProfiles: 'All profiles',
+    degraded: 'This panel version cannot merge profiles, so only the current one is listed.',
+    views: {
+      recents: 'Recents',
+      gateways: 'Gateways',
+      scheduled: 'Scheduled',
+      archived: 'Archived'
+    },
     local: 'Conversations stay on this Mac',
     panel: 'Conversations stay on the Hermes panel',
     loading: 'Loading conversation…',
@@ -305,7 +319,33 @@ export const en = {
     body: 'A tool wants to perform a sensitive action. Review the command before allowing it.',
     command: 'Command',
     allowOnce: 'Allow once',
-    deny: 'Deny'
+    allowSession: 'Allow this session',
+    always: 'Always allow',
+    deny: 'Deny',
+    smartDenied: 'Smart approval already judged this dangerous, so only a one-time decision is available.'
+  },
+  ask: {
+    expires: 'Hermes stops waiting in {time}',
+    clarifyTitle: 'Hermes has a question',
+    clarifyPlaceholder: 'Type your answer',
+    clarifySubmit: 'Send answer',
+    cancel: 'Cancel',
+    secretTitle: 'Hermes needs a value',
+    secretBody: 'The agent asked for a secret. It is passed straight to the runtime and never stored here.',
+    secretPlaceholder: 'Paste the value',
+    secretSubmit: 'Continue',
+    skip: 'Skip',
+    decision: {
+      allowedOnce: 'Allowed once',
+      allowedSession: 'Allowed for this session',
+      allowedAlways: 'Always allowed',
+      denied: 'Denied',
+      answered: 'Answered',
+      skipped: 'Skipped',
+      cancelled: 'Dismissed',
+      timeout: 'Expired unanswered',
+      questions: '{count} questions'
+    }
   },
   messages: {
     'rectangle.user': 'Find a window manager app that’s free, supports multiple displays, and install it.',
@@ -939,6 +979,20 @@ export const zhCN: HermesContent = {
     yesterday: '昨天',
     earlier: '更早',
     empty: '还没有对话',
+    loadingList: '正在读取对话…',
+    failed: '没能从面板读到这个列表。',
+    retry: '重试',
+    showMore: '显示更多',
+    archive: '归档',
+    restore: '恢复',
+    allProfiles: '所有 Profile',
+    degraded: '该面板版本不支持合并 Profile，只显示当前 Profile。',
+    views: {
+      recents: '最近',
+      gateways: '网关',
+      scheduled: '定时',
+      archived: '归档'
+    },
     local: '对话保存在本机',
     panel: '对话保存在面板主机上',
     loading: '正在载入对话…',
@@ -1007,7 +1061,33 @@ export const zhCN: HermesContent = {
     body: 'Hermes 要执行敏感操作，请检查命令后再决定。',
     command: '命令',
     allowOnce: '允许一次',
-    deny: '拒绝'
+    allowSession: '本会话允许',
+    always: '始终允许',
+    deny: '拒绝',
+    smartDenied: '智能审批已判定该操作危险，只能选择一次性放行或拒绝。'
+  },
+  ask: {
+    expires: 'Hermes 将在 {time} 后停止等待',
+    clarifyTitle: 'Hermes 需要你确认',
+    clarifyPlaceholder: '输入你的回答',
+    clarifySubmit: '发送回答',
+    cancel: '取消',
+    secretTitle: 'Hermes 需要一个敏感值',
+    secretBody: 'Agent 请求输入一个密钥/密码，该值会直接交给 runtime，不会保存在本地。',
+    secretPlaceholder: '粘贴该值',
+    secretSubmit: '继续',
+    skip: '跳过',
+    decision: {
+      allowedOnce: '已允许一次',
+      allowedSession: '已允许本会话',
+      allowedAlways: '已始终允许',
+      denied: '已拒绝',
+      answered: '已回答',
+      skipped: '已跳过',
+      cancelled: '已取消',
+      timeout: '超时未回答',
+      questions: '{count} 个问题'
+    }
   },
   messages: {
     'rectangle.user': '帮我找一款窗口管理 App，要免费、支持多显示器，直接装上。',

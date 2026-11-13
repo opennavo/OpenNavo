@@ -3,7 +3,8 @@ use tauri::State;
 
 use crate::AppError;
 use crate::hermes::{
-    self, HermesChatInput, HermesChatReply, HermesRuntimeState, HermesRuntimeStatus,
+    self, AskAnswer, HermesAskReply, HermesChatInput, HermesChatReply, HermesRuntimeState,
+    HermesRuntimeStatus,
 };
 
 #[tauri::command]
@@ -30,21 +31,22 @@ pub async fn hermes_stop(state: State<'_, Arc<HermesRuntimeState>>) -> Result<()
 
 #[tauri::command]
 #[specta::specta]
-pub async fn hermes_approval_respond(
+pub async fn hermes_ask_respond(
     state: State<'_, Arc<HermesRuntimeState>>,
-    choice: String,
+    request_id: String,
+    reply: HermesAskReply,
 ) -> Result<(), AppError> {
-    let sender = state.approval.lock().await.clone();
+    let sender = state.asks.lock().await.clone();
     let Some(sender) = sender else {
         return Err(AppError::new(
-            "E_HERMES_APPROVAL",
-            "No approval request is pending.",
+            "E_HERMES_ASK",
+            "No Hermes request is waiting on an answer.",
         ));
     };
-    sender.send(choice).map_err(|_| {
+    sender.send(AskAnswer { request_id, reply }).map_err(|_| {
         AppError::new(
-            "E_HERMES_APPROVAL",
-            "The approval request is no longer active.",
+            "E_HERMES_ASK",
+            "The Hermes turn that asked is no longer running.",
         )
     })
 }
@@ -532,6 +534,29 @@ pub async fn hermes_panel_sessions(
     crate::hermes::panel::sessions(&profile_id, profile.as_deref(), limit, offset).await
 }
 
+/// One history slice (recents, gateways, scheduled, archived), optionally aggregated across
+/// every profile on the host.
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_history(
+    profile_id: String,
+    profile: Option<String>,
+    all_profiles: bool,
+    slice: String,
+    limit: usize,
+    offset: usize,
+) -> Result<String, AppError> {
+    crate::hermes::panel::history(
+        &profile_id,
+        profile.as_deref(),
+        all_profiles,
+        &slice,
+        limit,
+        offset,
+    )
+    .await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn hermes_panel_session_messages(
@@ -579,6 +604,27 @@ pub async fn hermes_panel_session_delete(
         &profile_id,
         profile.as_deref(),
         &session_id,
+        expected_revision,
+        expected_generation,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_session_archive(
+    profile_id: String,
+    session_id: String,
+    archived: bool,
+    expected_revision: i64,
+    expected_generation: i64,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::panel::set_archived(
+        &profile_id,
+        profile.as_deref(),
+        &session_id,
+        archived,
         expected_revision,
         expected_generation,
     )

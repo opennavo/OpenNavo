@@ -214,11 +214,43 @@ pub struct HermesChunk {
     pub delta: String,
 }
 
+/// One answer the renderer gave to a server→client request (`approval`, `clarify`, `sudo`/`secret`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HermesAskReply {
+    /// `scope` is one of the `choices` the runtime offered: once / session / always / deny.
+    Approval { choice: String },
+    /// `cancelled` answers "the user dismissed the card", which the runtime reads as cancel-all.
+    Clarify {
+        answers: Vec<HermesClarifyAnswer>,
+        cancelled: bool,
+    },
+    /// One masked string (sudo password, env secret, vault unlock). `""` means skipped.
+    Secret { value: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HermesClarifyAnswer {
+    pub qid: String,
+    /// `None` is a skipped question (`clarify`'s `null` answer).
+    pub answer: Option<String>,
+}
+
+/// A reply routed to the turn that is waiting on it, matched by the request id the card carried.
+#[derive(Debug, Clone)]
+pub(crate) struct AskAnswer {
+    pub request_id: String,
+    pub reply: HermesAskReply,
+}
+
 #[derive(Default)]
 pub struct HermesRuntimeState {
     pid: Mutex<Option<u32>>,
     gateway: tokio::sync::Mutex<Option<std::sync::Arc<GatewayServer>>>,
-    pub(crate) approval: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>,
+    /// Answers from the renderer for the requests the running turn is parked on. One channel per turn:
+    /// the id inside the answer picks the request, so a clarify and an approval can be open together.
+    pub(crate) asks: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<AskAnswer>>>,
     pub(crate) approval_cancel: tokio::sync::Notify,
     installing: AtomicBool,
     pub(crate) install_cancel: AtomicBool,
@@ -2033,7 +2065,7 @@ async fn consume_stdout<R: AsyncRead + Unpin>(
 
 pub async fn stop(state: &HermesRuntimeState) -> Result<(), AppError> {
     state.approval_cancel.notify_waiters();
-    let _ = state.approval.lock().await.take();
+    let _ = state.asks.lock().await.take();
     let pid = state.pid.lock().ok().and_then(|current| *current);
     if let Some(pid) = pid {
         kill_pid(pid);

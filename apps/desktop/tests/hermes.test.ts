@@ -7,16 +7,14 @@ import { useToasts } from '@/composables/useToasts';
 import { commands } from '@/ipc/client';
 
 const eventMock = vi.hoisted(() => {
-  const listeners: { event: string; handler: (event: { payload: { requestId: string; delta: string } }) => void }[] =
-    [];
+  type EventPayload = Record<string, unknown>;
+  const listeners: { event: string; handler: (event: { payload: EventPayload }) => void }[] = [];
   return {
     listeners,
-    listen: vi.fn(
-      async (event: string, handler: (event: { payload: { requestId: string; delta: string } }) => void) => {
-        listeners.push({ event, handler });
-        return () => undefined;
-      }
-    )
+    listen: vi.fn(async (event: string, handler: (event: { payload: EventPayload }) => void) => {
+      listeners.push({ event, handler });
+      return () => undefined;
+    })
   };
 });
 
@@ -479,6 +477,100 @@ describe('Hermes conversation store', () => {
     expect(store.messages.at(-1)?.streaming).toBe(false);
     expect(store.active?.sessionId).toBe('stored-1');
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('Shows one card at a time and records what the runtime did with it', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    const respond = vi.spyOn(commands, 'hermesAskRespond').mockResolvedValue({ status: 'ok', data: null });
+    vi.spyOn(commands, 'hermesChat').mockImplementation(() => new Promise(() => undefined) as never);
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    eventMock.listeners.length = 0;
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('Run the migration');
+    for (
+      let attempt = 0;
+      attempt < 20 && !eventMock.listeners.some(listener => listener.event === 'hermes-ask-settled');
+      attempt++
+    ) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    const ask = eventMock.listeners.find(listener => listener.event === 'hermes-ask')!.handler;
+    const settled = eventMock.listeners.find(listener => listener.event === 'hermes-ask-settled')!.handler;
+
+    // Two requests can be open together (a clarify behind an approval); the card shows the first.
+    ask({
+      payload: {
+        requestId: 'srq-1',
+        kind: 'approval',
+        deadline: null,
+        params: { command: 'rm -rf build', choices: ['once', 'deny'] }
+      }
+    });
+    ask({
+      payload: {
+        requestId: 'srq-2',
+        kind: 'clarify',
+        deadline: null,
+        params: { questions: [{ qid: 'q1', question: 'Which database?' }] }
+      }
+    });
+    await nextTick();
+    expect(store.approvalRequest?.command).toBe('rm -rf build');
+    expect(store.clarifyRequest).toBeNull();
+
+    await store.respondApproval('once');
+    expect(respond).toHaveBeenCalledWith('srq-1', { kind: 'approval', choice: 'once' });
+    await nextTick();
+    // Answering discloses the next card instead of leaving the queue stuck.
+    expect(store.approvalRequest).toBeNull();
+    expect(store.clarifyRequest?.questions[0]?.question).toBe('Which database?');
+
+    // The settled event is what puts the decision in the transcript.
+    settled({
+      payload: {
+        requestId: 'srq-1',
+        kind: 'approval',
+        outcome: 'allowed',
+        scope: 'once',
+        summary: 'rm -rf build',
+        count: null
+      }
+    });
+    await nextTick();
+    expect(store.messages.at(-1)?.decisions?.[0]).toMatchObject({
+      outcome: 'allowed',
+      scope: 'once',
+      summary: 'rm -rf build'
+    });
+
+    // A withdrawn question tears the card down without inventing a decision from the user.
+    settled({
+      payload: {
+        requestId: 'srq-2',
+        kind: 'clarify',
+        outcome: 'cancelled',
+        scope: null,
+        summary: 'Which database?',
+        count: null
+      }
+    });
+    await nextTick();
+    expect(store.clarifyRequest).toBeNull();
+    expect(store.messages.at(-1)?.decisions?.at(-1)?.outcome).toBe('cancelled');
   });
 
   it('Does not let an earlier stop fallback kill the next turn', async () => {

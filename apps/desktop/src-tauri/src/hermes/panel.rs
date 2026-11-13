@@ -301,12 +301,21 @@ async fn send(
     persist_response_cookies(profile_id, &headers)?;
     let value = response.json().await.unwrap_or(serde_json::Value::Null);
     if !status.is_success() {
-        return Err(AppError::new(
-            "E_HERMES_PANEL_AUTH",
-            format!("Panel request returned {status}."),
-        ));
+        return Err(status_error(status, failure));
     }
     Ok(value)
+}
+
+/// A non-2xx panel response, classified so callers can tell "sign in again" (401/403)
+/// from "this host has no such route" (404). Reporting every failure as an auth error
+/// left the history list unable to degrade when an older host lacks an endpoint.
+fn status_error(status: reqwest::StatusCode, failure: &str) -> AppError {
+    let code = match status.as_u16() {
+        401 | 403 => "E_HERMES_PANEL_AUTH",
+        404 => "E_HERMES_PANEL_UNSUPPORTED",
+        _ => "E_HERMES_PANEL",
+    };
+    AppError::new(code, failure).with_detail(format!("Panel request returned {status}."))
 }
 
 async fn get_json(profile_id: &str, path: &str) -> Result<serde_json::Value, AppError> {
@@ -362,6 +371,166 @@ pub fn sessions_path(profile: Option<&str>, limit: usize, offset: usize) -> Stri
         ),
         profile,
     )
+}
+
+/// External messaging platforms. Mirrors the host's gateway adapters and the panel's own
+/// desktop (`MESSAGING_SESSION_SOURCE_IDS`): each one is a gateway conversation, and the
+/// panel's sidebar never mixes them into recents.
+pub const MESSAGING_SOURCES: &[&str] = &[
+    "telegram",
+    "discord",
+    "slack",
+    "mattermost",
+    "matrix",
+    "signal",
+    "whatsapp",
+    "bluebubbles",
+    "photon",
+    "homeassistant",
+    "email",
+    "sms",
+    "webhook",
+    "api_server",
+    "weixin",
+    "wecom",
+    "qqbot",
+    "yuanbao",
+    "dingtalk",
+    "feishu",
+];
+
+/// Sources that run on the host itself rather than on a messaging platform.
+const LOCAL_SOURCES: &[&str] = &[
+    "acp", "cli", "codex", "desktop", "gateway", "kanban", "local", "oneshot", "tui",
+];
+
+/// Rows that are plumbing, never conversations a person opens from a history list.
+const INTERNAL_SOURCES: &[&str] = &["acp", "kanban", "oneshot", "subagent", "tool"];
+
+/// One view of the panel's session store. The client asks for a slice at a time, the same
+/// way the panel's own desktop keeps recents, per-platform threads, scheduled jobs and the
+/// archive apart instead of interleaving them on one page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistorySlice {
+    Recents,
+    Messaging,
+    Cron,
+    Archived,
+}
+
+impl HistorySlice {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "recents" => Some(Self::Recents),
+            "messaging" => Some(Self::Messaging),
+            "cron" => Some(Self::Cron),
+            "archived" => Some(Self::Archived),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Recents => "recents",
+            Self::Messaging => "messaging",
+            Self::Cron => "cron",
+            Self::Archived => "archived",
+        }
+    }
+
+    /// `archived` filter for this view: the archive is its own list, everything else hides it.
+    fn archived(self) -> &'static str {
+        match self {
+            Self::Archived => "only",
+            _ => "exclude",
+        }
+    }
+
+    /// An included source, used by the scheduled-jobs view.
+    fn source(self) -> Option<&'static str> {
+        match self {
+            Self::Cron => Some("cron"),
+            _ => None,
+        }
+    }
+
+    fn excludes(self) -> Vec<&'static str> {
+        match self {
+            // Scheduled jobs are their own list. Leaving `cron` out here put every routine run
+            // (they are frequent and chatty) on top of the person's real conversations — the
+            // panel's own desktop excludes it for the same reason.
+            Self::Recents => std::iter::once("cron")
+                .chain(INTERNAL_SOURCES.iter().copied())
+                .chain(MESSAGING_SOURCES.iter().copied())
+                .collect(),
+            // A gateway thread is a conversation on an external platform: the host's own sources
+            // (and the plumbing rows) have no place in this list either.
+            Self::Messaging => std::iter::once("cron")
+                .chain(LOCAL_SOURCES.iter().copied())
+                .chain(
+                    INTERNAL_SOURCES
+                        .iter()
+                        .copied()
+                        .filter(|id| !LOCAL_SOURCES.contains(id)),
+                )
+                .collect(),
+            Self::Cron => Vec::new(),
+            Self::Archived => INTERNAL_SOURCES
+                .iter()
+                .copied()
+                .chain(std::iter::once("cron"))
+                .collect(),
+        }
+    }
+}
+
+pub struct HistoryQuery<'a> {
+    pub slice: HistorySlice,
+    pub profile: Option<&'a str>,
+    /// Read every profile's store through the host's aggregated endpoint.
+    pub all_profiles: bool,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+fn history_param(value: &str) -> String {
+    urlencoding::encode(value).into_owned()
+}
+
+/// One slice of the panel's store. `all_profiles` rides `/api/profiles/sessions`, which opens
+/// every profile's `state.db` on the host and tags rows with their owning profile; the
+/// per-profile view keeps `/api/sessions` so older hosts still work.
+pub fn history_path(query: &HistoryQuery<'_>) -> String {
+    let base = if query.all_profiles {
+        "/api/profiles/sessions"
+    } else {
+        "/api/sessions"
+    };
+    let mut params = vec![
+        format!("limit={}", query.limit.clamp(1, 200)),
+        format!("offset={}", query.offset),
+        "order=recent".to_owned(),
+        "min_messages=1".to_owned(),
+        format!("archived={}", query.slice.archived()),
+    ];
+    if let Some(source) = query.slice.source() {
+        params.push(format!("source={source}"));
+    }
+    let excludes = query.slice.excludes();
+    if !excludes.is_empty() {
+        let joined = excludes
+            .iter()
+            .map(|id| history_param(id))
+            .collect::<Vec<_>>()
+            .join(",");
+        params.push(format!("exclude_sources={joined}"));
+    }
+    if query.all_profiles {
+        params.push("profile=all".to_owned());
+    } else if let Some(profile) = profile_query(query.profile) {
+        params.push(profile);
+    }
+    format!("{base}?{}", params.join("&"))
 }
 
 /// `order=latest` pages from the newest turn, which is the view the panel's own desktop opens:
@@ -428,6 +597,116 @@ pub async fn sessions(
         AppError::new("E_HERMES_PANEL", "Could not encode panel sessions.")
             .with_detail(error.to_string())
     })
+}
+
+/// Read one history slice and normalize the envelope.
+///
+/// A host without `/api/profiles/sessions` (older than 0.23) answers 404: the same slice is
+/// retried per-profile and reported as `degraded`, so the list stays usable and the UI can
+/// say why the cross-profile view is missing.
+pub async fn history(
+    profile_id: &str,
+    profile: Option<&str>,
+    all_profiles: bool,
+    slice: &str,
+    limit: usize,
+    offset: usize,
+) -> Result<String, AppError> {
+    let slice = HistorySlice::parse(slice)
+        .ok_or_else(|| AppError::new("E_HERMES_PANEL_INPUT", "Unknown history slice."))?;
+    let query = HistoryQuery {
+        slice,
+        profile,
+        all_profiles,
+        limit,
+        offset,
+    };
+    let (value, degraded) = match get_json(profile_id, &history_path(&query)).await {
+        Ok(value) => (value, false),
+        Err(error) if all_profiles && error.code == "E_HERMES_PANEL_UNSUPPORTED" => {
+            let fallback = HistoryQuery {
+                all_profiles: false,
+                ..query
+            };
+            (get_json(profile_id, &history_path(&fallback)).await?, true)
+        }
+        Err(error) => return Err(error),
+    };
+    serde_json::to_string(&history_payload(
+        slice,
+        all_profiles,
+        degraded,
+        limit,
+        offset,
+        &value,
+    ))
+    .map_err(|error| {
+        AppError::new("E_HERMES_PANEL", "Could not encode panel history.")
+            .with_detail(error.to_string())
+    })
+}
+
+/// The renderer should never have to know which endpoint answered. Trimmed to the fields the
+/// sidebar reads, plus the paging signal the host's `total` only implies.
+fn history_payload(
+    slice: HistorySlice,
+    all_profiles: bool,
+    degraded: bool,
+    limit: usize,
+    offset: usize,
+    value: &serde_json::Value,
+) -> serde_json::Value {
+    let rows = value
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let total = value
+        .get("total")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(rows.len() as u64);
+    let seen = rows.len() as u64 + offset as u64;
+    let profile_totals = value
+        .get("profile_totals")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "slice": slice.as_str(),
+        "allProfiles": all_profiles && !degraded,
+        "degraded": degraded,
+        "sessions": rows,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": !rows.is_empty() && seen < total,
+        "profileTotals": profile_totals,
+    })
+}
+
+/// Archive or restore one panel session. Same fenced mutation as rename: the panel refuses an
+/// unfenced write once a second client may have moved the row.
+pub async fn set_archived(
+    profile_id: &str,
+    profile: Option<&str>,
+    session_id: &str,
+    archived: bool,
+    expected_revision: i64,
+    expected_generation: i64,
+) -> Result<(), AppError> {
+    send(
+        profile_id,
+        reqwest::Method::PATCH,
+        &session_path(profile, session_id),
+        Some(serde_json::json!({
+            "archived": archived,
+            "request_id": uuid::Uuid::now_v7().to_string(),
+            "expected_revision": expected_revision.max(0),
+            "expected_generation": expected_generation.max(0)
+        })),
+        "Could not change the panel conversation's archive state.",
+    )
+    .await?;
+    Ok(())
 }
 
 pub async fn messages(
@@ -615,11 +894,222 @@ mod path_tests {
             "/api/sessions/a%20b?request_id=req%202&expected_revision=7&expected_generation=2&profile=aso"
         );
     }
+
+    fn query(slice: HistorySlice, profile: Option<&str>, all_profiles: bool) -> String {
+        history_path(&HistoryQuery {
+            slice,
+            profile,
+            all_profiles,
+            limit: 30,
+            offset: 60,
+        })
+    }
+
+    #[test]
+    fn recents_keep_gateway_threads_out_of_the_main_list() {
+        // The panel's own desktop does the same: a busy Telegram bot would otherwise bury
+        // every local chat behind a page of messenger threads.
+        let path = query(HistorySlice::Recents, None, false);
+        assert!(path.starts_with("/api/sessions?limit=30&offset=60&order=recent&min_messages=1"));
+        assert!(path.contains("archived=exclude"));
+        // Scheduled jobs are a separate list. Omitting `cron` here put 38 routine runs above a
+        // single real chat on a real host, which is exactly what the user saw.
+        assert!(path.contains("exclude_sources=cron,"));
+        assert!(path.contains("subagent"));
+        assert!(path.contains("oneshot"));
+        for platform in ["telegram", "discord", "slack", "whatsapp"] {
+            assert!(path.contains(platform), "recents must exclude {platform}");
+        }
+    }
+
+    #[test]
+    fn messaging_is_the_inverse_of_recents() {
+        let path = query(HistorySlice::Messaging, Some("aso"), false);
+        // Every local source, plus the internal rows `LOCAL_SOURCES` does not name: a `subagent`
+        // run is plumbing, not a Telegram thread.
+        assert!(path.contains(
+            "exclude_sources=cron,acp,cli,codex,desktop,gateway,kanban,local,oneshot,tui,subagent,tool"
+        ));
+        assert!(
+            !path.contains("telegram"),
+            "the messaging slice must not exclude platforms"
+        );
+        assert!(path.ends_with("&profile=aso"));
+    }
+
+    #[test]
+    fn cron_rows_have_their_own_slice() {
+        let path = query(HistorySlice::Cron, None, false);
+        assert!(path.contains("source=cron"));
+        assert!(!path.contains("exclude_sources"));
+        assert!(path.contains("archived=exclude"));
+    }
+
+    #[test]
+    fn the_archive_is_its_own_list() {
+        let path = query(HistorySlice::Archived, Some("default"), false);
+        assert!(path.contains("archived=only"));
+        assert!(path.contains("exclude_sources=acp,kanban,oneshot,subagent,tool,cron"));
+        // `default` is the host's own profile: no parameter, same as before.
+        assert!(!path.contains("profile="));
+    }
+
+    #[test]
+    fn aggregation_rides_the_profiles_endpoint() {
+        let path = query(HistorySlice::Messaging, Some("aso"), true);
+        assert!(path.starts_with("/api/profiles/sessions?"));
+        // `profile=all` wins over the selected agent profile: the host fans out itself.
+        assert!(path.ends_with("&profile=all"));
+        assert!(!path.contains("profile=aso"));
+    }
+
+    #[test]
+    fn drops_an_unnameable_slice_and_profile() {
+        assert!(HistorySlice::parse("everything").is_none());
+        assert_eq!(
+            HistorySlice::parse(" archived "),
+            Some(HistorySlice::Archived)
+        );
+        let path = query(HistorySlice::Recents, Some("../../etc"), false);
+        assert!(!path.contains("profile="));
+    }
+
+    #[test]
+    fn classifies_panel_status_codes() {
+        assert_eq!(
+            status_error(reqwest::StatusCode::UNAUTHORIZED, "x").code,
+            "E_HERMES_PANEL_AUTH"
+        );
+        assert_eq!(
+            status_error(reqwest::StatusCode::NOT_FOUND, "x").code,
+            "E_HERMES_PANEL_UNSUPPORTED"
+        );
+        assert_eq!(
+            status_error(reqwest::StatusCode::BAD_GATEWAY, "x").code,
+            "E_HERMES_PANEL"
+        );
+    }
+
+    #[test]
+    fn reports_more_rows_only_when_the_host_has_them() {
+        let page = serde_json::json!({
+            "sessions": [{"id": "a"}, {"id": "b"}],
+            "total": 5
+        });
+        let payload = history_payload(HistorySlice::Messaging, true, false, 20, 0, &page);
+        assert_eq!(payload["hasMore"], serde_json::json!(true));
+        assert_eq!(payload["allProfiles"], serde_json::json!(true));
+        assert_eq!(payload["slice"], serde_json::json!("messaging"));
+        let last = history_payload(HistorySlice::Messaging, false, false, 20, 3, &page);
+        assert_eq!(last["hasMore"], serde_json::json!(false));
+        // A degraded read is per-profile: the UI must not claim an aggregate.
+        let degraded = history_payload(HistorySlice::Recents, true, true, 20, 0, &page);
+        assert_eq!(degraded["allProfiles"], serde_json::json!(false));
+        assert_eq!(degraded["degraded"], serde_json::json!(true));
+        // An empty page is a real answer, not "more to load".
+        let empty = history_payload(
+            HistorySlice::Recents,
+            false,
+            false,
+            20,
+            0,
+            &serde_json::json!({"sessions": [], "total": 0}),
+        );
+        assert_eq!(empty["hasMore"], serde_json::json!(false));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Real-host smoke test for the history slices: every slice must come back with the
+    /// envelope the renderer expects, and the two lists a person opens must not be empty on a
+    /// panel that has gateway traffic. Tokens come from the environment so nothing is stored.
+    ///
+    /// ```sh
+    /// HERMES_PANEL_URL=http://100.64.0.9:9119 \
+    /// HERMES_PANEL_AT=<session cookie> HERMES_PANEL_RT=<refresh cookie> \
+    /// cargo test --lib hermes::panel::tests::reads_every_history_slice -- --ignored --nocapture
+    /// ```
+    #[tokio::test]
+    #[ignore = "requires HERMES_PANEL_URL, HERMES_PANEL_AT and HERMES_PANEL_RT"]
+    async fn reads_every_history_slice_from_a_real_panel() {
+        let url = std::env::var("HERMES_PANEL_URL").expect("HERMES_PANEL_URL");
+        let access = std::env::var("HERMES_PANEL_AT").expect("HERMES_PANEL_AT");
+        let refresh = std::env::var("HERMES_PANEL_RT").expect("HERMES_PANEL_RT");
+        let profile =
+            std::env::var("HERMES_PANEL_PROFILE").unwrap_or_else(|_| "default".to_owned());
+        let dir = std::env::temp_dir().join(format!("opennavo-panel-smoke-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // The app's own store is never touched: this uses a throwaway data root.
+        let _ = super::super::DATA_ROOT.set(dir);
+        let session = PanelSession {
+            base_url: base_url(&url).unwrap(),
+            provider: "basic".to_owned(),
+            access_token: access,
+            refresh_token: refresh,
+        };
+        super::super::panel_session_set("smoke", &session).unwrap();
+
+        let agent_profile = if profile == "default" {
+            None
+        } else {
+            Some(profile.as_str())
+        };
+        let mut counts = Vec::new();
+        for slice in ["recents", "messaging", "cron", "archived"] {
+            let raw = history("smoke", agent_profile, false, slice, 40, 0)
+                .await
+                .unwrap_or_else(|error| panic!("{slice} failed: {error:?}"));
+            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(value["slice"], serde_json::json!(slice));
+            assert_eq!(value["degraded"], serde_json::json!(false));
+            let rows = value["sessions"].as_array().map(Vec::len).unwrap_or(0);
+            println!(
+                "{slice:9} total={} rows={rows} sources={:?}",
+                value["total"],
+                value["sessions"]
+                    .as_array()
+                    .map(|rows| rows
+                        .iter()
+                        .filter_map(|row| row["source"].as_str())
+                        .collect::<Vec<_>>())
+                    .unwrap_or_default()
+            );
+            counts.push((slice, rows));
+        }
+
+        // Aggregated read: every profile on the host, tagged with its owner.
+        let raw = history("smoke", agent_profile, true, "recents", 40, 0)
+            .await
+            .expect("aggregated recents");
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let profiles: Vec<&str> = value["sessions"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row["profile"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        println!(
+            "all-profiles total={} rows={} profiles={:?} degraded={}",
+            value["total"],
+            profiles.len(),
+            profiles,
+            value["degraded"]
+        );
+
+        // A panel with local chats must answer the recents slice; gateway traffic must answer
+        // the messaging slice. An empty answer here is the bug this test exists to catch.
+        let recents = counts
+            .iter()
+            .find(|(slice, _)| *slice == "recents")
+            .unwrap()
+            .1;
+        assert!(recents > 0, "recents came back empty");
+    }
 
     #[tokio::test]
     #[ignore = "requires HERMES_PANEL_URL, HERMES_PANEL_USER and HERMES_PANEL_PASSWORD"]

@@ -8,6 +8,9 @@ import HermesSettings from '@/components/hermes/HermesSettings.vue';
 import HermesProfiles from '@/components/hermes/HermesProfiles.vue';
 import HermesGatewayModal from '@/components/hermes/HermesGatewayModal.vue';
 import HermesAgentProfiles from '@/components/hermes/HermesAgentProfiles.vue';
+import HermesApprovalDialog from '@/components/hermes/HermesApprovalDialog.vue';
+import HermesClarifyDialog from '@/components/hermes/HermesClarifyDialog.vue';
+import HermesSecretPrompt from '@/components/hermes/HermesSecretPrompt.vue';
 import { useHermesStore } from '@/stores/hermes';
 import { commands, unwrap } from '@/ipc/client';
 import { useHermesUiStore } from '@/stores/hermesUi';
@@ -744,26 +747,24 @@ onBeforeUnmount(() => {
     />
     <HermesAgentProfiles :open="ui.agentProfilesOpen" @close="ui.closeAgentProfiles()" />
 
-    <OnModal
+    <HermesApprovalDialog
       :open="Boolean(store.approvalRequest)"
-      :title="content.approval.title"
-      :description="content.approval.body"
-      size="md"
-      role="dialog"
+      :request="store.approvalRequest"
+      @decide="store.respondApproval"
       @close="store.respondApproval('deny')"
-    >
-      <div v-if="store.approvalRequest" class="flex flex-col gap-8px">
-        <span class="text-11px text-ink-tertiary">{{ content.approval.command }}</span>
-        <pre
-          class="m-0 max-h-220px overflow-auto whitespace-pre-wrap break-words rounded-small border border-solid border-line-subtle bg-surface-inset px-10px py-8px font-mono text-11px leading-[1.5] text-ink-secondary"
-          >{{ store.approvalRequest.command || store.approvalRequest.description || '—' }}</pre
-        >
-      </div>
-      <template #footer>
-        <OnButton variant="ghost" @click="store.respondApproval('deny')">{{ content.approval.deny }}</OnButton>
-        <OnButton variant="accent" @click="store.respondApproval('once')">{{ content.approval.allowOnce }}</OnButton>
-      </template>
-    </OnModal>
+    />
+    <HermesClarifyDialog
+      :open="Boolean(store.clarifyRequest)"
+      :request="store.clarifyRequest"
+      @submit="store.respondClarify"
+      @cancel="store.respondClarify([], true)"
+    />
+    <HermesSecretPrompt
+      :open="Boolean(store.secretRequest)"
+      :request="store.secretRequest"
+      @submit="store.respondSecret"
+      @skip="store.respondSecret('')"
+    />
 
     <OnModal
       :open="installOpen"
