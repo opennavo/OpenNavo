@@ -119,7 +119,7 @@ jobs:
       - run: node tooling/scripts/check-desktop-mock-release.mjs
       - run: pnpm --filter @opennavo/web test:ssr
 
-  # Admin menu/permission E2E (intercepted API; no backend required).
+  # Admin menu/permission E2E and desktop browser-mode E2E (both intercept their APIs; no backend required).
   e2e:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
@@ -137,6 +137,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm --filter @opennavo/admin run e2e
+      - run: pnpm --filter @opennavo/desktop run e2e
 
   # Full-stack web E2E (05 section 10): the composite action starts isolated PostgreSQL/Redis/MinIO and the seeded E2E API on 18082.
   # Write frontend environment variables to GITHUB_ENV; always remove dedicated containers and volumes (03 section 5.5).
