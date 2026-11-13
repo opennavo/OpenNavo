@@ -11,7 +11,7 @@ import {
   HERMES_PROVIDERS,
   HERMES_PROVIDER_MAP,
   defaultProviderEndpoint,
-  hermesProviderSlug,
+  pickOfficialProvider,
   HERMES_AUX_TASKS,
   type HermesAuxTask,
   providerModels
@@ -31,6 +31,7 @@ const toasts = useToasts();
 const activeTab = ref<HermesSettingsTab>(props.tab);
 const draftModel = ref<HermesModelSettings>({ ...store.model });
 const draftMac = ref<HermesMacSettings>({ ...store.mac });
+const editProfileName = ref(store.activeAgentProfileName);
 const secret = ref('');
 const uninstallOpen = ref(false);
 const modelOpen = ref(false);
@@ -58,6 +59,8 @@ const LEVELS = ['open', 'guarded', 'full'] as const;
 const MAC_CAPABILITIES = ['terminal', 'screen', 'files', 'cron'] as const;
 
 const provider = computed(() => HERMES_PROVIDER_MAP[draftModel.value.provider]);
+/** A panel connection authenticates on its own host; this Mac holds no credential for it. */
+const remoteCredentials = computed(() => store.remoteActive);
 const providerCopy = computed(() => content.value.providers[draftModel.value.provider]);
 const localAuthDetected = computed(() => {
   const key = provider.value.localAuth;
@@ -73,9 +76,9 @@ const loginDetected = computed(() => {
   return key === 'claude-code' ? status.claudeCode : status[key];
 });
 const officialProvider = computed(() => {
-  const slug = hermesProviderSlug(draftModel.value.provider);
-  if (!slug) return undefined;
-  return store.modelOptions?.providers?.find(item => item.slug === slug);
+  // Annotated so the generic keeps the full catalog row type (`capabilities`, `pricing`).
+  const providers: NonNullable<typeof store.modelOptions>['providers'] = store.modelOptions?.providers ?? [];
+  return pickOfficialProvider(providers, draftModel.value.provider);
 });
 const officialAuthenticated = computed(() => officialProvider.value?.authenticated ?? false);
 const models = computed(() => {
@@ -101,8 +104,14 @@ const selectedCapability = computed(() => officialProvider.value?.capabilities?.
 const reasoningSupported = computed(() => selectedCapability.value?.reasoning !== false);
 const fastSupported = computed(() => selectedCapability.value?.fast === true);
 const selectedPricing = computed(() => officialProvider.value?.pricing?.[draftModel.value.model]);
+/** `loadModelOptions` no-ops until the runtime status is known, so make sure it is loaded. */
+async function ensureRuntime() {
+  if (!store.runtime) await store.loadRuntime();
+}
+
 async function refreshModels() {
-  await store.loadModelOptions(true, draftModel.value, secret.value);
+  await ensureRuntime();
+  await store.loadModelOptions(true, draftModel.value, secret.value, editProfileName.value);
 }
 function selectModel(model: string) {
   draftModel.value.model = model;
@@ -152,7 +161,8 @@ const auxSummary = computed(() => {
 });
 function openAux() {
   auxOpen.value = true;
-  if (!auxProviders.value.length) void store.loadModelOptions(false, draftModel.value, secret.value);
+  if (!auxProviders.value.length)
+    void store.loadModelOptions(false, draftModel.value, secret.value, editProfileName.value);
 }
 
 function auxValue(task: HermesAuxTask) {
@@ -176,7 +186,7 @@ function resetTest() {
 }
 
 async function refreshLogin() {
-  await store.loadLoginStatus();
+  await store.loadLoginStatus(editProfileName.value);
 }
 
 interface HermesLoginEvent {
@@ -230,7 +240,9 @@ async function ensureLoginListener() {
         loginPhase.value = 'success';
         void refreshLogin();
         store.resetSession();
-        void store.loadModelOptions(true, draftModel.value, secret.value).then(alignOfficialModel);
+        void store
+          .loadModelOptions(true, draftModel.value, secret.value, editProfileName.value)
+          .then(alignOfficialModel);
       } else {
         loginPhase.value = 'error';
         if (payload.message) appendLoginLine(payload.message);
@@ -238,6 +250,14 @@ async function ensureLoginListener() {
     }
   });
 }
+
+/**
+ * The profile the sheet is editing, as the backend wants it: `null` for `default` (the root
+ * home). Credentials, official logins and the runtime's own per-profile state (MCP servers,
+ * skills, toolsets, cron jobs) all live in that profile, so every call that reads or writes
+ * them passes this.
+ */
+const profileArg = computed(() => (editProfileName.value === 'default' ? null : editProfileName.value));
 
 async function openLogin() {
   const key = provider.value.login;
@@ -252,7 +272,7 @@ async function openLogin() {
   loginInput.value = '';
   try {
     await ensureLoginListener();
-    await unwrap(commands.hermesLoginStart(key));
+    await unwrap(commands.hermesLoginStart(key, profileArg.value));
     if (loginPhase.value === 'starting') loginPhase.value = 'waiting';
   } catch (error) {
     loginPhase.value = 'error';
@@ -264,10 +284,10 @@ async function logout() {
   const key = provider.value.login;
   if (!key) return;
   try {
-    await unwrap(commands.hermesLogout(key));
+    await unwrap(commands.hermesLogout(key, profileArg.value));
     await refreshLogin();
     store.resetSession();
-    await store.loadModelOptions(true, draftModel.value, secret.value);
+    await store.loadModelOptions(true, draftModel.value, secret.value, editProfileName.value);
     alignOfficialModel();
     toasts.push({ tone: 'success', title: content.value.settings.model.logout, description: providerCopy.value.name });
   } catch (error) {
@@ -303,26 +323,50 @@ async function copyLoginCode() {
 }
 
 async function refreshSecret() {
-  if (provider.value.login) {
+  if (remoteCredentials.value) {
     draftModel.value.keySet = false;
     await refreshLogin();
     return;
   }
-  if (provider.value.localAuth) {
+  const info = provider.value;
+  if (info.login) {
+    draftModel.value.keySet = false;
     await refreshLogin();
-  }
-  if (draftModel.value.keySet) {
     return;
   }
-  if (provider.value.oauth) {
+  if (info.localAuth) {
+    await refreshLogin();
+  }
+  if (info.oauth) {
+    // An OAuth account is not a stored API key; claiming one would offer a
+    // "remove key" action that has nothing to remove.
     draftModel.value.keySet = false;
     return;
   }
+  // Always ask the runtime. `keySet` is persisted UI state and the key lives in the
+  // runtime's own store, so it can disappear outside this app (CLI, uninstall, a
+  // failed write); a cached `true` must never suppress the check.
   try {
-    draftModel.value.keySet = await unwrap(commands.hermesSecretStatus(draftModel.value.provider));
+    draftModel.value.keySet = await unwrap(commands.hermesSecretStatus(draftModel.value.provider, profileArg.value));
   } catch {
-    // A locked or unavailable Keychain must not block the settings sheet.
+    // An unreadable credential file must not block the settings sheet.
   }
+}
+
+function changeProfileScope(event: Event) {
+  const target = event.target as HTMLSelectElement;
+  editProfileName.value = target.value;
+  draftModel.value = store.agentProfileModel(target.value);
+  draftMac.value = store.agentProfileMac(target.value);
+  secret.value = '';
+  resetTest();
+  // The diagnostics pane reads per-profile runtime state (MCP servers, skills, toolsets,
+  // cron jobs), so re-read it for the new scope instead of leaving the previous profile's
+  // output on screen.
+  cliOutput.value = '';
+  if (activeTab.value === 'tools') void loadCli(cliKind.value);
+  void refreshSecret();
+  void store.loadModelOptions(false, draftModel.value, secret.value, target.value).then(alignOfficialModel);
 }
 
 watch(
@@ -330,6 +374,7 @@ watch(
   open => {
     if (!open) return;
     activeTab.value = props.tab;
+    editProfileName.value = store.activeAgentProfileName;
     draftModel.value = { ...store.model };
     draftMac.value = { ...store.mac };
     secret.value = '';
@@ -338,10 +383,13 @@ watch(
     resetTest();
     void refreshSecret();
     void refreshPermissions();
+    // Paint from the cached catalog immediately, then refresh it in the background: a
+    // payload fetched for another provider can carry a warning that describes *that*
+    // provider, not the card being edited.
     if (store.modelOptions) alignOfficialModel();
-    else if (!store.modelOptionsLoading) {
-      void store.loadModelOptions(false, draftModel.value, secret.value).then(alignOfficialModel);
-    }
+    void ensureRuntime()
+      .then(() => store.loadModelOptions(false, draftModel.value, secret.value, editProfileName.value))
+      .then(alignOfficialModel);
   }
 );
 watch(
@@ -361,17 +409,18 @@ async function selectProvider(id: HermesProvider) {
     provider: id,
     model: info.models[0] ?? draftModel.value.model,
     endpoint: defaultProviderEndpoint(id),
-    keySet: info.oauth
+    keySet: false
   };
   secret.value = '';
   modelOpen.value = false;
   resetTest();
   await refreshSecret();
-  const slug = hermesProviderSlug(id);
-  const hasCachedModels = store.modelOptions?.providers?.some(
-    entry => entry.slug === slug && (entry.models?.length ?? 0) > 0
-  );
-  if (!hasCachedModels) await store.loadModelOptions(false, draftModel.value, secret.value);
+  // Always reload for the newly selected card. Reusing the catalog because *some* slug
+  // already had models kept a payload built for the previous provider, and its
+  // `configured-current` warning then described a provider the user was no longer editing.
+  // `loadModelOptions` already ignores re-entrant calls.
+  await ensureRuntime();
+  await store.loadModelOptions(false, draftModel.value, secret.value, editProfileName.value);
   alignOfficialModel();
 }
 
@@ -393,19 +442,34 @@ function selectLevel(level: HermesMacSettings['level']) {
 }
 
 async function save() {
-  const entered = secret.value.trim();
+  // A panel connection authenticates on its own host; never write this Mac's `.env` for it.
+  const entered = remoteCredentials.value ? '' : secret.value.trim();
   if (entered) {
     try {
-      await unwrap(commands.hermesSecretSet(draftModel.value.provider, entered));
-      draftModel.value.keySet = true;
+      await unwrap(commands.hermesSecretSet(draftModel.value.provider, entered, profileArg.value));
     } catch (error) {
       const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
       toasts.push({ tone: 'warning', title: content.value.settings.model.keyError, description: detail });
     }
   }
-  store.setApiKey(secret.value);
+  // `keySet` must record what the runtime actually stores. Deriving it from "the user
+  // typed something" marked a failed write as saved, and the sheet then claimed a key
+  // existed for the rest of the profile's life.
+  if (entered || draftModel.value.keySet) {
+    try {
+      draftModel.value.keySet = await unwrap(commands.hermesSecretStatus(draftModel.value.provider, profileArg.value));
+    } catch {
+      // Keep the last known value when the store cannot be read.
+    }
+  }
+  // The key was already written to the edited profile's own `.env` above, which is where the
+  // runtime reads it from. Keeping a copy in the store for a profile that is not active made
+  // the next `write_config` in a different profile copy it into that profile's `.env`.
+  const editingActive = editProfileName.value === store.activeAgentProfileName;
+  store.setApiKey(editingActive && !remoteCredentials.value ? secret.value : '');
   const previous = store.model;
   const sessionWillReset =
+    editingActive &&
     Boolean(store.activeId) &&
     (previous.provider !== draftModel.value.provider ||
       previous.model !== draftModel.value.model ||
@@ -413,13 +477,20 @@ async function save() {
       previous.fast !== draftModel.value.fast ||
       previous.endpoint !== draftModel.value.endpoint ||
       Boolean(entered));
-  if (entered) store.resetSession();
-  store.saveModel({ ...draftModel.value, keySet: draftModel.value.keySet || Boolean(entered) });
-  store.saveMac({ ...draftMac.value });
+  if (editingActive) {
+    if (entered) store.resetSession();
+    store.saveModel({ ...draftModel.value });
+    store.saveMac({ ...draftMac.value });
+  } else {
+    store.setAgentProfileModel(editProfileName.value, {
+      ...draftModel.value
+    });
+    store.setAgentProfileMac(editProfileName.value, { ...draftMac.value });
+  }
   toasts.push({
     tone: 'success',
     title: content.value.common.settingsSaved,
-    description: `${store.modelShort} · ${content.value.effort[store.model.effort]}`
+    description: `${draftModel.value.model} · ${content.value.effort[draftModel.value.effort]}`
   });
   if (sessionWillReset) {
     toasts.push({
@@ -433,9 +504,12 @@ async function save() {
 
 async function removeApiKey() {
   try {
-    await unwrap(commands.hermesSecretDelete(draftModel.value.provider));
+    await unwrap(commands.hermesSecretDelete(draftModel.value.provider, profileArg.value));
     draftModel.value.keySet = false;
     secret.value = '';
+    // Drop the in-memory copy too: `write_config` persists whatever key the request carries,
+    // so a stale one would put the deleted credential back into `.env` on the next turn.
+    if (editProfileName.value === store.activeAgentProfileName) store.setApiKey('');
     resetTest();
     toasts.push({ tone: 'success', title: content.value.settings.model.keyRemoved });
   } catch (error) {
@@ -454,7 +528,8 @@ async function testConnection() {
       commands.hermesTestConnection({
         provider: draftModel.value.provider,
         apiKey: secret.value.trim() || null,
-        endpoint: draftModel.value.endpoint.trim() || null
+        endpoint: draftModel.value.endpoint.trim() || null,
+        profile: profileArg.value
       })
     );
     testOk.value = result.ok;
@@ -530,7 +605,7 @@ async function loadCli(kind: string) {
   cliKind.value = kind;
   cliLoading.value = true;
   try {
-    cliOutput.value = await unwrap(commands.hermesCliRead(kind));
+    cliOutput.value = await unwrap(commands.hermesCliRead(kind, profileArg.value));
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
     cliOutput.value = detail;
@@ -545,7 +620,7 @@ async function runCronAction(action: 'pause' | 'resume' | 'remove') {
   if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.cronConfirm)) return;
   cronBusy.value = true;
   try {
-    await unwrap(commands.hermesCronAction(action, cronJobId.value.trim()));
+    await unwrap(commands.hermesCronAction(action, cronJobId.value.trim(), profileArg.value));
     await loadCli('cron');
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -560,7 +635,9 @@ async function runMcp(action: 'list' | 'add' | 'remove') {
   if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.mcpRemoveConfirm)) return;
   mcpBusy.value = true;
   try {
-    const output = await unwrap(commands.hermesMcpAction(action, mcpName.value.trim(), mcpUrl.value.trim()));
+    const output = await unwrap(
+      commands.hermesMcpAction(action, mcpName.value.trim(), mcpUrl.value.trim(), profileArg.value)
+    );
     if (action === 'list') cliOutput.value = output;
     else await loadCli('tools');
   } catch (error) {
@@ -577,7 +654,7 @@ async function runSkillAction(action: 'install' | 'uninstall') {
   if (action === 'uninstall' && !window.confirm(content.value.settings.diagnostics.uninstallConfirm)) return;
   actionBusy.value = true;
   try {
-    await unwrap(commands.hermesSkillAction(action, skillName.value.trim()));
+    await unwrap(commands.hermesSkillAction(action, skillName.value.trim(), profileArg.value));
     await loadCli('skills');
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -592,7 +669,7 @@ async function runToolAction(action: 'enable' | 'disable') {
   if (action === 'disable' && !window.confirm(content.value.settings.diagnostics.disableConfirm)) return;
   actionBusy.value = true;
   try {
-    await unwrap(commands.hermesToolAction(action, toolName.value.trim()));
+    await unwrap(commands.hermesToolAction(action, toolName.value.trim(), profileArg.value));
     await loadCli('tools');
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -718,6 +795,31 @@ onBeforeUnmount(() => {
           </nav>
 
           <div class="min-w-0 flex-1 overflow-y-auto px-24px pb-22px pt-18px">
+            <div
+              v-if="store.agentProfiles.length > 1"
+              class="mb-16px flex items-center gap-9px rounded-small border border-solid border-line-subtle bg-surface-card px-10px py-8px"
+            >
+              <OnIcon name="lucide:layers" :size="13" class="shrink-0 text-ink-accent" />
+              <span class="text-10.5px text-ink-secondary">{{ content.agentProfiles.title }}</span>
+              <select
+                :value="editProfileName"
+                class="ml-auto h-26px rounded-tiny border border-solid border-line-default bg-surface-inset px-7px text-10.5px text-ink-primary outline-none focus-visible:shadow-focus-ring"
+                @change="changeProfileScope"
+              >
+                <option v-for="profile in store.agentProfiles" :key="profile.name" :value="profile.name">
+                  {{ profile.displayName || profile.name }}
+                </option>
+              </select>
+              <span
+                v-if="editProfileName !== store.activeAgentProfileName"
+                class="ml-3px text-9.5px text-ink-tertiary"
+                >{{
+                  content.agentProfiles.editingOther
+                    .replace('{name}', editProfileName)
+                    .replace('{active}', store.activeAgentProfileName)
+                }}</span
+              >
+            </div>
             <template v-if="activeTab === 'model'">
               <section class="mb-22px">
                 <h3 class="m-0 text-12px font-600 text-ink-primary">{{ content.settings.model.providerTitle }}</h3>
@@ -868,7 +970,14 @@ onBeforeUnmount(() => {
                 <OnToggle v-model="draftModel.fast" :aria-label="content.effort.fast" />
               </div>
 
-              <div class="mb-14px flex flex-col gap-6px">
+              <div v-if="remoteCredentials" class="mb-14px flex flex-col gap-6px">
+                <label class="text-11px text-ink-tertiary">{{ providerCopy.authLabel }}</label>
+                <span
+                  class="rounded-small border border-solid border-line-default bg-surface-inset px-10px py-8px text-11px leading-[1.45] text-ink-tertiary"
+                  >{{ content.settings.model.remoteAuth }}</span
+                >
+              </div>
+              <div v-else class="mb-14px flex flex-col gap-6px">
                 <label class="text-11px text-ink-tertiary" for="hermes-auth">{{ providerCopy.authLabel }}</label>
                 <div v-if="provider.login" class="flex flex-col gap-7px">
                   <div
@@ -942,7 +1051,7 @@ onBeforeUnmount(() => {
                 <span class="text-11px leading-[1.45] text-ink-tertiary">{{ providerCopy.hint }}</span>
               </div>
 
-              <div class="mb-18px flex flex-col gap-6px">
+              <div v-if="!remoteCredentials" class="mb-18px flex flex-col gap-6px">
                 <div class="flex items-center gap-10px">
                   <OnButton variant="ghost" size="sm" :disabled="testing" @click="testConnection">{{
                     testing ? content.settings.model.testing : content.common.test
@@ -991,6 +1100,16 @@ onBeforeUnmount(() => {
             </template>
 
             <template v-else>
+              <div
+                v-if="store.remoteActive"
+                class="mb-16px flex items-start gap-8px rounded-small border border-solid border-[rgba(145,135,255,0.16)] bg-[rgba(145,135,255,0.045)] p-10px text-11px leading-[1.55] text-[#bbb7db]"
+              >
+                <OnIcon name="lucide:wifi-off" :size="14" class="mt-1px shrink-0 text-ink-accent" />
+                <span
+                  ><b class="font-600 text-ink-primary">{{ content.profiles.macUnavailable }}</b
+                  ><br />{{ content.profiles.remoteWorkspace }} · {{ content.profiles.remoteCapabilities }}</span
+                >
+              </div>
               <div
                 class="mb-18px flex gap-10px rounded-default border border-solid border-[rgba(255,93,81,0.22)] bg-[rgba(255,93,81,0.06)] p-12px"
               >
@@ -1072,7 +1191,7 @@ onBeforeUnmount(() => {
                   </div>
                   <OnToggle
                     v-model="draftMac.terminal"
-                    :disabled="!draftMac.enabled"
+                    :disabled="!draftMac.enabled || store.remoteActive"
                     :aria-label="content.settings.mac.terminal"
                   />
                 </div>
@@ -1083,7 +1202,7 @@ onBeforeUnmount(() => {
                   </div>
                   <OnToggle
                     v-model="draftMac.screen"
-                    :disabled="!draftMac.enabled"
+                    :disabled="!draftMac.enabled || store.remoteActive"
                     :aria-label="content.settings.mac.screen"
                   />
                 </div>
@@ -1094,7 +1213,7 @@ onBeforeUnmount(() => {
                   </div>
                   <OnToggle
                     v-model="draftMac.files"
-                    :disabled="!draftMac.enabled"
+                    :disabled="!draftMac.enabled || store.remoteActive"
                     :aria-label="content.settings.mac.files"
                   />
                 </div>
@@ -1105,7 +1224,7 @@ onBeforeUnmount(() => {
                   </div>
                   <OnToggle
                     v-model="draftMac.cron"
-                    :disabled="!draftMac.enabled"
+                    :disabled="!draftMac.enabled || store.remoteActive"
                     :aria-label="content.settings.mac.cron"
                   />
                 </div>

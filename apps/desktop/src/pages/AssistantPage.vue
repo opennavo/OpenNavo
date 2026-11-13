@@ -5,6 +5,9 @@ import HermesMark from '@/components/hermes/HermesMark.vue';
 import HermesMessage from '@/components/hermes/HermesMessage.vue';
 import AssistantHistory from '@/components/hermes/AssistantHistory.vue';
 import HermesSettings from '@/components/hermes/HermesSettings.vue';
+import HermesProfiles from '@/components/hermes/HermesProfiles.vue';
+import HermesGatewayModal from '@/components/hermes/HermesGatewayModal.vue';
+import HermesAgentProfiles from '@/components/hermes/HermesAgentProfiles.vue';
 import { useHermesStore } from '@/stores/hermes';
 import { commands, unwrap } from '@/ipc/client';
 import { useHermesUiStore } from '@/stores/hermesUi';
@@ -19,6 +22,12 @@ const toasts = useToasts();
 const input = ref('');
 const historyOpen = ref(false);
 const installOpen = ref(false);
+const gatewayOpen = ref(false);
+const reloginProfile = ref<import('@/stores/hermes').HermesProfile | null>(null);
+let connectionProbeTimer: number | undefined;
+const headerRef = ref<HTMLElement | null>(null);
+const compactHeader = ref(false);
+let headerObserver: ResizeObserver | undefined;
 const contextOpen = ref(false);
 const attachments = ref<{ path: string; name: string; isImage: boolean; size?: number }[]>([]);
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
@@ -35,14 +44,24 @@ const modelLabel = computed(
 );
 
 const macLabel = computed(() => {
+  if (store.remoteActive) return content.value.profiles.macUnavailable;
   if (!store.mac.enabled) return content.value.header.macPaused;
   if (store.mac.level === 'open') return content.value.header.openOnly;
   return content.value.header.mac;
 });
 
 const macTone = computed<'success' | 'neutral'>(() =>
-  store.mac.enabled && store.mac.level !== 'open' ? 'success' : 'neutral'
+  !store.remoteActive && store.mac.enabled && store.mac.level !== 'open' ? 'success' : 'neutral'
 );
+const connectionReady = computed(() =>
+  store.remoteActive ? store.activeProfile.status === 'connected' : store.runtimeReady
+);
+
+/** Older panel rows are only offered once this conversation's transcript is on screen. */
+const showEarlier = computed(() => {
+  const active = store.conversations.find(item => item.id === store.activeId);
+  return Boolean(active?.panel && active.messagesLoaded && active.panelHasOlder);
+});
 
 function enableMac() {
   // Enabling is an explicit grant: default to full control with every capability.
@@ -74,12 +93,14 @@ function scrollToBottom() {
 }
 
 const directoryLabel = computed(() => {
+  if (store.remoteActive) return content.value.profiles.remoteWorkspace;
   const dir = store.workingDir.trim();
   if (!dir) return content.value.composer.chooseDirectory;
   return dir.split('/').filter(Boolean).at(-1) ?? dir;
 });
 
 function addAttachment(path: string, name?: string, size?: number, image?: boolean) {
+  if (store.remoteActive) return;
   const displayName = name || path.split('/').filter(Boolean).at(-1) || path;
   if (size && size > MAX_ATTACHMENT_BYTES) {
     toasts.push({ tone: 'warning', title: content.value.composer.attach, description: `${displayName} > 50 MB` });
@@ -127,6 +148,14 @@ async function openAttachment(path: string) {
 }
 
 async function pickFiles() {
+  if (store.remoteActive) {
+    toasts.push({
+      tone: 'warning',
+      title: content.value.profiles.remote,
+      description: 'Remote gateways do not accept local attachment paths yet.'
+    });
+    return;
+  }
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
@@ -172,6 +201,7 @@ function removeAttachment(index: number) {
 }
 
 async function pickDirectory() {
+  if (store.remoteActive) return;
   if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) return;
   try {
     const { open } = await import('@tauri-apps/plugin-dialog');
@@ -276,6 +306,16 @@ watch(() => store.messages.length, scrollToBottom, { flush: 'post' });
 watch(() => store.thinking, scrollToBottom, { flush: 'post' });
 watch(lastTextLength, scrollToBottom, { flush: 'post' });
 watch(
+  () => store.panelAuthExpired,
+  profileId => {
+    if (!profileId) return;
+    const profile = store.profiles.find(item => item.id === profileId);
+    if (!profile) return;
+    reloginProfile.value = profile;
+    gatewayOpen.value = true;
+  }
+);
+watch(
   () => store.activeId,
   () => {
     void nextTick(() => scroll.value?.scrollTo({ top: 0 }));
@@ -305,10 +345,28 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 onMounted(async () => {
+  if (headerRef.value) {
+    headerObserver = new ResizeObserver(entries => {
+      compactHeader.value = (entries[0]?.contentRect.width ?? 0) < 1240;
+    });
+    headerObserver.observe(headerRef.value);
+  }
+  const params = new URLSearchParams(window.location.search);
+  const requestedConnection = params.get('connection');
+  const requestedProfile = params.get('profile');
+  if (requestedConnection && requestedConnection !== store.activeProfileId) {
+    store.switchProfile(requestedConnection);
+  }
+  await store.loadAllAgentProfiles();
+  void store.probeConnections();
+  // Panel history lives on the host, so it is read once here instead of only after a switch.
+  void store.loadPanelHistory();
+  connectionProbeTimer = window.setInterval(() => void store.probeConnections(), 60_000);
+  if (requestedProfile) store.switchAgentProfile(requestedProfile);
   const history = store.loadHistory();
   await store.loadRuntime();
   await history;
-  if (!store.runtimeReady) installOpen.value = true;
+  if (!store.runtimeReady && !store.remoteActive) installOpen.value = true;
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('paste', onPaste);
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
@@ -330,6 +388,8 @@ onMounted(async () => {
   void nextTick(() => composer.value?.focus());
 });
 onBeforeUnmount(() => {
+  if (connectionProbeTimer) window.clearInterval(connectionProbeTimer);
+  headerObserver?.disconnect();
   window.removeEventListener('keydown', onKeydown);
   window.removeEventListener('paste', onPaste);
   unlistenDrop?.();
@@ -338,22 +398,35 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative flex h-[calc(100vh-86px)] min-h-0 flex-col">
-    <header class="flex h-64px shrink-0 items-center gap-10px border-b border-b-solid border-line-subtle">
+    <header
+      ref="headerRef"
+      class="flex h-64px shrink-0 items-center gap-10px border-b border-b-solid border-line-subtle"
+    >
       <div class="flex min-w-0 items-center gap-10px">
         <HermesMark :size="30" />
         <span class="text-17px font-600 tracking-[-0.015em] text-ink-primary">Hermes</span>
         <OnChip tone="neutral">{{ content.header.builtin }}</OnChip>
-        <span class="inline-flex items-center gap-5px text-11px text-ink-tertiary"
-          ><i
-            class="h-6px w-6px rounded-full"
-            :class="store.runtimeReady ? 'bg-status-success' : 'bg-status-warning'"
-          ></i
-          >{{ store.runtimeReady ? content.header.local : content.header.demo }}</span
+        <span class="inline-flex shrink-0 items-center gap-5px whitespace-nowrap text-11px text-ink-tertiary"
+          ><i class="h-6px w-6px rounded-full" :class="connectionReady ? 'bg-status-success' : 'bg-status-warning'"></i
+          >{{
+            connectionReady
+              ? store.remoteActive
+                ? content.profiles.remoteOnly
+                : content.header.local
+              : content.header.demo
+          }}</span
         >
-        <OnChip :tone="macTone" dot>{{ macLabel }}</OnChip>
-        <OnButton v-if="!store.mac.enabled" variant="ghost" size="xs" icon="lucide:power" @click="enableMac">{{
-          content.header.enableMac
-        }}</OnButton>
+        <div v-if="!compactHeader" class="flex shrink-0 items-center gap-10px">
+          <OnChip :tone="macTone" dot class="shrink-0 whitespace-nowrap">{{ macLabel }}</OnChip>
+          <OnButton
+            v-if="!store.remoteActive && !store.mac.enabled"
+            variant="ghost"
+            size="xs"
+            icon="lucide:power"
+            @click="enableMac"
+            >{{ content.header.enableMac }}</OnButton
+          >
+        </div>
       </div>
       <div class="ml-auto flex shrink-0 items-center gap-8px">
         <OnButton
@@ -367,21 +440,12 @@ onBeforeUnmount(() => {
           :class="{ 'bg-surface-raised text-ink-primary': historyOpen }"
           @click="historyOpen = !historyOpen"
         />
-        <button
-          type="button"
-          class="inline-flex h-28px items-center gap-6px rounded-full border border-solid border-line-default px-10px font-sans text-11.5px text-ink-secondary outline-none transition-colors hover:border-line-strong hover:text-ink-primary focus-visible:shadow-focus-ring"
-          :title="`${content.header.model} · ${content.effort.label}`"
-          @click="ui.openSettings('model')"
-        >
-          {{ modelLabel }}
-          <OnIcon name="lucide:chevron-down" :size="12" />
-        </button>
         <OnButton variant="ghost" size="sm" icon="lucide:plus" @click="newChat">{{ content.header.newChat }}</OnButton>
       </div>
     </header>
 
     <div
-      v-if="!store.runtimeReady"
+      v-if="!connectionReady"
       class="flex min-h-0 flex-1 flex-col items-center justify-center px-24px pb-40px text-center"
     >
       <HermesMark :size="54" />
@@ -404,8 +468,41 @@ onBeforeUnmount(() => {
     <template v-else>
       <div ref="scroll" class="min-h-0 flex-1 overflow-y-auto py-18px">
         <div class="mx-auto flex w-full max-w-720px flex-col gap-22px">
+          <div v-if="showEarlier" class="flex items-center justify-center">
+            <button
+              type="button"
+              class="inline-flex h-28px items-center gap-6px rounded-full border border-solid border-line-default px-12px font-sans text-11px text-ink-tertiary outline-none hover:border-line-strong hover:text-ink-secondary focus-visible:shadow-focus-ring"
+              @click="store.loadOlderPanelMessages()"
+            >
+              <OnIcon
+                :name="store.panelConversationLoading ? 'lucide:loader-circle' : 'lucide:chevron-up'"
+                :size="12"
+                :class="store.panelConversationLoading ? 'animate-spin' : ''"
+              />
+              {{ store.panelConversationLoading ? content.history.loadingEarlier : content.history.showEarlier }}
+            </button>
+          </div>
           <div
-            v-if="!store.messages.length && !store.thinking"
+            v-if="store.profileSwitching"
+            class="flex items-center justify-center gap-6px text-11px text-ink-tertiary"
+          >
+            <OnIcon name="lucide:loader-circle" :size="12" class="animate-spin" />
+            <span>{{
+              content.agentProfiles.switchingTo.replace(
+                '{name}',
+                store.profileSwitchingTo ?? store.activeAgentProfileName
+              )
+            }}</span>
+          </div>
+          <div
+            v-if="store.panelConversationLoading"
+            class="flex items-center justify-center gap-6px text-11px text-ink-tertiary"
+          >
+            <OnIcon name="lucide:loader-circle" :size="12" class="animate-spin" />
+            <span>{{ content.history.loading }}</span>
+          </div>
+          <div
+            v-if="!store.messages.length && !store.thinking && !store.panelConversationLoading"
             class="flex flex-col items-center px-0 pb-18px pt-38px text-center"
           >
             <HermesMark :size="54" />
@@ -623,6 +720,29 @@ onBeforeUnmount(() => {
 
     <AssistantHistory :open="historyOpen" @close="historyOpen = false" @select="selectConversation" />
     <HermesSettings :open="ui.settingsOpen" :tab="ui.settingsTab" @close="ui.closeSettings()" />
+    <HermesProfiles
+      :open="ui.profilesOpen"
+      @close="ui.closeProfiles()"
+      @add="
+        gatewayOpen = true;
+        ui.closeProfiles();
+      "
+    />
+    <HermesGatewayModal
+      :open="gatewayOpen"
+      :relogin-id="reloginProfile?.id ?? null"
+      :initial-name="reloginProfile?.name"
+      :initial-url="reloginProfile?.endpoint"
+      @close="
+        gatewayOpen = false;
+        reloginProfile = null;
+      "
+      @saved="
+        gatewayOpen = false;
+        reloginProfile = null;
+      "
+    />
+    <HermesAgentProfiles :open="ui.agentProfilesOpen" @close="ui.closeAgentProfiles()" />
 
     <OnModal
       :open="Boolean(store.approvalRequest)"

@@ -2,6 +2,7 @@ import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useHermesStore } from '@/stores/hermes';
+import { HERMES_PROVIDER_MAP, hermesProviderSlug, pickOfficialProvider } from '@/hermes/providers';
 import { useToasts } from '@/composables/useToasts';
 import { commands } from '@/ipc/client';
 
@@ -31,6 +32,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
+  Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
 });
 
 describe('Hermes conversation store', () => {
@@ -62,6 +64,264 @@ describe('Hermes conversation store', () => {
     };
     expect(saved.version).toBe(3);
     expect(saved.mac.enabled).toBe(false);
+  });
+
+  it('Restores per-profile history and disables Mac controls on a remote profile', () => {
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: { providers: [], model: null, provider: null }
+    });
+    const store = useHermesStore();
+    store.conversations.push({
+      id: 'local-conversation',
+      messages: [{ id: 'local-message', role: 'user', text: 'local', at: 1 }],
+      updatedAt: 1
+    });
+    store.activeId = 'local-conversation';
+    store.profiles.push({
+      id: 'remote-test',
+      name: 'Remote test',
+      kind: 'remote',
+      endpoint: 'wss://remote.test/api/ws',
+      status: 'connected',
+      version: '0.23.0',
+      latency: 12,
+      models: 2
+    });
+    store.switchProfile('remote-test');
+    expect(store.remoteActive).toBe(true);
+    expect(store.messages).toHaveLength(0);
+    expect(store.mac.enabled).toBe(false);
+    store.switchProfile('local');
+    expect(store.remoteActive).toBe(false);
+    expect(store.messages[0]?.text).toBe('local');
+  });
+
+  it('Persists profile color and default route', () => {
+    const store = useHermesStore();
+    store.setAgentProfileColor('work', '#123456');
+    store.setAgentProfileDefault('work');
+    const raw = JSON.parse(localStorage.getItem('ONV_HERMES_PROFILES_V1') ?? '{}') as {
+      profileColors?: Record<string, string>;
+      defaultAgentProfiles?: Record<string, string>;
+    };
+    expect(raw.profileColors?.work).toBe('#123456');
+    expect(raw.defaultAgentProfiles?.local).toBe('work');
+  });
+
+  it('Interrupts a remote turn with the id and route it had before clearing them', () => {
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: { providers: [], model: null, provider: null }
+    });
+    const store = useHermesStore();
+    store.profiles.push({
+      id: 'remote-test',
+      name: 'Remote test',
+      kind: 'remote',
+      endpoint: 'wss://remote.test/api/ws',
+      status: 'connected',
+      version: '0.23.0',
+      latency: 12,
+      models: 2
+    });
+    store.switchProfile('remote-test');
+    store.conversations.push({
+      id: 'remote-chat',
+      messages: [{ id: 'remote-message', role: 'user', text: 'remote', at: 1 }],
+      updatedAt: 1,
+      liveSessionId: 'live-1'
+    });
+    store.activeId = 'remote-chat';
+    const interrupt = vi.spyOn(commands, 'hermesInterrupt').mockResolvedValue({ status: 'ok', data: null } as never);
+
+    store.stopThinking();
+
+    expect(interrupt).toHaveBeenCalledWith('live-1', 'wss://remote.test/api/ws', 'remote-test');
+    expect(store.active?.liveSessionId).toBeUndefined();
+  });
+
+  it('Ignores a history read that finishes after another profile took over', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    const deferred = new Map<string, (value: unknown) => void>();
+    vi.spyOn(commands, 'hermesHistoryLoad').mockImplementation(
+      profile =>
+        new Promise(resolve => {
+          deferred.set(profile ?? 'default', resolve);
+        }) as never
+    );
+    vi.spyOn(commands, 'hermesHistorySave').mockResolvedValue({ status: 'ok', data: null } as never);
+    const store = useHermesStore();
+
+    const first = store.loadHistory('default');
+    // Let the first read reach the backend before the switch supersedes it.
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = store.loadHistory('work');
+    await Promise.resolve();
+    await Promise.resolve();
+    deferred.get('work')!({
+      status: 'ok',
+      data: JSON.stringify({
+        conversations: [{ id: 'work-chat', messages: [], updatedAt: 2 }],
+        activeId: 'work-chat'
+      })
+    });
+    await second;
+    expect(store.conversations.map(item => item.id)).toEqual(['work-chat']);
+
+    // The older request returns last and must not overwrite the profile that owns the store.
+    deferred.get('default')!({
+      status: 'ok',
+      data: JSON.stringify({
+        conversations: [{ id: 'default-chat', messages: [], updatedAt: 1 }],
+        activeId: 'default-chat'
+      })
+    });
+    await first;
+    expect(store.conversations.map(item => item.id)).toEqual(['work-chat']);
+    expect(store.activeId).toBe('work-chat');
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('Keeps conversations isolated per Hermes profile', () => {
+    const store = useHermesStore();
+    store.conversations.push({
+      id: 'default-chat',
+      messages: [{ id: 'default-message', role: 'user', text: 'default', at: 1 }],
+      updatedAt: 1
+    });
+    store.activeId = 'default-chat';
+    store.switchAgentProfile('work');
+    expect(store.activeAgentProfileName).toBe('work');
+    expect(store.messages).toHaveLength(0);
+    store.conversations.push({
+      id: 'work-chat',
+      messages: [{ id: 'work-message', role: 'user', text: 'work', at: 2 }],
+      updatedAt: 2
+    });
+    store.activeId = 'work-chat';
+    store.switchAgentProfile('default');
+    expect(store.activeAgentProfileName).toBe('default');
+    expect(store.messages[0]?.text).toBe('default');
+  });
+
+  it('Drops a saved API key when the agent profile changes', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: { providers: [], model: null, provider: null }
+    });
+    const chat = vi.spyOn(commands, 'hermesChat').mockResolvedValue({
+      status: 'ok',
+      data: { text: 'reply', sessionId: 'session-1', liveSessionId: null, usage: null }
+    });
+    const store = useHermesStore();
+    await store.loadRuntime();
+    // A key the sheet saved while profile `default` was active. Keeping it in the store made
+    // the next turn in another profile write it into that profile's `.env`.
+    store.setApiKey('sk-profile-default');
+    await store.switchAgentProfile('work');
+    expect(store.activeAgentProfileName).toBe('work');
+    expect(store.apiKey).toBe('');
+    store.newChat();
+    await store.send('hello');
+    expect(chat).toHaveBeenCalledWith(expect.objectContaining({ apiKey: null, profile: 'work' }));
+  });
+
+  it('Switches to a profile on another connection in one step', () => {
+    const store = useHermesStore();
+    store.profiles.push({
+      id: 'fleet-remote',
+      name: 'Fleet remote',
+      kind: 'remote',
+      endpoint: 'wss://fleet.test/api/ws',
+      status: 'connected',
+      version: '0.23.0',
+      latency: 10,
+      models: 2
+    });
+    store.switchToAgentProfile('fleet-remote', 'research');
+    expect(store.activeProfileId).toBe('fleet-remote');
+    expect(store.activeAgentProfileName).toBe('research');
+    expect(store.remoteActive).toBe(true);
+  });
+
+  it('Sends the remote gateway and profile with a remote chat request', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: false,
+        installed: false,
+        version: null,
+        path: null,
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: false,
+        outdated: false,
+        message: null
+      }
+    });
+    const chat = vi.spyOn(commands, 'hermesChat').mockResolvedValue({
+      status: 'ok',
+      data: { text: 'Remote reply', sessionId: 'remote-session', liveSessionId: null, usage: null }
+    });
+    localStorage.setItem(
+      'ONV_HERMES_PROFILES_V1',
+      JSON.stringify({
+        version: 1,
+        activeProfileId: 'remote-test',
+        profiles: [
+          {
+            id: 'local',
+            name: 'Local Mac',
+            kind: 'local',
+            endpoint: '',
+            status: 'connected',
+            version: '0.23.0',
+            latency: null,
+            models: 0
+          },
+          {
+            id: 'remote-test',
+            name: 'Panel test',
+            kind: 'panel',
+            endpoint: 'wss://remote.test/api/ws',
+            status: 'connected',
+            version: '0.23.0',
+            latency: 12,
+            models: 2
+          }
+        ],
+        states: {}
+      })
+    );
+    const store = useHermesStore();
+    await store.send('Use the remote gateway');
+    expect(chat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gatewayUrl: 'wss://remote.test/api/ws',
+        profileId: 'remote-test',
+        panelAuth: true,
+        macEnabled: false,
+        macTerminal: false,
+        macScreen: false,
+        macFiles: false,
+        macCron: false
+      })
+    );
+    expect(store.messages.at(-1)?.text).toBe('Remote reply');
   });
 
   it('Starts with an empty desktop history', () => {
@@ -98,7 +358,7 @@ describe('Hermes conversation store', () => {
     const id = store.activeId;
     expect(id).toBeTruthy();
     store.renameConversation(id!, 'Renamed chat');
-    expect(store.conversations.find(item => item.id === id)?.title).toBe('Renamed chat');
+    expect(store.conversations.find((item: { id: string }) => item.id === id)?.title).toBe('Renamed chat');
     store.deleteConversation(id!);
     expect(store.conversations).toHaveLength(0);
     expect(store.activeId).toBeNull();
@@ -362,5 +622,124 @@ describe('Hermes conversation store', () => {
     store.stopMac();
     expect(store.mac.enabled).toBe(false);
     expect(store.macStatus).toBe('paused');
+  });
+});
+
+describe('Hermes credential state', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('Re-reads the stored key instead of trusting a persisted keySet', async () => {
+    const status = vi.spyOn(commands, 'hermesSecretStatus').mockResolvedValue({ status: 'ok', data: false });
+    const store = useHermesStore();
+    store.useProvider('openai');
+    store.model = { ...store.model, keySet: true };
+
+    await expect(store.refreshCredentialState()).resolves.toBe(false);
+    expect(status).toHaveBeenCalledWith('openai', null);
+    expect(store.model.keySet).toBe(false);
+  });
+
+  it('Records a key that the runtime reports as stored', async () => {
+    vi.spyOn(commands, 'hermesSecretStatus').mockResolvedValue({ status: 'ok', data: true });
+    const store = useHermesStore();
+    store.useProvider('anthropic');
+
+    await expect(store.refreshCredentialState()).resolves.toBe(true);
+    expect(store.model.keySet).toBe(true);
+  });
+
+  it('Never asks for a key on an OAuth provider', async () => {
+    const status = vi.spyOn(commands, 'hermesSecretStatus');
+    const store = useHermesStore();
+    store.useProvider('nous');
+
+    await expect(store.refreshCredentialState()).resolves.toBe(false);
+    expect(status).not.toHaveBeenCalled();
+    expect(store.model.keySet).toBe(false);
+  });
+
+  it('Only requires a stored key for providers that need one', () => {
+    const store = useHermesStore();
+    const needs = (provider: 'openai' | 'nous' | 'codex' | 'local' | 'custom', endpoint = '') =>
+      store.requiresStoredKey({ ...store.model, provider, endpoint }, HERMES_PROVIDER_MAP[provider]);
+
+    expect(needs('openai')).toBe(true);
+    // Account logins and local endpoints authenticate without a stored key.
+    expect(needs('nous')).toBe(false);
+    expect(needs('codex')).toBe(false);
+    expect(needs('local', 'http://127.0.0.1:11434')).toBe(false);
+    // A custom endpoint needs one only until its URL is set.
+    expect(needs('custom')).toBe(true);
+    expect(needs('custom', 'https://example.test/v1')).toBe(false);
+  });
+});
+
+describe('Hermes provider slugs', () => {
+  it('Maps the local and custom cards to the provider OpenNavo actually configures', () => {
+    // `write_config()` registers one user-defined provider, `providers.openavoo-custom`.
+    // Mapping these cards to the canonical `custom` slug matched an always-present empty
+    // skeleton row, which is why their model list stayed empty.
+    expect(hermesProviderSlug('custom')).toBe('openavoo-custom');
+    expect(hermesProviderSlug('local')).toBe('openavoo-custom');
+  });
+
+  it('Keeps the canonical slugs for the vendor cards', () => {
+    expect(hermesProviderSlug('openai')).toBe('openai-api');
+    expect(hermesProviderSlug('google')).toBe('gemini');
+    expect(hermesProviderSlug('codex')).toBe('openai-codex');
+    expect(hermesProviderSlug('claude-code')).toBe('anthropic');
+    expect(hermesProviderSlug('opencode')).toBe('opencode-zen');
+    expect(hermesProviderSlug('nous')).toBe('nous');
+  });
+});
+
+describe('Hermes official provider picker', () => {
+  it('Picks the user-defined row on this Mac instead of the canonical skeleton', () => {
+    // Shape observed locally: the canonical `custom` row is always present and always empty.
+    const rows = [
+      { slug: 'custom', is_current: false, authenticated: false, models: [] },
+      { slug: 'openavoo-custom', is_current: true, authenticated: true, models: ['grok-4.7'] }
+    ];
+    expect(pickOfficialProvider(rows, 'custom')?.slug).toBe('openavoo-custom');
+    expect(pickOfficialProvider(rows, 'local')?.slug).toBe('openavoo-custom');
+  });
+
+  it('Picks the scoped endpoint row on a Hermes Panel host', () => {
+    // Shape observed on a panel host: `custom` is the configured-but-unauthenticated
+    // provider (one saved model plus the "not authenticated" warning), while the real
+    // endpoint is registered as `custom:newapi` with 14 models.
+    const rows = [
+      {
+        slug: 'custom',
+        is_current: true,
+        authenticated: false,
+        models: ['grok-4.7'],
+        warning:
+          'Configured provider is not authenticated; run `hermes model` to reactivate. Showing the saved model only.'
+      },
+      {
+        slug: 'custom:newapi',
+        is_current: true,
+        authenticated: true,
+        models: ['grok-4.6', 'grok-4.3', 'gpt-6-sol']
+      }
+    ];
+    const picked = pickOfficialProvider(rows, 'custom');
+    expect(picked?.slug).toBe('custom:newapi');
+    expect(picked?.models).toHaveLength(3);
+  });
+
+  it('Falls back to the current row when nothing can list models', () => {
+    const rows = [
+      { slug: 'custom', is_current: true, authenticated: false, models: ['grok-4.7'] },
+      { slug: 'custom:other', is_current: false, authenticated: false, models: [] }
+    ];
+    expect(pickOfficialProvider(rows, 'custom')?.slug).toBe('custom');
+  });
+
+  it('Returns undefined when the payload has no row for the card', () => {
+    expect(pickOfficialProvider([{ slug: 'nous', models: ['x'] }], 'custom')).toBeUndefined();
   });
 });

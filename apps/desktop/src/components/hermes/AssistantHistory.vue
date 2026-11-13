@@ -50,6 +50,8 @@ function previewOf(id: string): string {
   const conversation = store.conversations.find(item => item.id === id);
   const curated = historyItem(conversation?.previewKey);
   if (curated) return curated.preview;
+  // The panel ships its own preview line; the transcript is not read until a row is opened.
+  if (conversation?.panel) return conversation.panelPreview ?? '';
   const lastAssistant = [...(conversation?.messages ?? [])].reverse().find(item => item.role === 'assistant');
   return textOf(lastAssistant) || textOf(conversation?.messages[0]) || '';
 }
@@ -138,6 +140,9 @@ watch(
   () => props.open,
   async open => {
     if (!open) return;
+    // Opening the panel is the moment its rows are worth reading: the list is host state and is
+    // cached per connection+profile, so this only fetches when that list is still unknown.
+    void store.loadPanelHistory();
     search.value = '';
     await nextTick();
     (root.value?.querySelector('#hermes-history-search') as HTMLInputElement | null)?.focus();
@@ -178,7 +183,7 @@ onBeforeUnmount(() => {
         {{ content.history.exportHistory }}
       </button>
       <button
-        v-if="store.history.length"
+        v-if="store.history.length && !store.panelActive"
         type="button"
         class="text-11px text-ink-tertiary outline-none hover:text-status-danger focus-visible:shadow-focus-ring"
         @click="clearHistory"
@@ -273,12 +278,20 @@ onBeforeUnmount(() => {
           </span>
         </div>
       </div>
+      <button
+        v-if="store.panelActive && store.panelHistoryHasMore"
+        type="button"
+        class="mx-8px mb-6px w-[calc(100%-16px)] rounded-small border border-solid border-line-subtle py-6px text-center text-10.5px text-ink-tertiary outline-none hover:bg-surface-raised hover:text-ink-secondary focus-visible:shadow-focus-ring"
+        @click="store.loadMorePanelHistory()"
+      >
+        {{ content.history.loadMore }}
+      </button>
     </div>
     <div
       class="flex items-center gap-5px border-t border-t-solid border-line-subtle px-14px py-8px text-11px text-ink-tertiary"
     >
       <OnIcon name="lucide:lock" :size="12" />
-      {{ content.history.local }}
+      {{ store.panelActive ? content.history.panel : content.history.local }}
     </div>
   </div>
 </template>

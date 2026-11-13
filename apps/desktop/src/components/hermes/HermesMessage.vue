@@ -166,16 +166,68 @@ function onPackageCancel() {
         </summary>
         <div class="flex flex-col gap-7px border-t border-t-solid border-line-subtle px-10px pb-9px pt-8px">
           <div
-            v-for="call in message.tools"
-            :key="call.name"
-            class="flex items-center gap-8px text-11px text-ink-tertiary"
+            v-for="(call, index) in message.tools"
+            :key="call.toolId ?? `${call.name}-${index}`"
+            class="flex flex-col gap-5px"
           >
-            <code class="rounded-tiny bg-surface-inset px-5px py-2px font-mono text-11px text-ink-secondary">{{
-              call.name
-            }}</code>
-            <span>{{ toolText(call.label) }}</span>
-            <span class="ml-auto tabular-nums">{{ call.time }}</span>
-            <OnIcon name="lucide:check" :size="12" class="text-status-success" />
+            <div class="flex items-center gap-8px text-11px text-ink-tertiary">
+              <code class="rounded-tiny bg-surface-inset px-5px py-2px font-mono text-11px text-ink-secondary">{{
+                call.name
+              }}</code>
+              <span v-if="call.label">{{ toolText(call.label) }}</span>
+              <span class="ml-auto tabular-nums">{{ call.time }}</span>
+              <OnIcon
+                v-if="call.error"
+                name="lucide:circle-alert"
+                :size="12"
+                class="text-status-danger"
+                :aria-label="content.tools.failed"
+              />
+              <OnIcon
+                v-else-if="call.pending"
+                name="lucide:loader-circle"
+                :size="12"
+                class="animate-spin text-ink-tertiary"
+                :aria-label="content.tools.running"
+              />
+              <OnIcon v-else name="lucide:check" :size="12" class="text-status-success" />
+            </div>
+            <details
+              v-if="call.args || call.result"
+              class="group/call overflow-hidden rounded-tiny border border-solid border-line-subtle"
+            >
+              <summary
+                class="flex h-26px cursor-pointer list-none items-center gap-6px px-8px text-10.5px text-ink-tertiary outline-none focus-visible:shadow-focus-ring"
+              >
+                {{ content.tools.inspect }}
+                <OnIcon
+                  name="lucide:chevron-down"
+                  :size="12"
+                  class="ml-auto transition-transform group-open/call:rotate-180"
+                />
+              </summary>
+              <div class="flex flex-col gap-6px border-t border-t-solid border-line-subtle px-8px py-7px">
+                <div v-if="call.args" class="flex flex-col gap-3px">
+                  <span class="text-9.5px font-600 uppercase tracking-[0.06em] text-ink-tertiary">
+                    {{ content.tools.arguments }}
+                  </span>
+                  <pre
+                    class="m-0 max-h-180px overflow-auto whitespace-pre-wrap break-words font-mono text-10.5px leading-[1.5] text-ink-secondary"
+                    >{{ call.args }}</pre
+                  >
+                </div>
+                <div v-if="call.result" class="flex flex-col gap-3px">
+                  <span class="text-9.5px font-600 uppercase tracking-[0.06em] text-ink-tertiary">
+                    {{ content.tools.result }}
+                  </span>
+                  <pre
+                    class="m-0 max-h-220px overflow-auto whitespace-pre-wrap break-words font-mono text-10.5px leading-[1.5]"
+                    :class="call.error ? 'text-status-danger' : 'text-ink-secondary'"
+                    >{{ call.result }}</pre
+                  >
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       </details>

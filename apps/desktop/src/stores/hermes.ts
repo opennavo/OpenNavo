@@ -10,7 +10,8 @@ import {
   modelId,
   providerModels,
   shortModel,
-  type HermesAuxTask
+  type HermesAuxTask,
+  type HermesProviderInfo
 } from '@/hermes/providers';
 import { commands, unwrap, IpcError } from '@/ipc/client';
 import type { HermesLoginStatus, HermesModelOptions, HermesRuntimeStatus } from '@/ipc/bindings';
@@ -28,6 +29,51 @@ export interface HermesMacSettings {
   install: boolean;
   cron: boolean;
   confirmWrites: boolean;
+}
+
+export interface HermesProfile {
+  id: string;
+  name: string;
+  kind: 'local' | 'remote' | 'ssh' | 'cloud' | 'panel';
+  endpoint: string;
+  status: 'connected' | 'connecting' | 'error' | 'offline';
+  version: string;
+  latency: number | null;
+  models: number;
+  error?: string;
+}
+
+interface HermesProfileState {
+  model: HermesModelSettings;
+  conversations: HermesConversation[];
+  activeId: string | null;
+  workingDir: string;
+  auxiliary: HermesAuxSettings;
+  forceAuxVision: boolean;
+  mac?: HermesMacSettings;
+}
+
+interface PersistedProfiles {
+  version: number;
+  activeProfileId: string;
+  profiles: HermesProfile[];
+  states: Record<string, HermesProfileState>;
+  activeAgentProfiles?: Record<string, string>;
+  profileColors?: Record<string, string>;
+  profileOrder?: Record<string, string[]>;
+  defaultAgentProfiles?: Record<string, string>;
+  removedConnections?: number;
+}
+
+export interface HermesAgentProfile {
+  name: string;
+  displayName: string | null;
+  path: string;
+  isDefault: boolean;
+  model: string | null;
+  provider: string | null;
+  skillCount: number;
+  hasEnv: boolean;
 }
 
 export interface HermesModelSettings {
@@ -55,6 +101,14 @@ export interface HermesToolCall {
   label: string;
   time: string;
   toolId?: string;
+  /** Arguments the model sent, as the panel stored them (usually JSON). */
+  args?: string;
+  /** Result body, once the panel has one for this call. */
+  result?: string;
+  /** The tool reported a failure. */
+  error?: boolean;
+  /** The call has no result row in the loaded page. */
+  pending?: boolean;
 }
 
 export type HermesCard = 'cleanup' | 'updates' | 'explain';
@@ -127,6 +181,22 @@ export interface HermesConversation {
   sessionId?: string;
   /** Live gateway session id for the in-flight turn (steer/interrupt). */
   liveSessionId?: string;
+  /** Hermes Panel row: the list carries host metadata until the transcript is opened. */
+  panel?: boolean;
+  /** Panel-provided preview line, so the list renders without reading a transcript. */
+  panelPreview?: string;
+  /** Panel row's own message count, shown while the transcript is still on the host. */
+  panelMessages?: number;
+  /** Panel row's `runtime_revision`: the fence every panel write has to echo back. */
+  panelRevision?: number;
+  /** Panel row's `runtime_generation`: the panel requires it for a delete. */
+  panelGeneration?: number;
+  /** Rows already read from the host, counted back from the newest one. */
+  panelOffset?: number;
+  /** A full page came back, so older rows probably exist on the host. */
+  panelHasOlder?: boolean;
+  /** Transcript already fetched for a panel row (local conversations are always loaded). */
+  messagesLoaded?: boolean;
   /** Latest official context-window occupancy for this conversation. */
   context?: HermesContextUsage;
 }
@@ -144,7 +214,10 @@ interface PersistedHermes {
 
 const STORAGE_KEY = 'ONV_HERMES_STATE_V2';
 const STORAGE_VERSION = 3;
+/** Panel transcript page size: the same tail window the Hermes desktop hydrates. */
+const PANEL_TRANSCRIPT_PAGE = 120;
 const MODEL_OPTIONS_CACHE_KEY = 'ONV_HERMES_MODEL_OPTIONS_V2';
+const PROFILES_KEY = 'ONV_HERMES_PROFILES_V1';
 
 const RECTANGLE: PackageSummary = {
   kind: 'cask',
@@ -177,7 +250,8 @@ const DEFAULT_MODEL: HermesModelSettings = {
   effort: 'medium',
   fast: false,
   endpoint: '',
-  keySet: true
+  // Not a fact: `refreshCredentialState()` fills this in from the runtime's store.
+  keySet: false
 };
 
 const DEFAULT_MAC: HermesMacSettings = {
@@ -191,6 +265,58 @@ const DEFAULT_MAC: HermesMacSettings = {
   confirmWrites: true
 };
 
+const LOCAL_PROFILE: HermesProfile = {
+  id: 'local',
+  name: 'Local Mac',
+  kind: 'local',
+  endpoint: '',
+  status: 'connected',
+  version: '',
+  latency: null,
+  models: 0
+};
+
+function profileDefaults(): PersistedProfiles {
+  return {
+    version: 1,
+    activeProfileId: 'local',
+    profiles: [{ ...LOCAL_PROFILE }],
+    states: {},
+    activeAgentProfiles: {},
+    removedConnections: 0
+  };
+}
+
+function readProfiles(): PersistedProfiles {
+  if (typeof localStorage === 'undefined') return profileDefaults();
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '') as Partial<PersistedProfiles>;
+    const rawProfiles =
+      Array.isArray(parsed.profiles) && parsed.profiles.some(profile => profile.id === 'local')
+        ? parsed.profiles
+        : [{ ...LOCAL_PROFILE }, ...(parsed.profiles ?? [])];
+    const profiles = rawProfiles.filter(profile => profile.kind === 'local' || profile.kind === 'panel');
+    const requestedActive = typeof parsed.activeProfileId === 'string' ? parsed.activeProfileId : 'local';
+    return {
+      version: 1,
+      activeProfileId: profiles.some(profile => profile.id === requestedActive) ? requestedActive : 'local',
+      removedConnections: rawProfiles.length - profiles.length,
+      profiles,
+      states: parsed.states && typeof parsed.states === 'object' ? parsed.states : {},
+      profileColors: parsed.profileColors && typeof parsed.profileColors === 'object' ? parsed.profileColors : {},
+      profileOrder: parsed.profileOrder && typeof parsed.profileOrder === 'object' ? parsed.profileOrder : {},
+      defaultAgentProfiles:
+        parsed.defaultAgentProfiles && typeof parsed.defaultAgentProfiles === 'object'
+          ? parsed.defaultAgentProfiles
+          : {},
+      activeAgentProfiles:
+        parsed.activeAgentProfiles && typeof parsed.activeAgentProfiles === 'object' ? parsed.activeAgentProfiles : {}
+    };
+  } catch {
+    return profileDefaults();
+  }
+}
+
 let sequence = 0;
 function id(prefix: string) {
   sequence += 1;
@@ -199,6 +325,159 @@ function id(prefix: string) {
 
 function message(entry: Omit<HermesMessage, 'id' | 'at'> & { at?: number }): HermesMessage {
   return { ...entry, id: id('m'), at: entry.at ?? Date.now() };
+}
+
+/** A panel row's string field, trimmed; the host sends nulls for unset fields. */
+function panelText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Drop the machine preamble the host prepends when a skill, cron job or handoff drives a turn.
+ * Without this the sidebar title becomes `[IMPORTANT: The user has invoked the "…" skill…]`,
+ * which is what every scheduled row used to look like.
+ */
+function stripInjectedPreamble(text: string): string {
+  const value = text.trim();
+  if (!value.startsWith('[')) return value;
+  const end = value.indexOf(']');
+  if (end < 0) return value;
+  // Only a bracketed directive like `[IMPORTANT: …]`, never a user's own "[note] …".
+  if (!/^[A-Z][A-Z0-9 _-]{2,}:\s/.test(value.slice(1, end))) return value;
+  return value.slice(end + 1).trim();
+}
+
+/**
+ * One `GET /api/sessions` row as a conversation. The host already ships a title and a preview,
+ * so the list never needs a per-session transcript read (that used to cost 21 requests a page).
+ */
+function panelConversationFromRow(row: Record<string, unknown>): HermesConversation | null {
+  const sessionId = panelText(row.id);
+  if (!sessionId) return null;
+  const preview = stripInjectedPreamble(panelText(row.preview));
+  const title = panelText(row.display_name) || panelText(row.title) || preview.slice(0, 48) || sessionId;
+  // The host reports epoch seconds; `last_activity_at` is what `order=recent` sorts by.
+  const seconds = [row.last_activity_at, row.last_active, row.started_at].find(
+    value => typeof value === 'number' && Number.isFinite(value) && value > 0
+  ) as number | undefined;
+  return {
+    id: sessionId,
+    title,
+    messages: [],
+    messagesLoaded: false,
+    panel: true,
+    panelPreview: preview.slice(0, 120),
+    panelMessages: typeof row.message_count === 'number' ? row.message_count : undefined,
+    panelRevision: typeof row.runtime_revision === 'number' ? row.runtime_revision : 0,
+    panelGeneration: typeof row.runtime_generation === 'number' ? row.runtime_generation : 0,
+    updatedAt: seconds ? seconds * 1000 : Date.now(),
+    sessionId
+  };
+}
+
+/** Panel transcripts interleave user/assistant turns with tool payloads; tool rows fold into
+ * the assistant turn that called them, the way the panel's own transcript does. */
+function panelMessagesFrom(entries: unknown[], sessionId: string): HermesMessage[] {
+  const messages: HermesMessage[] = [];
+  const calls = new Map<string, HermesToolCall>();
+  /** Seconds when each call started, so its result row can report a duration. */
+  const startedAt = new Map<string, number>();
+  let lastAssistant: HermesMessage | null = null;
+
+  const timeOf = (value: unknown) => (typeof value === 'number' ? value * 1000 : Date.now());
+  const secondsOf = (value: unknown) => (typeof value === 'number' ? value : undefined);
+  const duration = (start: number | undefined, end: number | undefined) => {
+    if (start === undefined || end === undefined || end < start) return '';
+    const delta = end - start;
+    return delta >= 10 ? `${Math.round(delta)}s` : `${delta.toFixed(1)}s`;
+  };
+
+  for (const [index, entry] of entries.entries()) {
+    if (!entry || typeof entry !== 'object') continue;
+    const row = entry as Record<string, unknown>;
+    // Model scaffolding the panel's own sidebar hides (compaction notes, synthetic rows).
+    if (row.display_kind === 'hidden') continue;
+
+    if (row.role === 'tool') {
+      const result = typeof row.content === 'string' ? row.content : '';
+      const toolId = panelText(row.tool_call_id);
+      const target = toolId ? calls.get(toolId) : undefined;
+      if (target) {
+        target.result = result;
+        target.pending = false;
+        target.error = row.effect_disposition === 'error';
+        target.time = duration(startedAt.get(toolId), secondsOf(row.timestamp));
+        continue;
+      }
+      // A result whose call is not in this page still has to be readable: hang it on the
+      // nearest assistant turn, or on a synthetic one when the page opens with results.
+      const orphan: HermesToolCall = {
+        name: panelText(row.tool_name) || 'tool',
+        label: '',
+        time: '',
+        toolId,
+        result
+      };
+      if (!lastAssistant) {
+        lastAssistant = {
+          ...message({ role: 'assistant', text: '', at: timeOf(row.timestamp) }),
+          id: `panel-${sessionId}-tools-${index}`
+        };
+        messages.push(lastAssistant);
+      }
+      lastAssistant.tools = [...(lastAssistant.tools ?? []), orphan];
+      continue;
+    }
+
+    if (row.role !== 'user' && row.role !== 'assistant') continue;
+    const text = typeof row.content === 'string' ? row.content : '';
+    const stored = Array.isArray(row.tool_calls) ? row.tool_calls : [];
+    if (!text.trim() && !stored.length) continue;
+
+    const at = timeOf(row.timestamp);
+    const tools: HermesToolCall[] = stored.flatMap(call => {
+      if (!call || typeof call !== 'object') return [];
+      const record = call as Record<string, unknown>;
+      const fn = (record.function && typeof record.function === 'object' ? record.function : {}) as Record<
+        string,
+        unknown
+      >;
+      const name = panelText(fn.name) || panelText(record.name) || 'tool';
+      const args = typeof fn.arguments === 'string' ? fn.arguments : '';
+      const toolId = panelText(record.call_id) || panelText(record.id);
+      return [
+        {
+          name,
+          label: '',
+          time: '',
+          toolId,
+          args: args || undefined,
+          pending: true
+        }
+      ];
+    });
+
+    const built: HermesMessage = {
+      ...message({
+        role: row.role,
+        text,
+        at,
+        reasoning: typeof row.reasoning === 'string' ? row.reasoning : undefined
+      }),
+      id: `panel-${sessionId}-${String(row.id ?? index)}`
+    };
+    if (tools.length) built.tools = tools;
+    messages.push(built);
+    if (row.role === 'assistant') lastAssistant = built;
+    for (const call of tools) {
+      if (!call.toolId) continue;
+      calls.set(call.toolId, call);
+      const start = secondsOf(row.timestamp);
+      if (start !== undefined) startedAt.set(call.toolId, start);
+    }
+  }
+
+  return messages;
 }
 
 function defaults(): PersistedHermes {
@@ -290,13 +569,51 @@ export const useHermesStore = defineStore('hermes', () => {
   const workingDir = ref(initial.workingDir ?? '');
   const auxiliary = ref<HermesAuxSettings>(initial.auxiliary ?? defaultAuxSettings());
   const forceAuxVision = ref(Boolean(initial.forceAuxVision));
+  const storedProfiles = readProfiles();
+  const profiles = ref<HermesProfile[]>(storedProfiles.profiles);
+  const activeProfileId = ref(storedProfiles.activeProfileId);
+  const profileStates = ref<Record<string, HermesProfileState>>(migrateProfileStates(storedProfiles.states));
+  const agentProfilesByConnection = ref<Record<string, HermesAgentProfile[]>>({});
+  const activeAgentProfiles = ref<Record<string, string>>({ ...storedProfiles.activeAgentProfiles });
+  const profileColors = ref<Record<string, string>>({ ...storedProfiles.profileColors });
+  const profileOrder = ref<Record<string, string[]>>({ ...storedProfiles.profileOrder });
+  const defaultAgentProfiles = ref<Record<string, string>>({ ...storedProfiles.defaultAgentProfiles });
+  const windowScopedRoute = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('profile');
+  for (const [connectionId, profile] of Object.entries(defaultAgentProfiles.value)) {
+    activeAgentProfiles.value = { ...activeAgentProfiles.value, [connectionId]: profile };
+  }
   const loginStatus = ref<HermesLoginStatus | null>(null);
   const modelOptions = ref<HermesModelOptions | null>(cachedOptions?.options ?? null);
   const modelOptionsUpdatedAt = ref<number | null>(cachedOptions?.at ?? null);
   const modelOptionsLoading = ref(false);
+  const profileSwitching = ref(false);
+  const profileSwitchError = ref<string | null>(null);
+  /** Profile name being activated, so the chat area can say what it is waiting for. */
+  const profileSwitchingTo = ref<string | null>(null);
+  const panelAuthExpired = ref<string | null>(null);
+
+  function notePanelAuthError(error: unknown) {
+    if (!panelActive.value) return;
+    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+    if (!/401|Unauthorized|E_HERMES_PANEL_AUTH|session/i.test(detail)) return;
+    if (panelAuthExpired.value === activeProfile.value.id) return;
+    panelAuthExpired.value = activeProfile.value.id;
+    toasts.push({
+      tone: 'warning',
+      title: 'Hermes Panel',
+      description: 'The Hermes Panel session expired. Sign in again.'
+    });
+  }
   const modelOptionsError = ref<string | null>(null);
   const apiKey = ref('');
   const toasts = useToasts();
+  if (storedProfiles.removedConnections) {
+    toasts.push({
+      tone: 'info',
+      title: 'Hermes Panel',
+      description: `${storedProfiles.removedConnections} unsupported connection(s) were removed. Hermes Panel is now the only remote mode.`
+    });
+  }
   let replyTimer: ReturnType<typeof setTimeout> | undefined;
   let turnSeq = 0;
   let activeTurn = 0;
@@ -305,19 +622,127 @@ export const useHermesStore = defineStore('hermes', () => {
   let historySaveTimer: number | undefined;
   let historyLoaded = false;
   let historyLoadStarted = false;
+  let historyProfile: string | null = null;
+  /** Bumped for every history read so a slow request can never write the next profile's state. */
+  let historySeq = 0;
+  /** Serializes history writes; a read waits for this before trusting the file on disk. */
+  let pendingHistorySave: Promise<void> = Promise.resolve();
+  const panelHistoryLoaded = new Set<string>();
+  const panelHistoryLoading = new Set<string>();
+  /** Connection ids whose profile list is in flight (the rail shows a spinner meanwhile). */
+  const agentProfilesLoadingIds = ref<Set<string>>(new Set());
+  const panelHistoryOffsets = new Map<string, number>();
+  const panelHistoryHasMore = ref(false);
+  /** Panel session id whose transcript is being read, so the chat area can say it is loading. */
+  const panelConversationLoading = ref<string | null>(null);
   let historySaveEnabled = true;
   let historySaveErrorShown = false;
   let resolveHistoryReady: () => void = () => {};
-  const historyReadyPromise = new Promise<void>(resolve => {
+  let historyReadyPromise = new Promise<void>(resolve => {
     resolveHistoryReady = resolve;
   });
   const pendingSteers = new Map<string, string[]>();
   const queuedAfterTurn = new Map<string, string[]>();
 
+  function preferredAgentProfile(connectionId: string) {
+    return activeAgentProfiles.value[connectionId] ?? defaultAgentProfiles.value[connectionId] ?? 'default';
+  }
+
+  function stateKey(connectionId = activeProfileId.value, agentProfile = preferredAgentProfile(connectionId)) {
+    return `${connectionId}::${agentProfile}`;
+  }
+
+  function migrateProfileStates(states: Record<string, HermesProfileState>): Record<string, HermesProfileState> {
+    const next: Record<string, HermesProfileState> = {};
+    for (const [key, value] of Object.entries(states)) {
+      next[key.includes('::') ? key : `${key}::default`] = value;
+    }
+    return next;
+  }
+
+  const activeProfile = computed(
+    () =>
+      profiles.value.find(profile => profile.id === activeProfileId.value) ?? profiles.value[0] ?? { ...LOCAL_PROFILE }
+  );
+  const remoteActive = computed(() => activeProfile.value.kind !== 'local');
+  const panelActive = computed(() => activeProfile.value.kind === 'panel');
+  const activeAgentProfileName = computed(() => preferredAgentProfile(activeProfileId.value));
+  const fleetProfiles = computed(() =>
+    profiles.value.map(connection => ({
+      connection,
+      profiles: agentProfilesByConnection.value[connection.id] ?? []
+    }))
+  );
+  const agentProfilesLoading = computed(() => agentProfilesLoadingIds.value.has(activeProfileId.value));
+  const agentProfiles = computed(() => {
+    const list = agentProfilesByConnection.value[activeProfileId.value] ?? [];
+    const order = profileOrder.value[activeProfileId.value] ?? [];
+    if (!order.length) return list;
+    return [...list].sort((left, right) => {
+      const leftIndex = order.indexOf(left.name);
+      const rightIndex = order.indexOf(right.name);
+      if (leftIndex === -1 && rightIndex === -1) return left.name.localeCompare(right.name);
+      if (leftIndex === -1) return 1;
+      if (rightIndex === -1) return -1;
+      return leftIndex - rightIndex;
+    });
+  });
+  const gatewayUrl = computed(() => (remoteActive.value ? activeProfile.value.endpoint : null));
+  const gatewayProfileId = computed(() => (remoteActive.value ? activeProfile.value.id : null));
+
+  function currentProfileState(): HermesProfileState {
+    return {
+      model: { ...model.value },
+      conversations: conversations.value,
+      activeId: activeId.value,
+      workingDir: workingDir.value,
+      auxiliary: { ...auxiliary.value },
+      forceAuxVision: forceAuxVision.value,
+      mac: { ...mac.value }
+    };
+  }
+
+  function applyProfileState(state: HermesProfileState) {
+    model.value = { ...state.model };
+    conversations.value = state.conversations;
+    activeId.value = state.activeId;
+    workingDir.value = state.workingDir;
+    auxiliary.value = { ...state.auxiliary };
+    forceAuxVision.value = state.forceAuxVision;
+    mac.value = { ...(state.mac ?? DEFAULT_MAC) };
+  }
+
+  function saveActiveProfileState() {
+    profileStates.value = { ...profileStates.value, [stateKey()]: currentProfileState() };
+  }
+
+  function blankProfileState(): HermesProfileState {
+    return {
+      model: { ...DEFAULT_MODEL, keySet: false },
+      conversations: [],
+      activeId: null,
+      workingDir: '',
+      auxiliary: defaultAuxSettings(),
+      forceAuxVision: false,
+      mac: { ...DEFAULT_MAC }
+    };
+  }
+
+  if (activeProfile.value.kind !== 'local') {
+    if (!profileStates.value[stateKey('local', 'default')]) {
+      profileStates.value = { ...profileStates.value, [stateKey('local', 'default')]: blankProfileState() };
+    }
+    applyProfileState(profileStates.value[stateKey()] ?? blankProfileState());
+    mac.value = { ...DEFAULT_MAC };
+  }
+
   const active = computed(() => conversations.value.find(item => item.id === activeId.value) ?? null);
   const messages = computed(() => active.value?.messages ?? []);
+  // A panel row is a real conversation even while its transcript is still only on the host.
   const history = computed(() =>
-    [...conversations.value].filter(item => item.messages.length > 0).sort((a, b) => b.updatedAt - a.updatedAt)
+    [...conversations.value]
+      .filter(item => item.panel || item.messages.length > 0)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
   );
   const modelShort = computed(() => shortModel(model.value.model));
   const macActive = computed(() => mac.value.enabled && mac.value.level !== 'open');
@@ -335,67 +760,117 @@ export const useHermesStore = defineStore('hermes', () => {
     resolveHistoryReady();
   }
 
-  function flushHistorySave() {
-    if (!historyLoaded || !historySaveEnabled || typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window))
-      return;
-    if (historySaveTimer) window.clearTimeout(historySaveTimer);
+  /**
+   * Write the current conversations to `profileName`'s history file immediately.
+   *
+   * The payload and profile are captured synchronously, so calling this just before a
+   * profile switch saves the *outgoing* profile even though the active name changes next.
+   */
+  function flushHistorySave(profileName = activeAgentProfileName.value): Promise<void> {
+    if (historySaveTimer) {
+      window.clearTimeout(historySaveTimer);
+      historySaveTimer = undefined;
+    }
+    if (
+      remoteActive.value ||
+      !historyLoaded ||
+      !historySaveEnabled ||
+      typeof window === 'undefined' ||
+      !('__TAURI_INTERNALS__' in window)
+    )
+      return pendingHistorySave;
     const json = JSON.stringify({
       version: STORAGE_VERSION,
       conversations: conversations.value,
       activeId: activeId.value
     });
-    void commands.hermesHistorySave(json).then(result => {
-      if (result.status === 'error' && !historySaveErrorShown) {
-        historySaveErrorShown = true;
-        toasts.push({
-          tone: 'warning',
-          title: 'Hermes history',
-          description: 'Could not write history.json; keeping the local copy.'
-        });
-      }
-      if (result.status === 'ok') historySaveErrorShown = false;
-    });
+    const profileArg = profileName === 'default' ? null : profileName;
+    pendingHistorySave = pendingHistorySave
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const result = await commands.hermesHistorySave(json, profileArg);
+          if (result.status === 'error' && !historySaveErrorShown) {
+            historySaveErrorShown = true;
+            toasts.push({
+              tone: 'warning',
+              title: 'Hermes history',
+              description: 'Could not write history.json; keeping the local copy.'
+            });
+          }
+          if (result.status === 'ok') historySaveErrorShown = false;
+        } catch {
+          if (!historySaveErrorShown) {
+            historySaveErrorShown = true;
+            toasts.push({
+              tone: 'warning',
+              title: 'Hermes history',
+              description: 'Could not write history.json; keeping the local copy.'
+            });
+          }
+        }
+      });
+    return pendingHistorySave;
   }
 
   function scheduleHistorySave() {
-    if (!historyLoaded || !historySaveEnabled || typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window))
+    if (
+      remoteActive.value ||
+      !historyLoaded ||
+      !historySaveEnabled ||
+      typeof window === 'undefined' ||
+      !('__TAURI_INTERNALS__' in window)
+    )
       return;
     if (historySaveTimer) window.clearTimeout(historySaveTimer);
     historySaveTimer = window.setTimeout(() => {
-      const json = JSON.stringify({
-        version: STORAGE_VERSION,
-        conversations: conversations.value,
-        activeId: activeId.value
-      });
-      void commands.hermesHistorySave(json).then(result => {
-        if (result.status === 'error' && !historySaveErrorShown) {
-          historySaveErrorShown = true;
-          toasts.push({
-            tone: 'warning',
-            title: 'Hermes history',
-            description: 'Could not write history.json; keeping the local copy.'
-          });
-        }
-        if (result.status === 'ok') historySaveErrorShown = false;
-      });
+      historySaveTimer = undefined;
+      void flushHistorySave();
     }, 300);
   }
 
   function persist() {
     if (typeof localStorage === 'undefined') return;
+    saveActiveProfileState();
     try {
+      if (!windowScopedRoute) {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            version: STORAGE_VERSION,
+            model: model.value,
+            mac: mac.value,
+            conversations: conversations.value,
+            activeId: activeId.value,
+            workingDir: workingDir.value,
+            auxiliary: auxiliary.value,
+            forceAuxVision: forceAuxVision.value
+          } satisfies PersistedHermes)
+        );
+      }
+      let activeRoute = activeProfileId.value;
+      let activeAgents = activeAgentProfiles.value;
+      if (windowScopedRoute) {
+        try {
+          const stored = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}') as Partial<PersistedProfiles>;
+          if (typeof stored.activeProfileId === 'string') activeRoute = stored.activeProfileId;
+          if (stored.activeAgentProfiles) activeAgents = stored.activeAgentProfiles;
+        } catch {
+          // Keep the in-memory route if the shared record is unreadable.
+        }
+      }
       localStorage.setItem(
-        STORAGE_KEY,
+        PROFILES_KEY,
         JSON.stringify({
-          version: STORAGE_VERSION,
-          model: model.value,
-          mac: mac.value,
-          conversations: conversations.value,
-          activeId: activeId.value,
-          workingDir: workingDir.value,
-          auxiliary: auxiliary.value,
-          forceAuxVision: forceAuxVision.value
-        } satisfies PersistedHermes)
+          version: 1,
+          activeProfileId: activeRoute,
+          profiles: profiles.value,
+          states: profileStates.value,
+          activeAgentProfiles: activeAgents,
+          profileColors: profileColors.value,
+          profileOrder: profileOrder.value,
+          defaultAgentProfiles: defaultAgentProfiles.value
+        } satisfies PersistedProfiles)
       );
       scheduleHistorySave();
     } catch {
@@ -408,6 +883,11 @@ export const useHermesStore = defineStore('hermes', () => {
   async function loadRuntime() {
     try {
       runtime.value = await unwrap(commands.hermesRuntimeStatus());
+      const local = profiles.value.find(profile => profile.id === 'local');
+      if (local) {
+        local.status = runtime.value.ready ? 'connected' : 'offline';
+        local.version = /(\d+\.\d+\.\d+)/.exec(runtime.value.version ?? '')?.[1] ?? local.version;
+      }
     } catch (error) {
       runtime.value = {
         ready: false,
@@ -464,21 +944,54 @@ export const useHermesStore = defineStore('hermes', () => {
     }
   }
 
-  async function loadHistory() {
-    if (historyLoadStarted) {
-      await historyReadyPromise;
+  async function loadHistory(profileName = activeAgentProfileName.value) {
+    if (typeof window !== 'undefined' && historySaveTimer) {
+      window.clearTimeout(historySaveTimer);
+      historySaveTimer = undefined;
+    }
+    if (historyLoadStarted && historyProfile === profileName) {
+      if (!historyLoaded) await historyReadyPromise;
       return;
     }
+    // Release waiters of the superseded read; each load resolves only its own promise.
+    const previousResolve = resolveHistoryReady;
+    const seq = ++historySeq;
     historyLoadStarted = true;
+    historyProfile = profileName;
+    historyLoaded = false;
+    historyReady.value = false;
+    historyReadyPromise = new Promise<void>(resolve => {
+      resolveHistoryReady = resolve;
+    });
+    const done = resolveHistoryReady;
+    previousResolve();
+    if (remoteActive.value) {
+      historyLoaded = true;
+      historyReady.value = true;
+      done();
+      return;
+    }
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
       historyLoaded = true;
       historyReady.value = true;
-      resolveHistoryReady();
+      done();
+      return;
+    }
+    // Do not read a file a pending write is about to replace.
+    await pendingHistorySave.catch(() => undefined);
+    if (seq !== historySeq) {
+      done();
       return;
     }
     let hasBackend = false;
     try {
-      const raw = await unwrap(commands.hermesHistoryLoad());
+      const raw = await unwrap(commands.hermesHistoryLoad(profileName === 'default' ? null : profileName));
+      // A newer read (usually another profile) owns the store now; discard this result
+      // instead of overwriting its conversations with the previous profile's file.
+      if (seq !== historySeq) {
+        done();
+        return;
+      }
       if (raw) {
         hasBackend = true;
         const parsed = JSON.parse(raw) as { conversations?: unknown; activeId?: unknown };
@@ -506,7 +1019,9 @@ export const useHermesStore = defineStore('hermes', () => {
         });
         const localLatest = conversations.value.reduce((latest, item) => Math.max(latest, item.updatedAt || 0), 0);
         const backendLatest = restored.reduce((latest, item) => Math.max(latest, item.updatedAt || 0), 0);
-        if (localLatest > backendLatest && conversations.value.length) {
+        // Prefer local on a tie: deleting a conversation does not bump the remaining rows'
+        // timestamps, so a same-timestamp file would otherwise resurrect it.
+        if (conversations.value.length && localLatest >= backendLatest) {
           // Keep local unsaved work and write it back after load instead of
           // letting an older file erase the current conversation.
           hasBackend = false;
@@ -516,17 +1031,21 @@ export const useHermesStore = defineStore('hermes', () => {
         }
       }
     } catch {
-      historySaveEnabled = false;
-      toasts.push({
-        tone: 'warning',
-        title: 'Hermes history',
-        description: 'history.json is unreadable; keeping the local copy and leaving the file untouched.'
-      });
+      if (seq === historySeq) {
+        historySaveEnabled = false;
+        toasts.push({
+          tone: 'warning',
+          title: 'Hermes history',
+          description: 'history.json is unreadable; keeping the local copy and leaving the file untouched.'
+        });
+      }
     } finally {
-      historyLoaded = true;
-      historyReady.value = true;
-      if (!hasBackend && historySaveEnabled) scheduleHistorySave();
-      resolveHistoryReady();
+      if (seq === historySeq) {
+        historyLoaded = true;
+        historyReady.value = true;
+        if (!hasBackend && historySaveEnabled) scheduleHistorySave();
+      }
+      done();
     }
   }
 
@@ -550,8 +1069,13 @@ export const useHermesStore = defineStore('hermes', () => {
     }
   }
 
-  async function loadModelOptions(refresh = false, source: HermesModelSettings = model.value, keyOverride?: string) {
-    if (!runtime.value?.ready || modelOptionsLoading.value) return;
+  async function loadModelOptions(
+    refresh = false,
+    source: HermesModelSettings = model.value,
+    keyOverride?: string,
+    profileName = activeAgentProfileName.value
+  ) {
+    if ((!runtime.value?.ready && !remoteActive.value) || modelOptionsLoading.value) return;
     modelOptionsLoading.value = true;
     modelOptionsError.value = null;
     try {
@@ -564,7 +1088,11 @@ export const useHermesStore = defineStore('hermes', () => {
           apiKey: (keyOverride ?? apiKey.value).trim() || null,
           endpoint: source.endpoint.trim() || null,
           refresh,
-          includeUnconfigured: true
+          includeUnconfigured: true,
+          gatewayUrl: gatewayUrl.value,
+          profileId: gatewayProfileId.value,
+          profile: profileName,
+          panelAuth: panelActive.value
         })
       );
       const options = await Promise.race([
@@ -575,6 +1103,33 @@ export const useHermesStore = defineStore('hermes', () => {
       ]);
       modelOptions.value = options;
       modelOptionsUpdatedAt.value = Date.now();
+      if (remoteActive.value) {
+        const remoteProviders = options.providers ?? [];
+        const remoteProvider =
+          remoteProviders.find(provider => provider.is_current && (provider.models?.length ?? 0) > 0) ??
+          remoteProviders.find(provider => (provider.models?.length ?? 0) > 0);
+        if (remoteProvider) {
+          const remoteModels = remoteProvider.models ?? [];
+          if (!remoteModels.includes(model.value.model)) {
+            model.value.model = remoteModels[0]!;
+          }
+          const mapped: Record<string, HermesProvider> = {
+            'openai-api': 'openai',
+            anthropic: 'claude-code',
+            'openai-codex': 'codex',
+            copilot: 'copilot',
+            'opencode-go': 'opencode-go',
+            'opencode-zen': 'opencode',
+            gemini: 'google',
+            openrouter: 'openrouter',
+            'openavoo-custom': 'custom',
+            custom: 'custom',
+            nous: 'nous'
+          };
+          const mappedProvider = remoteProvider.slug ? mapped[remoteProvider.slug] : undefined;
+          if (mappedProvider) model.value.provider = mappedProvider;
+        }
+      }
       try {
         localStorage.setItem(
           MODEL_OPTIONS_CACHE_KEY,
@@ -585,14 +1140,548 @@ export const useHermesStore = defineStore('hermes', () => {
       }
     } catch (error) {
       modelOptionsError.value = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+      notePanelAuthError(error);
     } finally {
       modelOptionsLoading.value = false;
     }
   }
 
-  async function loadLoginStatus() {
+  function agentProfileModel(name: string): HermesModelSettings {
+    return {
+      ...(profileStates.value[stateKey(activeProfileId.value, name)]?.model ?? { ...DEFAULT_MODEL, keySet: false })
+    };
+  }
+
+  function agentProfileMac(name: string): HermesMacSettings {
+    return { ...(profileStates.value[stateKey(activeProfileId.value, name)]?.mac ?? DEFAULT_MAC) };
+  }
+
+  function setAgentProfileModel(name: string, next: HermesModelSettings) {
+    const key = stateKey(activeProfileId.value, name);
+    const state = profileStates.value[key] ?? blankProfileState();
+    profileStates.value = { ...profileStates.value, [key]: { ...state, model: { ...next } } };
+    persist();
+  }
+
+  function setAgentProfileMac(name: string, next: HermesMacSettings) {
+    const key = stateKey(activeProfileId.value, name);
+    const state = profileStates.value[key] ?? blankProfileState();
+    profileStates.value = { ...profileStates.value, [key]: { ...state, mac: { ...next } } };
+    persist();
+  }
+
+  function setAgentProfileDefault(name: string) {
+    defaultAgentProfiles.value = { ...defaultAgentProfiles.value, [activeProfileId.value]: name };
+    persist();
+    toasts.push({ tone: 'success', title: 'Hermes', description: 'Default profile updated.' });
+  }
+
+  function setAgentProfileColor(name: string, color: string | null) {
+    const next = { ...profileColors.value };
+    if (color) next[name] = color;
+    else delete next[name];
+    profileColors.value = next;
+    persist();
+  }
+
+  function moveAgentProfile(name: string, direction: -1 | 1) {
+    const current = agentProfiles.value.map(profile => profile.name);
+    const index = current.indexOf(name);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= current.length) return;
+    const next = [...current];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    profileOrder.value = { ...profileOrder.value, [activeProfileId.value]: next };
+    persist();
+  }
+
+  async function addPanelProfile(name: string, baseUrl: string, username: string, password: string) {
+    const profileId = `panel-${Date.now().toString(36)}`;
+    const login = await unwrap(commands.hermesPanelLogin(profileId, baseUrl.trim(), username.trim(), password));
+    panelAuthExpired.value = null;
     try {
-      loginStatus.value = await unwrap(commands.hermesLoginStatus());
+      const list = await unwrap(commands.hermesAgentProfiles(profileId, login.baseUrl));
+      if (!list.length) throw new Error('The panel returned no profiles.');
+    } catch (error) {
+      await commands.hermesPanelLogout(profileId).catch(() => undefined);
+      throw error;
+    }
+    const profile: HermesProfile = {
+      id: profileId,
+      name: name.trim() || 'Hermes Panel',
+      kind: 'panel',
+      endpoint: login.baseUrl,
+      status: 'connected',
+      version: '0.23.0',
+      latency: null,
+      models: 0
+    };
+    profiles.value = [...profiles.value, profile];
+    switchProfile(profileId);
+    await loadAgentProfiles();
+    return profile;
+  }
+
+  async function reloginPanel(profileId: string, baseUrl: string, username: string, password: string) {
+    const profile = profiles.value.find(item => item.id === profileId && item.kind === 'panel');
+    if (!profile) throw new Error('Panel connection not found.');
+    await commands.hermesPanelLogout(profileId).catch(() => undefined);
+    await unwrap(commands.hermesPanelLogin(profileId, baseUrl.trim(), username.trim(), password));
+    panelAuthExpired.value = null;
+    const list = await unwrap(commands.hermesAgentProfiles(profileId, baseUrl.trim()));
+    profile.endpoint = baseUrl.trim();
+    profile.status = 'connected';
+    profile.models = list.length;
+    profile.error = undefined;
+    await loadAgentProfiles();
+    await loadModelOptions(true);
+    panelAuthExpired.value = null;
+  }
+
+  async function probeConnections() {
+    const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (!tauri) return;
+    await Promise.all(
+      profiles.value
+        .filter(profile => profile.kind !== 'local')
+        .map(async profile => {
+          try {
+            const result = await unwrap(commands.hermesConnectionProbe(profile.id, profile.endpoint));
+            profile.status = result.ok ? 'connected' : 'error';
+            profile.latency = result.latencyMs;
+            profile.version = /(\d+\.\d+\.\d+)/.exec(result.version ?? '')?.[1] ?? profile.version;
+            profile.error = undefined;
+          } catch (error) {
+            profile.status = 'offline';
+            profile.error = 'Connection probe failed';
+            if (profile.id === activeProfile.value.id) notePanelAuthError(error);
+          }
+        })
+    );
+    persist();
+  }
+
+  async function removeProfile(profileId: string) {
+    if (profileId === 'local') return;
+    const profile = profiles.value.find(item => item.id === profileId);
+    if (!profile) return;
+    if (profile.kind === 'panel') await commands.hermesPanelLogout(profileId).catch(() => undefined);
+    const wasActive = activeProfileId.value === profileId;
+    profiles.value = profiles.value.filter(item => item.id !== profileId);
+    const nextStates = { ...profileStates.value };
+    for (const key of Object.keys(nextStates)) {
+      if (key.startsWith(`${profileId}::`)) delete nextStates[key];
+    }
+    profileStates.value = nextStates;
+    const nextAgents = { ...activeAgentProfiles.value };
+    delete nextAgents[profileId];
+    activeAgentProfiles.value = nextAgents;
+    const nextDefaults = { ...defaultAgentProfiles.value };
+    delete nextDefaults[profileId];
+    defaultAgentProfiles.value = nextDefaults;
+    if (wasActive) {
+      activeProfileId.value = 'local';
+      applyProfileState(profileStates.value[stateKey('local', 'default')] ?? blankProfileState());
+      modelOptions.value = null;
+      modelOptionsUpdatedAt.value = null;
+    }
+    persist();
+  }
+
+  function switchProfile(profileId: string, agentName?: string) {
+    const profile = profiles.value.find(item => item.id === profileId);
+    if (!profile || (profileId === activeProfileId.value && !agentName)) return;
+    stopThinking();
+    // Persist the outgoing profile's conversations before the active route changes, so a
+    // delayed debounce cannot write them into the next profile's file.
+    flushHistorySave();
+    saveActiveProfileState();
+    // The typed key belongs to the profile that was just saved into; carrying it over made
+    // the next `write_config` copy it into the newly selected profile's `.env`.
+    apiKey.value = '';
+    activeProfileId.value = profileId;
+    if (agentName) {
+      activeAgentProfiles.value = { ...activeAgentProfiles.value, [profileId]: agentName };
+    } else if (!activeAgentProfiles.value[profileId]) {
+      activeAgentProfiles.value = {
+        ...activeAgentProfiles.value,
+        [profileId]: defaultAgentProfiles.value[profileId] ?? 'default'
+      };
+    }
+    modelOptions.value = null;
+    modelOptionsUpdatedAt.value = null;
+    if (profile.kind !== 'local') {
+      mac.value = { ...DEFAULT_MAC };
+    }
+    applyProfileState(profileStates.value[stateKey()] ?? blankProfileState());
+    void loadAgentProfiles();
+    void loadHistory();
+    void loadPanelHistory();
+    void activateCurrentProfile();
+    persist();
+  }
+
+  /** Panel requests carry the agent profile so the host scopes its own session store. */
+  function agentProfileArg(): string | null {
+    const name = activeAgentProfileName.value;
+    return name && name !== 'default' ? name : null;
+  }
+
+  function connectionArgs() {
+    return {
+      connectionId: remoteActive.value ? activeProfile.value.id : null,
+      gatewayUrl: remoteActive.value ? activeProfile.value.endpoint : null
+    };
+  }
+
+  async function loadAgentProfilesFor(connection: HermesProfile) {
+    agentProfilesLoadingIds.value = new Set(agentProfilesLoadingIds.value).add(connection.id);
+    try {
+      return await loadAgentProfilesInner(connection);
+    } finally {
+      const next = new Set(agentProfilesLoadingIds.value);
+      next.delete(connection.id);
+      agentProfilesLoadingIds.value = next;
+    }
+  }
+
+  async function loadAgentProfilesInner(connection: HermesProfile) {
+    const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    const fallback: HermesAgentProfile[] = [
+      {
+        name: activeAgentProfiles.value[connection.id] ?? 'default',
+        displayName: null,
+        path: connection.endpoint || 'local',
+        isDefault: true,
+        model: null,
+        provider: null,
+        skillCount: 0,
+        hasEnv: false
+      }
+    ];
+    if (!tauri) {
+      agentProfilesByConnection.value = { ...agentProfilesByConnection.value, [connection.id]: fallback };
+      return fallback;
+    }
+    try {
+      const list = await unwrap(
+        commands.hermesAgentProfiles(
+          connection.kind !== 'local' ? connection.id : null,
+          connection.kind !== 'local' ? connection.endpoint : null
+        )
+      );
+      agentProfilesByConnection.value = { ...agentProfilesByConnection.value, [connection.id]: list };
+      connection.status = 'connected';
+      connection.models = list.length;
+      connection.error = undefined;
+      const current = activeAgentProfiles.value[connection.id];
+      if (!current || !list.some(profile => profile.name === current)) {
+        activeAgentProfiles.value = {
+          ...activeAgentProfiles.value,
+          [connection.id]: list.find(profile => profile.isDefault)?.name ?? list[0]?.name ?? 'default'
+        };
+      }
+      return list;
+    } catch (error) {
+      const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+      connection.status = 'error';
+      connection.error = detail;
+      if (connection.kind === 'panel' && (detail.includes('401') || detail.includes('Unauthorized'))) {
+        panelAuthExpired.value = connection.id;
+        toasts.push({
+          tone: 'warning',
+          title: 'Hermes Panel',
+          description: 'The Hermes Panel session expired. Sign in again.'
+        });
+      }
+      agentProfilesByConnection.value = { ...agentProfilesByConnection.value, [connection.id]: fallback };
+      return fallback;
+    }
+  }
+
+  async function loadAgentProfiles() {
+    return loadAgentProfilesFor(activeProfile.value);
+  }
+
+  async function loadAllAgentProfiles() {
+    await Promise.all(profiles.value.map(connection => loadAgentProfilesFor(connection)));
+  }
+
+  async function loadPanelHistory(append = false) {
+    if (!panelActive.value) return;
+    const key = stateKey();
+    if (panelHistoryLoading.has(key)) return;
+    if (!append && panelHistoryLoaded.has(key)) return;
+    const offset = append ? (panelHistoryOffsets.get(key) ?? 0) : 0;
+    panelHistoryLoading.add(key);
+    try {
+      const raw = await unwrap(commands.hermesPanelSessions(activeProfile.value.id, agentProfileArg(), 20, offset));
+      const parsed = JSON.parse(raw) as { sessions?: unknown[]; total?: unknown };
+      const rows = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+      const loaded = rows
+        .map(row => (row && typeof row === 'object' ? panelConversationFromRow(row as Record<string, unknown>) : null))
+        .filter(Boolean) as HermesConversation[];
+      // Conversations this window owns locally (an in-flight turn, or a chat started here that
+      // the host has not listed yet) survive the page replacement.
+      const localOnly = conversations.value.filter(
+        conversation =>
+          !conversation.panel &&
+          !loaded.some(item => item.id === conversation.id) &&
+          conversation.messages.some(entry => entry.streaming)
+      );
+      const merged = append
+        ? [
+            ...conversations.value,
+            ...loaded.filter(item => !conversations.value.some(existing => existing.id === item.id))
+          ]
+        : [...loaded, ...localOnly];
+      conversations.value = merged.sort((left, right) => right.updatedAt - left.updatedAt);
+      // Keep the conversation the user is reading; only fall back when it is gone from the list.
+      if (!append && !conversations.value.some(item => item.id === activeId.value)) {
+        activeId.value = conversations.value[0]?.id ?? null;
+      }
+      // An empty first page is a real answer (this profile has no history), so it is cached too.
+      if (loaded.length || !append) panelHistoryLoaded.add(key);
+      panelHistoryOffsets.set(key, offset + rows.length);
+      const total = typeof parsed.total === 'number' ? parsed.total : 0;
+      panelHistoryHasMore.value = rows.length > 0 && offset + rows.length < total;
+      persist();
+    } catch (error) {
+      notePanelAuthError(error);
+      // Panel history is best-effort; keep local state when it is unavailable.
+    } finally {
+      panelHistoryLoading.delete(key);
+    }
+  }
+
+  /**
+   * Read one panel transcript on demand. The list deliberately carries no messages, so opening a
+   * conversation is the only request that reads a transcript.
+   */
+  async function loadPanelConversation(idValue: string) {
+    const target = conversations.value.find(item => item.id === idValue);
+    if (!target?.panel || target.messagesLoaded) return;
+    if (panelConversationLoading.value === idValue) return;
+    panelConversationLoading.value = idValue;
+    try {
+      const raw = await unwrap(
+        commands.hermesPanelSessionMessages(
+          activeProfile.value.id,
+          idValue,
+          agentProfileArg(),
+          PANEL_TRANSCRIPT_PAGE,
+          0
+        )
+      );
+      const parsed = JSON.parse(raw) as { messages?: unknown[] };
+      const rows = Array.isArray(parsed.messages) ? parsed.messages : [];
+      const transcript = panelMessagesFrom(rows, idValue);
+      // A turn sent while this read was in flight is newer than the transcript: keep it.
+      const localOnly = target.messages.filter(entry => !entry.id.startsWith('panel-'));
+      target.messages = [...transcript, ...localOnly];
+      target.messagesLoaded = true;
+      target.panelOffset = rows.length;
+      // This route does not report `has_older`; a full page is the same signal the panel's own
+      // desktop uses to offer the rows before it.
+      target.panelHasOlder = rows.length >= PANEL_TRANSCRIPT_PAGE;
+      // A row with no title fell back to its preview; the transcript gives a better one.
+      const firstUser = transcript.find(entry => entry.role === 'user');
+      if (!target.title || target.title === idValue) target.title = firstUser?.text?.slice(0, 48) || target.title;
+      persist();
+    } catch (error) {
+      notePanelAuthError(error);
+      toasts.push({
+        tone: 'warning',
+        title: 'Hermes history',
+        description: 'Could not read this panel conversation.'
+      });
+    } finally {
+      if (panelConversationLoading.value === idValue) panelConversationLoading.value = null;
+    }
+  }
+
+  /**
+   * Prepend the next older page. Offsets count back from the newest row, so the loaded row count
+   * is the next offset; rows persisted between two reads are de-duplicated by message id.
+   */
+  async function loadOlderPanelMessages(idValue?: string) {
+    const target = conversations.value.find(item => item.id === (idValue ?? activeId.value));
+    if (!target?.panel || !target.panelHasOlder) return;
+    if (panelConversationLoading.value === target.id) return;
+    panelConversationLoading.value = target.id;
+    try {
+      const raw = await unwrap(
+        commands.hermesPanelSessionMessages(
+          activeProfile.value.id,
+          target.id,
+          agentProfileArg(),
+          PANEL_TRANSCRIPT_PAGE,
+          target.panelOffset ?? 0
+        )
+      );
+      const parsed = JSON.parse(raw) as { messages?: unknown[] };
+      const rows = Array.isArray(parsed.messages) ? parsed.messages : [];
+      const older = panelMessagesFrom(rows, target.id);
+      const seen = new Set(target.messages.map(entry => entry.id));
+      target.messages = [...older.filter(entry => !seen.has(entry.id)), ...target.messages];
+      target.panelOffset = (target.panelOffset ?? 0) + rows.length;
+      target.panelHasOlder = rows.length >= PANEL_TRANSCRIPT_PAGE;
+      persist();
+    } catch (error) {
+      notePanelAuthError(error);
+      toasts.push({
+        tone: 'warning',
+        title: 'Hermes history',
+        description: 'Could not read older panel messages.'
+      });
+    } finally {
+      if (panelConversationLoading.value === target.id) panelConversationLoading.value = null;
+    }
+  }
+
+  async function loadMorePanelHistory() {
+    await loadPanelHistory(true);
+  }
+
+  /** Re-read the first page after the host refused a fenced write or the row changed. */
+  async function refreshPanelHistory() {
+    if (!panelActive.value) return;
+    panelHistoryLoaded.delete(stateKey());
+    panelHistoryOffsets.delete(stateKey());
+    await loadPanelHistory();
+  }
+
+  async function activateCurrentProfile() {
+    if (!runtimeReady.value && !remoteActive.value) return;
+    profileSwitching.value = true;
+    profileSwitchError.value = null;
+    try {
+      await loadModelOptions(true);
+      if (modelOptionsError.value) profileSwitchError.value = modelOptionsError.value;
+    } finally {
+      profileSwitching.value = false;
+    }
+  }
+
+  async function switchAgentProfile(name: string) {
+    if (!name || name === activeAgentProfileName.value) return;
+    stopThinking();
+    flushHistorySave();
+    profileSwitchingTo.value = name;
+    saveActiveProfileState();
+    // Same reason as `switchProfile`: a key entered for the previous profile must not follow
+    // the switch into this one's `.env`.
+    apiKey.value = '';
+    activeAgentProfiles.value = { ...activeAgentProfiles.value, [activeProfileId.value]: name };
+    modelOptions.value = null;
+    modelOptionsUpdatedAt.value = null;
+    applyProfileState(profileStates.value[stateKey(activeProfileId.value, name)] ?? blankProfileState());
+    if (remoteActive.value) mac.value = { ...DEFAULT_MAC };
+    persist();
+    void loadHistory();
+    void loadPanelHistory();
+    try {
+      await activateCurrentProfile();
+    } finally {
+      profileSwitchingTo.value = null;
+    }
+  }
+
+  function switchToAgentProfile(connectionId: string, name: string) {
+    if (connectionId !== activeProfileId.value) {
+      switchProfile(connectionId, name);
+    } else {
+      switchAgentProfile(name);
+    }
+  }
+
+  async function createAgentProfile(name: string, cloneFrom: string | null, soul: string | null) {
+    const args = connectionArgs();
+    await unwrap(commands.hermesAgentProfileCreate(args.connectionId, args.gatewayUrl, name, cloneFrom, soul));
+    await loadAgentProfiles();
+    await switchAgentProfile(name);
+  }
+
+  async function renameAgentProfile(name: string, newName: string) {
+    const args = connectionArgs();
+    await unwrap(commands.hermesAgentProfileRename(args.connectionId, args.gatewayUrl, name, newName));
+    const oldKey = stateKey(activeProfileId.value, name);
+    const newKey = stateKey(activeProfileId.value, newName);
+    const nextStates = { ...profileStates.value };
+    if (nextStates[oldKey]) {
+      nextStates[newKey] = nextStates[oldKey];
+      delete nextStates[oldKey];
+      profileStates.value = nextStates;
+    }
+    if (activeAgentProfileName.value === name) {
+      activeAgentProfiles.value = { ...activeAgentProfiles.value, [activeProfileId.value]: newName };
+    }
+    if (defaultAgentProfiles.value[activeProfileId.value] === name) {
+      defaultAgentProfiles.value = { ...defaultAgentProfiles.value, [activeProfileId.value]: newName };
+    }
+    const order = profileOrder.value[activeProfileId.value];
+    if (order?.includes(name)) {
+      profileOrder.value = {
+        ...profileOrder.value,
+        [activeProfileId.value]: order.map(item => (item === name ? newName : item))
+      };
+    }
+    await loadAgentProfiles();
+    persist();
+  }
+
+  async function deleteAgentProfile(name: string) {
+    const args = connectionArgs();
+    await unwrap(commands.hermesAgentProfileDelete(args.connectionId, args.gatewayUrl, name));
+    if (activeAgentProfileName.value === name) {
+      await switchAgentProfile('default');
+    }
+    const nextStates = { ...profileStates.value };
+    delete nextStates[stateKey(activeProfileId.value, name)];
+    profileStates.value = nextStates;
+    await loadAgentProfiles();
+    persist();
+  }
+
+  async function openAgentProfileWindow(name: string) {
+    const args = connectionArgs();
+    await unwrap(commands.hermesOpenProfileWindow(args.connectionId ?? 'local', name));
+  }
+
+  async function exportAgentProfile(name: string, output: string) {
+    const args = connectionArgs();
+    return unwrap(commands.hermesAgentProfileExport(args.connectionId, args.gatewayUrl, name, output));
+  }
+
+  async function importAgentProfile(archive: string, name: string | null) {
+    const args = connectionArgs();
+    await unwrap(commands.hermesAgentProfileImport(args.connectionId, args.gatewayUrl, archive, name));
+    await loadAgentProfiles();
+  }
+
+  async function loadAgentProfileSoul(name: string) {
+    const args = connectionArgs();
+    return unwrap(commands.hermesAgentProfileSoul(args.connectionId, args.gatewayUrl, name));
+  }
+
+  async function saveAgentProfileSoul(name: string, content: string) {
+    const args = connectionArgs();
+    await unwrap(commands.hermesAgentProfileSoulSave(args.connectionId, args.gatewayUrl, name, content));
+  }
+
+  function updateProfile(profileId: string, patch: Partial<HermesProfile>) {
+    const profile = profiles.value.find(item => item.id === profileId);
+    if (!profile) return;
+    Object.assign(profile, patch);
+    persist();
+  }
+
+  async function loadLoginStatus(profileName = activeAgentProfileName.value) {
+    try {
+      // Official logins live in the agent profile's own `auth.json`, so the status must be
+      // read from the profile being inspected, not from the shared root home.
+      const profileArg = !profileName || profileName === 'default' ? null : profileName;
+      loginStatus.value = await unwrap(commands.hermesLoginStatus(profileArg));
     } catch {
       loginStatus.value = null;
     }
@@ -635,7 +1724,10 @@ export const useHermesStore = defineStore('hermes', () => {
   }
 
   function select(idValue: string) {
-    if (conversations.value.some(item => item.id === idValue)) activeId.value = idValue;
+    if (!conversations.value.some(item => item.id === idValue)) return;
+    activeId.value = idValue;
+    // A panel row is metadata only until it is opened.
+    void loadPanelConversation(idValue);
   }
 
   function newChat() {
@@ -646,6 +1738,31 @@ export const useHermesStore = defineStore('hermes', () => {
     if (historyLoadStarted && !historyLoaded) await historyReadyPromise;
     const index = conversations.value.findIndex(item => item.id === idValue);
     if (index < 0) return;
+    const target = conversations.value[index];
+    if (target?.panel) {
+      // The host owns the row: dropping it locally only made it reappear on the next read.
+      try {
+        await unwrap(
+          commands.hermesPanelSessionDelete(
+            activeProfile.value.id,
+            idValue,
+            target.panelRevision ?? 0,
+            target.panelGeneration ?? 0,
+            agentProfileArg()
+          )
+        );
+      } catch (error) {
+        notePanelAuthError(error);
+        toasts.push({
+          tone: 'warning',
+          title: 'Hermes history',
+          description: 'Could not delete this panel conversation.'
+        });
+        // The row moved on the host: re-read so the retry carries the fresh fence.
+        void refreshPanelHistory();
+        return;
+      }
+    }
     if (activeId.value === idValue) {
       stopThinking();
       activeId.value = null;
@@ -661,8 +1778,35 @@ export const useHermesStore = defineStore('hermes', () => {
     if (!target) return;
     const next = title.trim();
     if (!next) return;
+    if (target.panel) {
+      // Same reason as delete: the host's title is the one every client reads back.
+      try {
+        await unwrap(
+          commands.hermesPanelSessionRename(
+            activeProfile.value.id,
+            idValue,
+            next,
+            target.panelRevision ?? 0,
+            target.panelGeneration ?? 0,
+            agentProfileArg()
+          )
+        );
+      } catch (error) {
+        notePanelAuthError(error);
+        toasts.push({
+          tone: 'warning',
+          title: 'Hermes history',
+          description: 'Could not rename this panel conversation.'
+        });
+        // The row moved on the host: re-read so the next attempt carries the fresh fence.
+        void refreshPanelHistory();
+        return;
+      }
+    }
     target.title = next;
     target.updatedAt = Date.now();
+    // The host bumped the row's revision for the write we just made.
+    if (target.panel) target.panelRevision = (target.panelRevision ?? 0) + 1;
     persist();
     flushHistorySave();
   }
@@ -670,8 +1814,9 @@ export const useHermesStore = defineStore('hermes', () => {
   async function clearHistory() {
     if (historyLoadStarted && !historyLoaded) await historyReadyPromise;
     stopThinking();
-    conversations.value = [];
-    activeId.value = null;
+    // Panel rows live on the host, so only this Mac's own conversations can be cleared here.
+    conversations.value = conversations.value.filter(item => item.panel);
+    if (activeId.value && !conversations.value.some(item => item.id === activeId.value)) activeId.value = null;
     persist();
     flushHistorySave();
   }
@@ -764,8 +1909,9 @@ export const useHermesStore = defineStore('hermes', () => {
     pendingSteers.delete(conversation.id);
     for (const text of queued) {
       try {
-        await unwrap(commands.hermesSteer(live, text));
+        await unwrap(commands.hermesSteer(live, text, gatewayUrl.value, gatewayProfileId.value));
       } catch (error) {
+        notePanelAuthError(error);
         toasts.push({
           tone: 'warning',
           title: 'Hermes steer',
@@ -780,7 +1926,28 @@ export const useHermesStore = defineStore('hermes', () => {
       await historyReadyPromise;
     }
     const value = text.trim();
+    if (remoteActive.value && attachments.length) {
+      toasts.push({
+        tone: 'warning',
+        title: 'Hermes',
+        description: 'Remote gateways do not accept local attachment paths yet.'
+      });
+      return;
+    }
     if (!value && !attachments.length) return;
+    if (!remoteActive.value) {
+      // Verify against the runtime instead of trusting the cached flag: a stale `true`
+      // used to let the turn through and fail later with a provider error.
+      const info = HERMES_PROVIDER_MAP[model.value.provider];
+      if (requiresStoredKey(model.value, info) && !(await refreshCredentialState())) {
+        toasts.push({
+          tone: 'warning',
+          title: 'Hermes profile',
+          description: 'Configure this profile’s model and credentials before chatting.'
+        });
+        return;
+      }
+    }
     if (thinking.value) {
       if (attachments.length) {
         toasts.push({ tone: 'warning', title: 'Hermes', description: '请等待当前回复结束再发送附件。' });
@@ -799,7 +1966,9 @@ export const useHermesStore = defineStore('hermes', () => {
       steerConversation.updatedAt = Date.now();
       if (steerConversation.liveSessionId) {
         try {
-          await unwrap(commands.hermesSteer(steerConversation.liveSessionId, value));
+          await unwrap(
+            commands.hermesSteer(steerConversation.liveSessionId, value, gatewayUrl.value, gatewayProfileId.value)
+          );
         } catch (error) {
           const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
           const index = steerConversation.messages.findIndex(entry => entry.id === steerMessage.id);
@@ -816,7 +1985,9 @@ export const useHermesStore = defineStore('hermes', () => {
             stopRequested.value = true;
             stopping.value = true;
             armStopFallbacks(activeTurn, steerConversation.id);
-            await commands.hermesInterrupt(steerConversation.liveSessionId).catch(() => undefined);
+            await commands
+              .hermesInterrupt(steerConversation.liveSessionId, gatewayUrl.value, gatewayProfileId.value)
+              .catch(() => undefined);
           }
         }
       } else {
@@ -837,7 +2008,7 @@ export const useHermesStore = defineStore('hermes', () => {
 
     const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!runtime.value && tauri) await loadRuntime();
-    if (!runtime.value?.ready && tauri) {
+    if (!runtime.value?.ready && tauri && !remoteActive.value) {
       thinking.value = false;
       toasts.push({
         tone: 'warning',
@@ -846,7 +2017,7 @@ export const useHermesStore = defineStore('hermes', () => {
       });
       return;
     }
-    if (runtime.value?.ready) {
+    if (runtime.value?.ready || remoteActive.value) {
       const requestId =
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
           ? crypto.randomUUID()
@@ -940,13 +2111,19 @@ export const useHermesStore = defineStore('hermes', () => {
             attachments: [...attachments],
             auxiliary: HERMES_AUX_TASKS.map(task => ({ task, ...auxiliary.value[task] })),
             forceAuxVision: forceAuxVision.value,
-            macEnabled: mac.value.enabled,
-            controlLevel: mac.value.level,
-            macTerminal: mac.value.terminal,
-            macScreen: mac.value.screen,
-            macFiles: mac.value.files,
-            macCron: mac.value.cron,
-            confirmWrites: mac.value.confirmWrites
+            gatewayUrl: gatewayUrl.value,
+            profileId: gatewayProfileId.value,
+            profile: activeAgentProfileName.value,
+            panelAuth: panelActive.value,
+            macEnabled: !remoteActive.value && mac.value.enabled,
+            controlLevel: remoteActive.value ? 'open' : mac.value.level,
+            macTerminal: !remoteActive.value && mac.value.terminal,
+            macScreen: !remoteActive.value && mac.value.screen,
+            macFiles: !remoteActive.value && mac.value.files,
+            macCron: !remoteActive.value && mac.value.cron,
+            // A remote host's tools still need a user decision; only this Mac's capability
+            // switches are forced off. Without this the backend denied every remote approval.
+            confirmWrites: remoteActive.value ? true : mac.value.confirmWrites
           })
         );
         if (activeTurn !== turn) return;
@@ -980,6 +2157,7 @@ export const useHermesStore = defineStore('hermes', () => {
           }
           return;
         }
+        notePanelAuthError(error);
         const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
         const expiredOpenCode =
           (model.value.provider === 'opencode-go' || model.value.provider === 'opencode') &&
@@ -1052,6 +2230,9 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     stopping.value = false;
     stopRequested.value = false;
     approvalRequest.value = null;
+    // Read the live id before clearing it: the remote interrupt below used to run with
+    // `undefined` and never stopped the turn on a remote gateway.
+    const live = active.value?.liveSessionId;
     if (active.value) {
       active.value.liveSessionId = undefined;
       pendingSteers.delete(active.value.id);
@@ -1062,7 +2243,11 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
       last.streaming = false;
       if (!last.text) last.text = '已停止。';
     }
-    if (runtime.value?.ready) void commands.hermesStop().catch(() => undefined);
+    if (live && remoteActive.value) {
+      void commands.hermesInterrupt(live, gatewayUrl.value, gatewayProfileId.value).catch(() => undefined);
+    } else if (runtime.value?.ready && !remoteActive.value) {
+      void commands.hermesStop().catch(() => undefined);
+    }
   }
 
   async function respondApproval(choice: 'once' | 'session' | 'always' | 'deny') {
@@ -1109,10 +2294,10 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     armStopFallbacks(turn, stoppedConversation);
     const live = active.value?.liveSessionId;
     try {
-      if (live) await unwrap(commands.hermesInterrupt(live));
-      else await unwrap(commands.hermesStop());
+      if (live) await unwrap(commands.hermesInterrupt(live, gatewayUrl.value, gatewayProfileId.value));
+      else if (!remoteActive.value) await unwrap(commands.hermesStop());
     } catch {
-      await commands.hermesStop().catch(() => undefined);
+      if (!remoteActive.value) await commands.hermesStop().catch(() => undefined);
     }
   }
 
@@ -1140,8 +2325,50 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
       provider,
       model: info.models[0] ?? model.value.model,
       endpoint: defaultProviderEndpoint(provider),
-      keySet: info.oauth
+      keySet: false
     };
+  }
+
+  /** Providers that authenticate through an account login or a local CLI store. */
+  function usesAccountLogin(info: HermesProviderInfo): boolean {
+    return info.oauth || Boolean(info.login) || Boolean(info.localAuth);
+  }
+
+  /** True when the provider cannot work without a stored API key. */
+  function requiresStoredKey(settings: HermesModelSettings, info: HermesProviderInfo): boolean {
+    if (usesAccountLogin(info)) return false;
+    // Local and custom endpoints may be keyless; the runtime only asks for a key when one exists.
+    if (info.id === 'local') return false;
+    if (info.id === 'custom') return !settings.endpoint.trim();
+    return true;
+  }
+
+  /**
+   * Re-read whether the runtime holds an API key for `provider`.
+   *
+   * `keySet` is persisted UI state, but the key lives in the runtime's own `.env` and can
+   * disappear outside this app (CLI, uninstall, a failed write), so it is never trusted
+   * on its own.
+   */
+  async function refreshCredentialState(provider: HermesProvider = model.value.provider) {
+    const info = HERMES_PROVIDER_MAP[provider];
+    if (usesAccountLogin(info)) {
+      if (model.value.provider === provider && model.value.keySet) {
+        model.value = { ...model.value, keySet: false };
+      }
+      return false;
+    }
+    try {
+      // A key belongs to the agent profile whose `.env` holds it, not the shared root.
+      const profileArg = activeAgentProfileName.value === 'default' ? null : activeAgentProfileName.value;
+      const keySet = await unwrap(commands.hermesSecretStatus(provider, profileArg));
+      if (model.value.provider === provider) {
+        model.value = { ...model.value, keySet };
+      }
+      return keySet;
+    } catch {
+      return false;
+    }
   }
 
   function setEffort(effort: HermesEffort) {
@@ -1161,6 +2388,8 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
   return {
     model,
     mac,
+    refreshCredentialState,
+    requiresStoredKey,
     conversations,
     activeId,
     active,
@@ -1172,6 +2401,46 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     respondApproval,
     stopping,
     stop,
+    profiles,
+    activeProfile,
+    activeProfileId,
+    activeAgentProfileName,
+    agentProfiles,
+    agentProfilesLoading,
+    fleetProfiles,
+    loadAllAgentProfiles,
+    probeConnections,
+    switchToAgentProfile,
+    profileColors,
+    profileOrder,
+    defaultAgentProfiles,
+    setAgentProfileDefault,
+    agentProfileModel,
+    agentProfileMac,
+    setAgentProfileModel,
+    setAgentProfileMac,
+    setAgentProfileColor,
+    moveAgentProfile,
+    remoteActive,
+    panelActive,
+    panelAuthExpired,
+    gatewayUrl,
+    gatewayProfileId,
+    switchProfile,
+    switchAgentProfile,
+    loadAgentProfiles,
+    createAgentProfile,
+    renameAgentProfile,
+    deleteAgentProfile,
+    loadAgentProfileSoul,
+    saveAgentProfileSoul,
+    exportAgentProfile,
+    importAgentProfile,
+    openAgentProfileWindow,
+    addPanelProfile,
+    reloginPanel,
+    removeProfile,
+    updateProfile,
     runtime,
     runtimeReady,
     contextUsage,
@@ -1192,12 +2461,22 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     loadLoginStatus,
     modelOptions,
     modelOptionsLoading,
+    profileSwitching,
+    profileSwitchError,
+    profileSwitchingTo,
     modelOptionsError,
     modelOptionsUpdatedAt,
     loadModelOptions,
     apiKey,
     loadRuntime,
     loadHistory,
+    loadPanelHistory,
+    loadMorePanelHistory,
+    loadPanelConversation,
+    loadOlderPanelMessages,
+    refreshPanelHistory,
+    panelConversationLoading,
+    panelHistoryHasMore,
     setApiKey,
     modelShort,
     macActive,
