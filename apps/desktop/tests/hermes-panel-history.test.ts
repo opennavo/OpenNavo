@@ -173,9 +173,7 @@ describe('Hermes panel history', () => {
         ? pending
         : Promise.resolve(
             ok({
-              providers: [
-                { slug: 'anthropic', name: 'Anthropic', is_current: true, models: ['claude-sonnet'] }
-              ],
+              providers: [{ slug: 'anthropic', name: 'Anthropic', is_current: true, models: ['claude-sonnet'] }],
               model: 'claude-sonnet',
               provider: 'anthropic'
             })
@@ -199,6 +197,42 @@ describe('Hermes panel history', () => {
 
     expect(store.modelOptions?.providers?.[0]?.slug).toBe('anthropic');
     expect(store.modelOptions?.providers?.[0]?.models).toEqual(['claude-sonnet']);
+  });
+
+  it('starts a new model catalog request when the credential changes', async () => {
+    type ModelResult = Awaited<ReturnType<typeof commands.hermesModelOptions>>;
+    let release!: (value: ModelResult) => void;
+    const firstRequest = new Promise<ModelResult>(resolve => {
+      release = resolve;
+    });
+    vi.spyOn(commands, 'hermesModelOptions').mockImplementation(input =>
+      input.apiKey === 'sk-first'
+        ? firstRequest
+        : Promise.resolve(
+            ok({
+              providers: [{ slug: 'anthropic', name: 'Anthropic', is_current: true, models: ['claude-sonnet'] }],
+              model: 'claude-sonnet',
+              provider: 'anthropic'
+            })
+          )
+    );
+    const store = await mountPanelStore('default');
+
+    const oldLoad = store.loadModelOptions(true, store.model, 'sk-first');
+    await vi.waitFor(() => expect(commands.hermesModelOptions).toHaveBeenCalledTimes(1));
+    await store.loadModelOptions(true, store.model, 'sk-second');
+
+    expect(commands.hermesModelOptions).toHaveBeenCalledTimes(2);
+    expect(commands.hermesModelOptions).toHaveBeenLastCalledWith(expect.objectContaining({ apiKey: 'sk-second' }));
+    release(
+      ok({
+        providers: [{ slug: 'openai-api', name: 'OpenAI', is_current: true, models: ['gpt-old'] }],
+        model: 'gpt-old',
+        provider: 'openai-api'
+      })
+    );
+    await oldLoad;
+    expect(store.modelOptions?.providers?.[0]?.slug).toBe('anthropic');
   });
 
   it('renders the list from the host’s own metadata without reading transcripts', async () => {

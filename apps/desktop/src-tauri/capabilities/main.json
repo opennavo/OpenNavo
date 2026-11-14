@@ -29,6 +29,16 @@
         { "url": "x-apple.systempreferences:*" }
       ]
     },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$TEMP/**" },
+        { "path": "/Volumes/**" },
+        { "path": "/tmp/**" },
+        { "path": "/private/tmp/**" }
+      ]
+    },
     "clipboard-manager:allow-write-text",
     "process:default",
     "log:default",

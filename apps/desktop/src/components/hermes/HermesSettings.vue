@@ -579,11 +579,15 @@ function permissionDot(value: boolean | undefined) {
 }
 
 function openPermission(pane: string) {
-  void openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+  void openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`, {
+    allowSystemPreferences: true
+  });
 }
 
 function checkPermissions() {
-  void openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+  void openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility', {
+    allowSystemPreferences: true
+  });
   toasts.push({
     tone: 'info',
     title: content.value.settings.mac.rechecked,

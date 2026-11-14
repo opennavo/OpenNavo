@@ -144,6 +144,10 @@ pub fn start(
         })?;
     let mut command = CommandBuilder::new(&args[0]);
     command.args(&args[1..]);
+    command.env_clear();
+    for (name, value) in super::inherited_runtime_env() {
+        command.env(name, value);
+    }
     command.env("HERMES_HOME", home.display().to_string());
     command.env("NO_COLOR", "1");
     command.env("TERM", "xterm-256color");

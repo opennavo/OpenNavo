@@ -5,6 +5,7 @@
 //! resources directory after `pnpm --filter @opennavo/desktop hermes:prepare`.
 
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -1089,49 +1090,46 @@ fn runtime_python(bin: &Path) -> Option<PathBuf> {
 /// Entry point the generated runtime wrapper (`bin/hermes`) also uses.
 const HERMES_ENTRYPOINT: &str = "from hermes_cli.main import main; main()";
 
-/// Credential-bearing variables Hermes or its tools must not inherit from the app process.
-///
-/// Provider keys are stored in `<HERMES_HOME>/.env` instead, so a terminal or screen tool cannot
-/// read a key that happened to be present when the desktop app was launched from a shell.
-const CREDENTIAL_ENV_VARS: &[&str] = &[
-    "OPENAI_API_KEY",
-    "OPENAI_API_BASE",
-    "OPENAI_BASE_URL",
-    "OPENAI_ORG_ID",
-    "OPENAI_ORGANIZATION",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "GOOGLE_API_KEY",
-    "GEMINI_API_KEY",
-    "OPENROUTER_API_KEY",
-    "OPENROUTER_BASE_URL",
-    "NOUS_API_KEY",
-    "QWEN_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "MISTRAL_API_KEY",
-    "GROQ_API_KEY",
-    "TOGETHER_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "COHERE_API_KEY",
-    "FIREWORKS_API_KEY",
-    "XAI_API_KEY",
-    "HELICONE_API_KEY",
-    "PARALLEL_API_KEY",
-    "OPENCODE_ZEN_API_KEY",
-    "OPENCODE_GO_API_KEY",
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "COPILOT_GITHUB_TOKEN",
-    "COPILOT_API_BASE_URL",
-    "OPENNAVO_CUSTOM_API_KEY",
+/// Host variables the runtime needs. Everything else is dropped before spawning so a key that
+/// happened to be present when the app was launched from a shell cannot reach terminal/screen
+/// tools. Provider keys are loaded from `<HERMES_HOME>/.env` by the runtime itself.
+const RUNTIME_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NO_PROXY",
+    "no_proxy",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+    "TERM",
 ];
 
-fn scrub_credential_env(command: &mut Command) {
-    for name in CREDENTIAL_ENV_VARS {
-        command.env_remove(name);
-    }
+fn inherited_runtime_env() -> Vec<(&'static str, OsString)> {
+    RUNTIME_ENV_ALLOWLIST
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (*name, value)))
+        .collect()
+}
+
+fn apply_runtime_environment(command: &mut Command) {
+    command.env_clear().envs(inherited_runtime_env());
 }
 
 /// Build the runtime process directly instead of going through `bin/hermes` so the
@@ -1159,11 +1157,11 @@ fn runtime_command(bin: &Path) -> Result<Command, AppError> {
         pythonpath.push_str(&existing.to_string_lossy());
     }
     let mut command = Command::new(python);
+    apply_runtime_environment(&mut command);
     command
         .arg("-c")
         .arg(HERMES_ENTRYPOINT)
         .env("PYTHONPATH", pythonpath);
-    scrub_credential_env(&mut command);
     Ok(command)
 }
 
@@ -1781,6 +1779,7 @@ async fn probe_runtime_version(bin: &Path) -> Result<RuntimeVersionProbe, AppErr
         std::env::temp_dir().join(format!("opennavo-hermes-check-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&check_home)?;
     let mut command = Command::new("/bin/sh");
+    apply_runtime_environment(&mut command);
     command
         .arg(bin)
         .arg("--version")
@@ -1790,7 +1789,6 @@ async fn probe_runtime_version(bin: &Path) -> Result<RuntimeVersionProbe, AppErr
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    scrub_credential_env(&mut command);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -2349,23 +2347,27 @@ mod tests {
         assert_eq!(provider_key_env("local"), "OPENNAVO_CUSTOM_API_KEY");
     }
 
-    #[test]
-    fn runtime_commands_scrub_inherited_provider_credentials() {
+    #[tokio::test]
+    async fn runtime_commands_drop_the_inherited_environment() {
         let dir = tempfile::tempdir().unwrap();
-        let bin = fake_runtime(dir.path(), "#!/bin/sh\nexit 0\n");
-        let command = runtime_command(&bin).unwrap();
-        let removed: Vec<String> = command
-            .as_std()
-            .get_envs()
-            .filter(|(_, value)| value.is_none())
-            .map(|(name, _)| name.to_string_lossy().into_owned())
-            .collect();
-        for name in CREDENTIAL_ENV_VARS {
-            assert!(
-                removed.iter().any(|removed| removed == name),
-                "{name} must not reach the Hermes runtime"
-            );
+        let bin = fake_runtime(dir.path(), "#!/bin/sh\nenv\n");
+        let inherited = ["CARGO_MANIFEST_DIR", "PWD", "OLDPWD"]
+            .into_iter()
+            .find(|name| std::env::var_os(name).is_some())
+            .expect("the test process should expose at least one non-allowlisted variable");
+        let output = runtime_command(&bin).unwrap().output().await.unwrap();
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !stdout
+                .lines()
+                .any(|line| line.starts_with(&format!("{inherited}="))),
+            "{inherited} must not reach the Hermes runtime"
+        );
+        if std::env::var_os("PATH").is_some() {
+            assert!(stdout.lines().any(|line| line.starts_with("PATH=")));
         }
+        assert!(stdout.lines().any(|line| line.starts_with("PYTHONPATH=")));
     }
 
     #[test]

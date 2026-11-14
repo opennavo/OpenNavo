@@ -77,9 +77,11 @@ if (location.hash.startsWith('#/tray-monitor')) {
 } else {
   const profileWindow = new URLSearchParams(location.search).has('profile');
   if (profileWindow) {
+    document.documentElement.dataset.opennavoWindow = 'hermes-profile';
     // The profile window owns no package, security or update state; loading it would invoke
     // commands its capability deliberately does not grant.
     await startProfileWindowState();
+    navigationCleanups.push(router.beforeEach(to => (to.name === 'assistant' ? true : '/assistant')));
   } else {
     // Subscribe to Rust events and load local state before mounting; subscribe to deep links alongside local state to receive buffered cold-start links.
     const localState = startLocalState();

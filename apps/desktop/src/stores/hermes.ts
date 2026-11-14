@@ -51,6 +51,16 @@ function modelCatalogCount(options: HermesModelOptions | null): number {
   );
 }
 
+/** Opaque fingerprint used only to de-duplicate catalog requests; never persisted or sent. */
+function credentialFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 interface HermesProfileState {
   model: HermesModelSettings;
   conversations: HermesConversation[];
@@ -759,6 +769,7 @@ export const useHermesStore = defineStore('hermes', () => {
   let profileActivationSeq = 0;
   let profileSwitchSeq = 0;
   const panelAuthExpired = ref<string | null>(null);
+  let panelAuthGeneration = 0;
 
   function notePanelAuthError(error: unknown) {
     if (!panelActive.value) return;
@@ -1290,6 +1301,7 @@ export const useHermesStore = defineStore('hermes', () => {
   ) {
     if (!runtime.value?.ready && !remoteActive.value) return;
     const owner = stateKey(activeProfileId.value, profileName);
+    const requestApiKey = (keyOverride ?? apiKey.value).trim();
     const requestKey = [
       owner,
       source.provider,
@@ -1299,7 +1311,11 @@ export const useHermesStore = defineStore('hermes', () => {
       source.endpoint.trim(),
       String(refresh),
       gatewayUrl.value ?? '',
-      gatewayProfileId.value ?? ''
+      gatewayProfileId.value ?? '',
+      credentialFingerprint(requestApiKey),
+      String(panelActive.value),
+      String(panelAuthGeneration),
+      panelAuthExpired.value ?? ''
     ].join('::');
     if (modelOptionsLoading.value && modelOptionsRequestKey === requestKey) return;
     const seq = ++modelOptionsSeq;
@@ -1313,7 +1329,7 @@ export const useHermesStore = defineStore('hermes', () => {
           model: modelId(source.model),
           effort: source.effort,
           fast: source.fast,
-          apiKey: (keyOverride ?? apiKey.value).trim() || null,
+          apiKey: requestApiKey || null,
           endpoint: source.endpoint.trim() || null,
           refresh,
           includeUnconfigured: true,
@@ -1435,6 +1451,7 @@ export const useHermesStore = defineStore('hermes', () => {
   async function addPanelProfile(name: string, baseUrl: string, username: string, password: string) {
     const profileId = `panel-${Date.now().toString(36)}`;
     const login = await unwrap(commands.hermesPanelLogin(profileId, baseUrl.trim(), username.trim(), password));
+    panelAuthGeneration += 1;
     panelAuthExpired.value = null;
     try {
       const list = await unwrap(commands.hermesAgentProfiles(profileId, login.baseUrl));
@@ -1465,6 +1482,7 @@ export const useHermesStore = defineStore('hermes', () => {
     if (!profile) throw new Error('Panel connection not found.');
     await commands.hermesPanelLogout(profileId).catch(() => undefined);
     await unwrap(commands.hermesPanelLogin(profileId, baseUrl.trim(), username.trim(), password));
+    panelAuthGeneration += 1;
     panelAuthExpired.value = null;
     await unwrap(commands.hermesAgentProfiles(profileId, baseUrl.trim()));
     const probe = await unwrap(commands.hermesConnectionProbe(profileId, baseUrl.trim())).catch(() => null);
@@ -1506,7 +1524,10 @@ export const useHermesStore = defineStore('hermes', () => {
     if (profileId === 'local') return;
     const profile = profiles.value.find(item => item.id === profileId);
     if (!profile) return;
-    if (profile.kind === 'panel') await commands.hermesPanelLogout(profileId).catch(() => undefined);
+    if (profile.kind === 'panel') {
+      await commands.hermesPanelLogout(profileId).catch(() => undefined);
+      panelAuthGeneration += 1;
+    }
     const wasActive = activeProfileId.value === profileId;
     profiles.value = profiles.value.filter(item => item.id !== profileId);
     const nextStates = { ...profileStates.value };
@@ -1865,11 +1886,7 @@ export const useHermesStore = defineStore('hermes', () => {
       }
       persist();
     } catch (error) {
-      if (
-        seq === panelHistoryRequests.get(requestId) &&
-        generation === panelHistoryGeneration &&
-        key === stateKey()
-      ) {
+      if (seq === panelHistoryRequests.get(requestId) && generation === panelHistoryGeneration && key === stateKey()) {
         notePanelAuthError(error);
         // Not cached as empty: the next open retries instead of showing "no history".
         state.error = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
