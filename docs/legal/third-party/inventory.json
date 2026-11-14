@@ -1,11 +1,11 @@
 {
   "formatVersion": 1,
   "lockDigests": {
-    "pnpm-lock.yaml": "7f5077200e9a1c31696f46b44b43ed4999900d2de39752f16448ff68d4a98368",
+    "pnpm-lock.yaml": "6906c8463ed1eedf4a7d0543671cdd5c59103e16e56ad9434a2ff4e692a8bf94",
     "apps/server/go.mod": "ff8c6aa45fb91c5452370488158da02e1a479024ee9575762af1d10d91a8d290",
     "apps/server/go.sum": "f435b6582a31c4569095a98bfc084855b2aad610255acc66caa9eeb71066a1ee",
     "apps/mcp/uv.lock": "7cf1c9389ae8f28702b943baabd723ab3badbc21fbfcee5d816cb2b431718220",
-    "apps/desktop/src-tauri/Cargo.lock": "3858f596588b6929e451f8b895c505d5366fcf7dc0620f02c0e6f6432230e32a",
+    "apps/desktop/src-tauri/Cargo.lock": "92a721d19883028fde7808eaabd2a2c990c096aebf00cbffd1941f94d90010d5",
     "apps/desktop/native/firewall/core/Cargo.lock": "22bdb9a96ef3b8a62249637d81060826ff82e3eff3e158125d51e269c35bd798",
     "docs/legal/native/manifest.json": "d9619fd270ab33851ceabd487e00888046bfd386e9ce5568943772bf2d4a923a",
     "apps/desktop/native/store/upstream.json": "c85b3ebf2515718f8b066febf42d4f5ffe609941f2957cc8bd73f348a828e9c8",
@@ -20766,30 +20766,6 @@
     },
     {
       "ecosystem": "Rust",
-      "name": "keyring",
-      "version": "3.6.3",
-      "license": "MIT OR Apache-2.0",
-      "url": "https://crates.io/crates/keyring/3.6.3",
-      "scope": "runtime-candidate",
-      "evidence": {
-        "source": "Cargo.lock and downloaded crate manifest",
-        "registry": "registry+https://github.com/rust-lang/crates.io-index"
-      },
-      "licenseFiles": [
-        {
-          "source": "LICENSE-APACHE",
-          "path": "licenses/78ebc2ea2a1cec9cbec2e1a6fc15e73474fe22bdad7575518e7f4628651d49c4.txt",
-          "sha256": "78ebc2ea2a1cec9cbec2e1a6fc15e73474fe22bdad7575518e7f4628651d49c4"
-        },
-        {
-          "source": "LICENSE-MIT",
-          "path": "licenses/157cc607717b1b372a69f6b4526f6ad18c1279af9f3267835cca2943f37bc07d.txt",
-          "sha256": "157cc607717b1b372a69f6b4526f6ad18c1279af9f3267835cca2943f37bc07d"
-        }
-      ]
-    },
-    {
-      "ecosystem": "Rust",
       "name": "lazy_static",
       "version": "1.5.1",
       "license": "MIT OR Apache-2.0",
@@ -24147,30 +24123,6 @@
           "source": "LICENSE-MIT",
           "path": "licenses/fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7.txt",
           "sha256": "fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7"
-        }
-      ]
-    },
-    {
-      "ecosystem": "Rust",
-      "name": "security-framework",
-      "version": "2.11.1",
-      "license": "MIT OR Apache-2.0",
-      "url": "https://crates.io/crates/security-framework/2.11.1",
-      "scope": "runtime-candidate",
-      "evidence": {
-        "source": "Cargo.lock and downloaded crate manifest",
-        "registry": "registry+https://github.com/rust-lang/crates.io-index"
-      },
-      "licenseFiles": [
-        {
-          "source": "LICENSE-APACHE",
-          "path": "licenses/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
-          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
-        },
-        {
-          "source": "LICENSE-MIT",
-          "path": "licenses/91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69.txt",
-          "sha256": "91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69"
         }
       ]
     },
@@ -28011,6 +27963,44 @@
       "version": "1.0.9",
       "license": "CDLA-Permissive-2.0",
       "url": "https://crates.io/crates/webpki-root-certs/1.0.9",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "Cargo.lock and downloaded crate manifest",
+        "registry": "registry+https://github.com/rust-lang/crates.io-index"
+      },
+      "licenseFiles": [
+        {
+          "source": "LICENSE",
+          "path": "licenses/e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8.txt",
+          "sha256": "e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Rust",
+      "name": "webpki-roots",
+      "version": "0.26.11",
+      "license": "CDLA-Permissive-2.0",
+      "url": "https://crates.io/crates/webpki-roots/0.26.11",
+      "scope": "runtime-candidate",
+      "evidence": {
+        "source": "Cargo.lock and downloaded crate manifest",
+        "registry": "registry+https://github.com/rust-lang/crates.io-index"
+      },
+      "licenseFiles": [
+        {
+          "source": "LICENSE",
+          "path": "licenses/e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8.txt",
+          "sha256": "e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8"
+        }
+      ]
+    },
+    {
+      "ecosystem": "Rust",
+      "name": "webpki-roots",
+      "version": "1.0.10",
+      "license": "CDLA-Permissive-2.0",
+      "url": "https://crates.io/crates/webpki-roots/1.0.10",
       "scope": "runtime-candidate",
       "evidence": {
         "source": "Cargo.lock and downloaded crate manifest",

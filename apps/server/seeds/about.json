@@ -6902,13 +6902,6 @@
     },
     {
       "ecosystem": "Rust",
-      "name": "keyring",
-      "version": "3.6.3",
-      "license": "MIT OR Apache-2.0",
-      "url": "https://crates.io/crates/keyring/3.6.3"
-    },
-    {
-      "ecosystem": "Rust",
       "name": "lazy_static",
       "version": "1.5.1",
       "license": "MIT OR Apache-2.0",
@@ -7921,13 +7914,6 @@
       "version": "1.2.0",
       "license": "MIT OR Apache-2.0",
       "url": "https://crates.io/crates/scopeguard/1.2.0"
-    },
-    {
-      "ecosystem": "Rust",
-      "name": "security-framework",
-      "version": "2.11.1",
-      "license": "MIT OR Apache-2.0",
-      "url": "https://crates.io/crates/security-framework/2.11.1"
     },
     {
       "ecosystem": "Rust",
@@ -9083,6 +9069,20 @@
       "version": "1.0.9",
       "license": "CDLA-Permissive-2.0",
       "url": "https://crates.io/crates/webpki-root-certs/1.0.9"
+    },
+    {
+      "ecosystem": "Rust",
+      "name": "webpki-roots",
+      "version": "0.26.11",
+      "license": "CDLA-Permissive-2.0",
+      "url": "https://crates.io/crates/webpki-roots/0.26.11"
+    },
+    {
+      "ecosystem": "Rust",
+      "name": "webpki-roots",
+      "version": "1.0.10",
+      "license": "CDLA-Permissive-2.0",
+      "url": "https://crates.io/crates/webpki-roots/1.0.10"
     },
     {
       "ecosystem": "Rust",
