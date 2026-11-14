@@ -94,6 +94,9 @@ const modelOptionsUpdated = computed(() => {
   if (minutes < 60) return content.value.settings.model.updatedMinutes.replace('{count}', String(minutes));
   return content.value.settings.model.updatedHours.replace('{count}', String(Math.round(minutes / 60)));
 });
+const runtimeUpdateLabel = computed(() =>
+  content.value.install.updateAvailable.replace('{version}', store.runtime?.expectedVersion ?? '')
+);
 const officialWarning = computed(() => {
   if (!officialProvider.value?.models?.length) return content.value.settings.model.fallbackModels;
   if (provider.value.login && needsImport.value) return '';
@@ -1329,7 +1332,7 @@ onBeforeUnmount(() => {
                   >{{ store.runtime?.dataPath ?? '…' }}</code
                 >
                 <div v-if="store.runtime?.outdated" class="mt-10px flex items-center gap-8px">
-                  <span class="text-11px text-status-warning">{{ content.install.updateAvailable }}</span>
+                  <span class="text-11px text-status-warning">{{ runtimeUpdateLabel }}</span>
                   <OnButton variant="accent" size="sm" :disabled="store.installing" @click="updateRuntime">{{
                     content.install.updateRuntime
                   }}</OnButton>

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "hermes": {
+    "version": "0.23.1",
+    "tag": "v0.23.1",
+    "commit": "3b421578588243f920886e6fe79a6faa87ea026e",
+    "commitTimestamp": 1794270273
+  },
+  "python": "3.14",
+  "cuaDriver": {
+    "version": "0.26.1"
+  },
+  "plugins": [
+    {
+      "name": "github-copilot",
+      "repository": "https://github.com/NousResearch/hermes-labs-plugins",
+      "ref": "4987918a068fcf4b3efbb584db5dd05e5f57c669"
+    }
+  ],
+  "release": {
+    "repository": "opennavo/OpenNavo",
+    "tag": "hermes-runtime-v0.23.1",
+    "asset": "runtime-0.23.1-macos-arm64.tar.gz",
+    "sha256": "ee037e5e756592c44a606402250360e957180db99141dc3483ee731c5cf746f3"
+  }
+}

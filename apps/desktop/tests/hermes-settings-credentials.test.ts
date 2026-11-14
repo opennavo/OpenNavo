@@ -131,6 +131,7 @@ describe('Hermes settings credentials', () => {
         ready: true,
         installed: true,
         version: '0.23.0',
+        expectedVersion: '0.23.0',
         path: '/tmp/hermes',
         dataPath: '/tmp',
         computerUse: false,

@@ -1576,6 +1576,7 @@ export type HermesRuntimeStatus = {
 	ready: boolean,
 	installed: boolean,
 	version: string | null,
+	expectedVersion: string,
 	path: string | null,
 	dataPath: string | null,
 	computerUse: boolean,

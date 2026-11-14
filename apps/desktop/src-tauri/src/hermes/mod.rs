@@ -39,6 +39,38 @@ const DATA_ROOT_DIR: &str = "OpenNavoData";
 const RUNTIME_DIR: &str = "runtime/hermes";
 const HERMES_HOME_DIR: &str = "hermes";
 const AUDIT_FILE: &str = "audit.jsonl";
+const RUNTIME_MANIFEST_JSON: &str = include_str!("../../../hermes/runtime.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeManifest {
+    hermes: RuntimeHermesPin,
+    #[serde(default)]
+    plugins: Vec<RuntimePluginPin>,
+    release: RuntimeReleasePin,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeHermesPin {
+    version: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimePluginPin {
+    name: String,
+    repository: String,
+    #[serde(rename = "ref")]
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeReleasePin {
+    repository: String,
+    tag: String,
+    asset: String,
+    sha256: String,
+}
 
 /// App data root, cached so panel-session helpers work without an `AppHandle`.
 static DATA_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -49,6 +81,7 @@ pub struct HermesRuntimeStatus {
     pub ready: bool,
     pub installed: bool,
     pub version: Option<String>,
+    pub expected_version: String,
     pub path: Option<String>,
     pub data_path: Option<String>,
     pub computer_use: bool,
@@ -386,19 +419,42 @@ fn toolsets(input: &HermesChatInput) -> String {
     }
 }
 
-fn runtime_is_current(version: &str) -> bool {
-    let Ok(pattern) = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)") else {
-        return false;
-    };
-    let Some(captures) = pattern.captures(version) else {
-        return false;
-    };
-    let parse = |index: usize| {
-        captures
-            .get(index)
-            .and_then(|value| value.as_str().parse::<u64>().ok())
-    };
-    matches!((parse(1), parse(2), parse(3)), (Some(0), Some(23), Some(0)))
+fn runtime_manifest() -> Result<RuntimeManifest, AppError> {
+    serde_json::from_str(RUNTIME_MANIFEST_JSON).map_err(|error| {
+        AppError::new(
+            "E_HERMES_RUNTIME_MANIFEST",
+            "The pinned Hermes runtime metadata is invalid.",
+        )
+        .with_detail(error.to_string())
+    })
+}
+
+fn expected_runtime_version() -> Result<String, AppError> {
+    let version = runtime_manifest()?.hermes.version;
+    let valid = regex::Regex::new(r"^\d+\.\d+\.\d+$")
+        .expect("static Hermes version regex")
+        .is_match(&version);
+    if !valid {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME_MANIFEST",
+            "The pinned Hermes runtime version is invalid.",
+        ));
+    }
+    Ok(version)
+}
+
+fn runtime_version_from_output(value: &str) -> Option<String> {
+    let pattern = regex::Regex::new(r"(?m)^Hermes Agent v?(\d+\.\d+\.\d+)\b")
+        .expect("static Hermes version output regex");
+    pattern
+        .captures(value)
+        .and_then(|captures| captures.get(1))
+        .map(|value| value.as_str().to_owned())
+}
+
+#[cfg(test)]
+fn runtime_version_matches(version: &str, expected: &str) -> bool {
+    runtime_version_from_output(version).as_deref() == Some(expected)
 }
 
 fn reasoning_effort(effort: &str) -> Option<&str> {
@@ -1681,14 +1737,130 @@ fn migrate_legacy_credentials(app: &AppHandle) {
     });
 }
 
+#[derive(Debug)]
+struct RuntimeVersionProbe {
+    success: bool,
+    stderr: String,
+    version: Option<String>,
+}
+
+/// Read the runtime's own version with an empty, throwaway HERMES_HOME.
+///
+/// Without this, Hermes falls back to the user's `~/.hermes` checkout (or a
+/// source tree) and can report a version that has nothing to do with the
+/// packaged runtime OpenNavo installed.
+async fn probe_runtime_version(bin: &Path) -> Result<RuntimeVersionProbe, AppError> {
+    let check_home =
+        std::env::temp_dir().join(format!("opennavo-hermes-check-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&check_home)?;
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg(bin)
+        .arg("--version")
+        .env("HERMES_HOME", &check_home)
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&check_home);
+            return Err(
+                AppError::new("E_HERMES_RUNTIME", "Hermes runtime could not start.")
+                    .with_detail(error.to_string()),
+            );
+        }
+    };
+    let mut stdout_pipe = child.stdout.take().expect("version probe stdout is piped");
+    let mut stderr_pipe = child.stderr.take().expect("version probe stderr is piped");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let output = timeout(VERSION_TIMEOUT, async {
+        let (stdout_result, stderr_result, status_result) = tokio::join!(
+            stdout_pipe.read_to_end(&mut stdout),
+            stderr_pipe.read_to_end(&mut stderr),
+            child.wait(),
+        );
+        (stdout_result, stderr_result, status_result)
+    })
+    .await;
+    let (stdout_result, stderr_result, status_result) = match output {
+        Ok(output) => output,
+        Err(_) => {
+            // `kill_on_drop` would reap the child when the future is dropped, but the
+            // throwaway HERMES_HOME must outlive the process that is still using it.
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = std::fs::remove_dir_all(&check_home);
+            return Err(AppError::new(
+                "E_HERMES_TIMEOUT",
+                "Hermes version check timed out.",
+            ));
+        }
+    };
+    let _ = std::fs::remove_dir_all(&check_home);
+    stdout_result.map_err(|error| {
+        AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime output could not be read.",
+        )
+        .with_detail(error.to_string())
+    })?;
+    stderr_result.map_err(|error| {
+        AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime output could not be read.",
+        )
+        .with_detail(error.to_string())
+    })?;
+    let status = status_result.map_err(|error| {
+        AppError::new("E_HERMES_RUNTIME", "Hermes runtime could not start.")
+            .with_detail(error.to_string())
+    })?;
+    let stdout = clean_output(&String::from_utf8_lossy(&stdout));
+    let stderr = clean_output(&String::from_utf8_lossy(&stderr));
+    Ok(RuntimeVersionProbe {
+        success: status.success(),
+        version: status
+            .success()
+            .then(|| runtime_version_from_output(&stdout))
+            .flatten(),
+        stderr,
+    })
+}
+
+async fn verify_runtime_bin(bin: &Path, expected: &str) -> Result<(), AppError> {
+    let probe = probe_runtime_version(bin).await?;
+    if !probe.success {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "The Hermes runtime version check failed.",
+        )
+        .with_detail(probe.stderr));
+    }
+    let actual = probe.version.unwrap_or_else(|| "unknown".to_owned());
+    if actual != expected {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "The Hermes runtime does not match the pinned version.",
+        )
+        .with_detail(format!("expected {expected}, got {actual}")));
+    }
+    Ok(())
+}
+
 pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
     migrate_legacy_credentials(&app);
+    let expected_version = expected_runtime_version()?;
     let Some(bin) = runtime_bin(&app) else {
         log::warn!("Hermes runtime status: no runtime binary found");
         return Ok(HermesRuntimeStatus {
             ready: false,
             installed: false,
             version: None,
+            expected_version,
             path: None,
             data_path: data_root(&app).ok().map(|path| path.display().to_string()),
             computer_use: false,
@@ -1697,42 +1869,28 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
         });
     };
     log::info!("Hermes runtime status: checking {}", bin.display());
-    let output = timeout(
-        VERSION_TIMEOUT,
-        Command::new("/bin/sh").arg(&bin).arg("--version").output(),
-    )
-    .await
-    .map_err(|_| {
-        log::warn!("Hermes runtime status: version check timed out");
-        AppError::new("E_HERMES_TIMEOUT", "Hermes version check timed out.")
-    })?
-    .map_err(|error| {
-        log::warn!("Hermes runtime status: spawn failed: {error}");
-        AppError::new("E_HERMES_RUNTIME", "Hermes runtime could not start.")
-            .with_detail(error.to_string())
+    let probe = probe_runtime_version(&bin).await.map_err(|error| {
+        log::warn!("Hermes runtime status: version check failed: {error}");
+        error
     })?;
-    if !output.status.success() {
+    if !probe.success {
         log::warn!(
-            "Hermes runtime status: version failed status={:?} stderr={}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
+            "Hermes runtime status: version failed stderr={}",
+            probe.stderr
         );
         return Ok(HermesRuntimeStatus {
             ready: false,
             installed: true,
             version: None,
+            expected_version,
             path: Some(bin.display().to_string()),
             data_path: data_root(&app).ok().map(|path| path.display().to_string()),
             computer_use: false,
             outdated: false,
-            message: Some(clean_output(&String::from_utf8_lossy(&output.stderr))),
+            message: Some(probe.stderr),
         });
     }
-    let version = clean_output(&String::from_utf8_lossy(&output.stdout))
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .to_owned();
+    let version = probe.version;
     let computer_use = bin
         .parent()
         .and_then(|dir| dir.parent())
@@ -1741,17 +1899,26 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
                 .is_file()
         })
         .unwrap_or(false);
-    let outdated = !runtime_is_current(&version);
-    log::info!("Hermes runtime status: ready {version} (computer_use={computer_use})");
+    let outdated = version.as_deref() != Some(expected_version.as_str());
+    let message = version.is_none().then(|| {
+        format!(
+            "The installed Hermes runtime does not report a packaged version. Update it to {expected_version}."
+        )
+    });
+    log::info!(
+        "Hermes runtime status: ready {} (computer_use={computer_use}, outdated={outdated})",
+        version.as_deref().unwrap_or("unknown")
+    );
     Ok(HermesRuntimeStatus {
         ready: true,
         installed: true,
-        version: Some(version),
+        version,
+        expected_version,
         path: Some(bin.display().to_string()),
         data_path: data_root(&app).ok().map(|path| path.display().to_string()),
         computer_use,
         outdated,
-        message: None,
+        message,
     })
 }
 
@@ -2469,6 +2636,61 @@ mod tests {
         assert_eq!(reasoning_effort("auto"), None);
         assert_eq!(reasoning_effort("medium"), Some("medium"));
         assert_eq!(reasoning_effort("high"), Some("high"));
+    }
+
+    #[test]
+    fn runtime_manifest_pins_the_expected_version() {
+        let manifest = runtime_manifest().unwrap();
+        assert_eq!(manifest.hermes.version, "0.23.1");
+        assert_eq!(manifest.plugins.len(), 1);
+        assert_eq!(manifest.plugins[0].name, "github-copilot");
+        assert_eq!(
+            manifest.plugins[0].repository,
+            "https://github.com/NousResearch/hermes-labs-plugins"
+        );
+        assert_eq!(
+            manifest.plugins[0].sha,
+            "4987918a068fcf4b3efbb584db5dd05e5f57c669"
+        );
+    }
+
+    #[test]
+    fn runtime_version_ignores_dates_and_other_numbers() {
+        assert_eq!(
+            runtime_version_from_output("Hermes Agent v0.23.1 · stable").as_deref(),
+            Some("0.23.1")
+        );
+        assert_eq!(
+            runtime_version_from_output("Hermes Agent vunknown (2026.9.24)"),
+            None
+        );
+        assert!(runtime_version_matches(
+            "Hermes Agent v0.23.1 · stable",
+            "0.23.1"
+        ));
+        assert!(!runtime_version_matches(
+            "Hermes Agent v0.23.0 · stable",
+            "0.23.1"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn version_probe_sets_an_isolated_hermes_home() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let wrapper = dir.path().join("hermes");
+        std::fs::write(
+            &wrapper,
+            "#!/bin/sh\nif [ -n \"${HERMES_HOME:-}\" ]; then printf 'Hermes Agent v0.23.1 · stable\\n'; else printf 'Hermes Agent vunknown (2026.9.24)\\n'; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let probe = probe_runtime_version(&wrapper).await.unwrap();
+        assert!(probe.success);
+        assert_eq!(probe.version.as_deref(), Some("0.23.1"));
     }
 
     fn test_input() -> HermesChatInput {

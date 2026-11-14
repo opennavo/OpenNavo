@@ -11,6 +11,8 @@
     "tauri": "tauri",
     "gen": "cd src-tauri && OPENNAVO_WRITE_BINDINGS=1 cargo test --lib export_bindings -- --exact --quiet",
     "gen:mock": "node scripts/mock-fixtures.mjs",
+    "hermes:check": "node scripts/hermes-runtime.mjs check",
+    "hermes:bump": "node scripts/hermes-runtime.mjs bump",
     "hermes:prepare": "node scripts/prepare-hermes-runtime.mjs",
     "hermes:package": "node scripts/package-hermes-runtime.mjs",
     "lint": "node ../../tooling/scripts/lint-frontend.mjs --eslint",

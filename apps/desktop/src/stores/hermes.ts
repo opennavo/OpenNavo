@@ -44,6 +44,13 @@ export interface HermesProfile {
   error?: string;
 }
 
+function modelCatalogCount(options: HermesModelOptions | null): number {
+  return (options?.providers ?? []).reduce(
+    (total, provider) => total + (provider.total_models ?? provider.models?.length ?? 0),
+    0
+  );
+}
+
 interface HermesProfileState {
   model: HermesModelSettings;
   conversations: HermesConversation[];
@@ -1086,6 +1093,7 @@ export const useHermesStore = defineStore('hermes', () => {
         ready: false,
         installed: false,
         version: null,
+        expectedVersion: '',
         path: null,
         dataPath: null,
         computerUse: false,
@@ -1094,8 +1102,8 @@ export const useHermesStore = defineStore('hermes', () => {
       };
     }
     if (runtime.value?.installed && !runtime.value.ready && runtime.value.message) {
-      console.warn('Hermes runtime:', runtime.value.message);
-      toasts.push({ tone: 'warning', title: 'Hermes runtime', description: runtime.value.message });
+      console.warn('Local Hermes:', runtime.value.message);
+      toasts.push({ tone: 'warning', title: 'Local Hermes', description: runtime.value.message });
     }
   }
 
@@ -1116,7 +1124,7 @@ export const useHermesStore = defineStore('hermes', () => {
     }
     try {
       runtime.value = await unwrap(commands.hermesRuntimeInstall());
-      toasts.push({ tone: 'success', title: 'Hermes', description: 'Hermes runtime installed.' });
+      toasts.push({ tone: 'success', title: 'Hermes', description: 'Local Hermes installed.' });
       return runtime.value.ready;
     } catch (error) {
       const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -1253,7 +1261,7 @@ export const useHermesStore = defineStore('hermes', () => {
       activeId.value = null;
       model.value = { ...DEFAULT_MODEL };
       mac.value = { ...DEFAULT_MAC };
-      toasts.push({ tone: 'success', title: 'Hermes', description: 'Hermes runtime and data removed.' });
+      toasts.push({ tone: 'success', title: 'Hermes', description: 'Local Hermes and its data were removed.' });
       return true;
     } catch (error) {
       const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -1296,6 +1304,8 @@ export const useHermesStore = defineStore('hermes', () => {
       ]);
       modelOptions.value = options;
       modelOptionsUpdatedAt.value = Date.now();
+      const catalogProfile = profiles.value.find(profile => profile.id === activeProfileId.value);
+      if (catalogProfile) catalogProfile.models = modelCatalogCount(options);
       if (remoteActive.value) {
         const remoteProviders = options.providers ?? [];
         const remoteProvider =
@@ -1399,14 +1409,15 @@ export const useHermesStore = defineStore('hermes', () => {
       await commands.hermesPanelLogout(profileId).catch(() => undefined);
       throw error;
     }
+    const probe = await unwrap(commands.hermesConnectionProbe(profileId, login.baseUrl)).catch(() => null);
     const profile: HermesProfile = {
       id: profileId,
       name: name.trim() || 'Hermes Panel',
       kind: 'panel',
       endpoint: login.baseUrl,
       status: 'connected',
-      version: '0.23.0',
-      latency: null,
+      version: /(\d+\.\d+\.\d+)/.exec(probe?.version ?? '')?.[1] ?? '',
+      latency: probe?.latencyMs ?? null,
       models: 0
     };
     profiles.value = [...profiles.value, profile];
@@ -1421,10 +1432,13 @@ export const useHermesStore = defineStore('hermes', () => {
     await commands.hermesPanelLogout(profileId).catch(() => undefined);
     await unwrap(commands.hermesPanelLogin(profileId, baseUrl.trim(), username.trim(), password));
     panelAuthExpired.value = null;
-    const list = await unwrap(commands.hermesAgentProfiles(profileId, baseUrl.trim()));
+    await unwrap(commands.hermesAgentProfiles(profileId, baseUrl.trim()));
+    const probe = await unwrap(commands.hermesConnectionProbe(profileId, baseUrl.trim())).catch(() => null);
     profile.endpoint = baseUrl.trim();
     profile.status = 'connected';
-    profile.models = list.length;
+    profile.version = /(\d+\.\d+\.\d+)/.exec(probe?.version ?? '')?.[1] ?? profile.version;
+    profile.latency = probe?.latencyMs ?? profile.latency;
+    profile.models = 0;
     profile.error = undefined;
     await loadAgentProfiles();
     await loadModelOptions(true);
@@ -2423,8 +2437,8 @@ export const useHermesStore = defineStore('hermes', () => {
       thinking.value = false;
       toasts.push({
         tone: 'warning',
-        title: 'Hermes runtime',
-        description: 'Install the Hermes runtime before chatting.'
+        title: 'Local Hermes',
+        description: 'Install local Hermes before chatting.'
       });
       return;
     }
@@ -2595,7 +2609,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
         }
         toasts.push({
           tone: 'danger',
-          title: expiredOpenCode ? 'OpenCode API Key' : 'Hermes runtime',
+          title: expiredOpenCode ? 'OpenCode API Key' : 'Local Hermes',
           description: expiredOpenCode ? 'OpenCode Go Key 已过期，请创建新的 API Key。' : detail
         });
       } finally {

@@ -301,13 +301,12 @@ const contextUsedLabel = computed(() => content.value.context.used.replace('{per
 const contextTokensLabel = computed(() =>
   content.value.context.tokens.replace('{used}', contextUsedText.value).replace('{total}', contextMaxText.value)
 );
-const lastTextLength = computed(() => store.messages.at(-1)?.text?.length ?? 0);
+const lastMessage = computed(() => store.messages.at(-1));
 const streamingAssistant = computed(() =>
   store.messages.some(message => message.role === 'assistant' && message.streaming === true)
 );
-watch(() => store.messages.length, scrollToBottom, { flush: 'post' });
 watch(() => store.thinking, scrollToBottom, { flush: 'post' });
-watch(lastTextLength, scrollToBottom, { flush: 'post' });
+watch(lastMessage, scrollToBottom, { deep: true, flush: 'post' });
 watch(
   () => store.panelAuthExpired,
   profileId => {

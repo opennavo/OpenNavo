@@ -1350,20 +1350,24 @@ export function installMockIpc(
         ? {
             ready: true,
             installed: true,
-            version: 'Hermes Agent v0.23.0',
+            version: '0.23.1',
+            expectedVersion: '0.23.1',
             path: '/mock/OpenNavoData/runtime/hermes/bin/hermes',
             dataPath: '/mock/OpenNavoData',
             computerUse: true,
+            outdated: false,
             message: null
           }
         : {
             ready: false,
             installed: false,
             version: null,
+            expectedVersion: '0.23.1',
             path: null,
             dataPath: null,
             computerUse: false,
-            message: 'Hermes runtime is not installed in browser preview.'
+            outdated: false,
+            message: 'Local Hermes is not installed in browser preview.'
           },
     hermes_panel_login: args => ({
       baseUrl: String(args.baseUrl ?? 'http://panel.tail1234.ts.net:9119'),
@@ -1508,7 +1512,7 @@ export function installMockIpc(
     }),
     hermes_ssh_disconnect: () => null,
     hermes_chat: () => {
-      throw { code: 'E_HERMES_RUNTIME', message: 'Hermes runtime is not installed in browser preview', detail: null };
+      throw { code: 'E_HERMES_RUNTIME', message: 'Local Hermes is not installed in browser preview', detail: null };
     },
     hermes_test_connection: () => ({ ok: true, status: 200, message: '连接成功 · HTTP 200' }),
     hermes_model_options: () => ({
@@ -1591,7 +1595,7 @@ export function installMockIpc(
     hermes_runtime_install: () => {
       throw {
         code: 'E_HERMES_INSTALL',
-        message: 'Installing the Hermes runtime is only available in the desktop app',
+        message: 'Installing local Hermes is only available in the desktop app',
         detail: null
       };
     },
@@ -1599,10 +1603,12 @@ export function installMockIpc(
       ready: false,
       installed: false,
       version: null,
+      expectedVersion: '0.23.1',
       path: null,
       dataPath: null,
       computerUse: false,
-      message: 'Hermes runtime is not installed in browser preview.'
+      outdated: false,
+      message: 'Local Hermes is not installed in browser preview.'
     }),
     hermes_stop: () => null,
     hermes_interrupt: () => null,

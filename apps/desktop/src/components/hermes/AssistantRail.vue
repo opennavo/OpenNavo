@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { OnChip, OnIcon, OnRailPanel, OnRailSection } from '@opennavo/ui';
+import { OnButton, OnChip, OnIcon, OnRailPanel, OnRailSection } from '@opennavo/ui';
 import { useHermesContent } from '@/composables/useHermesContent';
 import HermesProfileSection from '@/components/hermes/HermesProfileSection.vue';
 import { useHermesStore } from '@/stores/hermes';
@@ -23,8 +23,11 @@ const profileStatus = computed(() =>
 const hermesVersion = computed(() => {
   if (remote.value) return profile.value.version || '—';
   const raw = hermes.runtime?.version ?? '';
-  return /(\d+\.\d+\.\d+)/.exec(raw)?.[1] ?? (hermes.runtime?.installed ? version : '—');
+  return /(\d+\.\d+\.\d+)/.exec(raw)?.[1] ?? '—';
 });
+const runtimeUpdateLabel = computed(() =>
+  content.value.rail.updateAvailable.replace('{version}', hermes.runtime?.expectedVersion ?? '')
+);
 
 const macLabel = computed(() => {
   if (!hermes.mac.enabled) return content.value.common.paused;
@@ -124,6 +127,15 @@ const confirmText = computed(() => (hermes.mac.confirmWrites ? content.value.com
           ><span class="text-right text-ink-secondary">{{
             remote ? content.profiles.remoteOnly : hermes.runtimeReady ? content.rail.local : content.rail.demo
           }}</span>
+        </div>
+        <div
+          v-if="!remote && hermes.runtime?.outdated"
+          class="flex flex-col items-start gap-7px border-b border-b-solid border-line-subtle py-8px"
+        >
+          <span class="text-11px leading-[1.45] text-status-warning">{{ runtimeUpdateLabel }}</span>
+          <OnButton variant="accent" size="sm" :disabled="hermes.installing" @click="hermes.installRuntime()">{{
+            content.install.updateRuntime
+          }}</OnButton>
         </div>
         <div
           class="flex items-center justify-between gap-12px border-b border-b-solid border-line-subtle py-7px text-11px"

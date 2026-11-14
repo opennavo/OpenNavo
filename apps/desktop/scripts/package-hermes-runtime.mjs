@@ -1,27 +1,43 @@
 #!/usr/bin/env node
-/** Package the prepared runtime for the optional in-app installer/CDN. */
+/** Package the prepared runtime and pin its SHA-256 in runtime.json. */
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  RUNTIME_ROOT,
+  assertPreparedRuntime,
+  readRuntimeManifest,
+  sha256File,
+  writeRuntimeManifest
+} from './hermes-runtime-lib.mjs';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const desktop = resolve(here, '..');
-const source = join(desktop, 'src-tauri', 'resources', 'hermes');
+const desktop = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputDir = join(desktop, 'hermes-dist');
-const manifestPath = join(source, 'manifest.json');
-const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
-const version = manifest.hermesAgent ?? '0.23.0';
-const output = join(outputDir, `runtime-${version}-macos-arm64.tar.gz`);
 
-if (!existsSync(join(source, 'bin', 'hermes'))) {
-  console.error('Runtime is not prepared. Run hermes:prepare first.');
-  process.exit(1);
+try {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+    throw new Error('The Hermes runtime package is macOS arm64 and must be built on Apple Silicon.');
+  }
+  if (!existsSync(join(RUNTIME_ROOT, 'bin', 'hermes'))) {
+    throw new Error('Runtime is not prepared. Run hermes:prepare first.');
+  }
+
+  const manifest = readRuntimeManifest();
+  const version = assertPreparedRuntime(RUNTIME_ROOT, manifest);
+  const output = join(outputDir, manifest.release.asset);
+  mkdirSync(outputDir, { recursive: true });
+  execFileSync('tar', ['-czf', output, '-C', RUNTIME_ROOT, '.'], { stdio: 'inherit' });
+  const digest = sha256File(output);
+  writeFileSync(`${output}.sha256`, `${digest}  ${manifest.release.asset}\n`);
+
+  manifest.release.sha256 = digest;
+  writeRuntimeManifest(manifest);
+
+  console.log(output);
+  console.log(`sha256 ${digest}`);
+  console.log(`Verified ${version}; pinned ${manifest.release.asset} in apps/desktop/hermes/runtime.json.`);
+} catch (error) {
+  console.error(`Hermes runtime packaging failed: ${error.message}`);
+  process.exitCode = 1;
 }
-mkdirSync(outputDir, { recursive: true });
-execFileSync('tar', ['-czf', output, '-C', source, '.'], { stdio: 'inherit' });
-const digest = createHash('sha256').update(readFileSync(output)).digest('hex');
-writeFileSync(`${output}.sha256`, `${digest}  ${output.split('/').pop()}\n`);
-console.log(output);
-console.log(`sha256 ${digest}`);
