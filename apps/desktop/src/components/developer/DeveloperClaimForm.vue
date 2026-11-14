@@ -179,7 +179,7 @@ function reset() {
             v-model="query"
             type="search"
             :placeholder="t('developerForm.searchPlaceholder')"
-            class="dev-input pl-28px"
+            class="dev-input dev-input-with-icon"
             @keydown.enter.prevent="search"
           />
         </label>
@@ -328,6 +328,9 @@ function reset() {
   font: inherit;
   font-size: 12px;
   outline: none;
+}
+.dev-input.dev-input-with-icon {
+  padding-left: 28px;
 }
 .dev-input:focus {
   border-color: var(--on-border-strong);

@@ -219,7 +219,7 @@ function reset() {
             v-model="link"
             type="url"
             :placeholder="t('developerForm.linkPlaceholder')"
-            class="dev-input pl-28px"
+            class="dev-input dev-input-with-icon"
             @keydown.enter.prevent="fetchInfo"
           />
         </label>
@@ -346,6 +346,9 @@ function reset() {
   font: inherit;
   font-size: 12px;
   outline: none;
+}
+.dev-input.dev-input-with-icon {
+  padding-left: 28px;
 }
 .dev-input:focus {
   border-color: var(--on-border-strong);
