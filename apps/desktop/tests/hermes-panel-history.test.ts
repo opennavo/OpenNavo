@@ -144,6 +144,63 @@ describe('Hermes panel history', () => {
     expect(commands.hermesPanelHistory).toHaveBeenCalledWith('panel-1', null, false, 'recents', 40, 0);
   });
 
+  it('drops a history page that arrived after switching agent profiles', async () => {
+    type PanelResult = Awaited<ReturnType<typeof commands.hermesPanelHistory>>;
+    let release!: (value: PanelResult) => void;
+    const pending = new Promise<PanelResult>(resolve => {
+      release = resolve;
+    });
+    vi.spyOn(commands, 'hermesPanelHistory').mockImplementationOnce(() => pending);
+    const store = await mountPanelStore('default');
+
+    const oldLoad = store.loadPanelHistory();
+    await vi.waitFor(() => expect(commands.hermesPanelHistory).toHaveBeenCalledTimes(1));
+    await store.switchAgentProfile('aso-u4e13-u5bb6');
+    release(panelSessions([row({ id: 'old-profile-row' })]));
+    await oldLoad;
+
+    expect(store.conversations.map(item => item.id)).not.toContain('old-profile-row');
+  });
+
+  it('drops a model catalog from the profile the user left', async () => {
+    type ModelResult = Awaited<ReturnType<typeof commands.hermesModelOptions>>;
+    let release!: (value: ModelResult) => void;
+    const pending = new Promise<ModelResult>(resolve => {
+      release = resolve;
+    });
+    vi.spyOn(commands, 'hermesModelOptions').mockImplementation(input =>
+      input.profile === 'default'
+        ? pending
+        : Promise.resolve(
+            ok({
+              providers: [
+                { slug: 'anthropic', name: 'Anthropic', is_current: true, models: ['claude-sonnet'] }
+              ],
+              model: 'claude-sonnet',
+              provider: 'anthropic'
+            })
+          )
+    );
+    const store = await mountPanelStore('default');
+
+    const oldLoad = store.loadModelOptions(true);
+    await vi.waitFor(() =>
+      expect(commands.hermesModelOptions).toHaveBeenCalledWith(expect.objectContaining({ profile: 'default' }))
+    );
+    await store.switchAgentProfile('aso-u4e13-u5bb6');
+    release(
+      ok({
+        providers: [{ slug: 'openai-api', name: 'OpenAI', is_current: true, models: ['gpt-old'] }],
+        model: 'gpt-old',
+        provider: 'openai-api'
+      })
+    );
+    await oldLoad;
+
+    expect(store.modelOptions?.providers?.[0]?.slug).toBe('anthropic');
+    expect(store.modelOptions?.providers?.[0]?.models).toEqual(['claude-sonnet']);
+  });
+
   it('renders the list from the host’s own metadata without reading transcripts', async () => {
     vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValue(
       panelSessions([row({ id: 'sess-1' }), row({ id: 'sess-2', title: '每日检查 Hermes 更新' })])

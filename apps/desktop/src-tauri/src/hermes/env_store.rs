@@ -315,14 +315,22 @@ pub fn set_env_value(home: &Path, key: &str, value: &str) -> Result<(), AppError
         if lines.last().is_some_and(|line| line.is_empty()) {
             lines.pop();
         }
-        match lines
-            .iter()
-            .position(|line| env_line_defines_key(line, key))
-        {
-            Some(index) => lines[index] = serialized.trim_end().to_owned(),
-            None => lines.push(serialized.trim_end().to_owned()),
+        // `env_value` applies the last assignment, so replacing only the first would leave a
+        // later duplicate in force. Keep one assignment at the first position instead.
+        let mut replaced = false;
+        let mut next = Vec::with_capacity(lines.len() + 1);
+        for line in lines {
+            if !env_line_defines_key(&line, key) {
+                next.push(line);
+            } else if !replaced {
+                next.push(serialized.trim_end().to_owned());
+                replaced = true;
+            }
         }
-        let mut body = lines.join("\n");
+        if !replaced {
+            next.push(serialized.trim_end().to_owned());
+        }
+        let mut body = next.join("\n");
         body.push('\n');
         atomic_write(&home.join(".env"), body.as_bytes())
     })
@@ -519,6 +527,25 @@ mod tests {
         assert!(body.contains("# comment"));
         assert!(body.contains("export OLD_KEY=keep"));
         assert!(body.contains("LAST=1"));
+    }
+
+    #[test]
+    fn replaces_duplicate_assignments_so_the_new_value_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env"),
+            "OPENAI_API_KEY=sk-old\nKEEP=1\nOPENAI_API_KEY=sk-older\n",
+        )
+        .unwrap();
+        set_env_value(dir.path(), "OPENAI_API_KEY", "sk-new").unwrap();
+        let body = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert_eq!(body.matches("OPENAI_API_KEY").count(), 1);
+        assert!(body.contains("OPENAI_API_KEY=sk-new"));
+        assert!(body.contains("KEEP=1"));
+        assert_eq!(
+            env_value(dir.path(), "OPENAI_API_KEY").as_deref(),
+            Some("sk-new")
+        );
     }
 
     #[test]

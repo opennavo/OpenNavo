@@ -19,6 +19,7 @@ import {
   startGuideState,
   startLocalState,
   startMonitorPopoverState,
+  startProfileWindowState,
   startTrayState,
   useSettingsStore
 } from './stores';
@@ -74,30 +75,39 @@ if (location.hash.startsWith('#/tray-monitor')) {
   // Permission guidance overlay: read only permissions and language allowed by the guide capability (06 §12.7, §14).
   await startGuideState();
 } else {
-  // Subscribe to Rust events and load local state before mounting; subscribe to deep links alongside local state to receive buffered cold-start links.
-  const localState = startLocalState();
-  await subscriptions.start('deepLinks', async register => {
-    await register(startDeepLinks(router, localState));
-  });
-  await localState;
-  // Keep navigation on Welcome until onboarding completes, then replay deferred deep links.
-  navigationCleanups.push(
-    router.beforeEach(to => {
-      if (useSettingsStore().value?.onboardingCompleted === false && to.name !== 'welcome') return '/welcome';
-    })
-  );
-  const redirect = startupRedirect({
-    deepLinkOpened: deepLinkOpened(),
-    onboardingCompleted: useSettingsStore().value?.onboardingCompleted
-  });
-  if (redirect) await router.replace(redirect);
-  else if (!deepLinkOpened()) await resumeDeepLink(router);
+  const profileWindow = new URLSearchParams(location.search).has('profile');
+  if (profileWindow) {
+    // The profile window owns no package, security or update state; loading it would invoke
+    // commands its capability deliberately does not grant.
+    await startProfileWindowState();
+  } else {
+    // Subscribe to Rust events and load local state before mounting; subscribe to deep links alongside local state to receive buffered cold-start links.
+    const localState = startLocalState();
+    await subscriptions.start('deepLinks', async register => {
+      await register(startDeepLinks(router, localState));
+    });
+    await localState;
+    // Keep navigation on Welcome until onboarding completes, then replay deferred deep links.
+    navigationCleanups.push(
+      router.beforeEach(to => {
+        if (useSettingsStore().value?.onboardingCompleted === false && to.name !== 'welcome') return '/welcome';
+      })
+    );
+    const redirect = startupRedirect({
+      deepLinkOpened: deepLinkOpened(),
+      onboardingCompleted: useSettingsStore().value?.onboardingCompleted
+    });
+    if (redirect) await router.replace(redirect);
+    else if (!deepLinkOpened()) await resumeDeepLink(router);
+  }
   await router.isReady();
-  await syncMainWindow(router.currentRoute.value.name === 'welcome');
-  navigationCleanups.push(
-    router.beforeResolve(async to => {
-      await syncMainWindow(to.name === 'welcome');
-    })
-  );
+  if (!profileWindow) {
+    await syncMainWindow(router.currentRoute.value.name === 'welcome');
+    navigationCleanups.push(
+      router.beforeResolve(async to => {
+        await syncMainWindow(to.name === 'welcome');
+      })
+    );
+  }
 }
 app.mount('#app');

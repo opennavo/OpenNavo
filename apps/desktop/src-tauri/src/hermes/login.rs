@@ -128,6 +128,23 @@ fn gh_token_exists() -> bool {
         .unwrap_or(false)
 }
 
+fn claude_keychain_exists() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("security")
+            .args(["find-generic-password", "-s", "Claude Code-credentials"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 /// Hermes home whose `auth.json` holds this login: the root for `default`, otherwise
 /// `<root>/profiles/<name>`. The OAuth store is per profile, so a login performed while a
 /// named profile is selected must be looked up there and not in the shared root.
@@ -150,7 +167,8 @@ pub fn status(app: &AppHandle, profile: Option<&str>) -> Result<HermesLoginStatu
             .unwrap_or(false)
     };
     let codex = has_codex_tokens() || has("openai-codex");
-    let claude_code = claude_file().is_file() || has("anthropic");
+    let claude_keychain = claude_keychain_exists();
+    let claude_code = claude_file().is_file() || claude_keychain || has("anthropic");
     let copilot = copilot_file().is_file() || gh_token_exists() || has("copilot");
     let opencode = opencode_key("opencode").is_some() || opencode_key("opencode-zen").is_some();
     let opencode_go = opencode_key("opencode-go").is_some();
@@ -166,6 +184,8 @@ pub fn status(app: &AppHandle, profile: Option<&str>) -> Result<HermesLoginStatu
         claude_code_source: claude_code.then(|| {
             if claude_file().is_file() {
                 claude_file().display().to_string()
+            } else if claude_keychain {
+                "macOS Keychain · Claude Code-credentials".into()
             } else {
                 "Hermes auth store · anthropic".into()
             }
@@ -223,7 +243,7 @@ mod tests {
     fn detects_local_cli_credentials() {
         assert!(has_codex_tokens(), "Codex CLI auth not detected");
         assert!(
-            claude_file().is_file() || has_codex_tokens(),
+            claude_file().is_file() || claude_keychain_exists(),
             "Claude Code auth not detected"
         );
         assert!(gh_token_exists(), "GitHub CLI auth not detected");

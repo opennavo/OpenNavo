@@ -580,7 +580,9 @@ impl AskTarget {
     }
 
     fn matches(&self, id: &str) -> bool {
-        matches!(self, AskTarget::Request(own) if own == id)
+        match self {
+            AskTarget::Request(own) | AskTarget::Event(own) => own == id,
+        }
     }
 }
 
@@ -597,6 +599,8 @@ struct AskPolicy {
 struct PendingAsk {
     target: AskTarget,
     kind: AskKind,
+    /// The chat turn that opened this card; the renderer uses it to ignore another window's events.
+    turn_request_id: String,
     /// What the settled note in the transcript names (the command, the env var, the first question).
     summary: String,
     deadline: Instant,
@@ -610,6 +614,7 @@ enum Step {
 }
 
 /// Show a card for a server→client request, or answer it from the turn's own policy.
+#[allow(clippy::too_many_arguments)]
 async fn open_ask(
     socket: &mut Socket,
     app: Option<&AppHandle>,
@@ -618,6 +623,7 @@ async fn open_ask(
     params: Value,
     policy: &AskPolicy,
     live_sid: &str,
+    turn_request_id: &str,
 ) -> Result<Option<PendingAsk>, AppError> {
     let window = ask_window(&params);
     // Only approvals have a policy: a clarify or a password prompt is the agent asking something the
@@ -632,6 +638,7 @@ async fn open_ask(
             "hermes-ask",
             json!({
                 "requestId": target.id(),
+                "turnRequestId": turn_request_id,
                 "kind": kind.wire(),
                 "deadline": unix_millis() + window.as_millis() as u64,
                 "params": params,
@@ -642,6 +649,7 @@ async fn open_ask(
         summary: ask_summary(kind, &params),
         target,
         kind,
+        turn_request_id: turn_request_id.to_owned(),
         deadline: Instant::now() + window,
     }))
 }
@@ -770,6 +778,7 @@ fn settled_note(
 ) -> Value {
     json!({
         "requestId": ask.target.id(),
+        "turnRequestId": ask.turn_request_id,
         "kind": ask.kind.wire(),
         "outcome": outcome,
         "scope": scope,
@@ -991,6 +1000,7 @@ async fn stream_turn(
                     params,
                     &policy,
                     live_sid,
+                    &input.request_id,
                 )
                 .await?
                 {
@@ -1113,6 +1123,7 @@ async fn stream_turn(
                         params,
                         &policy,
                         live_sid,
+                        &input.request_id,
                     )
                     .await?
                     {
@@ -1263,6 +1274,7 @@ async fn stream_turn(
                     payload,
                     &policy,
                     live_sid,
+                    &input.request_id,
                 )
                 .await?
                 {
@@ -1516,6 +1528,7 @@ mod tests {
             summary: ask_summary(kind, &params),
             target,
             kind,
+            turn_request_id: "turn-1".into(),
             deadline: Instant::now() + APPROVAL_TIMEOUT,
         }
     }
@@ -1625,6 +1638,25 @@ mod tests {
         assert_eq!(frame["params"]["session_id"], "live-1");
         assert_eq!(frame["params"]["request_id"], "approval-7");
         assert_eq!(frame["params"]["choice"], "deny");
+    }
+
+    #[test]
+    fn event_approvals_match_answers_and_cancellations() {
+        let target = AskTarget::Event("approval-7".into());
+        assert!(target.matches("approval-7"));
+        assert!(!target.matches("approval-8"));
+    }
+
+    #[test]
+    fn settled_notes_name_the_turn_that_asked() {
+        let card = ask(
+            AskTarget::Request("srq-abc123".into()),
+            AskKind::Approval,
+            json!({"command": "rm -rf build"}),
+        );
+        let settled = settled_note(&card, "allowed", Some("once"), None);
+        assert_eq!(settled["requestId"], "srq-abc123");
+        assert_eq!(settled["turnRequestId"], "turn-1");
     }
 
     #[tokio::test]
@@ -1755,6 +1787,7 @@ mod tests {
                 full_control: true,
             },
             "live-1",
+            "turn-1",
         )
         .await
         .expect("open");
@@ -1773,6 +1806,7 @@ mod tests {
                 full_control: false,
             },
             "live-1",
+            "turn-1",
         )
         .await
         .expect("open");
@@ -1801,6 +1835,7 @@ mod tests {
                     full_control: true,
                 },
                 "live-1",
+                "turn-1",
             )
             .await
             .expect("open");

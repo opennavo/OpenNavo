@@ -1089,6 +1089,51 @@ fn runtime_python(bin: &Path) -> Option<PathBuf> {
 /// Entry point the generated runtime wrapper (`bin/hermes`) also uses.
 const HERMES_ENTRYPOINT: &str = "from hermes_cli.main import main; main()";
 
+/// Credential-bearing variables Hermes or its tools must not inherit from the app process.
+///
+/// Provider keys are stored in `<HERMES_HOME>/.env` instead, so a terminal or screen tool cannot
+/// read a key that happened to be present when the desktop app was launched from a shell.
+const CREDENTIAL_ENV_VARS: &[&str] = &[
+    "OPENAI_API_KEY",
+    "OPENAI_API_BASE",
+    "OPENAI_BASE_URL",
+    "OPENAI_ORG_ID",
+    "OPENAI_ORGANIZATION",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "NOUS_API_KEY",
+    "QWEN_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "MISTRAL_API_KEY",
+    "GROQ_API_KEY",
+    "TOGETHER_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "COHERE_API_KEY",
+    "FIREWORKS_API_KEY",
+    "XAI_API_KEY",
+    "HELICONE_API_KEY",
+    "PARALLEL_API_KEY",
+    "OPENCODE_ZEN_API_KEY",
+    "OPENCODE_GO_API_KEY",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "COPILOT_GITHUB_TOKEN",
+    "COPILOT_API_BASE_URL",
+    "OPENNAVO_CUSTOM_API_KEY",
+];
+
+fn scrub_credential_env(command: &mut Command) {
+    for name in CREDENTIAL_ENV_VARS {
+        command.env_remove(name);
+    }
+}
+
 /// Build the runtime process directly instead of going through `bin/hermes` so the
 /// interpreter is discovered rather than hard-coded by the generated wrapper. The
 /// layout matches that wrapper (`<root>/python/bin/python3`, `<root>/site`).
@@ -1118,14 +1163,17 @@ fn runtime_command(bin: &Path) -> Result<Command, AppError> {
         .arg("-c")
         .arg(HERMES_ENTRYPOINT)
         .env("PYTHONPATH", pythonpath);
+    scrub_credential_env(&mut command);
     Ok(command)
 }
 
 /// Resolve the provider key the runtime will authenticate with. Used for the gateway
 /// fingerprint and for the custom-endpoint `key_env` decision.
 ///
-/// The key is never injected into the child process: it lives in
-/// `<HERMES_HOME>/.env`, which the runtime loads itself (see [`env_store`]).
+/// The key is never injected into the child process: it lives in `<HERMES_HOME>/.env`, which the
+/// runtime loads itself (see [`env_store`]). Inherited shell variables are deliberately ignored:
+/// the runtime is launched with those credentials scrubbed, so counting one here would claim a
+/// key exists while the runtime cannot read it.
 fn resolve_provider_secret(home: &Path, input: &HermesChatInput) -> Option<String> {
     if let Some(key) = env_store::env_value(home, provider_key_env(&input.provider)) {
         return Some(key);
@@ -1134,27 +1182,6 @@ fn resolve_provider_secret(home: &Path, input: &HermesChatInput) -> Option<Strin
         && let Some(key) = local_opencode_key(&input.provider)
     {
         return Some(key);
-    }
-    // These providers sign in through Hermes' OAuth flow; an inherited shell key
-    // must not preempt the stored login.
-    if !matches!(input.provider.as_str(), "nous" | "codex" | "claude-code")
-        && let Ok(value) = std::env::var(provider_key_env(&input.provider))
-    {
-        let value = value.trim();
-        if !value.is_empty() {
-            return Some(value.to_owned());
-        }
-    }
-    if input.provider == "copilot"
-        && let Ok(output) = std::process::Command::new("gh")
-            .args(["auth", "token"])
-            .output()
-        && output.status.success()
-    {
-        let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if !token.is_empty() {
-            return Some(token);
-        }
     }
     None
 }
@@ -1763,6 +1790,7 @@ async fn probe_runtime_version(bin: &Path) -> Result<RuntimeVersionProbe, AppErr
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    scrub_credential_env(&mut command);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -2319,6 +2347,25 @@ mod tests {
         assert_eq!(provider_key_env("copilot"), "GITHUB_TOKEN");
         assert_eq!(provider_key_env("custom"), "OPENNAVO_CUSTOM_API_KEY");
         assert_eq!(provider_key_env("local"), "OPENNAVO_CUSTOM_API_KEY");
+    }
+
+    #[test]
+    fn runtime_commands_scrub_inherited_provider_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake_runtime(dir.path(), "#!/bin/sh\nexit 0\n");
+        let command = runtime_command(&bin).unwrap();
+        let removed: Vec<String> = command
+            .as_std()
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name.to_string_lossy().into_owned())
+            .collect();
+        for name in CREDENTIAL_ENV_VARS {
+            assert!(
+                removed.iter().any(|removed| removed == name),
+                "{name} must not reach the Hermes runtime"
+            );
+        }
     }
 
     #[test]

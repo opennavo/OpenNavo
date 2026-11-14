@@ -91,7 +91,7 @@ function installRuntime() {
   console.log(`\nCopying standalone Python from ${python}`);
   cpSync(dirname(dirname(python)), pythonDir, { recursive: true, dereference: true });
 
-  // 0.23+ is not on PyPI. Build from the tagged source with the repository's
+  // 0.23+ is not on PyPI. Build from the pinned commit with the repository's
   // uv.lock so provider plugins and exact pins stay consistent.
   // Build outside the repository: write_install_stamp.py walks up looking for
   // .git and would otherwise stamp this worktree's branch/dirty state into the
@@ -101,7 +101,11 @@ function installRuntime() {
   const tarball = join(tmp, `hermes-${version}.tar.gz`);
   run('curl', ['-sSL', '--fail', runtimeSourceUrl(manifest), '-o', tarball]);
   run('tar', ['-xzf', tarball, '-C', tmp]);
-  const source = join(tmp, `hermes-agent-${version}`);
+  // GitHub extracts a commit archive under the commit SHA, unlike a tag archive that uses the tag.
+  const source = join(tmp, `hermes-agent-${commit}`);
+  if (!existsSync(join(source, 'pyproject.toml'))) {
+    throw new Error(`Hermes source archive did not contain the pinned commit ${commit}`);
+  }
   const venv = join(tmp, 'venv');
   run(uv, ['sync', '--frozen', '--python', join(pythonDir, 'bin', `python${pythonVersion}`)], {
     cwd: source,

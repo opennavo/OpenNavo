@@ -499,20 +499,21 @@ describe('Hermes conversation store', () => {
       }
     });
     const respond = vi.spyOn(commands, 'hermesAskRespond').mockResolvedValue({ status: 'ok', data: null });
-    vi.spyOn(commands, 'hermesChat').mockImplementation(() => new Promise(() => undefined) as never);
+    let turnRequestId = '';
+    vi.spyOn(commands, 'hermesChat').mockImplementation(input => {
+      turnRequestId = input.requestId;
+      return new Promise(() => undefined) as never;
+    });
     Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
     eventMock.listeners.length = 0;
     const store = useHermesStore();
     await store.loadRuntime();
     store.newChat();
     void store.send('Run the migration');
-    for (
-      let attempt = 0;
-      attempt < 20 && !eventMock.listeners.some(listener => listener.event === 'hermes-ask-settled');
-      attempt++
-    ) {
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
+    await vi.waitFor(() => expect(turnRequestId).not.toBe(''));
+    await vi.waitFor(() =>
+      expect(eventMock.listeners.some(listener => listener.event === 'hermes-ask-settled')).toBe(true)
+    );
     const ask = eventMock.listeners.find(listener => listener.event === 'hermes-ask')!.handler;
     const settled = eventMock.listeners.find(listener => listener.event === 'hermes-ask-settled')!.handler;
 
@@ -520,6 +521,7 @@ describe('Hermes conversation store', () => {
     ask({
       payload: {
         requestId: 'srq-1',
+        turnRequestId,
         kind: 'approval',
         deadline: null,
         params: { command: 'rm -rf build', choices: ['once', 'deny'] }
@@ -528,6 +530,7 @@ describe('Hermes conversation store', () => {
     ask({
       payload: {
         requestId: 'srq-2',
+        turnRequestId,
         kind: 'clarify',
         deadline: null,
         params: { questions: [{ qid: 'q1', question: 'Which database?' }] }
@@ -548,6 +551,7 @@ describe('Hermes conversation store', () => {
     settled({
       payload: {
         requestId: 'srq-1',
+        turnRequestId,
         kind: 'approval',
         outcome: 'allowed',
         scope: 'once',
@@ -566,6 +570,7 @@ describe('Hermes conversation store', () => {
     settled({
       payload: {
         requestId: 'srq-2',
+        turnRequestId,
         kind: 'clarify',
         outcome: 'cancelled',
         scope: null,

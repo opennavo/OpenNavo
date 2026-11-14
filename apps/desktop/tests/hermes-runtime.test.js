@@ -6,6 +6,7 @@ import {
   readRuntimeManifest,
   requireReleaseChecksum,
   runtimeReleaseUrl,
+  runtimeSourceUrl,
   validateRuntimeManifest
 } from '../scripts/hermes-runtime-lib.mjs';
 
@@ -30,6 +31,12 @@ describe('Hermes runtime manifest', () => {
   it('builds the pinned GitHub release URL', () => {
     expect(runtimeReleaseUrl(readRuntimeManifest())).toBe(
       'https://github.com/opennavo/OpenNavo/releases/download/hermes-runtime-v0.23.1/runtime-0.23.1-macos-arm64.tar.gz'
+    );
+  });
+
+  it('downloads runtime source by commit rather than a movable tag', () => {
+    expect(runtimeSourceUrl(readRuntimeManifest())).toBe(
+      'https://github.com/NousResearch/hermes-agent/archive/3b421578588243f920886e6fe79a6faa87ea026e.tar.gz'
     );
   });
 

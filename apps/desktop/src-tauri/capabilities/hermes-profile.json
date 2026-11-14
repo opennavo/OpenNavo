@@ -4,7 +4,7 @@
   "description": "Secondary Hermes profile windows",
   "windows": ["hermes-profile-*"],
   "permissions": [
-    "native-main",
+    "native-hermes-profile",
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-set-size",

@@ -99,7 +99,9 @@ export function runtimeReleaseUrl(manifest) {
 }
 
 export function runtimeSourceUrl(manifest) {
-  return `https://github.com/NousResearch/hermes-agent/archive/refs/tags/${manifest.hermes.tag}.tar.gz`;
+  // Address the commit, not the tag: a moved tag would otherwise build code that does not match
+  // the commit recorded in install-stamp.json.
+  return `https://github.com/NousResearch/hermes-agent/archive/${manifest.hermes.commit}.tar.gz`;
 }
 
 export function normalizeHermesVersion(output) {

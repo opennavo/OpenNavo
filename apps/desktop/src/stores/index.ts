@@ -179,6 +179,25 @@ export function startLocalState() {
   });
 }
 
+/**
+ * Secondary Hermes profile windows: the assistant needs the shared appearance preference, but the
+ * package, security and update stores are main-window concerns and their native commands stay
+ * outside the profile-window capability.
+ */
+export function startProfileWindowState() {
+  return useStateSubscriptions().start('profile-window', async register => {
+    const settings = useSettingsStore();
+    await register(
+      watch(
+        () => settings.value?.appearance,
+        appearance => applyThemePreference(appearance ?? 'dark'),
+        { immediate: true }
+      )
+    );
+    await settings.load().catch(() => undefined);
+  });
+}
+
 /** Permission overlay (06 §12.7): the guide capability permits only permission/language reads and permission-change events during guidance. */
 export function startGuideState() {
   return useStateSubscriptions().start('guide', async register => {

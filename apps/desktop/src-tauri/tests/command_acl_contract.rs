@@ -124,3 +124,31 @@ fn the_panel_history_commands_are_reachable_from_the_main_window() {
         );
     }
 }
+
+#[test]
+fn profile_windows_get_only_the_assistant_surface() {
+    let allowed = allowed_commands("native-hermes-profile");
+    for command in [
+        "hermes_chat",
+        "hermes_model_options",
+        "hermes_agent_profile_create",
+        "hermes_open_profile_window",
+    ] {
+        assert!(
+            allowed.iter().any(|entry| entry == command),
+            "{command} must be allowed for Hermes profile windows"
+        );
+    }
+    for command in [
+        "firewall_status",
+        "uninstall_execute",
+        "settings_set",
+        "app_quit",
+        "mcp_set_enabled",
+    ] {
+        assert!(
+            !allowed.iter().any(|entry| entry == command),
+            "{command} must not be reachable from a Hermes profile window"
+        );
+    }
+}
