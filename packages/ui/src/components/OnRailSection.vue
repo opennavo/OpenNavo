@@ -6,14 +6,17 @@ export interface OnRailSectionProps {
 }
 
 defineProps<OnRailSectionProps>();
-defineSlots<{ default?: () => unknown }>();
+defineSlots<{ default?: () => unknown; actions?: () => unknown }>();
 </script>
 
 <template>
   <section class="flex flex-col gap-12px">
-    <header class="flex flex-col gap-2px">
-      <h2 class="m-0 text-headline text-ink-primary">{{ title }}</h2>
-      <p v-if="subtitle" class="m-0 text-12.5px text-ink-tertiary">{{ subtitle }}</p>
+    <header class="flex items-start justify-between gap-8px">
+      <div class="flex flex-col gap-2px">
+        <h2 class="m-0 text-headline text-ink-primary">{{ title }}</h2>
+        <p v-if="subtitle" class="m-0 text-12.5px text-ink-tertiary">{{ subtitle }}</p>
+      </div>
+      <div v-if="$slots.actions" class="shrink-0"><slot name="actions" /></div>
     </header>
     <slot />
   </section>

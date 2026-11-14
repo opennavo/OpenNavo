@@ -243,6 +243,30 @@ describe('Shared UI external links in the desktop app', () => {
     expect([...schemes].sort()).toEqual([...EXTERNAL_PROTOCOLS].sort());
   });
 
+  it('profile windows can open scoped external links and user attachments', () => {
+    type CapabilityPermission = { identifier: string; allow?: { url?: string; path?: string }[] };
+    const capability = (file: string) =>
+      JSON.parse(readFileSync(`src-tauri/capabilities/${file}`, 'utf8')) as {
+        permissions: (string | CapabilityPermission)[];
+      };
+    const opener = (file: string, identifier: string) =>
+      capability(file).permissions.find(
+        (permission): permission is CapabilityPermission =>
+          typeof permission !== 'string' && permission.identifier === identifier
+      );
+
+    const urls = opener('hermes-profile.json', 'opener:allow-open-url');
+    const schemes = new Set(
+      (urls?.allow ?? []).map(item => (item.url ? item.url.slice(0, item.url.indexOf(':') + 1) : ''))
+    );
+    expect([...schemes].sort()).toEqual([...EXTERNAL_PROTOCOLS].sort());
+    for (const file of ['main.json', 'hermes-profile.json']) {
+      expect(opener(file, 'opener:allow-open-path')?.allow).toEqual(
+        expect.arrayContaining([{ path: '$HOME/**' }, { path: '$TEMP/**' }])
+      );
+    }
+  });
+
   it('respects an existing source-link handler without opening the URL twice', async () => {
     const { version } = mountLinks(event => {
       event.preventDefault();

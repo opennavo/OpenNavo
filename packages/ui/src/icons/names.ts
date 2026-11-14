@@ -31,6 +31,8 @@ export const UI_ICONS = [
   'circle-alert',
   'info',
   'trash',
+  'trash-2',
+  'pencil',
   'cloud',
   'folder',
   'git-branch',

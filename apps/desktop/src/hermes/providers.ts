@@ -111,9 +111,13 @@ export function hermesProviderSlug(provider: HermesProvider): string {
       return 'anthropic';
     case 'opencode':
       return 'opencode-zen';
+    // Both cards are served by the single user-defined provider that `write_config()`
+    // registers in config.yaml as `providers.openavoo-custom`. Mapping them to the
+    // canonical `custom` slug matched an always-present empty skeleton row instead, so
+    // the model list for these two cards was permanently empty.
     case 'local':
     case 'custom':
-      return '';
+      return 'openavoo-custom';
     default:
       return provider;
   }
@@ -143,3 +147,43 @@ export interface HermesAuxAssignment {
 }
 
 export const HERMES_AUX_AUTO: HermesAuxAssignment = { task: 'vision', provider: 'auto', model: '' };
+
+/**
+ * The subset of a Hermes model-catalog row this picker needs. Field names follow the
+ * generated bindings (`HermesModelProvider`), which keep the runtime's snake_case keys.
+ */
+export interface OfficialProviderRow {
+  slug?: string;
+  is_current?: boolean;
+  authenticated?: boolean;
+  models?: string[];
+}
+
+/**
+ * Pick the catalog row that serves `card`.
+ *
+ * A card maps to one canonical slug, but the provider that actually answers for it can be
+ * a user-defined row: `openavoo-custom` for the two endpoint cards on this Mac, and
+ * scoped variants such as `custom:newapi` on a Hermes Panel host. A canonical skeleton row
+ * with the same slug is *always* present when the payload includes unconfigured providers,
+ * so a plain `find(slug)` picks that empty row and the model list looks broken.
+ */
+export function pickOfficialProvider<T extends OfficialProviderRow>(
+  rows: readonly T[],
+  card: HermesProvider
+): T | undefined {
+  // A host may register the endpoint under the card's own id (`custom:newapi`) or under
+  // the name this app writes (`openavoo-custom`), so match both vocabularies.
+  const names = new Set([hermesProviderSlug(card), card, 'openavoo-custom'].filter(Boolean));
+  const candidates = rows.filter(row => {
+    const slug = row.slug ?? '';
+    return names.has(slug) || [...names].some(name => slug.startsWith(`${name}:`));
+  });
+  if (!candidates.length) return undefined;
+  return (
+    candidates.find(row => row.authenticated && (row.models?.length ?? 0) > 0) ??
+    candidates.find(row => (row.models?.length ?? 0) > 0) ??
+    candidates.find(row => row.is_current) ??
+    candidates[0]
+  );
+}

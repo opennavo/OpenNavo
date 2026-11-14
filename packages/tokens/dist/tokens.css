@@ -193,6 +193,10 @@
   --on-component-menu-bar-bg: rgba(38, 38, 40, 0.96);
   /* Menu bar preview items, drawn like AppKit template images. */
   --on-component-menu-bar-text: #E6E6E6;
+  /* Scrollbar thumb: a quiet hint of position, so it stays translucent over any surface. */
+  --on-component-scrollbar-thumb: rgba(255, 255, 255, 0.28);
+  /* Scrollbar thumb under the pointer or while dragging. */
+  --on-component-scrollbar-thumb-hover: rgba(255, 255, 255, 0.45);
 
   --on-macos-close: #FF5F57;
   --on-macos-minimize: #FEBC2E;
@@ -443,6 +447,8 @@
     --on-component-segment-active: #FFFFFF;
     --on-component-menu-bar-bg: rgba(246, 246, 246, 0.96);
     --on-component-menu-bar-text: #1F1F1F;
+    --on-component-scrollbar-thumb: rgba(0, 0, 0, 0.28);
+    --on-component-scrollbar-thumb-hover: rgba(0, 0, 0, 0.45);
     --on-shadow-window: 0 40px 100px rgba(0, 0, 0, 0.16), 0 0 0 0.5px rgba(0, 0, 0, 0.16);
     --on-shadow-popover: 0 12px 40px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.04);
     --on-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.16);
@@ -547,6 +553,8 @@
   --on-component-segment-active: #FFFFFF;
   --on-component-menu-bar-bg: rgba(246, 246, 246, 0.96);
   --on-component-menu-bar-text: #1F1F1F;
+  --on-component-scrollbar-thumb: rgba(0, 0, 0, 0.28);
+  --on-component-scrollbar-thumb-hover: rgba(0, 0, 0, 0.45);
   --on-shadow-window: 0 40px 100px rgba(0, 0, 0, 0.16), 0 0 0 0.5px rgba(0, 0, 0, 0.16);
   --on-shadow-popover: 0 12px 40px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.04);
   --on-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.16);
@@ -650,6 +658,8 @@
   --on-component-segment-active: #262626;
   --on-component-menu-bar-bg: rgba(38, 38, 40, 0.96);
   --on-component-menu-bar-text: #E6E6E6;
+  --on-component-scrollbar-thumb: rgba(255, 255, 255, 0.28);
+  --on-component-scrollbar-thumb-hover: rgba(255, 255, 255, 0.45);
   --on-shadow-window: 0 50px 140px rgba(0, 0, 0, 0.65), 0 0 0 0.5px #000000;
   --on-shadow-popover: 0 24px 60px rgba(0, 0, 0, 0.60);
   --on-shadow-modal: 0 30px 80px rgba(0, 0, 0, 0.60);

@@ -584,17 +584,32 @@ fn compiled_capabilities_isolate_native_commands_between_windows() {
             "{command}"
         );
     }
-    for command in [
-        "plugin:opener|open_path",
-        "plugin:opener|reveal_item_in_dir",
-    ] {
+    for window in ["main", "hermes-profile-test"] {
         assert!(
             authority
-                .resolve_access(command, "main", "main", &Origin::Local)
-                .is_none(),
-            "{command}"
+                .resolve_access("plugin:opener|open_path", window, window, &Origin::Local)
+                .is_some(),
+            "plugin:opener|open_path for {window}"
         );
     }
+    let reveal = "plugin:opener|reveal_item_in_dir";
+    assert!(
+        authority
+            .resolve_access(reveal, "main", "main", &Origin::Local)
+            .is_none(),
+        "{reveal}"
+    );
+    assert!(
+        authority
+            .resolve_access(
+                reveal,
+                "hermes-profile-test",
+                "hermes-profile-test",
+                &Origin::Local
+            )
+            .is_none(),
+        "{reveal}"
+    );
     assert!(
         authority
             .resolve_access("task_enqueue", "foreign", "foreign", &Origin::Local)

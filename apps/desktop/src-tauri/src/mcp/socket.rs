@@ -33,6 +33,20 @@ pub struct SocketPath {
     pub path: PathBuf,
 }
 
+/// Stable 32-bit tag of a directory path (FNV-1a).
+///
+/// Deliberately not `DefaultHasher`: this value names a socket that must survive app
+/// restarts and Rust upgrades, so it cannot depend on the standard library's choice of
+/// algorithm. Eight hex characters keep the fallback path short enough for `sun_path`.
+fn dir_tag(directory: &Path) -> u32 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in directory.as_os_str().as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash
+}
+
 /// Compute the socket path without creating directories or touching the
 /// filesystem. Both the GUI broker and the CLI use this so they always meet at
 /// the same location.
@@ -46,7 +60,10 @@ pub fn path(data_dir: &Path) -> SocketPath {
         };
     }
 
-    let name = format!("opennavo-mcp-{}", current_uid());
+    // The temp fallback drops the data dir from the path, so fold a short stable tag of it
+    // into the name: two different data dirs (a dev checkout, a second install, or two
+    // tests running in parallel) must not fight over one socket.
+    let name = format!("opennavo-mcp-{}-{:08x}", current_uid(), dir_tag(&preferred));
     if let Some(temp) = user_temp_dir() {
         let directory = temp.join(&name);
         let socket = directory.join("mcp.sock");
@@ -598,7 +615,12 @@ mod tests {
         let dir = tempdir();
         let long = dir.path().join("x".repeat(120));
         let resolved = path(&long);
-        let name = format!("opennavo-mcp-{}", current_uid());
+        // The tag comes from the data dir, not from the fallback it produces.
+        let name = format!(
+            "opennavo-mcp-{}-{:08x}",
+            current_uid(),
+            dir_tag(&state::mcp_dir(&long))
+        );
         assert!(resolved.directory.ends_with(&name));
         if let Some(temp) = user_temp_dir() {
             let candidate = temp.join(&name).join("mcp.sock");
@@ -606,6 +628,24 @@ mod tests {
                 assert_eq!(resolved.path, candidate);
             }
         }
+    }
+
+    #[test]
+    fn distinct_long_data_dirs_do_not_share_one_fallback_socket() {
+        // The fallback drops the data dir from the path; without a tag of its own every
+        // long data dir (and every parallel test) would land on the same socket.
+        let root = tempdir();
+        let first = root.path().join(format!("{}-one", "x".repeat(110)));
+        let second = root.path().join(format!("{}-two", "x".repeat(110)));
+
+        let a = path(&first);
+        let b = path(&second);
+        assert!(a.path.as_os_str().as_bytes().len() <= MAX_SOCKET_PATH_BYTES);
+        assert!(b.path.as_os_str().as_bytes().len() <= MAX_SOCKET_PATH_BYTES);
+        assert_ne!(a.path, b.path);
+
+        // Stable across calls, so a restarted app finds the same socket.
+        assert_eq!(path(&first).path, a.path);
     }
 
     #[test]

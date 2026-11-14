@@ -1,4 +1,6 @@
 import { onBeforeUnmount, onMounted, watch } from 'vue';
+import { isTauri } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useAppUpdaterStore } from '@/stores/appUpdater';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -6,14 +8,16 @@ import { useSettingsStore } from '@/stores/settings';
 export function useAppUpdateChecks() {
   const updater = useAppUpdaterStore();
   const settings = useSettingsStore();
+  const mainWindow = !isTauri() || getCurrentWindow().label === 'main';
   let ready = false;
   let startup: ReturnType<typeof setTimeout> | undefined;
   let interval: ReturnType<typeof setInterval> | undefined;
   const check = () => {
-    if (ready) void updater.checkNow(true);
+    if (mainWindow && ready) void updater.checkNow(true);
   };
 
   onMounted(() => {
+    if (!mainWindow) return;
     if (updater.preview) {
       void updater.showPreview().catch((error: unknown) => {
         console.error('Could not open the development update preview', error);
@@ -33,7 +37,7 @@ export function useAppUpdateChecks() {
   watch(
     () => settings.value?.autoCheckAppUpdates,
     enabled => {
-      if (enabled) check();
+      if (mainWindow && enabled) check();
     }
   );
 

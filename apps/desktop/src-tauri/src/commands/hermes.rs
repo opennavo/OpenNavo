@@ -3,7 +3,8 @@ use tauri::State;
 
 use crate::AppError;
 use crate::hermes::{
-    self, HermesChatInput, HermesChatReply, HermesRuntimeState, HermesRuntimeStatus,
+    self, AskAnswer, HermesAskReply, HermesChatInput, HermesChatReply, HermesRuntimeState,
+    HermesRuntimeStatus,
 };
 
 #[tauri::command]
@@ -30,21 +31,22 @@ pub async fn hermes_stop(state: State<'_, Arc<HermesRuntimeState>>) -> Result<()
 
 #[tauri::command]
 #[specta::specta]
-pub async fn hermes_approval_respond(
+pub async fn hermes_ask_respond(
     state: State<'_, Arc<HermesRuntimeState>>,
-    choice: String,
+    request_id: String,
+    reply: HermesAskReply,
 ) -> Result<(), AppError> {
-    let sender = state.approval.lock().await.clone();
+    let sender = state.asks.lock().await.clone();
     let Some(sender) = sender else {
         return Err(AppError::new(
-            "E_HERMES_APPROVAL",
-            "No approval request is pending.",
+            "E_HERMES_ASK",
+            "No Hermes request is waiting on an answer.",
         ));
     };
-    sender.send(choice).map_err(|_| {
+    sender.send(AskAnswer { request_id, reply }).map_err(|_| {
         AppError::new(
-            "E_HERMES_APPROVAL",
-            "The approval request is no longer active.",
+            "E_HERMES_ASK",
+            "The Hermes turn that asked is no longer running.",
         )
     })
 }
@@ -54,7 +56,23 @@ pub async fn hermes_approval_respond(
 pub async fn hermes_interrupt(
     state: State<'_, Arc<HermesRuntimeState>>,
     live_session_id: String,
+    gateway_url: Option<String>,
+    profile_id: Option<String>,
 ) -> Result<(), AppError> {
+    if gateway_url
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        let id = profile_id.as_deref().unwrap_or_default();
+        if hermes::panel::has_session(id) {
+            let ticket = hermes::panel::ticket_for(id).await?;
+            let query = format!("ticket={}", urlencoding::encode(&ticket));
+            let panel_url = hermes::panel::base_url_for(id)?;
+            return hermes::gateway::interrupt_remote_auth(&panel_url, &query, &live_session_id)
+                .await;
+        }
+        return Err(hermes::remote_auth_required());
+    }
     hermes::gateway::interrupt(state.inner(), &live_session_id).await
 }
 
@@ -64,26 +82,55 @@ pub async fn hermes_steer(
     state: State<'_, Arc<HermesRuntimeState>>,
     live_session_id: String,
     text: String,
+    gateway_url: Option<String>,
+    profile_id: Option<String>,
 ) -> Result<(), AppError> {
+    if gateway_url
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        let id = profile_id.as_deref().unwrap_or_default();
+        if hermes::panel::has_session(id) {
+            let ticket = hermes::panel::ticket_for(id).await?;
+            let query = format!("ticket={}", urlencoding::encode(&ticket));
+            let panel_url = hermes::panel::base_url_for(id)?;
+            return hermes::gateway::steer_remote_auth(&panel_url, &query, &live_session_id, &text)
+                .await;
+        }
+        return Err(hermes::remote_auth_required());
+    }
     hermes::gateway::steer(state.inner(), &live_session_id, &text).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn hermes_secret_set(provider: String, key: String) -> Result<(), AppError> {
-    hermes::secret_set(&provider, &key)
+pub fn hermes_secret_set(
+    app: tauri::AppHandle,
+    provider: String,
+    key: String,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    hermes::secret_set(&app, &provider, &key, profile.as_deref())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn hermes_secret_status(provider: String) -> Result<bool, AppError> {
-    hermes::secret_status(&provider)
+pub fn hermes_secret_status(
+    app: tauri::AppHandle,
+    provider: String,
+    profile: Option<String>,
+) -> Result<bool, AppError> {
+    hermes::secret_status(&app, &provider, profile.as_deref())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn hermes_secret_delete(provider: String) -> Result<(), AppError> {
-    hermes::secret_delete(&provider)
+pub fn hermes_secret_delete(
+    app: tauri::AppHandle,
+    provider: String,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    hermes::secret_delete(&app, &provider, profile.as_deref())
 }
 
 #[tauri::command]
@@ -102,8 +149,9 @@ pub async fn hermes_mcp_action(
     action: String,
     name: String,
     url: String,
+    profile: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::mcp_action(&app, &action, &name, &url).await
+    crate::hermes::mcp_action(&app, &action, &name, &url, profile.as_deref()).await
 }
 
 #[tauri::command]
@@ -112,8 +160,9 @@ pub async fn hermes_skill_action(
     app: tauri::AppHandle,
     action: String,
     identifier: String,
+    profile: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::skill_action(&app, &action, &identifier).await
+    crate::hermes::skill_action(&app, &action, &identifier, profile.as_deref()).await
 }
 
 #[tauri::command]
@@ -122,8 +171,9 @@ pub async fn hermes_tool_action(
     app: tauri::AppHandle,
     action: String,
     name: String,
+    profile: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::tool_action(&app, &action, &name).await
+    crate::hermes::tool_action(&app, &action, &name, profile.as_deref()).await
 }
 
 #[tauri::command]
@@ -132,14 +182,19 @@ pub async fn hermes_cron_action(
     app: tauri::AppHandle,
     action: String,
     job_id: String,
+    profile: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::cron_action(&app, &action, &job_id).await
+    crate::hermes::cron_action(&app, &action, &job_id, profile.as_deref()).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn hermes_cli_read(app: tauri::AppHandle, kind: String) -> Result<String, AppError> {
-    crate::hermes::cli_read(&app, &kind).await
+pub async fn hermes_cli_read(
+    app: tauri::AppHandle,
+    kind: String,
+    profile: Option<String>,
+) -> Result<String, AppError> {
+    crate::hermes::cli_read(&app, &kind, profile.as_deref()).await
 }
 
 #[tauri::command]
@@ -183,20 +238,31 @@ pub async fn hermes_runtime_uninstall(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn hermes_logout(app: tauri::AppHandle, provider: String) -> Result<(), AppError> {
-    crate::hermes::logout(&app, &provider).await
+pub async fn hermes_logout(
+    app: tauri::AppHandle,
+    provider: String,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::logout(&app, &provider, profile.as_deref()).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn hermes_history_load(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
-    crate::hermes::history_load(&app)
+pub fn hermes_history_load(
+    app: tauri::AppHandle,
+    profile: Option<String>,
+) -> Result<Option<String>, AppError> {
+    crate::hermes::history_load(&app, profile.as_deref())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn hermes_history_save(app: tauri::AppHandle, json: String) -> Result<(), AppError> {
-    crate::hermes::history_save(&app, &json)
+pub fn hermes_history_save(
+    app: tauri::AppHandle,
+    json: String,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::history_save(&app, &json, profile.as_deref())
 }
 
 #[tauri::command]
@@ -235,8 +301,334 @@ pub fn hermes_permissions_status(
 #[specta::specta]
 pub fn hermes_login_status(
     app: tauri::AppHandle,
+    profile: Option<String>,
 ) -> Result<crate::hermes::login::HermesLoginStatus, AppError> {
-    crate::hermes::login::status(&app)
+    crate::hermes::login::status(&app, profile.as_deref())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profiles(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+) -> Result<Vec<crate::hermes::profiles::HermesAgentProfile>, AppError> {
+    crate::hermes::profiles::list(&app, connection_id.as_deref(), gateway_url.as_deref()).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profile_create(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+    name: String,
+    clone_from: Option<String>,
+    soul: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::profiles::create(
+        &app,
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+        &name,
+        clone_from.as_deref(),
+        soul.as_deref(),
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profile_rename(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+    name: String,
+    new_name: String,
+) -> Result<(), AppError> {
+    crate::hermes::profiles::rename(
+        &app,
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+        &name,
+        &new_name,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profile_delete(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+    name: String,
+) -> Result<(), AppError> {
+    crate::hermes::profiles::delete(
+        &app,
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+        &name,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profile_soul(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+    name: String,
+) -> Result<String, AppError> {
+    crate::hermes::profiles::soul(
+        &app,
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+        &name,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profile_soul_save(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+    name: String,
+    content: String,
+) -> Result<(), AppError> {
+    crate::hermes::profiles::soul_save(
+        &app,
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+        &name,
+        &content,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_connection_probe(
+    connection_id: String,
+    gateway_url: String,
+) -> Result<crate::hermes::profiles::HermesConnectionProbe, AppError> {
+    crate::hermes::profiles::probe(&connection_id, &gateway_url).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_open_profile_window(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    profile: String,
+) -> Result<(), AppError> {
+    let profile = profile.trim().to_owned();
+    if profile.is_empty()
+        || !profile
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(AppError::new(
+            "E_HERMES_PROFILE_NAME",
+            "Invalid profile name for a new window.",
+        ));
+    }
+    let label = format!("hermes-profile-{profile}");
+    if let Some(window) = tauri::Manager::get_webview_window(&app, &label) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    let connection = connection_id.unwrap_or_else(|| "local".into());
+    let url = format!(
+        "index.html?profile={}&connection={}#/assistant",
+        urlencoding::encode(&profile),
+        urlencoding::encode(&connection)
+    );
+    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
+        .title(format!("Hermes · {profile}"))
+        .inner_size(1200.0, 820.0)
+        .min_inner_size(900.0, 640.0)
+        .build()
+        .map_err(|error| {
+            AppError::new("E_HERMES_WINDOW", "Could not open the profile window.")
+                .with_detail(error.to_string())
+        })?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profile_export(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+    name: String,
+    output: Option<String>,
+) -> Result<String, AppError> {
+    crate::hermes::profiles::export(
+        &app,
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+        &name,
+        output.as_deref(),
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_agent_profile_import(
+    app: tauri::AppHandle,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
+    archive: String,
+    name: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::profiles::import(
+        &app,
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+        &archive,
+        name.as_deref(),
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_login(
+    profile_id: String,
+    base_url: String,
+    username: String,
+    password: String,
+) -> Result<crate::hermes::panel::PanelLoginResult, AppError> {
+    let session = crate::hermes::panel::login(&base_url, &username, &password).await?;
+    crate::hermes::panel_session_set(&profile_id, &session)?;
+    Ok(crate::hermes::panel::PanelLoginResult {
+        base_url: session.base_url,
+        provider: session.provider,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_logout(profile_id: String) -> Result<(), AppError> {
+    if let Ok(session) = crate::hermes::panel_session(&profile_id) {
+        crate::hermes::panel::logout(&session).await?;
+    }
+    crate::hermes::panel_session_delete(&profile_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_sessions(
+    profile_id: String,
+    profile: Option<String>,
+    limit: usize,
+    offset: usize,
+) -> Result<String, AppError> {
+    crate::hermes::panel::sessions(&profile_id, profile.as_deref(), limit, offset).await
+}
+
+/// One history slice (recents, gateways, scheduled, archived), optionally aggregated across
+/// every profile on the host.
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_history(
+    profile_id: String,
+    profile: Option<String>,
+    all_profiles: bool,
+    slice: String,
+    limit: usize,
+    offset: usize,
+) -> Result<String, AppError> {
+    crate::hermes::panel::history(
+        &profile_id,
+        profile.as_deref(),
+        all_profiles,
+        &slice,
+        limit,
+        offset,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_session_messages(
+    profile_id: String,
+    session_id: String,
+    profile: Option<String>,
+    limit: usize,
+    offset: usize,
+) -> Result<String, AppError> {
+    crate::hermes::panel::messages(&profile_id, &session_id, profile.as_deref(), limit, offset)
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_session_rename(
+    profile_id: String,
+    session_id: String,
+    title: String,
+    expected_revision: i64,
+    expected_generation: i64,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::panel::rename(
+        &profile_id,
+        profile.as_deref(),
+        &session_id,
+        &title,
+        expected_revision,
+        expected_generation,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_session_delete(
+    profile_id: String,
+    session_id: String,
+    expected_revision: i64,
+    expected_generation: i64,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::panel::delete(
+        &profile_id,
+        profile.as_deref(),
+        &session_id,
+        expected_revision,
+        expected_generation,
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn hermes_panel_session_archive(
+    profile_id: String,
+    session_id: String,
+    archived: bool,
+    expected_revision: i64,
+    expected_generation: i64,
+    profile: Option<String>,
+) -> Result<(), AppError> {
+    crate::hermes::panel::set_archived(
+        &profile_id,
+        profile.as_deref(),
+        &session_id,
+        archived,
+        expected_revision,
+        expected_generation,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -246,6 +638,27 @@ pub async fn hermes_model_options(
     state: State<'_, Arc<HermesRuntimeState>>,
     input: crate::hermes::HermesModelOptionsInput,
 ) -> Result<crate::hermes::HermesModelOptions, AppError> {
+    if input
+        .gateway_url
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        let profile_id = input.profile_id.as_deref().unwrap_or_default().to_owned();
+        if input.panel_auth {
+            let ticket = crate::hermes::panel::ticket_for(&profile_id).await?;
+            let query = format!("ticket={}", urlencoding::encode(&ticket));
+            let panel_url = crate::hermes::panel::base_url_for(&profile_id)?;
+            return crate::hermes::gateway::model_options_remote_auth(
+                &panel_url,
+                &query,
+                input.profile.as_deref(),
+                input.refresh,
+                input.include_unconfigured,
+            )
+            .await;
+        }
+        return Err(crate::hermes::remote_auth_required());
+    }
     let bin = {
         let home = crate::hermes::hermes_home(&app)?;
         (crate::hermes::runtime_bin(&app), home)
@@ -268,6 +681,10 @@ pub async fn hermes_model_options(
         attachments: Vec::new(),
         auxiliary: Vec::new(),
         force_aux_vision: false,
+        gateway_url: input.gateway_url,
+        profile_id: input.profile_id,
+        profile: input.profile,
+        panel_auth: input.panel_auth,
         api_key: input.api_key,
         endpoint: input.endpoint,
         mac_enabled: false,
@@ -304,8 +721,9 @@ pub fn hermes_login_start(
     app: tauri::AppHandle,
     state: State<'_, std::sync::Arc<crate::hermes::login_session::HermesLoginState>>,
     provider: String,
+    profile: Option<String>,
 ) -> Result<(), AppError> {
-    crate::hermes::login_session::start(&app, state.inner().clone(), &provider)
+    crate::hermes::login_session::start(&app, state.inner().clone(), &provider, profile.as_deref())
 }
 
 #[tauri::command]

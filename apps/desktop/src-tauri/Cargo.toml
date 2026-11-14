@@ -49,7 +49,7 @@ regex = "1"
 # Pattern matching only; expansion walks each directory without following symlinks (MIT/Apache-2.0).
 glob = "0.3"
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.28"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 nix = { version = "0.31", features = ["signal", "process", "fs", "socket"] }
 libc = "0.2"
@@ -58,8 +58,6 @@ uuid = { version = "1", features = ["v4", "v7", "serde"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "system-proxy"] }
 sha2 = "0.10"
-# Provider credentials for the built-in Hermes runtime (macOS Keychain via Security.framework).
-keyring = { version = "3", default-features = false, features = ["apple-native"] }
 base64 = "0.23"
 urlencoding = "2"
 quick-xml = "0.42"

@@ -8,6 +8,7 @@ import type {
   AppInfo,
   CatalogStatus,
   EnvInfo,
+  HermesAgentProfile,
   HistoryCleared,
   HistoryQuery,
   Kind,
@@ -27,6 +28,7 @@ import type {
 import { events, packageKey } from './client';
 import type { AppSettings } from './client';
 import { getCatalogItem, listCatalog, listCategories, searchCatalog } from './mock-data/catalog';
+import { isMessagingSource, normalizeSource } from '@/hermes/platforms';
 import {
   catalogCursor,
   catalogItems,
@@ -407,6 +409,237 @@ export function installMockIpc(
   );
   // first-run neither reads nor writes persisted simulated settings, avoiding changes to other tabs at the same URL.
   const persist = persistSettings && !flags.has('first-run');
+  let mockAgentProfiles: HermesAgentProfile[] = [
+    {
+      name: 'default',
+      displayName: null,
+      path: '/mock/OpenNavoData/hermes',
+      isDefault: true,
+      model: 'gpt-5.4',
+      provider: 'openai-api',
+      skillCount: 0,
+      hasEnv: false,
+      description: null,
+      botTitle: null,
+      distributionName: null,
+      distributionVersion: null
+    },
+    {
+      name: 'research',
+      displayName: 'Research',
+      path: '/mock/OpenNavoData/hermes/profiles/research',
+      isDefault: false,
+      model: 'claude-sonnet-4.5',
+      provider: 'anthropic',
+      skillCount: 3,
+      hasEnv: true,
+      description: 'Research profile',
+      botTitle: null,
+      distributionName: null,
+      distributionVersion: null
+    }
+  ];
+  const mockSouls = new Map<string, string>([
+    ['default', 'You are Hermes. Be direct and useful.'],
+    ['research', 'You are a careful research assistant.']
+  ]);
+  // Hermes Panel session store: rows carry the host's own title/preview, so the history list can
+  // render without reading a transcript. The real backend also stamps `profile` and splits the
+  // store into source slices (recents / gateways / scheduled / archived), which the mock mirrors.
+  const mockPanelSeconds = Math.floor(Date.now() / 1000);
+  let mockPanelSessions: Array<Record<string, unknown>> = [
+    {
+      id: 'mock-session-1',
+      profile_name: 'default',
+      profile: 'default',
+      title: 'Panel ok confirmation',
+      preview: 'Reply with exactly PANEL_OK',
+      display_name: null,
+      source: 'desktop',
+      message_count: 2,
+      started_at: mockPanelSeconds - 3600,
+      last_activity_at: mockPanelSeconds - 3500,
+      last_active: mockPanelSeconds - 3500
+    },
+    {
+      id: 'mock-session-2',
+      profile_name: 'default',
+      profile: 'default',
+      title: '每日检查 Hermes 更新',
+      preview: '检查今天有没有新版本',
+      display_name: null,
+      source: 'telegram',
+      message_count: 12,
+      started_at: mockPanelSeconds - 86_400,
+      last_activity_at: mockPanelSeconds - 80_000,
+      last_active: mockPanelSeconds - 80_000
+    },
+    {
+      id: 'mock-session-3',
+      profile_name: 'default',
+      profile: 'default',
+      title: null,
+      preview: '了解当前 Telegram 接入方式',
+      display_name: 'Telegram 接入',
+      source: 'desktop',
+      message_count: 4,
+      started_at: mockPanelSeconds - 3 * 86_400,
+      last_activity_at: mockPanelSeconds - 3 * 86_400,
+      last_active: mockPanelSeconds - 3 * 86_400
+    },
+    {
+      id: 'mock-session-long',
+      profile_name: 'default',
+      profile: 'default',
+      title: '长会话分页',
+      preview: '第 130 条消息',
+      display_name: null,
+      source: 'desktop',
+      message_count: 130,
+      started_at: mockPanelSeconds - 5000,
+      last_activity_at: mockPanelSeconds - 100,
+      last_active: mockPanelSeconds - 100
+    },
+    {
+      id: 'mock-session-4',
+      profile_name: 'default',
+      profile: 'default',
+      title: '整理 ASO 关键词',
+      preview: '帮我查一下班级宠物的排名',
+      display_name: null,
+      source: 'desktop',
+      message_count: 3,
+      started_at: mockPanelSeconds - 7200,
+      last_activity_at: mockPanelSeconds - 7000,
+      last_active: mockPanelSeconds - 7000
+    },
+    // Gateway threads: enough rows to exercise a platform section's three-row cap.
+    ...Array.from({ length: 5 }, (_, index) => ({
+      id: `mock-telegram-${index + 1}`,
+      profile_name: 'default',
+      profile: 'default',
+      title: `Telegram 讨论 ${index + 1}`,
+      preview: `第 ${index + 1} 条网关消息`,
+      display_name: null,
+      source: 'telegram',
+      message_count: 3,
+      started_at: mockPanelSeconds - 900 * (index + 1),
+      last_activity_at: mockPanelSeconds - 900 * (index + 1),
+      last_active: mockPanelSeconds - 900 * (index + 1)
+    })),
+    {
+      id: 'mock-discord-1',
+      profile_name: 'default',
+      profile: 'default',
+      title: 'Discord 值班频道',
+      preview: '今晚的部署谁来跟',
+      display_name: null,
+      source: 'discord',
+      message_count: 6,
+      started_at: mockPanelSeconds - 5000,
+      last_activity_at: mockPanelSeconds - 4200,
+      last_active: mockPanelSeconds - 4200
+    },
+    // Scheduled runs: the host titles them `<job> · <timestamp>`, one session per run, so the
+    // sidebar groups them per job instead of stacking every run in the conversation list.
+    ...Array.from({ length: 4 }, (_, index) => ({
+      id: `mock-cron-${index + 1}`,
+      profile_name: 'default',
+      profile: 'default',
+      title: `每小时检查更新 · Nov 13 0${6 - index}:00`,
+      preview: '[IMPORTANT: cron job] 检查 Hermes 版本',
+      display_name: null,
+      source: 'cron',
+      message_count: 2,
+      started_at: mockPanelSeconds - 1200 - index * 3600,
+      last_activity_at: mockPanelSeconds - 1100 - index * 3600,
+      last_active: mockPanelSeconds - 1100 - index * 3600
+    })),
+    {
+      id: 'mock-archived-1',
+      profile_name: 'default',
+      profile: 'default',
+      title: '上周的排查记录',
+      preview: '归档前最后一条消息',
+      display_name: null,
+      source: 'desktop',
+      archived: true,
+      message_count: 8,
+      started_at: mockPanelSeconds - 9 * 86_400,
+      last_activity_at: mockPanelSeconds - 8 * 86_400,
+      last_active: mockPanelSeconds - 8 * 86_400
+    },
+    // Another profile on the host: only the aggregated view lists it.
+    {
+      id: 'mock-aso-1',
+      profile_name: 'aso-u4e13-u5bb6',
+      profile: 'aso-u4e13-u5bb6',
+      title: 'ASO 关键词周报',
+      preview: '这周排名变化不大',
+      display_name: null,
+      source: 'telegram',
+      message_count: 9,
+      started_at: mockPanelSeconds - 400,
+      last_activity_at: mockPanelSeconds - 300,
+      last_active: mockPanelSeconds - 300
+    }
+  ];
+  const mockPanelMessages = new Map<string, Array<Record<string, unknown>>>([
+    [
+      'mock-session-1',
+      [
+        { id: 1, role: 'user', content: 'Reply with exactly PANEL_OK', timestamp: mockPanelSeconds - 3600 },
+        { id: 2, role: 'assistant', content: 'PANEL_OK', timestamp: mockPanelSeconds - 3500 }
+      ]
+    ],
+    [
+      'mock-session-3',
+      [
+        {
+          id: 1,
+          role: 'user',
+          content: '[IMPORTANT: The user has invoked the "telegram-setup" skill.]\n目前你如何接入到 Telegram？',
+          timestamp: mockPanelSeconds - 3 * 86_400
+        },
+        {
+          id: 2,
+          role: 'assistant',
+          content: '我用 bot token 接入 Telegram。',
+          timestamp: mockPanelSeconds - 3 * 86_400 + 60
+        },
+        { id: 3, role: 'tool', content: '{"ok":true}', timestamp: mockPanelSeconds - 3 * 86_400 + 61 }
+      ]
+    ],
+    [
+      'mock-session-4',
+      [
+        { id: 1, role: 'user', content: '帮我查一下班级宠物的排名', timestamp: mockPanelSeconds - 7200 },
+        {
+          id: 2,
+          role: 'assistant',
+          content: '我先看中国区 App Store 自然搜索排名。',
+          timestamp: mockPanelSeconds - 7100,
+          tool_calls: [
+            {
+              id: 'call-1',
+              call_id: 'call-1',
+              type: 'function',
+              function: { name: 'app_store.search', arguments: '{"term":"班级宠物","country":"cn"}' }
+            }
+          ]
+        },
+        {
+          id: 3,
+          role: 'tool',
+          tool_call_id: 'call-1',
+          tool_name: 'app_store.search',
+          content: '{"rank":3,"results":12}',
+          timestamp: mockPanelSeconds - 7090
+        },
+        { id: 4, role: 'assistant', content: '班级宠物目前自然搜索第 3。', timestamp: mockPanelSeconds - 7080 }
+      ]
+    ]
+  ]);
   const mcpOn = flags.has('mcp-on') || flags.has('mcp-write-on');
   let mcp: McpStatus = {
     enabled: mcpOn,
@@ -1117,23 +1350,169 @@ export function installMockIpc(
         ? {
             ready: true,
             installed: true,
-            version: 'Hermes Agent v0.23.0',
+            version: '0.23.1',
+            expectedVersion: '0.23.1',
             path: '/mock/OpenNavoData/runtime/hermes/bin/hermes',
             dataPath: '/mock/OpenNavoData',
             computerUse: true,
+            outdated: false,
             message: null
           }
         : {
             ready: false,
             installed: false,
             version: null,
+            expectedVersion: '0.23.1',
             path: null,
             dataPath: null,
             computerUse: false,
-            message: 'Hermes runtime is not installed in browser preview.'
+            outdated: false,
+            message: 'Local Hermes is not installed in browser preview.'
           },
+    hermes_panel_login: args => ({
+      baseUrl: String(args.baseUrl ?? 'http://panel.tail1234.ts.net:9119'),
+      provider: 'basic',
+      accessToken: 'mock-panel-access',
+      refreshToken: 'mock-panel-refresh'
+    }),
+    hermes_panel_logout: () => null,
+    hermes_agent_profiles: () => mockAgentProfiles.map(profile => ({ ...profile })),
+    hermes_history_load: () => null,
+    hermes_history_save: () => null,
+    hermes_panel_sessions: args => {
+      const profile = typeof args.profile === 'string' ? args.profile : 'default';
+      const limit = Number(args.limit ?? 20);
+      const offset = Number(args.offset ?? 0);
+      const rows = mockPanelSessions.filter(row => (row.profile_name ?? 'default') === profile);
+      return JSON.stringify({ sessions: rows.slice(offset, offset + limit), total: rows.length, limit, offset });
+    },
+    // Mirrors `GET /api/sessions` / `GET /api/profiles/sessions` with the client's source slices.
+    // `panel-no-aggregate` simulates a host that predates the aggregated endpoint.
+    hermes_panel_history: args => {
+      // `panel-history-fails` simulates a backend/route failure so the UI's retry path is
+      // exercised the way a stale build or a busy store would fail in real life.
+      if (flags.has('panel-history-fails')) {
+        throw { code: 'E_HERMES_PANEL', message: 'Panel request returned 503.', detail: 'busy' };
+      }
+      const slice = String(args.slice ?? 'recents');
+      const allProfiles = Boolean(args.allProfiles);
+      const degraded = allProfiles && flags.has('panel-no-aggregate');
+      const profile = typeof args.profile === 'string' ? args.profile : 'default';
+      const limit = Math.max(1, Number(args.limit ?? 40));
+      const offset = Math.max(0, Number(args.offset ?? 0));
+      const platform = (row: Record<string, unknown>) => normalizeSource(String(row.source ?? ''));
+      const rows = mockPanelSessions
+        .filter(row => {
+          const archived = row.archived === true;
+          if (slice === 'archived') return archived;
+          if (archived) return false;
+          if (!allProfiles || degraded) {
+            if ((row.profile_name ?? 'default') !== profile) return false;
+          }
+          if (slice === 'cron') return platform(row) === 'cron';
+          if (slice === 'messaging') return isMessagingSource(platform(row));
+          return platform(row) !== 'cron' && !isMessagingSource(platform(row));
+        })
+        .sort((left, right) => Number(right.last_activity_at ?? 0) - Number(left.last_activity_at ?? 0));
+      return JSON.stringify({
+        slice,
+        allProfiles: allProfiles && !degraded,
+        degraded,
+        sessions: rows.slice(offset, offset + limit),
+        total: rows.length,
+        limit,
+        offset,
+        hasMore: offset + limit < rows.length
+      });
+    },
+    // Mirrors the panel's newest-anchored paging: `offset` counts back from the last row.
+    hermes_panel_session_messages: args => {
+      const sessionId = String(args.sessionId);
+      // A long session, so the transcript's "show earlier" path can be exercised.
+      const all =
+        sessionId === 'mock-session-long'
+          ? Array.from({ length: 130 }, (_, index) => ({
+              id: index + 1,
+              role: index % 2 ? 'assistant' : 'user',
+              content: `第 ${index + 1} 条消息`,
+              timestamp: mockPanelSeconds - 130 + index
+            }))
+          : (mockPanelMessages.get(sessionId) ?? []);
+      const limit = Math.max(1, Number(args.limit ?? 120));
+      const offset = Math.max(0, Number(args.offset ?? 0));
+      const end = Math.max(0, all.length - offset);
+      const start = Math.max(0, end - limit);
+      return JSON.stringify({ messages: all.slice(start, end) });
+    },
+    hermes_panel_session_rename: args => {
+      const row = mockPanelSessions.find(item => item.id === args.sessionId);
+      if (row) row.title = String(args.title ?? '');
+      return null;
+    },
+    hermes_panel_session_delete: args => {
+      mockPanelSessions = mockPanelSessions.filter(item => item.id !== args.sessionId);
+      mockPanelMessages.delete(String(args.sessionId));
+      return null;
+    },
+    hermes_panel_session_archive: args => {
+      const row = mockPanelSessions.find(item => item.id === args.sessionId);
+      if (row) row.archived = Boolean(args.archived);
+      return null;
+    },
+    hermes_agent_profile_create: args => {
+      const name = String(args.name);
+      const source = args.cloneFrom ? mockAgentProfiles.find(profile => profile.name === args.cloneFrom) : null;
+      mockAgentProfiles = [
+        ...mockAgentProfiles,
+        {
+          name,
+          displayName: null,
+          path: `/mock/OpenNavoData/hermes/profiles/${name}`,
+          isDefault: false,
+          model: source?.model ?? null,
+          provider: source?.provider ?? null,
+          skillCount: source?.skillCount ?? 0,
+          hasEnv: source?.hasEnv ?? false,
+          description: null,
+          botTitle: null,
+          distributionName: null,
+          distributionVersion: null
+        }
+      ];
+      mockSouls.set(name, String(args.soul ?? ''));
+      return null;
+    },
+    hermes_agent_profile_rename: args => {
+      const name = String(args.name);
+      const newName = String(args.newName);
+      mockAgentProfiles = mockAgentProfiles.map(profile =>
+        profile.name === name ? { ...profile, name: newName } : profile
+      );
+      if (mockSouls.has(name)) mockSouls.set(newName, mockSouls.get(name)!);
+      return null;
+    },
+    hermes_agent_profile_delete: args => {
+      const name = String(args.name);
+      if (name !== 'default') mockAgentProfiles = mockAgentProfiles.filter(profile => profile.name !== name);
+      mockSouls.delete(name);
+      return null;
+    },
+    hermes_agent_profile_soul: args => mockSouls.get(String(args.name)) ?? '',
+    hermes_agent_profile_soul_save: args => {
+      mockSouls.set(String(args.name), String(args.content));
+      return null;
+    },
+    hermes_agent_profile_export: () => '/mock/profile.tar.gz',
+    hermes_agent_profile_import: () => null,
+    hermes_open_profile_window: () => null,
+    hermes_ssh_connect: args => ({
+      id: String((args.input as { id?: string } | undefined)?.id ?? 'ssh'),
+      endpoint: 'ws://127.0.0.1:19119/api/ws',
+      localPort: 19119
+    }),
+    hermes_ssh_disconnect: () => null,
     hermes_chat: () => {
-      throw { code: 'E_HERMES_RUNTIME', message: 'Hermes runtime is not installed in browser preview', detail: null };
+      throw { code: 'E_HERMES_RUNTIME', message: 'Local Hermes is not installed in browser preview', detail: null };
     },
     hermes_test_connection: () => ({ ok: true, status: 200, message: '连接成功 · HTTP 200' }),
     hermes_model_options: () => ({
@@ -1216,7 +1595,7 @@ export function installMockIpc(
     hermes_runtime_install: () => {
       throw {
         code: 'E_HERMES_INSTALL',
-        message: 'Installing the Hermes runtime is only available in the desktop app',
+        message: 'Installing local Hermes is only available in the desktop app',
         detail: null
       };
     },
@@ -1224,10 +1603,12 @@ export function installMockIpc(
       ready: false,
       installed: false,
       version: null,
+      expectedVersion: '0.23.1',
       path: null,
       dataPath: null,
       computerUse: false,
-      message: 'Hermes runtime is not installed in browser preview.'
+      outdated: false,
+      message: 'Local Hermes is not installed in browser preview.'
     }),
     hermes_stop: () => null,
     hermes_interrupt: () => null,

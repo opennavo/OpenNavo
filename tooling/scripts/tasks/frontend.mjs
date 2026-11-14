@@ -96,6 +96,8 @@ export function runTask(task) {
     case 'e2e':
       // Admin menu/permission tests intercept APIs and need no backend; full-stack web tests require make e2e-up (03 section 5.5).
       run('pnpm', ['--filter', '@opennavo/admin', 'run', 'e2e']);
+      // The desktop runs in browser mode against its IPC mocks, so it needs no backend either.
+      run('pnpm', ['--filter', '@opennavo/desktop', 'run', 'e2e']);
       if (e2eStackReady()) run('pnpm', ['--filter', '@opennavo/web', 'run', 'e2e']);
       else
         console.log(

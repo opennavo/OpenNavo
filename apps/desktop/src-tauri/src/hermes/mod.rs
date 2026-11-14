@@ -5,9 +5,8 @@
 //! resources directory after `pnpm --filter @opennavo/desktop hermes:prepare`.
 
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -18,14 +17,19 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::timeout;
+use yaml_rust2::{Yaml, YamlEmitter, YamlLoader, yaml::Hash};
 
 use crate::AppError;
 
+pub(crate) mod env_store;
 pub(crate) mod gateway;
 pub(crate) mod install;
+pub(crate) mod legacy_migration;
 pub(crate) mod login;
 pub(crate) mod login_session;
+pub mod panel;
 pub(crate) mod permissions;
+pub mod profiles;
 pub(crate) mod test_connection;
 use gateway::GatewayServer;
 
@@ -36,7 +40,41 @@ const DATA_ROOT_DIR: &str = "OpenNavoData";
 const RUNTIME_DIR: &str = "runtime/hermes";
 const HERMES_HOME_DIR: &str = "hermes";
 const AUDIT_FILE: &str = "audit.jsonl";
-const KEYCHAIN_SERVICE: &str = "com.opennavo.desktop.hermes";
+const RUNTIME_MANIFEST_JSON: &str = include_str!("../../../hermes/runtime.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeManifest {
+    hermes: RuntimeHermesPin,
+    #[serde(default)]
+    plugins: Vec<RuntimePluginPin>,
+    release: RuntimeReleasePin,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeHermesPin {
+    version: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimePluginPin {
+    name: String,
+    repository: String,
+    #[serde(rename = "ref")]
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeReleasePin {
+    repository: String,
+    tag: String,
+    asset: String,
+    sha256: String,
+}
+
+/// App data root, cached so panel-session helpers work without an `AppHandle`.
+static DATA_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +82,7 @@ pub struct HermesRuntimeStatus {
     pub ready: bool,
     pub installed: bool,
     pub version: Option<String>,
+    pub expected_version: String,
     pub path: Option<String>,
     pub data_path: Option<String>,
     pub computer_use: bool,
@@ -75,6 +114,10 @@ pub struct HermesChatInput {
     pub attachments: Vec<String>,
     pub auxiliary: Vec<HermesAuxAssignment>,
     pub force_aux_vision: bool,
+    pub gateway_url: Option<String>,
+    pub profile_id: Option<String>,
+    pub profile: Option<String>,
+    pub panel_auth: bool,
     pub mac_enabled: bool,
     pub control_level: String,
     pub mac_terminal: bool,
@@ -105,6 +148,15 @@ pub struct HermesAttachmentInfo {
     pub name: String,
     pub size: u64,
     pub is_image: bool,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HermesRemoteTest {
+    pub ok: bool,
+    pub latency_ms: u64,
+    pub models: u32,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -183,6 +235,10 @@ pub struct HermesModelOptionsInput {
     pub endpoint: Option<String>,
     pub refresh: bool,
     pub include_unconfigured: bool,
+    pub gateway_url: Option<String>,
+    pub profile_id: Option<String>,
+    pub profile: Option<String>,
+    pub panel_auth: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -192,11 +248,43 @@ pub struct HermesChunk {
     pub delta: String,
 }
 
+/// One answer the renderer gave to a server→client request (`approval`, `clarify`, `sudo`/`secret`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HermesAskReply {
+    /// `scope` is one of the `choices` the runtime offered: once / session / always / deny.
+    Approval { choice: String },
+    /// `cancelled` answers "the user dismissed the card", which the runtime reads as cancel-all.
+    Clarify {
+        answers: Vec<HermesClarifyAnswer>,
+        cancelled: bool,
+    },
+    /// One masked string (sudo password, env secret, vault unlock). `""` means skipped.
+    Secret { value: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HermesClarifyAnswer {
+    pub qid: String,
+    /// `None` is a skipped question (`clarify`'s `null` answer).
+    pub answer: Option<String>,
+}
+
+/// A reply routed to the turn that is waiting on it, matched by the request id the card carried.
+#[derive(Debug, Clone)]
+pub(crate) struct AskAnswer {
+    pub request_id: String,
+    pub reply: HermesAskReply,
+}
+
 #[derive(Default)]
 pub struct HermesRuntimeState {
     pid: Mutex<Option<u32>>,
     gateway: tokio::sync::Mutex<Option<std::sync::Arc<GatewayServer>>>,
-    pub(crate) approval: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>,
+    /// Answers from the renderer for the requests the running turn is parked on. One channel per turn:
+    /// the id inside the answer picks the request, so a clarify and an approval can be open together.
+    pub(crate) asks: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<AskAnswer>>>,
     pub(crate) approval_cancel: tokio::sync::Notify,
     installing: AtomicBool,
     pub(crate) install_cancel: AtomicBool,
@@ -211,6 +299,7 @@ fn data_root(app: &AppHandle) -> Result<PathBuf, AppError> {
         })?
         .join(DATA_ROOT_DIR);
     std::fs::create_dir_all(&root)?;
+    let _ = DATA_ROOT.set(root.clone());
     Ok(root)
 }
 
@@ -307,336 +396,6 @@ fn provider_key_env(provider: &str) -> &str {
     }
 }
 
-fn env_line_defines_key(line: &str, key: &str) -> bool {
-    let stripped = line.trim().trim_start_matches('\u{feff}');
-    let stripped = stripped
-        .strip_prefix("export ")
-        .unwrap_or(stripped)
-        .trim_start();
-    stripped
-        .split_once('=')
-        .map(|(name, _)| name.trim() == key)
-        .unwrap_or(false)
-}
-
-const OPENNAVO_CREDENTIAL_SOURCE: &str = "manual:opennavo";
-const OPENNAVO_CREDENTIAL_ID: &str = "opennavo";
-const AUTH_STORE_VERSION: u64 = 1;
-const AUTH_LOCK_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// Environment variables that may carry a provider secret. `.env` is loaded into the
-/// gateway's `os.environ` by Hermes (`override=True`), so app-managed key lines must be
-/// removed from it; the current build injects the value from an inherited descriptor
-/// instead. Exactly the variables `provider_key_env` can write, plus the custom
-/// endpoint key. Anything else in `.env` belongs to Hermes or the user and is left alone.
-const MANAGED_KEY_ENV_VARS: &[&str] = &[
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GOOGLE_API_KEY",
-    "OPENROUTER_API_KEY",
-    "NOUS_API_KEY",
-    "GITHUB_TOKEN",
-    "OPENCODE_ZEN_API_KEY",
-    "OPENCODE_GO_API_KEY",
-    "OPENNAVO_CUSTOM_API_KEY",
-];
-
-fn read_auth_store(home: &Path) -> Result<serde_json::Value, AppError> {
-    let path = home.join("auth.json");
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(serde_json::json!({
-                "version": AUTH_STORE_VERSION,
-                "providers": {},
-            }));
-        }
-        Err(error) => return Err(error.into()),
-    };
-    match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value) if value.is_object() => Ok(value),
-        _ => {
-            // Match Hermes' own corruption handling: preserve the unreadable store and
-            // start from an empty one instead of overwriting it silently.
-            let _ = std::fs::copy(&path, home.join("auth.json.corrupt"));
-            Ok(serde_json::json!({
-                "version": AUTH_STORE_VERSION,
-                "providers": {},
-            }))
-        }
-    }
-}
-
-fn save_auth_store(home: &Path, store: &serde_json::Value) -> Result<(), AppError> {
-    std::fs::create_dir_all(home)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        // Hermes keeps credential files under an owner-only directory; match it.
-        let _ = std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700));
-    }
-    let path = home.join("auth.json");
-    let tmp = home.join(".auth.json.opennavo.tmp");
-    let mut bytes = serde_json::to_vec_pretty(store)?;
-    bytes.push(b'\n');
-    {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&tmp)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-    }
-    #[cfg(windows)]
-    {
-        // std::fs::rename does not replace an existing file on Windows.
-        let _ = std::fs::remove_file(&path);
-    }
-    std::fs::rename(&tmp, &path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
-}
-
-fn with_auth_lock<T>(
-    home: &Path,
-    body: impl FnOnce() -> Result<T, AppError>,
-) -> Result<T, AppError> {
-    #[cfg(unix)]
-    {
-        use nix::errno::Errno;
-        use nix::fcntl::{Flock, FlockArg};
-
-        std::fs::create_dir_all(home)?;
-        let lock_path = home.join("auth.lock");
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true).write(true).create(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&lock_path)?;
-        let deadline = std::time::Instant::now() + AUTH_LOCK_TIMEOUT;
-        let guard = loop {
-            match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-                Ok(guard) => break guard,
-                Err((returned, error)) if error == Errno::EWOULDBLOCK || error == Errno::EAGAIN => {
-                    if std::time::Instant::now() >= deadline {
-                        return Err(AppError::new(
-                            "E_HERMES_CREDENTIAL",
-                            "The Hermes credential store is busy. Try again in a moment.",
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                    file = returned;
-                }
-                Err((_, error)) => {
-                    return Err(AppError::new(
-                        "E_HERMES_CREDENTIAL",
-                        "Could not lock the Hermes credential store.",
-                    )
-                    .with_detail(error.to_string()));
-                }
-            }
-        };
-        let result = body();
-        drop(guard);
-        result
-    }
-    #[cfg(not(unix))]
-    {
-        body()
-    }
-}
-
-/// Merge or remove an app-managed credential in `$HERMES_HOME/auth.json`. The app
-/// only calls this with `None` now, to scrub rows older builds wrote: every previous
-/// app-managed copy and every `env:` copy of a managed key variable is removed so a
-/// provider switch cannot leave an old secret behind. Returns true when the store changed.
-fn apply_provider_credential(
-    store: &mut serde_json::Value,
-    provider: &str,
-    api_key: Option<&str>,
-) -> bool {
-    let mut changed = false;
-    let root = store
-        .as_object_mut()
-        .expect("auth store is always an object");
-    if root
-        .get("version")
-        .and_then(serde_json::Value::as_u64)
-        .is_none()
-    {
-        root.insert("version".into(), serde_json::json!(AUTH_STORE_VERSION));
-        changed = true;
-    }
-    if !root
-        .get("providers")
-        .is_some_and(serde_json::Value::is_object)
-    {
-        root.insert("providers".into(), serde_json::json!({}));
-        changed = true;
-    }
-    let pool = root
-        .entry("credential_pool")
-        .or_insert_with(|| serde_json::json!({}));
-    if !pool.is_object() {
-        *pool = serde_json::json!({});
-        changed = true;
-    }
-    let pool = pool.as_object_mut().expect("credential_pool is an object");
-
-    for (owner, entries) in pool.iter_mut() {
-        let Some(entries) = entries.as_array_mut() else {
-            continue;
-        };
-        let before = entries.len();
-        entries.retain(|entry| {
-            let source = entry
-                .get("source")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if source == OPENNAVO_CREDENTIAL_SOURCE {
-                return false;
-            }
-            // Hermes can seed a pool row from `.env` or the shell. Those rows are
-            // snapshots of a secret that may since have been rotated.
-            if let Some(variable) = source.strip_prefix("env:")
-                && MANAGED_KEY_ENV_VARS.contains(&variable)
-            {
-                return false;
-            }
-            // Older builds could write a literal into config.yaml (always for the
-            // custom endpoint); the current provider config never does.
-            let stale_config =
-                source.starts_with("config:") && (owner == provider || owner == "openavoo-custom");
-            !stale_config
-        });
-        if entries.len() != before {
-            changed = true;
-        }
-    }
-    pool.retain(|_, entries| {
-        entries
-            .as_array()
-            .map(|entries| !entries.is_empty())
-            .unwrap_or(true)
-    });
-
-    if let Some(key) = api_key.map(str::trim).filter(|key| !key.is_empty()) {
-        let key = key.replace(['\n', '\r'], "");
-        let entry = serde_json::json!({
-            "id": OPENNAVO_CREDENTIAL_ID,
-            "label": "OpenNavo",
-            "auth_type": "api_key",
-            "priority": 0,
-            "source": OPENNAVO_CREDENTIAL_SOURCE,
-            "access_token": key,
-        });
-        let entries = pool
-            .entry(provider.to_owned())
-            .or_insert_with(|| serde_json::json!([]))
-            .as_array_mut()
-            .expect("credential pool entries are arrays");
-        entries.push(entry);
-        changed = true;
-    }
-    changed
-}
-
-fn write_provider_credential(
-    home: &Path,
-    provider: &str,
-    api_key: Option<&str>,
-) -> Result<(), AppError> {
-    let mut store = read_auth_store(home)?;
-    let before = store.clone();
-    apply_provider_credential(&mut store, provider, api_key);
-    if store == before {
-        return Ok(());
-    }
-    with_auth_lock(home, || {
-        // Re-read under the cross-process lock: Hermes may have refreshed an OAuth
-        // grant while we were waiting.
-        let mut store = read_auth_store(home)?;
-        apply_provider_credential(&mut store, provider, api_key);
-        store["updated_at"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
-        save_auth_store(home, &store)
-    })
-}
-
-/// Remove app-managed credential lines from `.env`, which Hermes loads into its
-/// process environment on startup. Returns true when the file changed.
-fn remove_provider_env(home: &Path) -> Result<bool, AppError> {
-    let path = home.join(".env");
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(existing) => existing,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    let mut kept = String::new();
-    let mut removed = false;
-    for line in existing.lines() {
-        if MANAGED_KEY_ENV_VARS
-            .iter()
-            .any(|variable| env_line_defines_key(line, variable))
-        {
-            removed = true;
-            continue;
-        }
-        kept.push_str(line);
-        kept.push('\n');
-    }
-    if !removed {
-        return Ok(false);
-    }
-    if kept.trim().is_empty() {
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-        return Ok(true);
-    }
-    let tmp = home.join(".env.opennavo.tmp");
-    {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&tmp)?;
-        file.write_all(kept.as_bytes())?;
-        file.sync_all()?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-    }
-    #[cfg(windows)]
-    {
-        let _ = std::fs::remove_file(&path);
-    }
-    std::fs::rename(&tmp, &path)?;
-    Ok(true)
-}
-
 fn toolsets(input: &HermesChatInput) -> String {
     if !input.mac_enabled || input.control_level == "open" {
         return "safe".to_owned();
@@ -661,19 +420,42 @@ fn toolsets(input: &HermesChatInput) -> String {
     }
 }
 
-fn runtime_is_current(version: &str) -> bool {
-    let Ok(pattern) = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)") else {
-        return false;
-    };
-    let Some(captures) = pattern.captures(version) else {
-        return false;
-    };
-    let parse = |index: usize| {
-        captures
-            .get(index)
-            .and_then(|value| value.as_str().parse::<u64>().ok())
-    };
-    matches!((parse(1), parse(2), parse(3)), (Some(0), Some(23), Some(0)))
+fn runtime_manifest() -> Result<RuntimeManifest, AppError> {
+    serde_json::from_str(RUNTIME_MANIFEST_JSON).map_err(|error| {
+        AppError::new(
+            "E_HERMES_RUNTIME_MANIFEST",
+            "The pinned Hermes runtime metadata is invalid.",
+        )
+        .with_detail(error.to_string())
+    })
+}
+
+fn expected_runtime_version() -> Result<String, AppError> {
+    let version = runtime_manifest()?.hermes.version;
+    let valid = regex::Regex::new(r"^\d+\.\d+\.\d+$")
+        .expect("static Hermes version regex")
+        .is_match(&version);
+    if !valid {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME_MANIFEST",
+            "The pinned Hermes runtime version is invalid.",
+        ));
+    }
+    Ok(version)
+}
+
+fn runtime_version_from_output(value: &str) -> Option<String> {
+    let pattern = regex::Regex::new(r"(?m)^Hermes Agent v?(\d+\.\d+\.\d+)\b")
+        .expect("static Hermes version output regex");
+    pattern
+        .captures(value)
+        .and_then(|captures| captures.get(1))
+        .map(|value| value.as_str().to_owned())
+}
+
+#[cfg(test)]
+fn runtime_version_matches(version: &str, expected: &str) -> bool {
+    runtime_version_from_output(version).as_deref() == Some(expected)
 }
 
 fn reasoning_effort(effort: &str) -> Option<&str> {
@@ -683,12 +465,31 @@ fn reasoning_effort(effort: &str) -> Option<&str> {
     }
 }
 
-fn history_path(app: &AppHandle) -> Result<PathBuf, AppError> {
-    Ok(hermes_home(app)?.join("history.json"))
+fn history_path(app: &AppHandle, profile: Option<&str>) -> Result<PathBuf, AppError> {
+    let home = hermes_home(app)?;
+    let profile = profile
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && *name != "default");
+    Ok(match profile {
+        Some(name)
+            if name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') =>
+        {
+            home.join(format!("history-{name}.json"))
+        }
+        Some(_) => {
+            return Err(AppError::new(
+                "E_HERMES_HISTORY",
+                "Invalid profile name for history.",
+            ));
+        }
+        None => home.join("history.json"),
+    })
 }
 
-pub fn history_load(app: &AppHandle) -> Result<Option<String>, AppError> {
-    let path = history_path(app)?;
+pub fn history_load(app: &AppHandle, profile: Option<&str>) -> Result<Option<String>, AppError> {
+    let path = history_path(app, profile)?;
     if !path.is_file() {
         return Ok(None);
     }
@@ -702,7 +503,7 @@ pub fn history_load(app: &AppHandle) -> Result<Option<String>, AppError> {
     Ok(Some(raw))
 }
 
-pub fn history_save(app: &AppHandle, json: &str) -> Result<(), AppError> {
+pub fn history_save(app: &AppHandle, json: &str, profile: Option<&str>) -> Result<(), AppError> {
     if json.len() > 20 * 1024 * 1024 {
         return Err(AppError::new(
             "E_HERMES_HISTORY",
@@ -713,7 +514,7 @@ pub fn history_save(app: &AppHandle, json: &str) -> Result<(), AppError> {
         AppError::new("E_HERMES_HISTORY", "Hermes history is not valid JSON.")
             .with_detail(error.to_string())
     })?;
-    let path = history_path(app)?;
+    let path = history_path(app, profile)?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
     #[cfg(unix)]
@@ -857,16 +658,22 @@ fn audit_path(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(hermes_home(app)?.join(AUDIT_FILE))
 }
 
-pub async fn logout(app: &AppHandle, provider: &str) -> Result<(), AppError> {
+pub async fn logout(
+    app: &AppHandle,
+    provider: &str,
+    profile: Option<&str>,
+) -> Result<(), AppError> {
     let Some(bin) = runtime_bin(app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed.",
         ));
     };
-    let home = hermes_home(app)?;
+    // Log out of the profile whose `auth.json` actually holds the login.
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
     let hermes_provider = provider_id(provider);
     let mut command = runtime_command(&bin)?;
+    profiles::pin_default_profile(&mut command, profile);
     command
         .arg("auth")
         .arg("logout")
@@ -874,7 +681,6 @@ pub async fn logout(app: &AppHandle, provider: &str) -> Result<(), AppError> {
         .env("HERMES_HOME", &home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    scrub_credential_env(&mut command);
     let output = timeout(VERSION_TIMEOUT, command.output())
         .await
         .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes logout timed out."))?
@@ -897,6 +703,7 @@ pub async fn mcp_action(
     action: &str,
     name: &str,
     url: &str,
+    profile: Option<&str>,
 ) -> Result<String, AppError> {
     let name = name.trim();
     if !matches!(action, "list" | "add" | "remove") {
@@ -914,8 +721,9 @@ pub async fn mcp_action(
             "Hermes runtime is not installed.",
         ));
     };
-    let home = hermes_home(app)?;
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
     let mut command = runtime_command(&bin)?;
+    profiles::pin_default_profile(&mut command, profile);
     command.arg("mcp");
     match action {
         "list" => {
@@ -940,7 +748,6 @@ pub async fn mcp_action(
         .env("HERMES_HOME", home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    scrub_credential_env(&mut command);
     let output = timeout(VERSION_TIMEOUT, command.output())
         .await
         .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes MCP action timed out."))?
@@ -964,6 +771,7 @@ pub async fn skill_action(
     app: &AppHandle,
     action: &str,
     identifier: &str,
+    profile: Option<&str>,
 ) -> Result<String, AppError> {
     let action = match action {
         "install" | "uninstall" => action,
@@ -982,8 +790,9 @@ pub async fn skill_action(
             "Hermes runtime is not installed.",
         ));
     };
-    let home = hermes_home(app)?;
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
     let mut command = runtime_command(&bin)?;
+    profiles::pin_default_profile(&mut command, profile);
     command
         .arg("skills")
         .arg(action)
@@ -992,7 +801,6 @@ pub async fn skill_action(
         .env("HERMES_HOME", home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    scrub_credential_env(&mut command);
     let output = timeout(VERSION_TIMEOUT, command.output())
         .await
         .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes skill action timed out."))?
@@ -1012,7 +820,12 @@ pub async fn skill_action(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub async fn tool_action(app: &AppHandle, action: &str, name: &str) -> Result<String, AppError> {
+pub async fn tool_action(
+    app: &AppHandle,
+    action: &str,
+    name: &str,
+    profile: Option<&str>,
+) -> Result<String, AppError> {
     let action = match action {
         "enable" | "disable" => action,
         _ => return Err(AppError::new("E_HERMES_INPUT", "Unknown tool action.")),
@@ -1030,8 +843,9 @@ pub async fn tool_action(app: &AppHandle, action: &str, name: &str) -> Result<St
             "Hermes runtime is not installed.",
         ));
     };
-    let home = hermes_home(app)?;
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
     let mut command = runtime_command(&bin)?;
+    profiles::pin_default_profile(&mut command, profile);
     command
         .arg("tools")
         .arg(action)
@@ -1039,7 +853,6 @@ pub async fn tool_action(app: &AppHandle, action: &str, name: &str) -> Result<St
         .env("HERMES_HOME", home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    scrub_credential_env(&mut command);
     let output = timeout(VERSION_TIMEOUT, command.output())
         .await
         .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes tool action timed out."))?
@@ -1059,7 +872,12 @@ pub async fn tool_action(app: &AppHandle, action: &str, name: &str) -> Result<St
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub async fn cron_action(app: &AppHandle, action: &str, job_id: &str) -> Result<String, AppError> {
+pub async fn cron_action(
+    app: &AppHandle,
+    action: &str,
+    job_id: &str,
+    profile: Option<&str>,
+) -> Result<String, AppError> {
     let action = match action {
         "pause" | "resume" | "remove" => action,
         _ => return Err(AppError::new("E_HERMES_INPUT", "Unknown cron action.")),
@@ -1077,8 +895,9 @@ pub async fn cron_action(app: &AppHandle, action: &str, job_id: &str) -> Result<
             "Hermes runtime is not installed.",
         ));
     };
-    let home = hermes_home(app)?;
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
     let mut command = runtime_command(&bin)?;
+    profiles::pin_default_profile(&mut command, profile);
     command
         .arg("cron")
         .arg(action)
@@ -1086,7 +905,6 @@ pub async fn cron_action(app: &AppHandle, action: &str, job_id: &str) -> Result<
         .env("HERMES_HOME", home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    scrub_credential_env(&mut command);
     let output = timeout(VERSION_TIMEOUT, command.output())
         .await
         .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes cron action timed out."))?
@@ -1106,14 +924,18 @@ pub async fn cron_action(app: &AppHandle, action: &str, job_id: &str) -> Result<
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub async fn cli_read(app: &AppHandle, kind: &str) -> Result<String, AppError> {
+pub async fn cli_read(
+    app: &AppHandle,
+    kind: &str,
+    profile: Option<&str>,
+) -> Result<String, AppError> {
     let Some(bin) = runtime_bin(app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed.",
         ));
     };
-    let home = hermes_home(app)?;
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
     let args: &[&str] = match kind {
         "tools" => &["tools", "list"],
         "skills" => &["skills", "list"],
@@ -1126,12 +948,12 @@ pub async fn cli_read(app: &AppHandle, kind: &str) -> Result<String, AppError> {
         }
     };
     let mut command = runtime_command(&bin)?;
+    profiles::pin_default_profile(&mut command, profile);
     command
         .args(args)
         .env("HERMES_HOME", home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    scrub_credential_env(&mut command);
     let output = timeout(VERSION_TIMEOUT, command.output())
         .await
         .map_err(|_| AppError::new("E_HERMES_TIMEOUT", "Hermes diagnostics timed out."))?
@@ -1244,185 +1066,6 @@ pub fn open_audit(app: &AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Credential-bearing environment variables Hermes or its tools may pick up. The
-/// sidecar receives none of them: provider keys are written to the Hermes credential
-/// store instead, so a terminal tool cannot read them back from `ps -E` or its own env.
-const CREDENTIAL_ENV_VARS: &[&str] = &[
-    "OPENAI_API_KEY",
-    "OPENAI_API_BASE",
-    "OPENAI_BASE_URL",
-    "OPENAI_ORG_ID",
-    "OPENAI_ORGANIZATION",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "GOOGLE_API_KEY",
-    "GEMINI_API_KEY",
-    "OPENROUTER_API_KEY",
-    "OPENROUTER_BASE_URL",
-    "NOUS_API_KEY",
-    "QWEN_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "MISTRAL_API_KEY",
-    "GROQ_API_KEY",
-    "TOGETHER_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "COHERE_API_KEY",
-    "FIREWORKS_API_KEY",
-    "XAI_API_KEY",
-    "HELICONE_API_KEY",
-    "PARALLEL_API_KEY",
-    "OPENCODE_ZEN_API_KEY",
-    "OPENCODE_GO_API_KEY",
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "COPILOT_GITHUB_TOKEN",
-    "COPILOT_API_BASE_URL",
-    "OPENNAVO_CUSTOM_API_KEY",
-];
-
-fn scrub_credential_env(command: &mut Command) {
-    for name in CREDENTIAL_ENV_VARS {
-        command.env_remove(name);
-    }
-}
-
-const SECRET_ENV_MARKER: &str = "HERMES_OPENNAVO_SECRET_ENV";
-const SECRET_FD_MARKER: &str = "HERMES_OPENNAVO_SECRET_FD";
-
-/// Runs before `hermes_cli` is imported. It reads the provider key from an
-/// inherited descriptor and installs an `os.environ` overlay: lookups by name see
-/// the key, but iteration, `copy()` and child environments do not. The key never
-/// enters the exec environment (so `ps -E` cannot show it) and never touches disk.
-const SECRET_BOOTSTRAP: &str = r##"
-import os
-
-_name = os.environ.pop("HERMES_OPENNAVO_SECRET_ENV", "")
-_fd_text = os.environ.pop("HERMES_OPENNAVO_SECRET_FD", "")
-_secret = ""
-_fd = -1
-try:
-    _fd = int(_fd_text)
-except (TypeError, ValueError):
-    _fd = -1
-if _name and _fd >= 0:
-    try:
-        _parts = []
-        while True:
-            _chunk = os.read(_fd, 65536)
-            if not _chunk:
-                break
-            _parts.append(_chunk)
-        _secret = b"".join(_parts).decode("utf-8", "replace").strip()
-    except OSError:
-        _secret = ""
-    finally:
-        try:
-            os.close(_fd)
-        except OSError:
-            pass
-
-if _name and _secret:
-    _base = os.environ
-
-    class _OpenNavoSecretEnv:
-        """Environment overlay that answers the provider key by name but hides it
-        from iteration, copy(), and every child process environment."""
-
-        def __init__(self, base, extra):
-            object.__setattr__(self, "_base", base)
-            object.__setattr__(self, "_extra", extra)
-
-        def __getitem__(self, key):
-            if key in self._extra:
-                return self._extra[key]
-            return self._base[key]
-
-        def __setitem__(self, key, value):
-            if key in self._extra:
-                object.__setattr__(self, "_extra", {**self._extra, key: value})
-            else:
-                self._base[key] = value
-
-        def __delitem__(self, key):
-            if key in self._extra:
-                object.__setattr__(self, "_extra", {k: v for k, v in self._extra.items() if k != key})
-            else:
-                del self._base[key]
-
-        def __contains__(self, key):
-            return key in self._extra or key in self._base
-
-        def __iter__(self):
-            return iter(self.keys())
-
-        def __len__(self):
-            return len(self.keys())
-
-        def __repr__(self):
-            return repr(self.copy())
-
-        def get(self, key, default=None):
-            try:
-                return self[key]
-            except KeyError:
-                return default
-
-        def keys(self):
-            return [key for key in self._base.keys() if key not in self._extra]
-
-        def items(self):
-            return [(key, self._base[key]) for key in self.keys()]
-
-        def values(self):
-            return [self._base[key] for key in self.keys()]
-
-        def copy(self):
-            return {key: self._base[key] for key in self.keys()}
-
-        def setdefault(self, key, default=None):
-            if key not in self:
-                self[key] = default
-            return self[key]
-
-        def pop(self, key, *default):
-            if key in self._extra:
-                value = self._extra[key]
-                object.__setattr__(self, "_extra", {k: v for k, v in self._extra.items() if k != key})
-                return value
-            return self._base.pop(key, *default)
-
-        def popitem(self):
-            return self._base.popitem()
-
-        def clear(self):
-            object.__setattr__(self, "_extra", {})
-            self._base.clear()
-
-        def update(self, *args, **kwargs):
-            for key, value in dict(*args, **kwargs).items():
-                self[key] = value
-
-        def __ior__(self, other):
-            self.update(other)
-            return self
-
-    os.environ = _OpenNavoSecretEnv(_base, {_name: _secret})
-
-from hermes_cli.main import main
-main()
-"##;
-
-/// Provider env var to inject, or `None` for providers that sign in through
-/// Hermes' OAuth store (a key would preempt the stored login).
-fn secret_env_var(provider: &str) -> Option<&str> {
-    if matches!(provider, "nous" | "codex" | "claude-code") {
-        return None;
-    }
-    Some(provider_key_env(provider))
-}
-
 fn runtime_python(bin: &Path) -> Option<PathBuf> {
     let root = bin.parent()?.parent()?;
     let link = root.join("python").join("bin").join("python3");
@@ -1444,9 +1087,57 @@ fn runtime_python(bin: &Path) -> Option<PathBuf> {
     found.pop()
 }
 
-/// Build the runtime process directly instead of going through `bin/hermes`, so
-/// [`SECRET_BOOTSTRAP`] runs before Hermes imports. The layout matches the
-/// generated wrapper (`<root>/python/bin/python3`, `<root>/site`).
+/// Entry point the generated runtime wrapper (`bin/hermes`) also uses.
+const HERMES_ENTRYPOINT: &str = "from hermes_cli.main import main; main()";
+
+/// Host variables the runtime needs. Everything else is dropped before spawning so a key that
+/// happened to be present when the app was launched from a shell cannot reach terminal/screen
+/// tools. Provider keys are loaded from `<HERMES_HOME>/.env` by the runtime itself.
+const RUNTIME_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NO_PROXY",
+    "no_proxy",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+    "TERM",
+];
+
+fn inherited_runtime_env() -> Vec<(&'static str, OsString)> {
+    RUNTIME_ENV_ALLOWLIST
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (*name, value)))
+        .collect()
+}
+
+fn apply_runtime_environment(command: &mut Command) {
+    command.env_clear().envs(inherited_runtime_env());
+}
+
+/// Build the runtime process directly instead of going through `bin/hermes` so the
+/// interpreter is discovered rather than hard-coded by the generated wrapper. The
+/// layout matches that wrapper (`<root>/python/bin/python3`, `<root>/site`).
+///
+/// No credential is injected here: provider keys live in `<HERMES_HOME>/.env`, which
+/// the runtime loads itself (see [`env_store`]).
 fn runtime_command(bin: &Path) -> Result<Command, AppError> {
     let python = runtime_python(bin).ok_or_else(|| {
         AppError::new(
@@ -1466,71 +1157,23 @@ fn runtime_command(bin: &Path) -> Result<Command, AppError> {
         pythonpath.push_str(&existing.to_string_lossy());
     }
     let mut command = Command::new(python);
+    apply_runtime_environment(&mut command);
     command
         .arg("-c")
-        .arg(SECRET_BOOTSTRAP)
+        .arg(HERMES_ENTRYPOINT)
         .env("PYTHONPATH", pythonpath);
     Ok(command)
 }
 
-#[cfg(unix)]
-type SecretGuard = OwnedFd;
-#[cfg(not(unix))]
-type SecretGuard = ();
-
-/// Put `value` on an inherited fd 3 and close the write end. The bootstrap reads
-/// it and installs the overlay. The returned read end must stay alive until after
-/// `spawn()` so `pre_exec` can duplicate it into the child.
-#[cfg(unix)]
-fn attach_secret(command: &mut Command, name: &str, value: &str) -> Result<SecretGuard, AppError> {
-    let (read, write) = nix::unistd::pipe().map_err(|error| {
-        AppError::new(
-            "E_HERMES_CREDENTIAL",
-            "Could not prepare the provider credential.",
-        )
-        .with_detail(error.to_string())
-    })?;
-    let mut write = std::fs::File::from(write);
-    write.write_all(value.as_bytes())?;
-    drop(write);
-    let raw = read.as_raw_fd();
-    // Safety: the closure only calls async-signal-safe syscalls and captures an
-    // integer; the read end stays open in the parent until after `spawn`.
-    unsafe {
-        command.pre_exec(move || {
-            if raw != 3 && libc::dup2(raw, 3) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::fcntl(3, libc::F_SETFD, 0) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    command.env(SECRET_ENV_MARKER, name);
-    command.env(SECRET_FD_MARKER, "3");
-    Ok(read)
-}
-
-#[cfg(not(unix))]
-fn attach_secret(command: &mut Command, name: &str, value: &str) -> Result<SecretGuard, AppError> {
-    let _ = (command, name, value);
-    Err(AppError::new(
-        "E_HERMES_CREDENTIAL",
-        "Secure credential injection requires macOS.",
-    ))
-}
-
-fn resolve_provider_secret(input: &HermesChatInput) -> Option<String> {
-    if let Some(key) = input
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-    {
-        return Some(key.to_owned());
-    }
-    if let Some(key) = stored_secret(&input.provider) {
+/// Resolve the provider key the runtime will authenticate with. Used for the gateway
+/// fingerprint and for the custom-endpoint `key_env` decision.
+///
+/// The key is never injected into the child process: it lives in `<HERMES_HOME>/.env`, which the
+/// runtime loads itself (see [`env_store`]). Inherited shell variables are deliberately ignored:
+/// the runtime is launched with those credentials scrubbed, so counting one here would claim a
+/// key exists while the runtime cannot read it.
+fn resolve_provider_secret(home: &Path, input: &HermesChatInput) -> Option<String> {
+    if let Some(key) = env_store::env_value(home, provider_key_env(&input.provider)) {
         return Some(key);
     }
     if matches!(input.provider.as_str(), "opencode" | "opencode-go")
@@ -1538,114 +1181,417 @@ fn resolve_provider_secret(input: &HermesChatInput) -> Option<String> {
     {
         return Some(key);
     }
-    // These providers sign in through Hermes' OAuth flow; an inherited shell key
-    // must not preempt the stored login.
-    if !matches!(input.provider.as_str(), "nous" | "codex" | "claude-code")
-        && let Ok(value) = std::env::var(provider_key_env(&input.provider))
-    {
-        let value = value.trim();
-        if !value.is_empty() {
-            return Some(value.to_owned());
-        }
-    }
-    if input.provider == "copilot"
-        && let Ok(output) = std::process::Command::new("gh")
-            .args(["auth", "token"])
-            .output()
-        && output.status.success()
-    {
-        let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if !token.is_empty() {
-            return Some(token);
-        }
-    }
     None
 }
 
-/// Returns the resolved key (used for the gateway fingerprint) and whether an old
-/// `.env` was cleaned up. The latter forces a gateway restart so a previously loaded
-/// `.env` secret does not stay in the running process environment.
-fn write_config(home: &Path, input: &HermesChatInput) -> Result<(Option<String>, bool), AppError> {
-    let api_key = resolve_provider_secret(input);
-    let provider = provider_id(&input.provider);
-    // The key is injected into the runtime through an inherited descriptor and an
-    // in-process overlay (see `attach_secret`); it must never be persisted. Scrub
-    // app-managed rows older builds wrote to the credential pool.
-    write_provider_credential(home, provider, None)?;
-    let env_cleaned = remove_provider_env(home)?;
-    let mut yaml = String::from("agent:\n");
-    if input.force_aux_vision {
-        yaml.push_str("  image_input_mode: text\n");
-    }
-    if let Some(effort) = reasoning_effort(&input.effort) {
-        yaml.push_str(&format!("  reasoning_effort: {effort}\n"));
-    } else {
-        yaml.push_str("  reasoning_effort: \"\"\n");
-    }
-    yaml.push_str("display:\n  show_reasoning: false\n  streaming: true\n");
-    // No credential is written here or to `auth.json`. `env_passthrough` stays
-    // empty so no tool can opt a credential into its child environment.
-    yaml.push_str("terminal:\n  env_passthrough: []\n  client_env_passthrough: []\n");
-    let provider_value =
-        serde_json::to_string(provider).unwrap_or_else(|_| "\"openai-api\"".into());
-    let model_value = serde_json::to_string(&input.model).unwrap_or_else(|_| "\"\"".into());
-    yaml.push_str(&format!(
-        "model:\n  provider: {provider_value}\n  default: {model_value}\n"
-    ));
-    if let Some(endpoint) = input
-        .endpoint
+/// Which part of `config.yaml` a write owns.
+///
+/// A chat turn applies the whole desktop projection: the model, the agent/display/terminal
+/// switches and the auxiliary slots the GUI shows. Reading the model catalog must not. The
+/// settings sheet asks for a profile's catalog just by selecting it, and the draft it passes
+/// is that profile's *saved* state — or the built-in default when this window never opened the
+/// profile — so writing it back replaced the profile's own model with the default one. A
+/// catalog read therefore only maintains the user-defined provider block it needs in order to
+/// discover models from a custom endpoint.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConfigScope {
+    Turn,
+    Catalog,
+}
+
+/// Write the runtime's `config.yaml`.
+///
+/// A key supplied with the request is persisted to `<HERMES_HOME>/.env`; otherwise the
+/// value already in `.env` is used as-is. That is the same store the official CLI and
+/// dashboard read and write, so both see one set of credentials.
+///
+/// The document is merged, not replaced: keys this app does not own (tools, skills, browser,
+/// cron, other providers, anything the user added by hand) survive the write. Only the keys
+/// listed in [`ConfigScope`] are removed and rewritten. The runtime's own `save_config` rewrites
+/// the file the same way, so YAML comments in it were never durable.
+///
+/// Returns the key the runtime will authenticate with, so the caller can fingerprint it.
+fn write_config(home: &Path, input: &HermesChatInput) -> Result<Option<String>, AppError> {
+    write_config_scoped(home, input, ConfigScope::Turn)
+}
+
+/// Catalog-only write; see [`ConfigScope`].
+fn write_catalog_config(home: &Path, input: &HermesChatInput) -> Result<Option<String>, AppError> {
+    write_config_scoped(home, input, ConfigScope::Catalog)
+}
+
+fn write_config_scoped(
+    home: &Path,
+    input: &HermesChatInput,
+    scope: ConfigScope,
+) -> Result<Option<String>, AppError> {
+    // Read before anything is written: saving a key creates `.env`, which is itself enough for the
+    // runtime to accept `--profile <name>`.
+    let was_live = profiles::has_identity(home);
+    if let Some(key) = input
+        .api_key
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|key| !key.is_empty())
     {
-        let endpoint_value = serde_json::to_string(endpoint).unwrap_or_else(|_| "\"\"".into());
-        yaml.push_str(&format!("  base_url: {endpoint_value}\n"));
+        env_store::set_env_value(home, provider_key_env(&input.provider), key)?;
     }
-    let custom_aux: Vec<_> = input
-        .auxiliary
-        .iter()
-        .filter(|entry| entry.provider != "auto" && !entry.model.is_empty())
-        .collect();
-    if !custom_aux.is_empty() {
-        yaml.push_str("auxiliary:\n");
-        for entry in custom_aux {
-            let provider =
-                serde_json::to_string(&entry.provider).unwrap_or_else(|_| "\"auto\"".into());
-            let model = serde_json::to_string(&entry.model).unwrap_or_else(|_| "\"\"".into());
-            yaml.push_str(&format!(
-                "  {}:\n    provider: {}\n    model: {}\n",
-                entry.task, provider, model
-            ));
-        }
-    }
-    if matches!(input.provider.as_str(), "custom" | "local") {
-        let endpoint = input
-            .endpoint
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("http://127.0.0.1:11434/v1");
-        let endpoint = serde_json::to_string(endpoint).unwrap_or_else(|_| "\"\"".into());
-        let model = serde_json::to_string(&input.model).unwrap_or_else(|_| "\"\"".into());
-        // `key_env` names the variable the bootstrap overlay answers; the value
-        // itself never reaches this file, the process environment, or a tool.
-        let key_env = if api_key.is_some() {
-            "    key_env: OPENNAVO_CUSTOM_API_KEY\n"
-        } else {
-            ""
-        };
-        yaml.push_str(&format!(
-            "providers:\n  openavoo-custom:\n    api: {endpoint}\n    transport: chat_completions\n{key_env}    default_model: {model}\n    models:\n      - {model}\n    discover_models: false\n"
-        ));
-    }
+    let api_key = resolve_provider_secret(home, input);
     let config_path = home.join("config.yaml");
-    std::fs::write(&config_path, yaml)?;
+    let existing = std::fs::read_to_string(&config_path).ok();
+    let mut doc = config_doc(existing.as_deref());
+    let before = doc.clone();
+    // A catalog read of a profile directory that holds none of the markers the runtime uses to
+    // recognise a profile would leave `--profile <name>` unresolvable, so that case still gets
+    // the full projection. A profile that merely lost its `config.yaml` stays live through its
+    // `.env` or `auth.json` and keeps the runtime's own defaults.
+    let bootstrap = scope == ConfigScope::Catalog && !was_live;
+    if scope == ConfigScope::Turn || bootstrap {
+        apply_turn_config(&mut doc, input);
+    }
+    apply_custom_provider(&mut doc, input, api_key.is_some());
+    // Nothing this write owns changed, so leave the file byte-for-byte alone. That keeps a
+    // catalog read from reformatting a profile's hand-written `config.yaml`.
+    if doc == before {
+        return Ok(api_key);
+    }
+    let body = render_config(&doc)?;
+    if existing.as_deref() == Some(body.as_str()) {
+        return Ok(api_key);
+    }
+    // A named profile's home may not exist yet; creating it here is what makes the directory a
+    // live `--profile` target for the gateway.
+    env_store::ensure_dir(home)?;
+    std::fs::write(&config_path, body)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600));
     }
-    Ok((api_key, env_cleaned))
+    Ok(api_key)
+}
+
+fn endpoint_of(input: &HermesChatInput) -> Option<&str> {
+    input
+        .endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// Apply the keys a chat turn owns.
+fn apply_turn_config(doc: &mut Yaml, input: &HermesChatInput) {
+    remove_path(doc, &["agent", "image_input_mode"]);
+    if input.force_aux_vision {
+        set_path(
+            doc,
+            &["agent", "image_input_mode"],
+            Yaml::String("text".into()),
+        );
+    }
+    set_path(
+        doc,
+        &["agent", "reasoning_effort"],
+        Yaml::String(reasoning_effort(&input.effort).unwrap_or("").to_owned()),
+    );
+    set_path(doc, &["display", "show_reasoning"], Yaml::Boolean(false));
+    set_path(doc, &["display", "streaming"], Yaml::Boolean(true));
+    // No credential is written to this file: keys stay in `.env`, and `env_passthrough`
+    // stays empty so no tool can opt a credential into its own child environment.
+    set_path(
+        doc,
+        &["terminal", "env_passthrough"],
+        Yaml::Array(Vec::new()),
+    );
+    set_path(
+        doc,
+        &["terminal", "client_env_passthrough"],
+        Yaml::Array(Vec::new()),
+    );
+    set_path(
+        doc,
+        &["model", "provider"],
+        Yaml::String(provider_id(&input.provider).to_owned()),
+    );
+    set_path(
+        doc,
+        &["model", "default"],
+        Yaml::String(input.model.clone()),
+    );
+    remove_path(doc, &["model", "base_url"]);
+    if let Some(endpoint) = endpoint_of(input) {
+        set_path(
+            doc,
+            &["model", "base_url"],
+            Yaml::String(endpoint.to_owned()),
+        );
+    }
+    // Every auxiliary slot the request mentions belongs to the desktop store, so a slot the
+    // user put back on "auto" has to disappear instead of keeping its previous override.
+    // Slots this build does not know about are left alone.
+    for entry in &input.auxiliary {
+        remove_path(doc, &["auxiliary", entry.task.as_str()]);
+    }
+    for entry in input
+        .auxiliary
+        .iter()
+        .filter(|entry| entry.provider != "auto" && !entry.model.is_empty())
+    {
+        set_path(
+            doc,
+            &["auxiliary", entry.task.as_str(), "provider"],
+            Yaml::String(entry.provider.clone()),
+        );
+        set_path(
+            doc,
+            &["auxiliary", entry.task.as_str(), "model"],
+            Yaml::String(entry.model.clone()),
+        );
+    }
+}
+
+/// Apply the user-defined provider block the custom and local cards are served by.
+fn apply_custom_provider(doc: &mut Yaml, input: &HermesChatInput, has_key: bool) {
+    remove_path(doc, &["providers", "openavoo-custom"]);
+    if !matches!(input.provider.as_str(), "custom" | "local") {
+        return;
+    }
+    // `local` means an Ollama-style server on this Mac, so an empty URL has an obvious
+    // default. `custom` means "some OpenAI-compatible endpoint the user names" —
+    // defaulting it to 127.0.0.1:11434 would silently probe Ollama and hide the fact
+    // that no endpoint is configured, so that block is simply omitted until a URL exists.
+    let endpoint = endpoint_of(input)
+        .or_else(|| (input.provider == "local").then_some("http://127.0.0.1:11434/v1"));
+    let Some(endpoint) = endpoint else { return };
+    set_path(
+        doc,
+        &["providers", "openavoo-custom", "api"],
+        Yaml::String(endpoint.to_owned()),
+    );
+    set_path(
+        doc,
+        &["providers", "openavoo-custom", "transport"],
+        Yaml::String("chat_completions".into()),
+    );
+    // `key_env` names the `.env` variable holding the custom endpoint's key; the value itself
+    // never reaches this file. `discover_models: true` lets the runtime list the endpoint's own
+    // models (`GET <api>/models`); with it off the picker could only ever offer the single model
+    // written below.
+    if has_key {
+        set_path(
+            doc,
+            &["providers", "openavoo-custom", "key_env"],
+            Yaml::String("OPENNAVO_CUSTOM_API_KEY".into()),
+        );
+    }
+    set_path(
+        doc,
+        &["providers", "openavoo-custom", "default_model"],
+        Yaml::String(input.model.clone()),
+    );
+    set_path(
+        doc,
+        &["providers", "openavoo-custom", "models"],
+        Yaml::Array(vec![Yaml::String(input.model.clone())]),
+    );
+    set_path(
+        doc,
+        &["providers", "openavoo-custom", "discover_models"],
+        Yaml::Boolean(true),
+    );
+}
+
+/// Parse `config.yaml` into the document a write merges onto.
+///
+/// Anything this crate cannot round-trip (invalid YAML, a non-mapping document, anchors) counts
+/// as absent: the caller then writes a complete document, which is what the app did before it
+/// merged.
+fn config_doc(raw: Option<&str>) -> Yaml {
+    let Some(raw) = raw else {
+        return Yaml::Hash(Hash::new());
+    };
+    let Ok(docs) = YamlLoader::load_from_str(raw) else {
+        return Yaml::Hash(Hash::new());
+    };
+    match docs.into_iter().next() {
+        Some(doc @ Yaml::Hash(_)) if !has_alias(&doc) => doc,
+        _ => Yaml::Hash(Hash::new()),
+    }
+}
+
+fn has_alias(value: &Yaml) -> bool {
+    match value {
+        Yaml::Alias(_) | Yaml::BadValue => true,
+        Yaml::Array(items) => items.iter().any(has_alias),
+        Yaml::Hash(map) => map
+            .iter()
+            .any(|(key, value)| has_alias(key) || has_alias(value)),
+        _ => false,
+    }
+}
+
+fn hash_mut(value: &mut Yaml) -> &mut Hash {
+    if !matches!(value, Yaml::Hash(_)) {
+        *value = Yaml::Hash(Hash::new());
+    }
+    let Yaml::Hash(map) = value else {
+        unreachable!("a hash was just inserted")
+    };
+    map
+}
+
+fn lookup_mut<'a>(doc: &'a mut Yaml, path: &[&str]) -> Option<&'a mut Yaml> {
+    let mut node = doc;
+    for key in path {
+        let Yaml::Hash(map) = node else {
+            return None;
+        };
+        node = map.get_mut(&Yaml::String((*key).to_owned()))?;
+    }
+    Some(node)
+}
+
+fn set_path(doc: &mut Yaml, path: &[&str], value: Yaml) {
+    let Some((last, parents)) = path.split_last() else {
+        return;
+    };
+    let mut node = doc;
+    for key in parents {
+        node = hash_mut(node)
+            .entry(Yaml::String((*key).to_owned()))
+            .or_insert_with(|| Yaml::Hash(Hash::new()));
+    }
+    hash_mut(node).insert(Yaml::String((*last).to_owned()), value);
+}
+
+/// Remove one key, and any section the removal leaves empty, without touching its siblings.
+fn remove_path(doc: &mut Yaml, path: &[&str]) {
+    let Some((last, parents)) = path.split_last() else {
+        return;
+    };
+    if let Some(Yaml::Hash(map)) = lookup_mut(doc, parents) {
+        map.remove(&Yaml::String((*last).to_owned()));
+    }
+    for depth in (1..=parents.len()).rev() {
+        let empty =
+            matches!(lookup_mut(doc, &path[..depth]), Some(Yaml::Hash(map)) if map.is_empty());
+        if !empty {
+            break;
+        }
+        let Some((key, grand)) = path[..depth].split_last() else {
+            break;
+        };
+        if let Some(Yaml::Hash(map)) = lookup_mut(doc, grand) {
+            map.remove(&Yaml::String((*key).to_owned()));
+        }
+    }
+}
+
+fn render_config(doc: &Yaml) -> Result<String, AppError> {
+    if matches!(doc, Yaml::Hash(map) if map.is_empty()) {
+        return Ok(String::new());
+    }
+    let mut out = String::new();
+    YamlEmitter::new(&mut out).dump(doc).map_err(|error| {
+        AppError::new(
+            "E_HERMES_CONFIG",
+            "Could not serialize the Hermes configuration.",
+        )
+        .with_detail(error.to_string())
+    })?;
+    let body = out.strip_prefix("---\n").unwrap_or(&out).to_owned();
+    // Keep a POSIX trailing newline so re-writing an unchanged document stays a no-op.
+    let body = if body.ends_with('\n') {
+        body
+    } else {
+        format!("{body}\n")
+    };
+    // `YamlEmitter` only quotes what YAML requires, and a bare `4` or `~` is legal but reads back
+    // as an integer and a null. When the emitted text no longer parses back to the same document,
+    // fall back to quoting every string so the file means exactly what was written.
+    let reparsed = YamlLoader::load_from_str(&body)
+        .ok()
+        .and_then(|docs| docs.into_iter().next());
+    if reparsed.as_ref() == Some(doc) {
+        return Ok(body);
+    }
+    Ok(quoted_config(doc))
+}
+
+/// Serialize a document with every string quoted: the exact fallback for [`render_config`].
+fn quoted_config(doc: &Yaml) -> String {
+    let mut out = String::new();
+    write_block(&mut out, doc, 0);
+    out.push('\n');
+    out
+}
+
+fn write_block(out: &mut String, value: &Yaml, indent: usize) {
+    match value {
+        Yaml::Hash(map) => {
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push('\n');
+                }
+                pad(out, indent);
+                write_scalar(out, key);
+                out.push(':');
+                write_child(out, item, indent);
+            }
+        }
+        Yaml::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push('\n');
+                }
+                pad(out, indent);
+                out.push('-');
+                write_child(out, item, indent);
+            }
+        }
+        other => {
+            pad(out, indent);
+            write_scalar(out, other);
+        }
+    }
+}
+
+fn write_child(out: &mut String, value: &Yaml, indent: usize) {
+    match value {
+        Yaml::Hash(map) if map.is_empty() => out.push_str(" {}"),
+        Yaml::Array(items) if items.is_empty() => out.push_str(" []"),
+        Yaml::Hash(_) | Yaml::Array(_) => {
+            out.push('\n');
+            write_block(out, value, indent + 2);
+        }
+        other => {
+            out.push(' ');
+            write_scalar(out, other);
+        }
+    }
+}
+
+fn write_scalar(out: &mut String, value: &Yaml) {
+    match value {
+        // `serde_json` escaping is a subset of YAML's double-quoted style, so a string is always
+        // safe to write this way.
+        Yaml::String(text) => match serde_json::to_string(text) {
+            Ok(quoted) => out.push_str(&quoted),
+            Err(_) => out.push_str("\"\""),
+        },
+        Yaml::Integer(number) => out.push_str(&number.to_string()),
+        Yaml::Real(number) => out.push_str(number),
+        Yaml::Boolean(flag) => out.push_str(if *flag { "true" } else { "false" }),
+        Yaml::Hash(_) | Yaml::Array(_) | Yaml::Null | Yaml::BadValue | Yaml::Alias(_) => {
+            out.push_str("null");
+        }
+    }
+}
+
+fn pad(out: &mut String, indent: usize) {
+    for _ in 0..indent {
+        out.push(' ');
+    }
 }
 
 fn kill_pid(pid: u32) {
@@ -1660,41 +1606,119 @@ fn kill_pid(pid: u32) {
     }
 }
 
-fn keychain_entry(provider: &str) -> Result<keyring::Entry, AppError> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, provider).map_err(|error| {
-        AppError::new("E_HERMES_KEYCHAIN", "Could not open the macOS Keychain.")
+/// Store a provider API key in the selected profile's `.env`, the same file the official
+/// Hermes CLI and dashboard read and write. `profile` is `None`/`default` for the root home,
+/// otherwise the key belongs to `<root>/profiles/<name>/.env`.
+pub fn secret_set(
+    app: &AppHandle,
+    provider: &str,
+    key: &str,
+    profile: Option<&str>,
+) -> Result<(), AppError> {
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    env_store::set_env_value(&home, provider_key_env(provider), key)
+}
+
+/// Whether a key is stored for `provider` in the selected profile.
+pub fn secret_status(
+    app: &AppHandle,
+    provider: &str,
+    profile: Option<&str>,
+) -> Result<bool, AppError> {
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    Ok(env_store::env_has(&home, provider_key_env(provider)))
+}
+
+/// Remove a provider's key line from the selected profile's `.env`.
+pub fn secret_delete(
+    app: &AppHandle,
+    provider: &str,
+    profile: Option<&str>,
+) -> Result<(), AppError> {
+    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    env_store::remove_env_value(&home, provider_key_env(provider))?;
+    Ok(())
+}
+
+/// Remote connections are Panel-only: the token-based remote transport was removed with
+/// the connection kinds that used it (`stores/hermes.ts` keeps `local` and `panel`).
+pub fn remote_auth_required() -> AppError {
+    AppError::new(
+        "E_HERMES_REMOTE_AUTH",
+        "Remote connections sign in through Hermes Panel.",
+    )
+}
+
+/// App data root, for the stores that are not part of `HERMES_HOME`.
+fn session_root() -> Result<&'static Path, AppError> {
+    DATA_ROOT
+        .get()
+        .map(PathBuf::as_path)
+        .ok_or_else(|| AppError::new("E_HERMES_HOME", "The app data directory is unavailable."))
+}
+
+fn panel_cache() -> &'static Mutex<std::collections::HashMap<String, panel::PanelSession>> {
+    static CACHE: std::sync::OnceLock<
+        Mutex<std::collections::HashMap<String, panel::PanelSession>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn missing_panel_session() -> AppError {
+    AppError::new(
+        "E_HERMES_PANEL_AUTH",
+        "Hermes Panel session is missing. Sign in again.",
+    )
+}
+
+/// Persist a panel session and prime the in-process cache.
+pub fn panel_session_set(profile_id: &str, session: &panel::PanelSession) -> Result<(), AppError> {
+    let value = serde_json::to_value(session).map_err(|error| {
+        AppError::new("E_HERMES_CREDENTIAL", "Could not encode the panel session.")
             .with_detail(error.to_string())
-    })
+    })?;
+    env_store::session_set(session_root()?, profile_id, value)?;
+    panel_cache()
+        .lock()
+        .map_err(|_| AppError::new("E_HERMES_CREDENTIAL", "Panel session cache is poisoned."))?
+        .insert(profile_id.to_owned(), session.clone());
+    Ok(())
 }
 
-pub fn secret_set(provider: &str, key: &str) -> Result<(), AppError> {
-    keychain_entry(provider)?
-        .set_password(key)
-        .map_err(|error| {
-            AppError::new("E_HERMES_KEYCHAIN", "Could not save the API key.")
-                .with_detail(error.to_string())
-        })
-}
-
-pub fn secret_status(provider: &str) -> Result<bool, AppError> {
-    match keychain_entry(provider)?.get_password() {
-        Ok(value) => Ok(!value.is_empty()),
-        Err(keyring::Error::NoEntry) => Ok(false),
-        Err(error) => Err(
-            AppError::new("E_HERMES_KEYCHAIN", "Could not read the API key.")
-                .with_detail(error.to_string()),
-        ),
+pub fn panel_session(profile_id: &str) -> Result<panel::PanelSession, AppError> {
+    if let Some(session) = panel_cache()
+        .lock()
+        .map_err(|_| AppError::new("E_HERMES_CREDENTIAL", "Panel session cache is poisoned."))?
+        .get(profile_id)
+        .cloned()
+    {
+        return Ok(session);
     }
+    let value =
+        env_store::session_get(session_root()?, profile_id).ok_or_else(missing_panel_session)?;
+    let session: panel::PanelSession = serde_json::from_value(value).map_err(|error| {
+        AppError::new("E_HERMES_CREDENTIAL", "The panel session is corrupt.")
+            .with_detail(error.to_string())
+    })?;
+    panel_cache()
+        .lock()
+        .map_err(|_| AppError::new("E_HERMES_CREDENTIAL", "Panel session cache is poisoned."))?
+        .insert(profile_id.to_owned(), session.clone());
+    Ok(session)
 }
 
-pub fn secret_delete(provider: &str) -> Result<(), AppError> {
-    match keychain_entry(provider)?.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(
-            AppError::new("E_HERMES_KEYCHAIN", "Could not remove the API key.")
-                .with_detail(error.to_string()),
-        ),
+pub fn panel_session_delete(profile_id: &str) -> Result<(), AppError> {
+    if let Ok(mut cache) = panel_cache().lock() {
+        cache.remove(profile_id);
+    }
+    env_store::session_delete(session_root()?, profile_id)
+}
+
+/// Drop every cached panel session. The stored copies live under the data root, so an
+/// uninstall removes them; this keeps the running process from holding them too.
+pub fn panel_sessions_forget() {
+    if let Ok(mut cache) = panel_cache().lock() {
+        cache.clear();
     }
 }
 
@@ -1718,35 +1742,151 @@ fn local_opencode_key(provider: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn stored_secret(provider: &str) -> Option<String> {
-    keychain_entry(provider)
-        .ok()
-        .and_then(|entry| entry.get_password().ok())
-        .filter(|value| !value.is_empty())
+/// Cache the app data root and start the one-time credential migration. Called once
+/// from the app setup hook so panel-session helpers never depend on call order.
+pub fn init(app: &AppHandle) {
+    if data_root(app).is_ok() {
+        migrate_legacy_credentials(app);
+    }
 }
 
-/// Remove provider keys that older builds persisted to `auth.json`/`.env`. The
-/// current build injects the key in memory, so a stale on-disk copy must not
-/// outlive an upgrade even if the user never sends another message.
-async fn scrub_legacy_credentials(app: &AppHandle) {
-    let Ok(home) = hermes_home(app) else {
-        return;
+/// Kick off the one-time migration of credentials older builds kept in the Keychain.
+/// Runs at most once per process, on a detached thread, and never blocks startup.
+fn migrate_legacy_credentials(app: &AppHandle) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let (Ok(root), Ok(home)) = (data_root(app), hermes_home(app)) else {
+            return;
+        };
+        legacy_migration::spawn(root, home);
+    });
+}
+
+#[derive(Debug)]
+struct RuntimeVersionProbe {
+    success: bool,
+    stderr: String,
+    version: Option<String>,
+}
+
+/// Read the runtime's own version with an empty, throwaway HERMES_HOME.
+///
+/// Without this, Hermes falls back to the user's `~/.hermes` checkout (or a
+/// source tree) and can report a version that has nothing to do with the
+/// packaged runtime OpenNavo installed.
+async fn probe_runtime_version(bin: &Path) -> Result<RuntimeVersionProbe, AppError> {
+    let check_home =
+        std::env::temp_dir().join(format!("opennavo-hermes-check-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&check_home)?;
+    let mut command = Command::new("/bin/sh");
+    apply_runtime_environment(&mut command);
+    command
+        .arg(bin)
+        .arg("--version")
+        .env("HERMES_HOME", &check_home)
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&check_home);
+            return Err(
+                AppError::new("E_HERMES_RUNTIME", "Hermes runtime could not start.")
+                    .with_detail(error.to_string()),
+            );
+        }
     };
-    let _ = tokio::task::spawn_blocking(move || {
-        let _ = write_provider_credential(&home, "", None);
-        let _ = remove_provider_env(&home);
+    let mut stdout_pipe = child.stdout.take().expect("version probe stdout is piped");
+    let mut stderr_pipe = child.stderr.take().expect("version probe stderr is piped");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let output = timeout(VERSION_TIMEOUT, async {
+        let (stdout_result, stderr_result, status_result) = tokio::join!(
+            stdout_pipe.read_to_end(&mut stdout),
+            stderr_pipe.read_to_end(&mut stderr),
+            child.wait(),
+        );
+        (stdout_result, stderr_result, status_result)
     })
     .await;
+    let (stdout_result, stderr_result, status_result) = match output {
+        Ok(output) => output,
+        Err(_) => {
+            // `kill_on_drop` would reap the child when the future is dropped, but the
+            // throwaway HERMES_HOME must outlive the process that is still using it.
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = std::fs::remove_dir_all(&check_home);
+            return Err(AppError::new(
+                "E_HERMES_TIMEOUT",
+                "Hermes version check timed out.",
+            ));
+        }
+    };
+    let _ = std::fs::remove_dir_all(&check_home);
+    stdout_result.map_err(|error| {
+        AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime output could not be read.",
+        )
+        .with_detail(error.to_string())
+    })?;
+    stderr_result.map_err(|error| {
+        AppError::new(
+            "E_HERMES_RUNTIME",
+            "Hermes runtime output could not be read.",
+        )
+        .with_detail(error.to_string())
+    })?;
+    let status = status_result.map_err(|error| {
+        AppError::new("E_HERMES_RUNTIME", "Hermes runtime could not start.")
+            .with_detail(error.to_string())
+    })?;
+    let stdout = clean_output(&String::from_utf8_lossy(&stdout));
+    let stderr = clean_output(&String::from_utf8_lossy(&stderr));
+    Ok(RuntimeVersionProbe {
+        success: status.success(),
+        version: status
+            .success()
+            .then(|| runtime_version_from_output(&stdout))
+            .flatten(),
+        stderr,
+    })
+}
+
+async fn verify_runtime_bin(bin: &Path, expected: &str) -> Result<(), AppError> {
+    let probe = probe_runtime_version(bin).await?;
+    if !probe.success {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "The Hermes runtime version check failed.",
+        )
+        .with_detail(probe.stderr));
+    }
+    let actual = probe.version.unwrap_or_else(|| "unknown".to_owned());
+    if actual != expected {
+        return Err(AppError::new(
+            "E_HERMES_RUNTIME",
+            "The Hermes runtime does not match the pinned version.",
+        )
+        .with_detail(format!("expected {expected}, got {actual}")));
+    }
+    Ok(())
 }
 
 pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
-    scrub_legacy_credentials(&app).await;
+    migrate_legacy_credentials(&app);
+    let expected_version = expected_runtime_version()?;
     let Some(bin) = runtime_bin(&app) else {
         log::warn!("Hermes runtime status: no runtime binary found");
         return Ok(HermesRuntimeStatus {
             ready: false,
             installed: false,
             version: None,
+            expected_version,
             path: None,
             data_path: data_root(&app).ok().map(|path| path.display().to_string()),
             computer_use: false,
@@ -1755,42 +1895,28 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
         });
     };
     log::info!("Hermes runtime status: checking {}", bin.display());
-    let output = timeout(
-        VERSION_TIMEOUT,
-        Command::new("/bin/sh").arg(&bin).arg("--version").output(),
-    )
-    .await
-    .map_err(|_| {
-        log::warn!("Hermes runtime status: version check timed out");
-        AppError::new("E_HERMES_TIMEOUT", "Hermes version check timed out.")
-    })?
-    .map_err(|error| {
-        log::warn!("Hermes runtime status: spawn failed: {error}");
-        AppError::new("E_HERMES_RUNTIME", "Hermes runtime could not start.")
-            .with_detail(error.to_string())
+    let probe = probe_runtime_version(&bin).await.map_err(|error| {
+        log::warn!("Hermes runtime status: version check failed: {error}");
+        error
     })?;
-    if !output.status.success() {
+    if !probe.success {
         log::warn!(
-            "Hermes runtime status: version failed status={:?} stderr={}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
+            "Hermes runtime status: version failed stderr={}",
+            probe.stderr
         );
         return Ok(HermesRuntimeStatus {
             ready: false,
             installed: true,
             version: None,
+            expected_version,
             path: Some(bin.display().to_string()),
             data_path: data_root(&app).ok().map(|path| path.display().to_string()),
             computer_use: false,
             outdated: false,
-            message: Some(clean_output(&String::from_utf8_lossy(&output.stderr))),
+            message: Some(probe.stderr),
         });
     }
-    let version = clean_output(&String::from_utf8_lossy(&output.stdout))
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .to_owned();
+    let version = probe.version;
     let computer_use = bin
         .parent()
         .and_then(|dir| dir.parent())
@@ -1799,17 +1925,26 @@ pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
                 .is_file()
         })
         .unwrap_or(false);
-    let outdated = !runtime_is_current(&version);
-    log::info!("Hermes runtime status: ready {version} (computer_use={computer_use})");
+    let outdated = version.as_deref() != Some(expected_version.as_str());
+    let message = version.is_none().then(|| {
+        format!(
+            "The installed Hermes runtime does not report a packaged version. Update it to {expected_version}."
+        )
+    });
+    log::info!(
+        "Hermes runtime status: ready {} (computer_use={computer_use}, outdated={outdated})",
+        version.as_deref().unwrap_or("unknown")
+    );
     Ok(HermesRuntimeStatus {
         ready: true,
         installed: true,
-        version: Some(version),
+        version,
+        expected_version,
         path: Some(bin.display().to_string()),
         data_path: data_root(&app).ok().map(|path| path.display().to_string()),
         computer_use,
         outdated,
-        message: None,
+        message,
     })
 }
 
@@ -1818,13 +1953,36 @@ pub async fn chat(
     state: &HermesRuntimeState,
     input: HermesChatInput,
 ) -> Result<HermesChatReply, AppError> {
+    let home = hermes_home(&app)?;
+    if input
+        .gateway_url
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        let profile_id = input.profile_id.as_deref().unwrap_or_default().to_owned();
+        if input.panel_auth {
+            let ticket = panel::ticket_for(&profile_id).await?;
+            let query = format!("ticket={}", urlencoding::encode(&ticket));
+            let panel_url = panel::base_url_for(&profile_id)?;
+            return gateway::chat_remote_auth(
+                &panel_url,
+                &query,
+                &home,
+                state,
+                input,
+                Some(&app),
+                None,
+            )
+            .await;
+        }
+        return Err(remote_auth_required());
+    }
     let Some(bin) = runtime_bin(&app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed. Install it from the assistant.",
         ));
     };
-    let home = hermes_home(&app)?;
     gateway::chat(&bin, &home, state, input, Some(&app), None).await
 }
 
@@ -1840,7 +1998,7 @@ async fn chat_with_bin(
     if input.prompt.trim().is_empty() {
         return Err(AppError::new("E_HERMES_INPUT", "The message is empty."));
     }
-    let (api_key, _) = write_config(home, &input)?;
+    write_config(home, &input)?;
 
     let prompt = {
         let mut prompt = input.prompt.clone();
@@ -1891,12 +2049,6 @@ async fn chat_with_bin(
     if input.mac_enabled && input.control_level == "full" && !input.confirm_writes {
         command.arg("--yolo");
     }
-    scrub_credential_env(&mut command);
-    let secret = match (api_key.as_deref(), secret_env_var(&input.provider)) {
-        (Some(key), Some(name)) => Some(attach_secret(&mut command, name, key)?),
-        _ => None,
-    };
-
     if let Some(dir) = input
         .cwd
         .as_deref()
@@ -1909,7 +2061,6 @@ async fn chat_with_bin(
         AppError::new("E_HERMES_RUNTIME", "Hermes runtime could not start.")
             .with_detail(error.to_string())
     })?;
-    drop(secret);
     let pid = child.id();
     if let Some(pid) = pid
         && let Ok(mut current) = state.pid.lock()
@@ -2107,7 +2258,7 @@ async fn consume_stdout<R: AsyncRead + Unpin>(
 
 pub async fn stop(state: &HermesRuntimeState) -> Result<(), AppError> {
     state.approval_cancel.notify_waiters();
-    let _ = state.approval.lock().await.take();
+    let _ = state.asks.lock().await.take();
     let pid = state.pid.lock().ok().and_then(|current| *current);
     if let Some(pid) = pid {
         kill_pid(pid);
@@ -2159,6 +2310,10 @@ mod tests {
                 },
             ],
             force_aux_vision: true,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             mac_enabled: false,
             control_level: "open".into(),
             mac_terminal: true,
@@ -2169,8 +2324,8 @@ mod tests {
         };
         write_config(dir.path(), &input).unwrap();
         let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-        assert!(config.contains("provider: \"openai-api\""));
-        assert!(config.contains("default: \"gpt-5.4\""));
+        assert!(config.contains("provider: openai-api"));
+        assert!(config.contains("default: gpt-5.4"));
         assert!(config.contains("auxiliary:"));
         assert!(config.contains("title_generation:"));
         assert!(config.contains("gpt-5.4-mini"));
@@ -2178,233 +2333,351 @@ mod tests {
         assert!(!config.contains("vision:"));
     }
 
-    fn pool_entry<'a>(
-        store: &'a serde_json::Value,
-        provider: &str,
-    ) -> Option<&'a serde_json::Value> {
-        store
-            .get("credential_pool")?
-            .get(provider)?
-            .as_array()?
-            .iter()
-            .find(|entry| {
-                entry.get("source").and_then(serde_json::Value::as_str)
-                    == Some(OPENNAVO_CREDENTIAL_SOURCE)
-            })
+    #[test]
+    fn maps_providers_to_their_dot_env_variables() {
+        assert_eq!(provider_key_env("openai"), "OPENAI_API_KEY");
+        assert_eq!(provider_key_env("codex"), "OPENAI_API_KEY");
+        assert_eq!(provider_key_env("anthropic"), "ANTHROPIC_API_KEY");
+        assert_eq!(provider_key_env("claude-code"), "ANTHROPIC_API_KEY");
+        assert_eq!(provider_key_env("google"), "GOOGLE_API_KEY");
+        assert_eq!(provider_key_env("openrouter"), "OPENROUTER_API_KEY");
+        assert_eq!(provider_key_env("nous"), "NOUS_API_KEY");
+        assert_eq!(provider_key_env("copilot"), "GITHUB_TOKEN");
+        assert_eq!(provider_key_env("custom"), "OPENNAVO_CUSTOM_API_KEY");
+        assert_eq!(provider_key_env("local"), "OPENNAVO_CUSTOM_API_KEY");
     }
 
-    #[test]
-    fn keeps_provider_keys_out_of_the_credential_pool() {
+    #[tokio::test]
+    async fn runtime_commands_drop_the_inherited_environment() {
         let dir = tempfile::tempdir().unwrap();
-        let input = HermesChatInput {
-            prompt: "hello".into(),
-            request_id: "key-test".into(),
-            session_id: None,
-            provider: "openai".into(),
-            model: "gpt-5.4".into(),
-            effort: "medium".into(),
-            fast: false,
-            api_key: Some("sk-not-on-disk".into()),
-            endpoint: None,
-            cwd: None,
-            attachments: Vec::new(),
-            auxiliary: Vec::new(),
-            force_aux_vision: false,
-            mac_enabled: false,
-            control_level: "open".into(),
-            mac_terminal: false,
-            mac_screen: false,
-            mac_files: false,
-            mac_cron: false,
-            confirm_writes: true,
-        };
-        let (key, env_cleaned) = write_config(dir.path(), &input).unwrap();
-        assert_eq!(key.as_deref(), Some("sk-not-on-disk"));
-        assert!(!env_cleaned);
-        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-        assert!(!config.contains("sk-not-on-disk"));
-        assert!(!config.contains("OPENAI_API_KEY"));
-        assert!(!dir.path().join(".env").exists());
-        if let Ok(bytes) = std::fs::read(dir.path().join("auth.json")) {
-            let store: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            assert!(pool_entry(&store, "openai-api").is_none());
+        let bin = fake_runtime(dir.path(), "#!/bin/sh\nenv\n");
+        let inherited = ["CARGO_MANIFEST_DIR", "PWD", "OLDPWD"]
+            .into_iter()
+            .find(|name| std::env::var_os(name).is_some())
+            .expect("the test process should expose at least one non-allowlisted variable");
+        let output = runtime_command(&bin).unwrap().output().await.unwrap();
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !stdout
+                .lines()
+                .any(|line| line.starts_with(&format!("{inherited}="))),
+            "{inherited} must not reach the Hermes runtime"
+        );
+        if std::env::var_os("PATH").is_some() {
+            assert!(stdout.lines().any(|line| line.starts_with("PATH=")));
         }
+        assert!(stdout.lines().any(|line| line.starts_with("PYTHONPATH=")));
     }
 
     #[test]
-    fn configures_custom_endpoints_without_persisting_the_key() {
+    fn writes_a_supplied_key_to_dot_env_and_never_to_config() {
         let dir = tempfile::tempdir().unwrap();
-        let input = HermesChatInput {
-            prompt: "hello".into(),
-            request_id: "custom-test".into(),
-            session_id: None,
-            provider: "custom".into(),
-            model: "my-model".into(),
-            effort: "medium".into(),
-            fast: false,
-            api_key: Some("sk-custom-not-on-disk".into()),
-            endpoint: Some("https://example.test/v1".into()),
-            cwd: None,
-            attachments: Vec::new(),
-            auxiliary: Vec::new(),
-            force_aux_vision: false,
-            mac_enabled: false,
-            control_level: "open".into(),
-            mac_terminal: false,
-            mac_screen: false,
-            mac_files: false,
-            mac_cron: false,
-            confirm_writes: true,
-        };
-        let (key, _) = write_config(dir.path(), &input).unwrap();
-        assert_eq!(key.as_deref(), Some("sk-custom-not-on-disk"));
+        let mut input = test_input();
+        input.api_key = Some("sk-in-dot-env".into());
+        let key = write_config(dir.path(), &input).unwrap();
+        assert_eq!(key.as_deref(), Some("sk-in-dot-env"));
+
+        let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert_eq!(env, "OPENAI_API_KEY=sk-in-dot-env\n");
         let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-        assert!(config.contains("key_env: OPENNAVO_CUSTOM_API_KEY"));
-        assert!(!config.contains("sk-custom-not-on-disk"));
-        assert!(!config.contains("api_key: \"local\""));
-        assert!(!dir.path().join(".env").exists());
-        if let Ok(bytes) = std::fs::read(dir.path().join("auth.json")) {
-            let store: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            assert!(pool_entry(&store, "openavoo-custom").is_none());
-        }
+        assert!(!config.contains("sk-in-dot-env"));
+        // The key lives in `.env`; the app no longer maintains an auth store of its own.
+        assert!(!dir.path().join("auth.json").exists());
     }
 
     #[test]
-    fn removes_a_stale_provider_key_from_the_pool() {
+    fn reads_the_key_back_from_dot_env_when_the_request_has_none() {
         let dir = tempfile::tempdir().unwrap();
-        // Call the store writer directly: `write_config` with no key would also consult
-        // the real Keychain, which is not available in a unit test.
-        write_provider_credential(dir.path(), "openavoo-custom", Some("sk-stale")).unwrap();
-        let store: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(dir.path().join("auth.json")).unwrap()).unwrap();
-        assert!(pool_entry(&store, "openavoo-custom").is_some());
-
-        write_provider_credential(dir.path(), "openavoo-custom", None).unwrap();
-        let store: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(dir.path().join("auth.json")).unwrap()).unwrap();
-        assert!(pool_entry(&store, "openavoo-custom").is_none());
+        std::fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-stored\n").unwrap();
+        let mut input = test_input();
+        input.api_key = None;
+        let key = write_config(dir.path(), &input).unwrap();
+        assert_eq!(key.as_deref(), Some("sk-stored"));
+        let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert_eq!(env, "OPENAI_API_KEY=sk-stored\n");
     }
 
     #[test]
-    fn removes_managed_env_keys_without_persisting_them() {
+    fn keeps_the_users_own_dot_env_lines() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(".env"),
-            "OPENAI_API_KEY=sk-old\nSOME_SETTING=keep\n",
+            "# added by hand\nMY_SETTING=keep\nOPENAI_API_KEY=sk-old\n",
         )
         .unwrap();
-        let input = test_input();
-        let (_, env_cleaned) = write_config(dir.path(), &input).unwrap();
-        assert!(env_cleaned);
-        let env = std::fs::read_to_string(dir.path().join(".env")).unwrap_or_default();
-        assert!(!env.contains("OPENAI_API_KEY"));
-        assert!(env.contains("SOME_SETTING=keep"));
-        if let Ok(bytes) = std::fs::read(dir.path().join("auth.json")) {
-            let store: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            assert!(pool_entry(&store, "openai-api").is_none());
-        }
+        let mut input = test_input();
+        input.api_key = Some("sk-new".into());
+        write_config(dir.path(), &input).unwrap();
+        let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert!(env.contains("# added by hand"));
+        assert!(env.contains("MY_SETTING=keep"));
+        assert!(env.contains("OPENAI_API_KEY=sk-new"));
+        assert!(!env.contains("sk-old"));
+        assert_eq!(env.matches("OPENAI_API_KEY").count(), 1);
     }
 
     #[test]
-    fn preserves_oauth_state_while_cleaning_stale_secrets() {
+    fn leaves_upstream_oauth_state_untouched() {
         let dir = tempfile::tempdir().unwrap();
+        // Hermes owns `auth.json`; the app must not read, rewrite or scrub it.
         let original = serde_json::json!({
             "version": 1,
             "active_provider": "nous",
-            "providers": {
-                "nous": {"access_token": "oauth-token"}
-            },
+            "providers": {"nous": {"access_token": "oauth-token"}},
             "credential_pool": {
-                "nous": [
-                    {"id": "nous1", "source": "device_code", "access_token": "oauth-token"}
-                ],
-                "openai-api": [
-                    {"id": "env1", "source": "env:OPENAI_API_KEY", "access_token": "sk-old-env"}
-                ],
-                "openavoo-custom": [
-                    {"id": "cfg1", "source": "config:openavoo-custom", "access_token": "sk-old-config"}
-                ]
+                "nous": [{"id": "nous1", "source": "device_code", "access_token": "oauth-token"}],
+                "openai-api": [{"id": "env1", "source": "env:OPENAI_API_KEY", "access_token": "sk-old"}]
             }
         });
-        std::fs::write(
-            dir.path().join("auth.json"),
-            serde_json::to_vec_pretty(&original).unwrap(),
-        )
-        .unwrap();
+        let path = dir.path().join("auth.json");
+        let bytes = serde_json::to_vec_pretty(&original).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
 
-        write_provider_credential(dir.path(), "openai-api", Some("sk-new")).unwrap();
-        let store: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(dir.path().join("auth.json")).unwrap()).unwrap();
-        assert_eq!(store["providers"]["nous"]["access_token"], "oauth-token");
-        assert_eq!(store["credential_pool"]["nous"][0]["source"], "device_code");
-        assert_eq!(
-            pool_entry(&store, "openai-api")
-                .and_then(|entry| entry.get("access_token"))
-                .and_then(serde_json::Value::as_str),
-            Some("sk-new")
-        );
-        assert!(store["credential_pool"].get("openavoo-custom").is_none());
-        assert_eq!(store["active_provider"], "nous");
+        let mut input = test_input();
+        input.api_key = Some("sk-new".into());
+        write_config(dir.path(), &input).unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
 
     #[test]
-    fn removes_app_managed_keys_from_other_providers() {
+    fn custom_endpoints_name_the_dot_env_variable_instead_of_inlining_the_key() {
         let dir = tempfile::tempdir().unwrap();
         let mut input = test_input();
-        input.api_key = Some("sk-openai".into());
-        write_config(dir.path(), &input).unwrap();
-
         input.provider = "custom".into();
+        input.model = "my-model".into();
         input.endpoint = Some("https://example.test/v1".into());
         input.api_key = Some("sk-custom".into());
+        let key = write_config(dir.path(), &input).unwrap();
+        assert_eq!(key.as_deref(), Some("sk-custom"));
+
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(config.contains("key_env: OPENNAVO_CUSTOM_API_KEY"));
+        assert!(!config.contains("sk-custom"));
+        let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert_eq!(env, "OPENNAVO_CUSTOM_API_KEY=sk-custom\n");
+    }
+
+    #[test]
+    fn custom_provider_without_a_url_writes_no_provider_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = test_input();
+        input.provider = "custom".into();
+        input.model = "grok-4.7".into();
+        input.endpoint = None;
+        input.api_key = None;
+        write_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        // Defaulting a custom endpoint to the Ollama URL would silently probe a local
+        // server the user never asked for.
+        assert!(!config.contains("providers:"));
+        assert!(!config.contains("11434"));
+    }
+
+    #[test]
+    fn local_provider_still_defaults_to_the_ollama_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = test_input();
+        input.provider = "local".into();
+        input.model = "llama".into();
+        input.endpoint = None;
+        input.api_key = None;
+        write_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(config.contains("http://127.0.0.1:11434/v1"));
+    }
+
+    #[test]
+    fn omits_key_env_when_a_custom_endpoint_has_no_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = test_input();
+        input.provider = "local".into();
+        input.model = "llama".into();
+        input.endpoint = Some("http://127.0.0.1:11434/v1".into());
+        input.api_key = None;
+        write_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(!config.contains("key_env"));
+    }
+
+    /// A profile's `config.yaml` holds settings the desktop never shows (tools, skills, browser,
+    /// cron, other providers). A write must merge onto it instead of replacing the file.
+    #[test]
+    fn keeps_settings_the_desktop_does_not_own() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "_config_version: 7\ntools:\n  browser:\n    enabled: true\nagent:\n  max_turns: 12\n  reasoning_effort: high\nproviders:\n  mine:\n    api: http://127.0.0.1:8000/v1\nmodel:\n  provider: nous\n  default: hermes-4\n",
+        )
+        .unwrap();
+        let mut input = test_input();
+        input.model = "gpt-test".into();
         write_config(dir.path(), &input).unwrap();
 
-        if let Ok(bytes) = std::fs::read(dir.path().join("auth.json")) {
-            let store: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            assert!(pool_entry(&store, "openai-api").is_none());
-            assert!(pool_entry(&store, "openavoo-custom").is_none());
-        }
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(config.contains("_config_version: 7"), "{config}");
+        assert!(config.contains("browser:"), "{config}");
+        assert!(config.contains("max_turns: 12"), "{config}");
+        assert!(config.contains("mine:"), "{config}");
+        // The keys the desktop owns are still rewritten.
+        assert!(config.contains("reasoning_effort: medium"), "{config}");
+        assert!(config.contains("provider: openai-api"), "{config}");
+        assert!(config.contains("default: gpt-test"), "{config}");
+        assert!(!config.contains("hermes-4"), "{config}");
     }
 
+    /// Selecting a profile in the settings sheet loads its catalog. That read used to write the
+    /// draft back, replacing the profile's own model with the built-in default.
     #[test]
-    fn oauth_providers_do_not_receive_a_secret_env_var() {
-        assert_eq!(secret_env_var("nous"), None);
-        assert_eq!(secret_env_var("codex"), None);
-        assert_eq!(secret_env_var("claude-code"), None);
-        assert_eq!(secret_env_var("openai"), Some("OPENAI_API_KEY"));
-        assert_eq!(secret_env_var("custom"), Some("OPENNAVO_CUSTOM_API_KEY"));
-        assert_eq!(secret_env_var("copilot"), Some("GITHUB_TOKEN"));
-    }
+    fn a_catalog_read_leaves_the_profile_model_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "model:\n  provider: nous\n  default: hermes-4\nagent:\n  reasoning_effort: high\n",
+        )
+        .unwrap();
+        let mut input = test_input();
+        input.provider = "nous".into();
+        input.model = "Hermes 4 · 405B".into();
+        write_catalog_config(dir.path(), &input).unwrap();
 
-    #[test]
-    fn secret_bootstrap_is_valid_python() {
-        let Ok(output) = std::process::Command::new("python3")
-            .arg("-c")
-            .arg(format!(
-                "compile({:?}, '<bootstrap>', 'exec')",
-                SECRET_BOOTSTRAP
-            ))
-            .output()
-        else {
-            return;
-        };
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert_eq!(
+            config,
+            "model:\n  provider: nous\n  default: hermes-4\nagent:\n  reasoning_effort: high\n"
         );
     }
 
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn passes_the_secret_on_fd_three() {
-        let mut command = Command::new("/bin/sh");
-        command.args(["-c", "cat <&3"]);
-        let guard = attach_secret(&mut command, "OPENNAVO_TEST_KEY", "sk-fd-secret").unwrap();
-        let output = command.output().await.unwrap();
-        drop(guard);
-        assert!(output.status.success());
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "sk-fd-secret");
+    /// A catalog read of a fresh profile still has to bootstrap the file, otherwise the runtime
+    /// refuses the `--profile` target it was started with.
+    #[test]
+    fn a_catalog_read_bootstraps_a_profile_without_a_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = test_input();
+        write_catalog_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(config.contains("provider: openai-api"), "{config}");
+        assert!(config.contains("default: gpt-test"), "{config}");
+    }
+
+    /// A profile that is already live through another marker keeps the runtime's own defaults;
+    /// a catalog read must not invent a model for it.
+    #[test]
+    fn a_catalog_read_does_not_invent_a_config_for_a_live_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-stored\n").unwrap();
+        let mut input = test_input();
+        input.api_key = None;
+        write_catalog_config(dir.path(), &input).unwrap();
+        assert!(!dir.path().join("config.yaml").exists());
+    }
+
+    #[test]
+    fn a_catalog_read_still_registers_the_custom_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = test_input();
+        input.provider = "custom".into();
+        input.model = "my-model".into();
+        input.endpoint = Some("https://example.test/v1".into());
+        write_catalog_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(config.contains("openavoo-custom:"), "{config}");
+        assert!(config.contains("https://example.test/v1"), "{config}");
+    }
+
+    /// Putting an auxiliary slot back on `auto` has to remove its override, or the runtime keeps
+    /// using the model the user just cleared.
+    #[test]
+    fn a_slot_back_on_auto_drops_its_override() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "auxiliary:\n  vision:\n    provider: openai-api\n    model: gpt-4o\n  curator:\n    provider: openai-api\n    model: keep-me\n",
+        )
+        .unwrap();
+        let mut input = test_input();
+        input.auxiliary = vec![HermesAuxAssignment {
+            task: "vision".into(),
+            provider: "auto".into(),
+            model: String::new(),
+        }];
+        write_config(dir.path(), &input).unwrap();
+
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(!config.contains("gpt-4o"), "{config}");
+        // A slot this build does not send is left alone.
+        assert!(config.contains("keep-me"), "{config}");
+    }
+
+    #[test]
+    fn a_missing_auxiliary_section_does_not_leave_an_empty_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = test_input();
+        input.auxiliary = vec![HermesAuxAssignment {
+            task: "vision".into(),
+            provider: "auto".into(),
+            model: String::new(),
+        }];
+        write_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(!config.contains("auxiliary"), "{config}");
+    }
+
+    /// `YamlEmitter` leaves `4` and `~` bare, which would read back as an integer and a null.
+    /// That document takes the fully quoted fallback, so this also covers its nesting.
+    #[test]
+    fn keeps_scalars_that_would_change_type() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "tools:\n  browser:\n    enabled: true\n",
+        )
+        .unwrap();
+        let mut input = test_input();
+        input.provider = "local".into();
+        input.model = "4".into();
+        write_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        let docs = YamlLoader::load_from_str(&config).unwrap();
+        assert_eq!(docs[0]["model"]["default"].as_str(), Some("4"), "{config}");
+        assert_eq!(
+            docs[0]["providers"]["openavoo-custom"]["models"]
+                .as_vec()
+                .map(Vec::len),
+            Some(1),
+            "{config}"
+        );
+        assert_eq!(
+            docs[0]["tools"]["browser"]["enabled"].as_bool(),
+            Some(true),
+            "{config}"
+        );
+    }
+
+    /// An unreadable file is written from scratch rather than merging onto a half-parsed doc.
+    #[test]
+    fn rewrites_a_config_it_cannot_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.yaml"), "model: [unclosed\n").unwrap();
+        let input = test_input();
+        write_config(dir.path(), &input).unwrap();
+        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+        assert!(config.contains("provider: openai-api"), "{config}");
+        assert!(!config.contains("unclosed"), "{config}");
+    }
+
+    #[test]
+    fn removing_a_provider_key_leaves_other_variables() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env"),
+            "OPENAI_API_KEY=sk-x\nANTHROPIC_API_KEY=sk-y\n",
+        )
+        .unwrap();
+        assert!(env_store::remove_env_value(dir.path(), "OPENAI_API_KEY").unwrap());
+        let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert_eq!(env, "ANTHROPIC_API_KEY=sk-y\n");
     }
 
     #[test]
@@ -2412,6 +2685,61 @@ mod tests {
         assert_eq!(reasoning_effort("auto"), None);
         assert_eq!(reasoning_effort("medium"), Some("medium"));
         assert_eq!(reasoning_effort("high"), Some("high"));
+    }
+
+    #[test]
+    fn runtime_manifest_pins_the_expected_version() {
+        let manifest = runtime_manifest().unwrap();
+        assert_eq!(manifest.hermes.version, "0.23.1");
+        assert_eq!(manifest.plugins.len(), 1);
+        assert_eq!(manifest.plugins[0].name, "github-copilot");
+        assert_eq!(
+            manifest.plugins[0].repository,
+            "https://github.com/NousResearch/hermes-labs-plugins"
+        );
+        assert_eq!(
+            manifest.plugins[0].sha,
+            "4987918a068fcf4b3efbb584db5dd05e5f57c669"
+        );
+    }
+
+    #[test]
+    fn runtime_version_ignores_dates_and_other_numbers() {
+        assert_eq!(
+            runtime_version_from_output("Hermes Agent v0.23.1 · stable").as_deref(),
+            Some("0.23.1")
+        );
+        assert_eq!(
+            runtime_version_from_output("Hermes Agent vunknown (2026.9.24)"),
+            None
+        );
+        assert!(runtime_version_matches(
+            "Hermes Agent v0.23.1 · stable",
+            "0.23.1"
+        ));
+        assert!(!runtime_version_matches(
+            "Hermes Agent v0.23.0 · stable",
+            "0.23.1"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn version_probe_sets_an_isolated_hermes_home() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let wrapper = dir.path().join("hermes");
+        std::fs::write(
+            &wrapper,
+            "#!/bin/sh\nif [ -n \"${HERMES_HOME:-}\" ]; then printf 'Hermes Agent v0.23.1 · stable\\n'; else printf 'Hermes Agent vunknown (2026.9.24)\\n'; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let probe = probe_runtime_version(&wrapper).await.unwrap();
+        assert!(probe.success);
+        assert_eq!(probe.version.as_deref(), Some("0.23.1"));
     }
 
     fn test_input() -> HermesChatInput {
@@ -2427,6 +2755,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: Some("test-key".into()),
             endpoint: None,
             mac_enabled: true,
@@ -2472,6 +2804,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: Some("test".into()),
             endpoint: Some(endpoint),
             mac_enabled: true,
@@ -2517,6 +2853,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: Some("test".into()),
             endpoint: Some(endpoint),
             mac_enabled: false,
@@ -2587,6 +2927,10 @@ mod tests {
             attachments: Vec::new(),
             auxiliary: Vec::new(),
             force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
             api_key: None,
             endpoint: None,
             mac_enabled: true,
