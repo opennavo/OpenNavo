@@ -484,20 +484,19 @@ fn rollback_plugin_updates(updates: &[PluginUpdate]) {
 }
 
 fn apply_plugin_updates(updates: &[PluginUpdate]) -> Result<(), AppError> {
-    let mut applied = 0;
-    for update in updates {
+    for (applied, update) in updates.iter().enumerate() {
         if let Some(parent) = update.backup.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        if update.had_previous {
-            if let Err(error) = std::fs::rename(&update.target, &update.backup) {
-                rollback_plugin_updates(&updates[..applied]);
-                return Err(AppError::new(
-                    "E_HERMES_INSTALL",
-                    "Could not back up a bundled Hermes plugin.",
-                )
-                .with_detail(error.to_string()));
-            }
+        if update.had_previous
+            && let Err(error) = std::fs::rename(&update.target, &update.backup)
+        {
+            rollback_plugin_updates(&updates[..applied]);
+            return Err(AppError::new(
+                "E_HERMES_INSTALL",
+                "Could not back up a bundled Hermes plugin.",
+            )
+            .with_detail(error.to_string()));
         }
         if let Err(error) = std::fs::rename(&update.staged, &update.target) {
             if update.had_previous && update.backup.exists() {
@@ -510,7 +509,6 @@ fn apply_plugin_updates(updates: &[PluginUpdate]) -> Result<(), AppError> {
             )
             .with_detail(error.to_string()));
         }
-        applied += 1;
     }
     Ok(())
 }
