@@ -1,8 +1,9 @@
-"""Anonymous, read-only public MCP server.
+"""Anonymous public MCP server.
 
 This module deliberately has no imports from the admin MCP adapter.  It talks to
-the documented public API over GET only, selects a small public response shape,
-and is safe to expose at ``https://opennavo.com/mcp``.
+the documented public API over an allowlist of public GET and POST routes,
+selects a small public response shape, and is safe to expose at
+``https://opennavo.com/mcp``.
 """
 
 from __future__ import annotations
@@ -47,6 +48,9 @@ _PUBLIC_GCRA_HASH_KEY = secrets.token_bytes(32)
 _TOKEN = re.compile(r"^[a-z0-9][a-z0-9+_.@-]{0,127}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 _KIND = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+_RECEIPT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$")
+_EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_COUNTRY = re.compile(r"^[A-Za-z]{2}$")
 
 logger = logging.getLogger(__name__)
 PUBLIC_PEER: ContextVar[str | None] = ContextVar("public_mcp_peer", default=None)
@@ -113,7 +117,20 @@ def _safe_segment(value: str, pattern: re.Pattern[str], label: str) -> str:
 
 
 class PublicAPIClient:
-    """Allowlisted, anonymous GET client for the public OpenAPI base."""
+    """Allowlisted, anonymous client for the public OpenAPI base."""
+
+    GET_ENDPOINTS = (
+        "/categories",
+        "/search",
+        "/packages/",
+        "/rankings",
+        "/collections",
+        "/articles",
+        "/developer-map",
+        "/developer-picks",
+        "/developer/submissions/",
+    )
+    POST_ENDPOINTS = ("/developer/fetch", "/developer/submissions")
 
     def __init__(self, settings: PublicSettings, http: httpx2.AsyncClient | None = None):
         self.settings = settings
@@ -125,24 +142,20 @@ class PublicAPIClient:
     async def close(self) -> None:
         await self.http.aclose()
 
-    def _url(self, endpoint: str) -> str:
+    def _url(self, endpoint: str, method: str) -> str:
         if not endpoint.startswith("/") or "//" in endpoint or ".." in endpoint:
             raise ValueError("invalid public API endpoint")
-        allowed = (
-            "/categories",
-            "/search",
-            "/packages/",
-            "/rankings",
-            "/collections",
-            "/articles",
-            "/developer-map",
-        )
-        if not any(
-            endpoint.startswith(prefix)
-            if prefix.endswith("/")
-            else endpoint == prefix or endpoint.startswith(prefix + "/")
-            for prefix in allowed
-        ):
+        allowed = self.GET_ENDPOINTS if method == "GET" else self.POST_ENDPOINTS
+        if method == "POST":
+            permitted = endpoint in allowed
+        else:
+            permitted = any(
+                endpoint.startswith(prefix)
+                if prefix.endswith("/")
+                else endpoint == prefix or endpoint.startswith(prefix + "/")
+                for prefix in allowed
+            )
+        if not permitted:
             raise ValueError("endpoint is not in the public API allowlist")
         url = self.base + endpoint
         parsed = urlsplit(url)
@@ -156,29 +169,33 @@ class PublicAPIClient:
             raise ValueError("public API endpoint escaped the configured base")
         return url
 
-    async def get(
+    async def _request(
         self,
+        method: str,
         endpoint: str,
         params: Mapping[str, Any] | None = None,
+        body: Mapping[str, Any] | None = None,
         *,
         text: bool = False,
+        include_links: bool = False,
     ) -> Any:
-        """Fetch one public endpoint and return its compact JSON data or plain text body."""
+        """Call one allowlisted public endpoint and return compact JSON data or text."""
 
-        url = self._url(endpoint)
+        url = self._url(endpoint, method)
         query = {
             key: value for key, value in (params or {}).items() if value is not None and value != ""
         }
         headers = {"Accept": "application/json", "User-Agent": "OpenNavo-public-mcp/0.1"}
+        if include_links:
+            headers["X-OpenNavo-Caps"] = "link"
         # Resolve the peer in PublicPeerMiddleware and never copy an inbound X-Forwarded-For.
         if (peer := PUBLIC_PEER.get()) is not None:
             headers["X-Forwarded-For"] = peer
+        request: dict[str, Any] = {"params": query, "headers": headers}
+        if body is not None:
+            request["json"] = body
         try:
-            response = await self.http.get(
-                url,
-                params=query,
-                headers=headers,
-            )
+            response = await self.http.request(method, url, **request)
         except httpx2.TimeoutException:
             raise PublicMCPError(
                 "public_api_timeout: the public API did not respond in time"
@@ -198,6 +215,16 @@ class PublicAPIClient:
             raise PublicMCPError(
                 "public_api_unavailable: the public API is temporarily unavailable"
             )
+        if response.status_code in {400, 409, 422}:
+            detail = ""
+            try:
+                detail = _text(_map(response.json()).get("msg"), 300) or ""
+            except (ValueError, TypeError):
+                pass
+            message = "public_api_rejected"
+            if detail:
+                message += f": {detail}"
+            raise PublicMCPError(message)
         if response.status_code >= 400:
             raise PublicMCPError("public_api_request_rejected")
         if text:
@@ -218,6 +245,29 @@ class PublicAPIClient:
             raise PublicMCPError("public_api_error: the public API rejected the request")
         return payload.get("data")
 
+    async def get(
+        self,
+        endpoint: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        text: bool = False,
+        include_links: bool = False,
+    ) -> Any:
+        """Fetch one allowlisted public GET endpoint."""
+
+        return await self._request("GET", endpoint, params, text=text, include_links=include_links)
+
+    async def post(
+        self,
+        endpoint: str,
+        body: Mapping[str, Any],
+        *,
+        include_links: bool = False,
+    ) -> Any:
+        """Call one allowlisted anonymous public POST endpoint."""
+
+        return await self._request("POST", endpoint, body=body, include_links=include_links)
+
 
 def _text(value: Any, limit: int = MAX_TEXT) -> str | None:
     if value is None:
@@ -232,8 +282,12 @@ def _map(value: Any) -> dict[str, Any]:
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
+def _all(value: Any) -> list[Any]:
+    return list(cast(list[Any], value)) if isinstance(value, list) else []
+
+
 def _list(value: Any, limit: int = MAX_LIST) -> list[Any]:
-    return list(cast(list[Any], value))[:limit] if isinstance(value, list) else []
+    return _all(value)[:limit]
 
 
 def _pick(source: Mapping[str, Any], *keys: str) -> dict[str, Any]:
@@ -373,9 +427,15 @@ def _tool_annotations() -> ToolAnnotations:
 
 
 def register_public_tools(server: FastMCP[Any], api: PublicAPIClient) -> None:
-    """Register only the ten anonymous public tools."""
+    """Register the anonymous public catalog and developer-map tools."""
 
     annotations = _tool_annotations()
+    write_annotations = ToolAnnotations(
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    )
 
     @server.tool(
         name="search_apps",
@@ -713,36 +773,70 @@ def register_public_tools(server: FastMCP[Any], api: PublicAPIClient) -> None:
         name="developer_map",
         description=(
             "Read the public OpenNavo developer map: developer and app totals, "
-            "cities with their top developers, and country counts."
+            "city and country aggregates with coordinates and top developers, and "
+            "recently approved locations. Use offset and limit to page through places, "
+            "and country_offset and country_limit for countries."
         ),
         annotations=annotations,
     )
     async def developer_map(
-        limit: Annotated[int, Field(ge=1, le=12)] = 8,
+        limit: Annotated[int, Field(ge=1, le=12)] = 12,
+        offset: Annotated[int, Field(ge=0)] = 0,
+        country_limit: Annotated[int, Field(ge=1, le=12)] = 12,
+        country_offset: Annotated[int, Field(ge=0)] = 0,
         locale: Annotated[str | None, Field(max_length=16)] = None,
     ) -> dict[str, Any]:
-        data = await api.get("/developer-map", _locale_params(locale))
+        data = await api.get("/developer-map", _locale_params(locale), include_links=True)
         source = _map(data)
         totals = _map(source.get("totals"))
-        places = [
-            _pick(
-                _map(item),
+
+        def top_developer(item: Any) -> dict[str, Any]:
+            return _pick(_map(item), "name", "apps", "installs30d")
+
+        def place(item: Any) -> dict[str, Any]:
+            entry = _map(item)
+            out = _pick(
+                entry,
+                "key",
+                "kind",
                 "name",
                 "countryCode",
                 "region",
+                "lat",
+                "lng",
                 "developers",
                 "apps",
                 "installs30d",
             )
-            for item in _list(source.get("places"))[:limit]
-        ]
+            out["topDevelopers"] = [
+                top_developer(developer) for developer in _list(entry.get("topDevelopers"), 3)
+            ]
+            return out
+
+        def recent(item: Any) -> dict[str, Any]:
+            return _pick(
+                _map(item),
+                "name",
+                "cityKey",
+                "city",
+                "countryCode",
+                "apps",
+                "updatedAt",
+            )
+
+        all_places = _all(source.get("places"))
+        page = all_places[offset : offset + limit]
+        total_places = len(all_places)
+        all_countries = _all(source.get("countries"))
+        country_page = all_countries[country_offset : country_offset + country_limit]
+        total_countries = len(all_countries)
         countries = [
-            _pick(_map(item), "code", "developers", "apps", "installs30d")
-            for item in _list(source.get("countries"))[:limit]
+            _pick(_map(item), "code", "developers", "apps", "installs30d") for item in country_page
         ]
         return fit_public_output(
             {
                 "link": f"{PUBLIC_SITE}/developer-map",
+                "generatedAt": source.get("generatedAt"),
                 "totals": _pick(
                     totals,
                     "developers",
@@ -752,11 +846,211 @@ def register_public_tools(server: FastMCP[Any], api: PublicAPIClient) -> None:
                     "places",
                     "countries",
                 ),
-                "places": places,
+                "places": [place(item) for item in page],
+                "paging": {
+                    "offset": offset,
+                    "limit": limit,
+                    "total": total_places,
+                    "hasMore": offset + len(page) < total_places,
+                },
+                "countryPaging": {
+                    "offset": country_offset,
+                    "limit": country_limit,
+                    "total": total_countries,
+                    "hasMore": country_offset + len(country_page) < total_countries,
+                },
                 "countries": countries,
+                "recentDevelopers": [
+                    recent(item) for item in _list(source.get("recentDevelopers"), 4)
+                ],
             },
             f"{PUBLIC_SITE}/developer-map",
         )
+
+    @server.tool(
+        name="developer_picks",
+        description=("Read the active developer picks shown above Hot Apps on OpenNavo Discover."),
+        annotations=annotations,
+    )
+    async def developer_picks(
+        limit: Annotated[int, Field(ge=1, le=12)] = 4,
+        locale: Annotated[str | None, Field(max_length=16)] = None,
+    ) -> dict[str, Any]:
+        data = await api.get(
+            "/developer-picks",
+            {"limit": limit, **_locale_params(locale)},
+            include_links=True,
+        )
+        picks: list[dict[str, Any]] = []
+        for item in _list(data, 12):
+            source = _map(item)
+            package = _map(source.get("package"))
+            picks.append(
+                {
+                    "package": app_summary(package),
+                    "quote": _text(source.get("quote"), 500),
+                    "publishedAt": source.get("publishedAt"),
+                }
+            )
+        link = f"{PUBLIC_SITE}/discover"
+        return fit_public_output({"link": link, "picks": picks}, link)
+
+    @server.tool(
+        name="developer_metadata_fetch",
+        description=(
+            "Fetch public metadata for a GitHub, App Store, or website link used by "
+            "the developer map submission form. The public API rejects private "
+            "addresses, non-HTTP schemes, and oversized responses."
+        ),
+        annotations=annotations,
+    )
+    async def developer_metadata_fetch(
+        url: Annotated[str, Field(min_length=8, max_length=2048)],
+    ) -> dict[str, Any]:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise PublicMCPError("invalid_url: use an http or https URL")
+        if parsed.username or parsed.password:
+            raise PublicMCPError("invalid_url: credentials are not allowed")
+        data = await api.post("/developer/fetch", {"url": url}, include_links=True)
+        source = _map(data)
+        out = _pick(
+            source,
+            "source",
+            "name",
+            "developer",
+            "homepage",
+            "repoUrl",
+            "downloadUrl",
+            "iconUrl",
+            "version",
+            "minMacos",
+            "category",
+            "license",
+        )
+        for key in ("summary", "description"):
+            if key in source:
+                out[key] = _text(source[key], 2000 if key == "description" else 700)
+        out["warnings"] = [_text(item, 300) for item in _list(source.get("warnings"), 20)]
+        link = f"{PUBLIC_SITE}/developer-map"
+        return fit_public_output({**out, "link": link}, link)
+
+    @server.tool(
+        name="developer_submission_create",
+        description=(
+            "Submit a new app, a claim, or a location update to the public developer "
+            "map. Only call this when the user intends to create a real submission: "
+            "the anonymous write creates a review record and returns a receipt token "
+            "for developer_submission_status. For kind=new, source_url is required. "
+            "For kind=claim or kind=location, package_kind and package_token are "
+            "required. For kind=location, payload.countryCode must be a two-letter "
+            "country code. The payload object carries the form fields, such as name, "
+            "summary, description, developer, category, homepage, repoUrl, "
+            "downloadUrl, iconUrl, version, "
+            "minMacos, license, countryCode, city, remote, updateLocation, "
+            "updateSummary, updateIcon, evidence, and note."
+        ),
+        annotations=write_annotations,
+    )
+    async def developer_submission_create(
+        kind: Literal["new", "claim", "location"],
+        contact_email: Annotated[str, Field(min_length=3, max_length=320)],
+        source_kind: Literal["github", "appstore", "website"] | None = None,
+        source_url: Annotated[str | None, Field(max_length=2048)] = None,
+        package_kind: Literal["cask", "link"] | None = None,
+        package_token: Annotated[str | None, Field(max_length=128)] = None,
+        proof: Annotated[str | None, Field(max_length=2000)] = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        email = contact_email.strip()
+        if not _EMAIL.fullmatch(email):
+            raise PublicMCPError("invalid_contact_email")
+        source_url = source_url.strip() if source_url else ""
+        if source_url:
+            parsed = urlsplit(source_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise PublicMCPError("invalid_source_url: use an http or https URL")
+            if parsed.username or parsed.password:
+                raise PublicMCPError("invalid_source_url: credentials are not allowed")
+        if kind == "new" and not source_url:
+            raise PublicMCPError("source_url_required_for_new_submission")
+        package_token = package_token.strip() if package_token else ""
+        if kind in {"claim", "location"}:
+            if not package_kind:
+                raise PublicMCPError("package_kind_required")
+            if not package_token:
+                raise PublicMCPError("package_token_required")
+        if package_token:
+            package_token = _safe_segment(package_token, _TOKEN, "package token")
+        if payload is not None:
+            encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+            if len(encoded) > 64 * 1024:
+                raise PublicMCPError("payload_too_large")
+        if kind == "location":
+            country_code = _map(payload).get("countryCode")
+            if not isinstance(country_code, str) or not _COUNTRY.fullmatch(country_code.strip()):
+                raise PublicMCPError("invalid_country_code: use a two-letter country code")
+        body: dict[str, Any] = {"kind": kind, "contactEmail": email}
+        if source_kind:
+            body["sourceKind"] = source_kind
+        if source_url:
+            body["sourceUrl"] = source_url
+        if package_kind:
+            body["packageKind"] = package_kind
+        if package_token:
+            body["packageToken"] = package_token
+        if proof:
+            body["proof"] = proof.strip()
+        if payload is not None:
+            body["payload"] = payload
+        data = await api.post("/developer/submissions", body, include_links=True)
+        source = _map(data)
+        out = _pick(source, "id", "reference", "token", "statusUrl")
+        link = source.get("statusUrl") or f"{PUBLIC_SITE}/developer-map?tab=submit"
+        out["link"] = link
+        out["next"] = (
+            "Keep the receipt token private. Call developer_submission_status with it "
+            "to read the review progress."
+        )
+        return fit_public_output(out, str(link))
+
+    @server.tool(
+        name="developer_submission_status",
+        description=(
+            "Read an anonymous developer-map submission by the receipt token returned "
+            "by developer_submission_create. Unknown tokens return not found."
+        ),
+        annotations=annotations,
+    )
+    async def developer_submission_status(
+        token: Annotated[str, Field(min_length=8, max_length=64)],
+    ) -> dict[str, Any]:
+        token = _safe_segment(token, _RECEIPT, "receipt token")
+        data = await api.get(f"/developer/submissions/{token}", include_links=True)
+        source = _map(data)
+        out = _pick(
+            source,
+            "reference",
+            "kind",
+            "status",
+            "createdAt",
+            "updatedAt",
+            "decidedAt",
+            "decisionNote",
+        )
+        if isinstance(source.get("package"), dict):
+            out["package"] = _pick(_map(source["package"]), "kind", "token", "name")
+        events: list[dict[str, Any]] = []
+        for item in _list(source.get("events"), 20):
+            entry = _map(item)
+            event = _pick(entry, "status", "actor", "createdAt")
+            if "note" in entry:
+                event["note"] = _text(entry.get("note"), 1000)
+            events.append(event)
+        out["events"] = events
+        link = f"{PUBLIC_SITE}/developer-map?tab=submit&submission={token}"
+        out["link"] = link
+        return fit_public_output(out, link)
 
     @server.tool(
         name="articles",
@@ -839,7 +1133,11 @@ def create_public_server(
     server: FastMCP[Any] = FastMCP(
         "OpenNavo Public",
         version="0.1.0",
-        instructions="Anonymous, read-only access to the public OpenNavo catalog.",
+        instructions=(
+            "Anonymous access to the public OpenNavo catalog and developer map. "
+            "Developer submissions are anonymous, rate limited, and create real "
+            "review records; submit only when the user intends to submit."
+        ),
         lifespan=lambda _: _lifespan(api),
         mask_error_details=True,
         strict_input_validation=True,
