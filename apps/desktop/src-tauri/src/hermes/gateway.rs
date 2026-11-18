@@ -17,6 +17,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::{
@@ -30,6 +32,12 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const START_TIMEOUT: Duration = Duration::from_secs(25);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(180);
+/// Pause before repeating a catalog read that died on a service-restart close.
+///
+/// Close code 1012 asks clients to wait 5–30s. That backoff is for a remote service this
+/// process does not own. Here the gateway is the local `hermes serve` we just started, or one
+/// uvicorn is reloading in place, and it is accepting again in well under a second.
+const MODEL_OPTIONS_RESTART_PAUSE: Duration = Duration::from_millis(400);
 
 pub struct GatewayServer {
     pub port: u16,
@@ -311,20 +319,7 @@ async fn next_frame(socket: &mut Socket, limit: Option<Duration>) -> Result<Valu
                 });
             }
             Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
-            Message::Close(frame) => {
-                let error = AppError::new(
-                    "E_HERMES_GATEWAY_STREAM",
-                    "Hermes gateway closed the connection.",
-                );
-                return Err(match frame {
-                    Some(frame) => error.with_detail(format!(
-                        "code {}: {}",
-                        u16::from(frame.code),
-                        frame.reason
-                    )),
-                    None => error,
-                });
-            }
+            Message::Close(frame) => return Err(gateway_close_error(frame)),
         }
     }
 }
@@ -332,6 +327,51 @@ async fn next_frame(socket: &mut Socket, limit: Option<Duration>) -> Result<Valu
 #[cfg(test)]
 async fn recv_json(socket: &mut Socket) -> Result<Value, AppError> {
     next_frame(socket, Some(MESSAGE_TIMEOUT)).await
+}
+
+/// A WebSocket close while a request is in flight.
+///
+/// `hermes serve` runs under uvicorn, which closes live sockets with 1012 (service restart)
+/// and an empty reason when the process reloads. Formatting that as `code 1012:` made the
+/// profile rail show a raw status code. 1012 and 1013 are defined as "connect again", so they
+/// get their own code and the catalog read retries once. The status number stays out of the
+/// user-visible text; an empty reason must not become a detail string.
+fn gateway_close_error(frame: Option<CloseFrame>) -> AppError {
+    let Some(frame) = frame else {
+        return AppError::new(
+            "E_HERMES_GATEWAY_STREAM",
+            "Hermes gateway closed the connection.",
+        );
+    };
+    let reason = frame.reason.to_string();
+    if matches!(frame.code, CloseCode::Restart | CloseCode::Again) {
+        let error = AppError::new("E_HERMES_GATEWAY_RESTART", "Hermes gateway is restarting.");
+        return if reason.trim().is_empty() {
+            error
+        } else {
+            error.with_detail(reason)
+        };
+    }
+    AppError::new(
+        "E_HERMES_GATEWAY_STREAM",
+        "Hermes gateway closed the connection.",
+    )
+    .with_detail(format!("code {}: {reason}", u16::from(frame.code)))
+}
+
+/// Repeat a catalog read once when the gateway closed the socket to restart.
+///
+/// `model.options` only reads. A chat turn must not use this: resubmitting it would run the
+/// agent a second time.
+async fn model_options_once_more(
+    error: AppError,
+    retry: impl std::future::Future<Output = Result<HermesModelOptions, AppError>>,
+) -> Result<HermesModelOptions, AppError> {
+    if error.code != "E_HERMES_GATEWAY_RESTART" {
+        return Err(error);
+    }
+    sleep(MODEL_OPTIONS_RESTART_PAUSE).await;
+    retry.await
 }
 
 async fn rpc(socket: &mut Socket, id: u64, method: &str, params: Value) -> Result<Value, AppError> {
@@ -1721,25 +1761,44 @@ pub async fn model_options(
     // saved draft (or the built-in default when this window never opened it), so a full write
     // here replaced the profile's own model with whatever the draft happened to hold.
     let api_key = write_catalog_config(&config_home, &input)?;
-    let server = ensure_server(bin, &config_home, state, &input, api_key.as_deref()).await?;
-    let url = format!(
-        "ws://127.0.0.1:{}/api/ws?token={}",
-        server.port, server.token
-    );
-    let (socket, _) = connect_async(url).await.map_err(|error| {
-        AppError::new(
-            "E_HERMES_GATEWAY_STREAM",
-            "Could not connect to the Hermes gateway.",
-        )
-        .with_detail(error.to_string())
-    })?;
-    model_options_over_socket(
-        socket,
-        refresh,
-        include_unconfigured,
-        input.profile.as_deref(),
-    )
-    .await
+    let profile = input.profile.clone();
+    let read = |api_key: &Option<String>| {
+        let config_home = config_home.clone();
+        let input = input.clone();
+        let api_key = api_key.clone();
+        let profile = profile.clone();
+        async move {
+            let server =
+                ensure_server(bin, &config_home, state, &input, api_key.as_deref()).await?;
+            let url = format!(
+                "ws://127.0.0.1:{}/api/ws?token={}",
+                server.port, server.token
+            );
+            let (socket, _) = connect_async(url).await.map_err(|error| {
+                AppError::new(
+                    "E_HERMES_GATEWAY_STREAM",
+                    "Could not connect to the Hermes gateway.",
+                )
+                .with_detail(error.to_string())
+            })?;
+            // Hold this clone across the read. The last `GatewayServer` drops kills the child,
+            // and a non-lexical drop at `server.token` would let a concurrent restart do that
+            // while this socket is still open.
+            let options = model_options_over_socket(
+                socket,
+                refresh,
+                include_unconfigured,
+                profile.as_deref(),
+            )
+            .await;
+            drop(server);
+            options
+        }
+    };
+    match read(&api_key).await {
+        Err(error) => model_options_once_more(error, read(&api_key)).await,
+        result => result,
+    }
 }
 
 async fn model_options_over_socket(
@@ -1784,8 +1843,14 @@ pub async fn model_options_remote_auth(
     refresh: bool,
     include_unconfigured: bool,
 ) -> Result<HermesModelOptions, AppError> {
-    let socket = connect_remote_auth(url, query).await?;
-    model_options_over_socket(socket, refresh, include_unconfigured, profile).await
+    let read = || async {
+        let socket = connect_remote_auth(url, query).await?;
+        model_options_over_socket(socket, refresh, include_unconfigured, profile).await
+    };
+    match read().await {
+        Err(error) => model_options_once_more(error, read()).await,
+        result => result,
+    }
 }
 
 /// Test seam used by the ignored real-runtime tests.
@@ -2205,6 +2270,53 @@ mod tests {
             result.expect_err("a stalled read has to time out").code,
             "E_HERMES_GATEWAY_TIMEOUT"
         );
+    }
+
+    #[tokio::test]
+    async fn a_restart_close_is_not_shown_as_a_raw_status_code() {
+        let (client, mut server) = ws_pair().await;
+        let server_task = tokio::spawn(async move {
+            let request = next_text(&mut server).await;
+            assert_eq!(request["method"], "model.options");
+            server
+                .send(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Restart,
+                    reason: "".into(),
+                })))
+                .await
+                .expect("close");
+        });
+        let error = model_options_over_socket(client, false, true, None)
+            .await
+            .expect_err("a restart close fails the read");
+        assert_eq!(error.code, "E_HERMES_GATEWAY_RESTART");
+        assert_eq!(error.detail, None);
+        assert!(
+            !error.to_string().contains("1012"),
+            "the profile rail used to render the raw close code: {error}"
+        );
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_close_keeps_its_status_in_the_detail() {
+        let (client, mut server) = ws_pair().await;
+        let server_task = tokio::spawn(async move {
+            let _ = next_text(&mut server).await;
+            server
+                .send(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Normal,
+                    reason: "bye".into(),
+                })))
+                .await
+                .expect("close");
+        });
+        let error = model_options_over_socket(client, false, true, None)
+            .await
+            .expect_err("a normal close still fails the read");
+        assert_eq!(error.code, "E_HERMES_GATEWAY_STREAM");
+        assert_eq!(error.detail.as_deref(), Some("code 1000: bye"));
+        server_task.await.unwrap();
     }
 
     #[tokio::test]
