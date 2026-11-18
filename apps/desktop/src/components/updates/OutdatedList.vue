@@ -16,6 +16,7 @@ import { usePackageIdentity } from '@/composables/usePackageIdentity';
 import { usePackageState } from '@/composables/usePackageState';
 import { useToasts } from '@/composables/useToasts';
 import { useLocalAppsStore, useUpdatesStore } from '@/stores';
+import { useUninstallStore } from '@/stores/uninstall';
 import { rowHref, rowKey } from '@/stores/updates';
 import { isPublicHttpUrl, openExternal, reportExternalLinkRejection } from '@/utils/external';
 
@@ -36,6 +37,7 @@ const { icon } = usePackageIdentity();
 const { errorText } = usePackageState();
 const updates = useUpdatesStore();
 const localApps = useLocalAppsStore();
+const uninstaller = useUninstallStore();
 const toasts = useToasts();
 
 const notesFor = ref<OutdatedItem | null>(null);
@@ -52,6 +54,20 @@ function identity(item: OutdatedItem) {
   if (item.source !== 'homebrew' && (!item.token || localApps.find(item.appId ?? '')))
     return icon('app', item.appId ?? '', item.name);
   return icon(item.kind, item.token, item.name);
+}
+
+/** The installed app a row can uninstall; Homebrew rows carry no app ID, so their cask finds it. */
+function uninstallTarget(item: OutdatedItem) {
+  const byId = localApps.find(item.appId ?? '');
+  if (byId || item.source !== 'homebrew' || item.kind !== 'cask') return byId;
+  const byCatalog = localApps.findCask(item.token);
+  if (byCatalog) return byCatalog;
+  // Without a catalog match only the full Homebrew token remains; its last segment is the site's short name. One cask
+  // can install several apps and they share that token, so the name must resolve to one cask, not one app; the
+  // reviewed flow removes them together, so any removable app of it can open it.
+  const byShortName = localApps.items.filter(app => app.cask?.split('/').at(-1) === item.token);
+  if (new Set(byShortName.map(app => app.cask)).size !== 1) return undefined;
+  return byShortName.find(app => app.removable);
 }
 
 function meta(item: OutdatedItem): string {
@@ -112,6 +128,14 @@ function menu(item: OutdatedItem): OnMenuItem[] {
       ? { key: 'unignoreApp', label: t('updates.actions.unignoreApp') }
       : { key: 'ignoreApp', label: t('updates.actions.ignoreApp'), icon: 'x' }
   );
+  items.push({
+    key: 'uninstall',
+    label: t('package.actions.uninstall'),
+    icon: 'trash',
+    danger: true,
+    separator: true,
+    disabled: !uninstallTarget(item)?.removable
+  });
   return items;
 }
 
@@ -146,6 +170,11 @@ function select(item: OutdatedItem, key: string) {
       return run(() => updates.ignoreApp(item, false), t('updates.toast.unignoredApp', { name }));
     case 'ignoreApp':
       return run(() => updates.ignoreApp(item), t('updates.toast.ignoredApp', { name }));
+    case 'uninstall': {
+      const app = uninstallTarget(item);
+      if (app?.removable) return run(() => uninstaller.start([app.id]));
+      return;
+    }
   }
 }
 

@@ -14,7 +14,8 @@ import AppStorePage from '@/pages/AppStorePage.vue';
 import UpdatesPage from '@/pages/UpdatesPage.vue';
 import UpdatesRail from '@/components/rails/UpdatesRail.vue';
 import { useToasts } from '@/composables/useToasts';
-import { startLocalState, useSettingsStore, useTasksStore, useUpdatesStore } from '@/stores';
+import { startLocalState, useLocalAppsStore, useSettingsStore, useTasksStore, useUpdatesStore } from '@/stores';
+import { useUninstallStore } from '@/stores/uninstall';
 import { updateRequest } from '@/stores/updates';
 import { setup } from './helpers';
 import type { TestContext } from './helpers';
@@ -332,6 +333,89 @@ describe('Updates from every source', () => {
     expect(ignore).toHaveBeenLastCalledWith('app:local-iterm2', false);
     expect(useUpdatesStore().items.find(item => item.name === 'iTerm2')?.ignored).toBe(false);
     expect(useUpdatesStore().actionable.some(item => item.name === 'iTerm2')).toBe(true);
+  });
+
+  it('Uninstalls an app from a row menu through the reviewed uninstall flow, including Homebrew casks', async () => {
+    const wrapper = await mountUpdates();
+    const start = vi.spyOn(useUninstallStore(), 'start').mockResolvedValue();
+    await chooseMenu(rowOf(wrapper, 'Keynote'), '卸载');
+    expect(start).toHaveBeenCalledWith(['local-keynote']);
+
+    const localApps = useLocalAppsStore();
+    const brew = useUpdatesStore().items.find(item => item.source === 'homebrew' && localApps.findCask(item.token))!;
+    const app = localApps.findCask(brew.token)!;
+    const row = wrapper
+      .findComponent(OutdatedList)
+      .findAll('li')
+      .find(item => item.find(`a[href="/package/${brew.kind}/${brew.token}"]`).exists());
+    await chooseMenu(row, '卸载');
+    expect(start).toHaveBeenLastCalledWith([app.id]);
+  });
+
+  it('Finds a Homebrew cask by its full token short name when the catalog has no match', async () => {
+    const wrapper = await mountUpdates();
+    const localApps = useLocalAppsStore();
+    const brew = useUpdatesStore().items.find(item => item.source === 'homebrew' && localApps.findCask(item.token))!;
+    const app = localApps.findCask(brew.token)!;
+    const row = wrapper
+      .findComponent(OutdatedList)
+      .findAll('li')
+      .find(item => item.find(`a[href="/package/${brew.kind}/${brew.token}"]`).exists());
+    app.catalogToken = null;
+    app.cask = `homebrew/cask/${brew.token}`;
+    await flushPromises();
+    expect(localApps.findCask(brew.token)).toBeUndefined();
+
+    const start = vi.spyOn(useUninstallStore(), 'start').mockResolvedValue();
+    await chooseMenu(row, '卸载');
+    expect(start).toHaveBeenCalledWith([app.id]);
+  });
+
+  it('Uninstalls a multi-app cask through an app of it that can be removed', async () => {
+    const wrapper = await mountUpdates();
+    const localApps = useLocalAppsStore();
+    const brew = useUpdatesStore().items.find(item => item.source === 'homebrew' && localApps.findCask(item.token))!;
+    const row = wrapper
+      .findComponent(OutdatedList)
+      .findAll('li')
+      .find(item => item.find(`a[href="/package/${brew.kind}/${brew.token}"]`).exists());
+    // One cask installed two apps, so both carry its full token; the catalog alias is gone and the first is protected.
+    const caskApp = localApps.findCask(brew.token)!;
+    const secondApp = localApps.find('local-word')!;
+    caskApp.catalogToken = null;
+    caskApp.cask = `homebrew/cask/${brew.token}`;
+    caskApp.removable = false;
+    secondApp.cask = `homebrew/cask/${brew.token}`;
+    await flushPromises();
+    expect(localApps.findCask(brew.token)).toBeUndefined();
+
+    const start = vi.spyOn(useUninstallStore(), 'start').mockResolvedValue();
+    await chooseMenu(row, '卸载');
+    expect(start).toHaveBeenCalledWith([secondApp.id]);
+  });
+
+  it('Leaves uninstall disabled when two casks share a short name', async () => {
+    const wrapper = await mountUpdates();
+    const localApps = useLocalAppsStore();
+    const brew = useUpdatesStore().items.find(item => item.source === 'homebrew' && localApps.findCask(item.token))!;
+    const row = wrapper
+      .findComponent(OutdatedList)
+      .findAll('li')
+      .find(item => item.find(`a[href="/package/${brew.kind}/${brew.token}"]`).exists());
+    const firstApp = localApps.findCask(brew.token)!;
+    const secondApp = localApps.find('local-word')!;
+    firstApp.catalogToken = null;
+    firstApp.cask = `homebrew/cask/${brew.token}`;
+    secondApp.cask = `other/tap/${brew.token}`;
+    await flushPromises();
+    expect(localApps.findCask(brew.token)).toBeUndefined();
+
+    await row?.get('button[aria-haspopup="menu"]').trigger('click');
+    await flushPromises();
+    const uninstall = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item =>
+      item.textContent?.includes('卸载')
+    );
+    expect(uninstall?.disabled).toBe(true);
   });
 
   it('Shows inline notes sanitized, without loading their images', async () => {
