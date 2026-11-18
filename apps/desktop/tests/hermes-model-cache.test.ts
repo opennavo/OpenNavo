@@ -384,9 +384,7 @@ describe('catalog failure text', () => {
     });
 
     expect(catalogFailureText(error, 'zh-CN')).toBe('Hermes 正在重启，模型目录暂时读不到。');
-    expect(catalogFailureText(error, 'en-US')).toBe(
-      'Hermes is restarting, so the model catalog could not be loaded.'
-    );
+    expect(catalogFailureText(error, 'en-US')).toBe('Hermes is restarting, so the model catalog could not be loaded.');
     expect(catalogFailureText(error, 'zh-CN')).not.toContain('1012');
   });
 
