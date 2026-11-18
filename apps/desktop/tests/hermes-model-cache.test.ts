@@ -1,8 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { nextTick } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commands } from '@/ipc/client';
-import { useHermesStore } from '@/stores/hermes';
+import { IpcError, commands } from '@/ipc/client';
+import { catalogFailureText, useHermesStore } from '@/stores/hermes';
 
 const ok = <T>(data: T) => ({ status: 'ok' as const, data });
 const PROFILES_KEY = 'ONV_HERMES_PROFILES_V1';
@@ -372,5 +372,29 @@ describe('Hermes model catalog cache', () => {
     useHermesStore();
 
     expect(localStorage.getItem('ONV_HERMES_MODEL_OPTIONS_V2')).toBeNull();
+  });
+});
+
+describe('catalog failure text', () => {
+  it('does not surface a gateway restart as a raw close code', () => {
+    const error = new IpcError({
+      code: 'E_HERMES_GATEWAY_RESTART',
+      message: 'Hermes gateway is restarting.',
+      detail: null
+    });
+
+    expect(catalogFailureText(error, 'zh-CN')).toBe('Hermes 正在重启，模型目录暂时读不到。');
+    expect(catalogFailureText(error, 'en-US')).toBe('Hermes is restarting, so the model catalog could not be loaded.');
+    expect(catalogFailureText(error, 'zh-CN')).not.toContain('1012');
+  });
+
+  it('keeps a diagnostic detail for other catalog failures', () => {
+    const error = new IpcError({
+      code: 'E_HERMES_GATEWAY_STREAM',
+      message: 'Hermes gateway closed the connection.',
+      detail: 'connection reset'
+    });
+
+    expect(catalogFailureText(error, 'zh-CN')).toBe('connection reset');
   });
 });

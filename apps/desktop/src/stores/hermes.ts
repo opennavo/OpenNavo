@@ -15,6 +15,8 @@ import {
   type HermesAuxTask,
   type HermesProviderInfo
 } from '@/hermes/providers';
+import { en, zhCN } from '@/hermes/content';
+import { i18n } from '@/i18n';
 import { commands, unwrap, IpcError } from '@/ipc/client';
 import { isMessagingSource } from '@/hermes/platforms';
 import { notifyHermesReply } from '@/hermes/notifications';
@@ -22,6 +24,20 @@ import type { HermesLoginStatus, HermesModelOptions, HermesRuntimeStatus, Hermes
 import { useToasts } from '@/composables/useToasts';
 import { useHermesNotificationsStore } from '@/stores/hermesNotifications';
 import rectangleIcon from '@/assets/hermes/rectangle.png';
+
+/**
+ * Text for a failed model-catalog read.
+ *
+ * A gateway restart used to arrive as the WebSocket detail `code 1012:`, and the profile rail
+ * printed that raw close code. The status number stays in the error code; the rail gets a sentence.
+ */
+export function catalogFailureText(error: unknown, locale = String(i18n.global.locale.value)): string {
+  if (error instanceof IpcError && error.code === 'E_HERMES_GATEWAY_RESTART') {
+    return locale === 'zh-CN' ? zhCN.settings.model.catalogRestart : en.settings.model.catalogRestart;
+  }
+  if (error instanceof IpcError) return error.detail ?? error.message;
+  return error instanceof Error ? error.message : String(error);
+}
 
 export type HermesControlLevel = 'open' | 'guarded' | 'full';
 
@@ -1596,7 +1612,7 @@ export const useHermesStore = defineStore('hermes', () => {
       writeModelOptionsCache(cacheKey, options, at);
     } catch (error) {
       if (seq !== modelOptionsSeq || epoch !== modelOptionsEpoch) return;
-      modelOptionsError.value = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+      modelOptionsError.value = catalogFailureText(error);
       notePanelAuthError(error);
     } finally {
       if (seq === modelOptionsSeq) {
