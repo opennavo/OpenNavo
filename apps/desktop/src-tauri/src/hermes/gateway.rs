@@ -34,9 +34,9 @@ const START_TIMEOUT: Duration = Duration::from_secs(25);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(180);
 /// Pause before repeating a catalog read that died on a service-restart close.
 ///
-/// Close code 1012 asks clients to wait 5–30s. That backoff is for a remote service this
-/// process does not own. Here the gateway is the local `hermes serve` we just started, or one
-/// uvicorn is reloading in place, and it is accepting again in well under a second.
+/// Close code 1012 asks clients to wait 5–30s. The catalog read sits on a UI path that gives
+/// up at 55s, so this is one short attempt rather than that backoff. It does not reconnect by
+/// itself: a remote retry has to mint a new panel ticket first.
 const MODEL_OPTIONS_RESTART_PAUSE: Duration = Duration::from_millis(400);
 
 pub struct GatewayServer {
@@ -362,8 +362,10 @@ fn gateway_close_error(frame: Option<CloseFrame>) -> AppError {
 /// Repeat a catalog read once when the gateway closed the socket to restart.
 ///
 /// `model.options` only reads. A chat turn must not use this: resubmitting it would run the
-/// agent a second time.
-async fn model_options_once_more(
+/// agent a second time. The future is polled only after a restart close, and only then, so a
+/// caller can mint a fresh panel ticket inside it. Reusing the ticket from the attempt that
+/// just closed is not possible: a panel WebSocket ticket is consumed on the handshake.
+pub(crate) async fn model_options_once_more(
     error: AppError,
     retry: impl std::future::Future<Output = Result<HermesModelOptions, AppError>>,
 ) -> Result<HermesModelOptions, AppError> {
@@ -1843,14 +1845,10 @@ pub async fn model_options_remote_auth(
     refresh: bool,
     include_unconfigured: bool,
 ) -> Result<HermesModelOptions, AppError> {
-    let read = || async {
-        let socket = connect_remote_auth(url, query).await?;
-        model_options_over_socket(socket, refresh, include_unconfigured, profile).await
-    };
-    match read().await {
-        Err(error) => model_options_once_more(error, read()).await,
-        result => result,
-    }
+    // One handshake per call. The query carries a single-use panel ticket, so a restart
+    // retry belongs to the caller, which mints a new ticket before connecting again.
+    let socket = connect_remote_auth(url, query).await?;
+    model_options_over_socket(socket, refresh, include_unconfigured, profile).await
 }
 
 /// Test seam used by the ignored real-runtime tests.
@@ -2317,6 +2315,49 @@ mod tests {
         assert_eq!(error.code, "E_HERMES_GATEWAY_STREAM");
         assert_eq!(error.detail.as_deref(), Some("code 1000: bye"));
         server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_remote_catalog_read_does_not_reuse_its_ticket() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let connections = std::sync::Arc::new(AtomicUsize::new(0));
+        let count = connections.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("first handshake");
+            count.fetch_add(1, Ordering::SeqCst);
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("upgrade");
+            let _ = next_text(&mut socket).await;
+            socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Restart,
+                    reason: "".into(),
+                })))
+                .await
+                .expect("close");
+            if timeout(Duration::from_millis(800), listener.accept())
+                .await
+                .is_ok()
+            {
+                count.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let error =
+            model_options_remote_auth(&format!("ws://{addr}"), "ticket=once", None, false, true)
+                .await
+                .expect_err("the restart must reach the caller, which mints the next ticket");
+        assert_eq!(error.code, "E_HERMES_GATEWAY_RESTART");
+        server.await.unwrap();
+        assert_eq!(
+            connections.load(Ordering::SeqCst),
+            1,
+            "reconnecting here would present the ticket the first handshake already consumed"
+        );
     }
 
     #[tokio::test]

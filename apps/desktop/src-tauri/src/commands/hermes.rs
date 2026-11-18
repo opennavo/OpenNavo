@@ -653,17 +653,28 @@ pub async fn hermes_model_options(
     {
         let profile_id = input.profile_id.as_deref().unwrap_or_default().to_owned();
         if input.panel_auth {
-            let ticket = crate::hermes::panel::ticket_for(&profile_id).await?;
-            let query = format!("ticket={}", urlencoding::encode(&ticket));
             let panel_url = crate::hermes::panel::base_url_for(&profile_id)?;
-            return crate::hermes::gateway::model_options_remote_auth(
-                &panel_url,
-                &query,
-                input.profile.as_deref(),
-                input.refresh,
-                input.include_unconfigured,
-            )
-            .await;
+            let agent_profile = input.profile.clone();
+            let refresh = input.refresh;
+            let include_unconfigured = input.include_unconfigured;
+            // Each attempt needs its own ticket: the first handshake consumes it, including
+            // when the gateway then closes with 1012.
+            let read = || async {
+                let ticket = crate::hermes::panel::ticket_for(&profile_id).await?;
+                let query = format!("ticket={}", urlencoding::encode(&ticket));
+                crate::hermes::gateway::model_options_remote_auth(
+                    &panel_url,
+                    &query,
+                    agent_profile.as_deref(),
+                    refresh,
+                    include_unconfigured,
+                )
+                .await
+            };
+            return match read().await {
+                Err(error) => crate::hermes::gateway::model_options_once_more(error, read()).await,
+                result => result,
+            };
         }
         return Err(crate::hermes::remote_auth_required());
     }
