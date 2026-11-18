@@ -200,8 +200,11 @@ async fn explicit_index_update_uses_only_simulated_write_queue() {
             .into(),
     );
     core.queue.start();
+    // The budget covers the queued `brew update` and the inventory reread that follows it.
+    // Those share locks with the post-task scan, and a loaded runner already spends tens of
+    // seconds on the neighboring test in this file, so 10s flakes after the fake brew exits.
     let updates =
-        tokio::time::timeout(std::time::Duration::from_secs(10), core.check_updates(true))
+        tokio::time::timeout(std::time::Duration::from_secs(60), core.check_updates(true))
             .await
             .unwrap()
             .unwrap();
