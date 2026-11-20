@@ -189,6 +189,25 @@ WebKit's own WebsiteData remains under
   final `message.complete` frame becomes the persisted assistant message.
 - The desktop uses the gateway only. CLI fallback is intentionally disabled so
   steering, approvals and tool events always share one transport contract.
+- A send while a turn is running follows the runtime's `display.busy_input_mode`
+  (read with `config.get` key `busy` when the turn opens). The default
+  `interrupt` sends `session.redirect`, which cancels the active model request,
+  keeps the displayed work, inserts the correction as a real user row and
+  retries; during tool execution the runtime degrades it to a steer. `steer`
+  sends `session.steer` (injected after the next tool batch) and `queue` admits
+  the text as the next turn. A correction typed before the turn's session and
+  `execution_generation` arrive is parked; neither method may reuse the
+  previous turn's `liveSessionId`, and the busy policy is cleared at every turn
+  start so a parked correction re-reads this turn's `busy_input_mode` instead
+  of the previous turn's value. A parked correction also queues when an
+  approval, clarify or secret card is open, matching a live send. A rejected
+  or failed correction is removed from the transcript and queued for the next
+  turn instead of being left as a phantom bubble. A redirect answered `queued` (compression/build window) is
+  removed too and reported as Hermes's next turn: the one-turn chat stream
+  returns at the first `message.complete`, so this window cannot receive that
+  turn, and re-sending it locally would run it twice. On acceptance the
+  renderer seals the assistant bubble above the correction, and later deltas
+  open a fresh bubble below it.
 - Full control enables the session-scoped gateway YOLO flag; guarded and
   safe modes do not, and approvals are denied unless the user grants them. The
   gateway toolsets are selected with `HERMES_TUI_TOOLSETS`.

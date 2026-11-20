@@ -126,6 +126,37 @@ pub async fn hermes_steer(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn hermes_redirect(
+    state: State<'_, Arc<HermesRuntimeState>>,
+    live_session_id: String,
+    text: String,
+    gateway_url: Option<String>,
+    profile_id: Option<String>,
+) -> Result<HermesSteerResult, AppError> {
+    if gateway_url
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        let id = profile_id.as_deref().unwrap_or_default();
+        if hermes::panel::has_session(id) {
+            let ticket = hermes::panel::ticket_for(id).await?;
+            let query = format!("ticket={}", urlencoding::encode(&ticket));
+            let panel_url = hermes::panel::base_url_for(id)?;
+            return hermes::gateway::redirect_remote_auth(
+                &panel_url,
+                &query,
+                &live_session_id,
+                &text,
+            )
+            .await;
+        }
+        return Err(hermes::remote_auth_required());
+    }
+    hermes::gateway::redirect(state.inner(), &live_session_id, &text).await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn hermes_secret_set(
     app: tauri::AppHandle,
     provider: String,

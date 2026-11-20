@@ -255,6 +255,13 @@ export interface HermesDecision {
   at?: number;
 }
 
+/**
+ * What a send does while a turn is running. The official desktop reads this from the runtime's
+ * `display.busy_input_mode`: `interrupt` is the default stop-and-correct redirect, `steer`
+ * injects at the next tool boundary, and `queue` admits the text as the next turn.
+ */
+export type HermesBusyMode = 'interrupt' | 'steer' | 'queue';
+
 export interface HermesSessionEvent {
   requestId: string;
   liveSessionId: string;
@@ -263,6 +270,8 @@ export interface HermesSessionEvent {
   resumed?: boolean;
   /** Running turn's fence for `session.steer`; absent until the runtime claims the turn. */
   executionGeneration?: number | null;
+  /** Runtime busy-input policy, read once when the turn opens. */
+  busyInputMode?: HermesBusyMode | null;
 }
 
 export interface HermesContextUsage {
@@ -319,6 +328,8 @@ export interface HermesConversation {
   liveSessionId?: string;
   /** Runtime `execution_generation` for the in-flight turn; `session.steer` rejects a stale value. */
   executionGeneration?: number;
+  /** Runtime `display.busy_input_mode`; absent until the first session event, then `interrupt`. */
+  busyMode?: HermesBusyMode;
   /** Hermes Panel row: the list carries host metadata until the transcript is opened. */
   panel?: boolean;
   /** Panel-provided preview line, so the list renders without reading a transcript. */
@@ -690,7 +701,8 @@ function read(): PersistedHermes {
               ...conversation,
               messages: conversation.messages.map(entry => ({ ...entry, streaming: false })),
               liveSessionId: undefined,
-              executionGeneration: undefined
+              executionGeneration: undefined,
+              busyMode: undefined
             }))
             .filter(
               conversation => !(conversation.messages.length > 0 && conversation.messages.every(entry => entry.textKey))
@@ -972,8 +984,24 @@ export const useHermesStore = defineStore('hermes', () => {
   let historyReadyPromise = new Promise<void>(resolve => {
     resolveHistoryReady = resolve;
   });
-  const pendingSteers = new Map<string, { text: string; messageId: string }[]>();
+  /**
+   * A correction waiting for the turn to claim a live session and generation. `mode` is the policy
+   * known when it was typed; `null` means the session event had not arrived yet, so the flush must
+   * re-read `conversation.busyMode` instead of pinning the default.
+   */
+  interface PendingSteer {
+    text: string;
+    messageId: string;
+    mode: 'interrupt' | 'steer' | null;
+  }
+  const pendingSteers = new Map<string, PendingSteer[]>();
   const queuedAfterTurn = new Map<string, string[]>();
+  /**
+   * The assistant bubble currently receiving this conversation's stream events. A correction
+   * seals it, so the next delta opens a fresh bubble below the correction — the official
+   * desktop's `pre-steer output → correction → post-steer output` order.
+   */
+  const streamingAssistantIds = new Map<string, string>();
   /**
    * The conversation whose queued text is already inside `send`. One drain at a time.
    * `stopThinking` clears it: that bump retires the in-flight turn, and a hung chat would
@@ -1393,7 +1421,8 @@ export const useHermesStore = defineStore('hermes', () => {
               return { ...entryMessage, streaming: false };
             }),
             liveSessionId: undefined,
-            executionGeneration: undefined
+            executionGeneration: undefined,
+            busyMode: undefined
           };
         });
         const localLatest = conversations.value.reduce((latest, item) => Math.max(latest, item.updatedAt || 0), 0);
@@ -2492,6 +2521,8 @@ export const useHermesStore = defineStore('hermes', () => {
       active.value.sessionId = undefined;
       active.value.liveSessionId = undefined;
       active.value.executionGeneration = undefined;
+      active.value.busyMode = undefined;
+      streamingAssistantIds.delete(conversationId);
       // A new session can no longer satisfy a steer's generation. Hand the text to the
       // next-turn queue instead of dropping it; rows already queued there stay valid.
       deferPendingSteers(conversationId);
@@ -2581,6 +2612,7 @@ export const useHermesStore = defineStore('hermes', () => {
     }
     pendingSteers.delete(idValue);
     queuedAfterTurn.delete(idValue);
+    streamingAssistantIds.delete(idValue);
     conversations.value = conversations.value.filter(item => item.id !== idValue);
     // The host dropped the row: other slices still list it until they are re-read.
     if (target?.panel) invalidatePanelSlices();
@@ -2637,6 +2669,7 @@ export const useHermesStore = defineStore('hermes', () => {
     for (const idValue of cleared) {
       pendingSteers.delete(idValue);
       queuedAfterTurn.delete(idValue);
+      streamingAssistantIds.delete(idValue);
     }
     if (activeId.value && !conversations.value.some(item => item.id === activeId.value)) activeId.value = null;
     persist();
@@ -2724,6 +2757,67 @@ export const useHermesStore = defineStore('hermes', () => {
     return message({ role: 'assistant', textKey: 'messages.fallback.assistant' });
   }
 
+  function streamingAssistant(conversation: HermesConversation) {
+    const assistantId = streamingAssistantIds.get(conversation.id);
+    if (!assistantId) return undefined;
+    return conversation.messages.find(entry => entry.id === assistantId);
+  }
+
+  /** The bubble that should receive this turn's deltas; after a seal, start a new one. */
+  function ensureStreamingAssistant(conversation: HermesConversation) {
+    const existing = streamingAssistant(conversation);
+    if (existing) return existing;
+    const assistant = message({ role: 'assistant', text: '', streaming: true });
+    conversation.messages = [...conversation.messages, assistant];
+    streamingAssistantIds.set(conversation.id, assistant.id);
+    conversation.updatedAt = Date.now();
+    return assistant;
+  }
+
+  /**
+   * Freeze the bubble above an accepted correction. The next delta opens a new bubble below it,
+   * and an empty placeholder is dropped so no blank assistant row survives the correction.
+   */
+  function sealStreamingAssistant(conversation: HermesConversation) {
+    const assistantId = streamingAssistantIds.get(conversation.id);
+    if (!assistantId) return;
+    streamingAssistantIds.delete(conversation.id);
+    const index = conversation.messages.findIndex(entry => entry.id === assistantId);
+    if (index < 0) return;
+    const entry = conversation.messages[index]!;
+    entry.streaming = false;
+    if (!entry.text && !entry.tools?.length && !entry.reasoning && !entry.decisions?.length) {
+      conversation.messages.splice(index, 1);
+    }
+    conversation.updatedAt = Date.now();
+  }
+
+  /** A tool completion can land after its starting bubble was sealed; keep it on that bubble. */
+  function findToolCall(
+    conversation: HermesConversation,
+    startIndex: number,
+    toolId: string | undefined,
+    name: string
+  ) {
+    for (let index = conversation.messages.length - 1; index >= startIndex; index -= 1) {
+      const entry = conversation.messages[index];
+      if (entry?.role !== 'assistant' || !entry.tools?.length) continue;
+      const call = toolId
+        ? entry.tools.find(item => item.toolId === toolId)
+        : [...entry.tools].reverse().find(item => item.name === name && item.time === '…');
+      if (call) return { entry, call };
+    }
+    return undefined;
+  }
+
+  function lastAssistantFrom(conversation: HermesConversation, startIndex: number) {
+    for (let index = conversation.messages.length - 1; index >= startIndex; index -= 1) {
+      const entry = conversation.messages[index];
+      if (entry?.role === 'assistant') return entry;
+    }
+    return undefined;
+  }
+
   function dropSteeringMessage(conversationId: string, messageId: string) {
     const target = conversations.value.find(item => item.id === conversationId);
     const index = target?.messages.findIndex(entry => entry.id === messageId) ?? -1;
@@ -2775,10 +2869,6 @@ export const useHermesStore = defineStore('hermes', () => {
     if (activeId.value) drainQueuedAfterTurn(activeId.value);
   }
 
-  function steerWasUndelivered(result: HermesSteerResult) {
-    return result.status === 'rejected' && result.delivered === false;
-  }
-
   function steerFailureDetail(error: unknown) {
     return error instanceof IpcError ? (error.detail ?? error.message) : String(error);
   }
@@ -2787,8 +2877,10 @@ export const useHermesStore = defineStore('hermes', () => {
     return steerFailureDetail(error).includes('stale_generation');
   }
 
-  function isUnsupportedSteerError(error: unknown) {
-    return steerFailureDetail(error).includes('does not support steer');
+  function isUnsupportedRedirectError(error: unknown) {
+    return /does not support active-turn redirect|method not found|unknown method|4010/i.test(
+      steerFailureDetail(error)
+    );
   }
 
   /**
@@ -2819,35 +2911,129 @@ export const useHermesStore = defineStore('hermes', () => {
     }
   }
 
-  async function flushSteers(conversation: HermesConversation) {
+  async function dispatchRedirect(live: string, text: string) {
+    try {
+      return {
+        ok: true as const,
+        result: await unwrap(commands.hermesRedirect(live, text, gatewayUrl.value, gatewayProfileId.value))
+      };
+    } catch (error) {
+      return { ok: false as const, error };
+    }
+  }
+
+  /**
+   * Queue a correction until this turn has claimed its live session and generation. `mode` stays
+   * `null` when the busy policy was unknown at send time, so the flush can use the policy that
+   * arrives with the session instead of pinning the default.
+   */
+  function parkCorrection(
+    conversation: HermesConversation,
+    messageId: string,
+    mode: 'interrupt' | 'steer' | null,
+    text: string
+  ) {
+    pendingSteers.set(conversation.id, [...(pendingSteers.get(conversation.id) ?? []), { text, messageId, mode }]);
+  }
+
+  /**
+   * Deliver one mid-turn correction. The official desktop's default is `session.redirect`
+   * (stop-and-correct); `session.steer` is the configured alternative. Rejected, unknown,
+   * client-invisible or failed corrections are never left in the transcript as if the model had
+   * seen them: the bubble is removed and the text either becomes the next turn or is reported.
+   */
+  async function deliverCorrection(
+    conversation: HermesConversation,
+    messageId: string,
+    requestedMode: 'interrupt' | 'steer' | null,
+    text: string
+  ) {
+    // A correction typed before the session event arrives has no frozen policy. Re-read the
+    // conversation now: the event that unblocked the flush also wrote `busyMode`.
+    const policy = requestedMode ?? conversation.busyMode;
+    // A parked correction can flush after an approval/clarify/secret card opened (session resume
+    // replays `open_requests` before `message.start`). The turn is parked on the user, so neither
+    // redirect nor steer can reach the model: queue it, exactly like a live `send` does.
+    if (policy === 'queue' || asks.value.length > 0) {
+      dropSteeringMessage(conversation.id, messageId);
+      queueSteerAfterTurn(conversation.id, text);
+      toasts.push({
+        tone: 'info',
+        title: 'Hermes',
+        description:
+          asks.value.length > 0
+            ? '本轮正在等待你的确认，这条修正已排队到本轮结束后发送。'
+            : '当前设置为排队发送，这条修正已排队到本轮结束后发送。'
+      });
+      return;
+    }
+    let effectiveMode = policy === 'steer' ? 'steer' : 'interrupt';
+    if (effectiveMode === 'steer') {
+      const correction = conversation.messages.find(entry => entry.id === messageId);
+      if (correction) correction.steering = true;
+    }
     const live = conversation.liveSessionId;
     const generation = conversation.executionGeneration;
-    if (!live || generation === undefined) return;
+    // `executionGeneration` is cleared when every turn starts and only this turn's session event
+    // sets it again. Gate redirect on it too: the previous turn's `liveSessionId` stays on the
+    // conversation after the turn succeeds, and must never receive this turn's correction.
+    if (!live || generation === undefined) {
+      parkCorrection(conversation, messageId, requestedMode, text);
+      return;
+    }
+    let dispatched =
+      effectiveMode === 'steer'
+        ? await dispatchSteer(conversation, live, generation, text)
+        : await dispatchRedirect(live, text);
+    // Older runtimes only know steer. Keep the correction usable instead of losing it.
+    if (!dispatched.ok && effectiveMode === 'interrupt' && isUnsupportedRedirectError(dispatched.error)) {
+      effectiveMode = 'steer';
+      const correction = conversation.messages.find(entry => entry.id === messageId);
+      if (correction) correction.steering = true;
+      dispatched = await dispatchSteer(conversation, live, generation, text);
+    }
+    if (!dispatched.ok) {
+      notePanelAuthError(dispatched.error);
+      dropSteeringMessage(conversation.id, messageId);
+      queueSteerAfterTurn(conversation.id, text);
+      toasts.push({
+        tone: 'warning',
+        title: effectiveMode === 'steer' ? 'Hermes steer' : 'Hermes redirect',
+        description: steerFailureDetail(dispatched.error)
+      });
+      return;
+    }
+    if (dispatched.result.status === 'rejected') {
+      dropSteeringMessage(conversation.id, messageId);
+      queueSteerAfterTurn(conversation.id, text);
+      toasts.push({
+        tone: 'info',
+        title: effectiveMode === 'steer' ? 'Hermes steer' : 'Hermes redirect',
+        description: '这条修正未送达，已排队到本轮结束后发送。'
+      });
+      return;
+    }
+    if (effectiveMode === 'interrupt' && dispatched.result.status === 'queued') {
+      // The gateway accepted the text into its own next-turn queue, but this one-turn IPC stream
+      // will not receive that turn (it returns at the first message.complete). Do not leave a
+      // bubble that looks delivered, and do not re-send it locally: the gateway already runs it.
+      dropSteeringMessage(conversation.id, messageId);
+      toasts.push({
+        tone: 'info',
+        title: 'Hermes redirect',
+        description: 'Hermes 已把这条修正排到下一轮；当前窗口收不到那一轮的回答，请不要重复发送。'
+      });
+      return;
+    }
+    sealStreamingAssistant(conversation);
+  }
+
+  async function flushSteers(conversation: HermesConversation) {
     const queued = pendingSteers.get(conversation.id) ?? [];
     if (!queued.length) return;
     pendingSteers.delete(conversation.id);
     for (const steer of queued) {
-      const dispatched = await dispatchSteer(conversation, live, generation, steer.text);
-      if (dispatched.ok) {
-        if (steerWasUndelivered(dispatched.result)) {
-          dropSteeringMessage(conversation.id, steer.messageId);
-          queueSteerAfterTurn(conversation.id, steer.text);
-          toasts.push({
-            tone: 'info',
-            title: 'Hermes steer',
-            description: '这条引导未送达，已排队到本轮结束后发送。'
-          });
-        }
-      } else {
-        notePanelAuthError(dispatched.error);
-        dropSteeringMessage(conversation.id, steer.messageId);
-        queueSteerAfterTurn(conversation.id, steer.text);
-        toasts.push({
-          tone: 'warning',
-          title: 'Hermes steer',
-          description: steerFailureDetail(dispatched.error)
-        });
-      }
+      await deliverCorrection(conversation, steer.messageId, steer.mode, steer.text);
     }
     drainQueuedAfterTurn(conversation.id);
   }
@@ -2885,6 +3071,7 @@ export const useHermesStore = defineStore('hermes', () => {
         );
         target.updatedAt = Date.now();
       }
+      streamingAssistantIds.delete(conversation.id);
       restoreTargetQueue();
     };
     const value = text.trim();
@@ -2900,62 +3087,36 @@ export const useHermesStore = defineStore('hermes', () => {
         toasts.push({ tone: 'warning', title: 'Hermes', description: '请等待当前回复结束再发送附件。' });
         return;
       }
-      const steerConversation = findTarget() ?? ensureConversation();
-      const steerMessage = message({ role: 'user', text: value, steering: true });
-      const streamingIndex = steerConversation.messages.findLastIndex(
-        entry => entry.role === 'assistant' && entry.streaming
-      );
-      if (streamingIndex >= 0) {
-        steerConversation.messages.splice(streamingIndex, 0, steerMessage);
-      } else {
-        steerConversation.messages = [...steerConversation.messages, steerMessage];
+      const conversation = findTarget() ?? ensureConversation();
+      // Official default: `interrupt` means session.redirect (stop-and-correct). `steer` injects
+      // at the next tool boundary, `queue` admits the text as the next turn. A parked card owns
+      // the turn, so nothing can reach the model until it is answered. `policy` stays undefined
+      // until this turn's session event; the correction keeps it unknown so the flush can use the
+      // real policy instead of pinning the default.
+      const policy = conversation.busyMode;
+      if (policy === 'queue' || asks.value.length > 0) {
+        queueSteerAfterTurn(conversation.id, value);
+        toasts.push({
+          tone: 'info',
+          title: 'Hermes',
+          description:
+            asks.value.length > 0
+              ? '本轮正在等待你的确认，这条消息已排队到本轮结束后发送。'
+              : '当前设置为排队发送，这条消息已排队到本轮结束后发送。'
+        });
+        return;
       }
-      steerConversation.updatedAt = Date.now();
-      const live = steerConversation.liveSessionId;
-      const generation = steerConversation.executionGeneration;
-      if (live && generation !== undefined) {
-        const dispatched = await dispatchSteer(steerConversation, live, generation, value);
-        if (dispatched.ok) {
-          if (steerWasUndelivered(dispatched.result)) {
-            dropSteeringMessage(steerConversation.id, steerMessage.id);
-            queueSteerAfterTurn(steerConversation.id, value);
-            toasts.push({
-              tone: 'info',
-              title: 'Hermes steer',
-              description: '这条引导未送达，已排队到本轮结束后发送。'
-            });
-          }
-        } else {
-          const detail = steerFailureDetail(dispatched.error);
-          dropSteeringMessage(steerConversation.id, steerMessage.id);
-          queueSteerAfterTurn(steerConversation.id, value);
-          toasts.push({
-            tone: 'info',
-            title: 'Hermes',
-            description: isUnsupportedSteerError(dispatched.error)
-              ? '当前模型不支持中途引导，这条消息已排队到本轮结束后发送。'
-              : detail
-          });
-          // A stale generation is a fence race. Stopping the turn would cancel the reply the
-          // user is still reading. Only a model that cannot steer falls back to interrupt.
-          if (
-            isUnsupportedSteerError(dispatched.error) &&
-            thinking.value &&
-            active.value?.id === steerConversation.id
-          ) {
-            stopRequested.value = true;
-            stopping.value = true;
-            armStopFallbacks(activeTurn, steerConversation.id);
-            await commands.hermesInterrupt(live, gatewayUrl.value, gatewayProfileId.value).catch(() => undefined);
-          }
-        }
-        drainQueuedAfterTurn(steerConversation.id);
-      } else {
-        pendingSteers.set(steerConversation.id, [
-          ...(pendingSteers.get(steerConversation.id) ?? []),
-          { text: value, messageId: steerMessage.id }
-        ]);
-      }
+      // Append at the tail, never above the stream that already reached the user: the official
+      // transcript order is pre-correction output → correction → post-correction output.
+      const correction = message({
+        role: 'user',
+        text: value,
+        steering: policy === 'steer' ? true : undefined
+      });
+      conversation.messages = [...conversation.messages, correction];
+      conversation.updatedAt = Date.now();
+      await deliverCorrection(conversation, correction.id, policy ?? null, value);
+      drainQueuedAfterTurn(conversation.id);
       return;
     }
     if (!targetIsActive()) {
@@ -2966,7 +3127,11 @@ export const useHermesStore = defineStore('hermes', () => {
     let conversation = findTarget() ?? ensureConversation();
     // The drain that called us published this epoch synchronously, before the first await.
     const drainEpoch = queuedDrain?.id === conversation.id ? queuedDrain.epoch : undefined;
+    // A new turn has not read the runtime's busy policy yet. Leaving the previous turn's value
+    // here would let a correction typed before this turn's `hermes-session` pin the old policy
+    // (for example, redirect a turn the runtime now says should queue).
     conversation.executionGeneration = undefined;
+    conversation.busyMode = undefined;
     const userMessage = message({
       role: 'user',
       text: value,
@@ -3000,6 +3165,7 @@ export const useHermesStore = defineStore('hermes', () => {
         live.messages = [...live.messages, ...carried];
         live.updatedAt = Date.now();
       }
+      if (live.busyMode === undefined) live.busyMode = conversation.busyMode;
       conversation = live;
     };
     if (historyLoadStarted && !historyLoaded) {
@@ -3061,24 +3227,34 @@ export const useHermesStore = defineStore('hermes', () => {
       pendingAssistantId = assistant.id;
       conversation.messages = [...conversation.messages, assistant];
       conversation.updatedAt = Date.now();
+      streamingAssistantIds.set(conversation.id, assistant.id);
+      // The first assistant bubble of this turn; tools may outlive it after a correction seals it.
+      const turnStartIndex = conversation.messages.length - 1;
+      const turnAssistant = (target: HermesConversation) =>
+        streamingAssistant(target) ?? lastAssistantFrom(target, turnStartIndex) ?? assistant;
       let unlisten: (() => void) | undefined;
       let turnSessionId: string | undefined;
       if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
         try {
           const { listen } = await import('@tauri-apps/api/event');
           const unlistenChunk = await listen<HermesChunk>('hermes-chunk', event => {
-            if (event.payload.requestId !== requestId) return;
+            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
             const target = conversations.value.find(item => item.id === conversation.id);
-            const entry = target?.messages.find(item => item.id === assistant.id);
-            if (!target || !entry || !entry.streaming) return;
+            if (!target) return;
+            // A correction seals the bubble above it; the first delta afterwards opens a fresh
+            // bubble below the correction (official arrival order).
+            const entry = ensureStreamingAssistant(target);
             entry.text = `${entry.text ?? ''}${event.payload.delta}`;
             target.updatedAt = Date.now();
           });
           const unlistenSession = await listen<HermesSessionEvent>('hermes-session', event => {
-            if (event.payload.requestId !== requestId) return;
+            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
             const target = conversations.value.find(item => item.id === conversation.id);
             if (!target) return;
             target.liveSessionId = event.payload.liveSessionId;
+            if (event.payload.busyInputMode) {
+              target.busyMode = event.payload.busyInputMode;
+            }
             if (event.payload.sessionId) {
               turnSessionId = event.payload.sessionId;
               turnSessionIds.value = {
@@ -3104,44 +3280,52 @@ export const useHermesStore = defineStore('hermes', () => {
           const unlistenSettled = await listen<HermesDecision>('hermes-ask-settled', event => {
             if (event.payload.turnRequestId !== requestId) return;
             asks.value = asks.value.filter(ask => ask.requestId !== event.payload.requestId);
-            recordDecision(event.payload, conversation.id, assistant.id);
+            const target = conversations.value.find(item => item.id === conversation.id);
+            if (target) recordDecision(event.payload, conversation.id, turnAssistant(target).id);
           });
           const unlistenTool = await listen<HermesToolEvent>('hermes-tool', event => {
-            if (event.payload.requestId !== requestId) return;
+            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
             const target = conversations.value.find(item => item.id === conversation.id);
-            const entry = target?.messages.find(item => item.id === assistant.id);
-            if (!entry) return;
-            const calls = [...(entry.tools ?? [])];
-            const existing = event.payload.toolId
-              ? calls.find(call => call.toolId === event.payload.toolId)
-              : [...calls].reverse().find(call => call.name === event.payload.name && call.time === '…');
+            if (!target) return;
+            // A tool started before a correction may finish after its bubble was sealed; keep
+            // the completion on that same bubble instead of duplicating it below the correction.
+            const found = findToolCall(target, turnStartIndex, event.payload.toolId, event.payload.name);
             if (event.payload.phase === 'start') {
-              if (!existing) {
-                calls.push({
+              if (!found) {
+                const entry = ensureStreamingAssistant(target);
+                entry.tools = [
+                  ...(entry.tools ?? []),
+                  {
+                    name: event.payload.name,
+                    label: event.payload.label || event.payload.name,
+                    time: '…',
+                    toolId: event.payload.toolId
+                  }
+                ];
+              }
+            } else if (found) {
+              found.call.label = event.payload.label || found.call.label;
+              found.call.time = `${event.payload.duration?.toFixed(1) ?? '0.0'}s`;
+            } else {
+              const entry = ensureStreamingAssistant(target);
+              entry.tools = [
+                ...(entry.tools ?? []),
+                {
                   name: event.payload.name,
                   label: event.payload.label || event.payload.name,
-                  time: '…',
+                  time: `${event.payload.duration?.toFixed(1) ?? '0.0'}s`,
                   toolId: event.payload.toolId
-                });
-              }
-            } else if (existing) {
-              existing.label = event.payload.label || existing.label;
-              existing.time = `${event.payload.duration?.toFixed(1) ?? '0.0'}s`;
-            } else {
-              calls.push({
-                name: event.payload.name,
-                label: event.payload.label || event.payload.name,
-                time: `${event.payload.duration?.toFixed(1) ?? '0.0'}s`,
-                toolId: event.payload.toolId
-              });
+                }
+              ];
             }
-            entry.tools = calls;
+            target.updatedAt = Date.now();
           });
           const unlistenReasoning = await listen<{ requestId: string; delta: string }>('hermes-reasoning', event => {
-            if (event.payload.requestId !== requestId) return;
+            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
             const target = conversations.value.find(item => item.id === conversation.id);
-            const entry = target?.messages.find(item => item.id === assistant.id);
-            if (entry) entry.reasoning = `${entry.reasoning ?? ''}${event.payload.delta}`;
+            if (!target) return;
+            const entry = ensureStreamingAssistant(target);
+            entry.reasoning = `${entry.reasoning ?? ''}${event.payload.delta}`;
           });
           unlisten = () => {
             unlistenChunk();
@@ -3195,10 +3379,15 @@ export const useHermesStore = defineStore('hermes', () => {
         if (activeTurn !== turn) return;
         syncConversation();
         const target = conversations.value.find(item => item.id === conversation.id);
-        const entry = target?.messages.find(item => item.id === assistant.id);
+        const entry = target
+          ? (streamingAssistant(target) ??
+            lastAssistantFrom(target, turnStartIndex) ??
+            ensureStreamingAssistant(target))
+          : undefined;
         if (target && entry) {
           entry.text = reply.text || entry.text || 'Hermes returned an empty response.';
           entry.streaming = false;
+          streamingAssistantIds.delete(conversation.id);
           if (reply.sessionId) target.sessionId = reply.sessionId;
           if (reply.liveSessionId) target.liveSessionId = reply.liveSessionId;
           if (reply.usage?.context_used && reply.usage.context_max) {
@@ -3218,10 +3407,11 @@ export const useHermesStore = defineStore('hermes', () => {
         syncConversation();
         if (stopping.value || stopRequested.value) {
           const target = conversations.value.find(item => item.id === conversation.id);
-          const entry = target?.messages.find(item => item.id === assistant.id);
+          const entry = target ? (streamingAssistant(target) ?? lastAssistantFrom(target, turnStartIndex)) : undefined;
           if (target && entry) {
             entry.text = entry.text || '已停止。';
             entry.streaming = false;
+            streamingAssistantIds.delete(conversation.id);
             target.updatedAt = Date.now();
           }
           return;
@@ -3238,10 +3428,15 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
           : detail;
         syncConversation();
         const target = conversations.value.find(item => item.id === conversation.id);
-        const entry = target?.messages.find(item => item.id === assistant.id);
+        const entry = target
+          ? (streamingAssistant(target) ??
+            lastAssistantFrom(target, turnStartIndex) ??
+            ensureStreamingAssistant(target))
+          : undefined;
         if (target && entry) {
           entry.text = entry.text || messageText;
           entry.streaming = false;
+          streamingAssistantIds.delete(conversation.id);
           target.updatedAt = Date.now();
         }
         toasts.push({
@@ -3264,7 +3459,12 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
           stopRequested.value = false;
           asks.value = [];
           const finished = conversations.value.find(item => item.id === conversation.id);
-          if (finished) finished.executionGeneration = undefined;
+          if (finished) {
+            sealStreamingAssistant(finished);
+            finished.executionGeneration = undefined;
+          } else {
+            streamingAssistantIds.delete(conversation.id);
+          }
           deferPendingSteers(conversation.id);
           // Let the next queued row start. This send's own finally still holds the previous epoch.
           releaseQueuedDrain(conversation.id);
@@ -3324,10 +3524,21 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
       // on screen and gave select nothing to send.
       deferPendingSteers(conversationId);
     }
-    const last = messages.value.at(-1);
-    if (last?.streaming) {
-      last.streaming = false;
-      if (!last.text) last.text = '已停止。';
+    if (active.value) {
+      // A correction may have left its own user row at the tail; seal every streaming assistant
+      // in the conversation, then stamp the last one so the stop is visible. Keep an empty
+      // placeholder here (it becomes the visible stop note) instead of dropping it.
+      const current = streamingAssistant(active.value);
+      if (current) {
+        current.streaming = false;
+        if (!current.text) current.text = '已停止。';
+      }
+      for (const entry of active.value.messages) {
+        if (entry.role === 'assistant' && entry.streaming) entry.streaming = false;
+      }
+      streamingAssistantIds.delete(active.value.id);
+      const last = [...active.value.messages].reverse().find(entry => entry.role === 'assistant');
+      if (last && !last.text) last.text = '已停止。';
     }
     if (live && remoteActive.value) {
       void commands.hermesInterrupt(live, gatewayUrl.value, gatewayProfileId.value).catch(() => undefined);

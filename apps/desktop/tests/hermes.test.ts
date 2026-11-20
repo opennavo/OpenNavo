@@ -986,6 +986,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     expect(store.thinking).toBe(true);
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
@@ -998,7 +999,7 @@ describe('Hermes conversation store', () => {
     expect(store.messages.some(entry => entry.text === 'steer this' && entry.steering)).toBe(true);
   });
 
-  it('Keeps a rejected steer that may have been delivered', async () => {
+  it('Redirects the live turn by default', async () => {
     vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
       status: 'ok',
       data: {
@@ -1014,6 +1015,613 @@ describe('Hermes conversation store', () => {
       }
     });
     vi.spyOn(commands, 'hermesChat').mockImplementation(() => new Promise(() => undefined) as never);
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const steer = vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    store.active!.liveSessionId = 'live-1';
+    store.active!.executionGeneration = 7;
+
+    await store.send('use the api');
+
+    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null);
+    expect(steer).not.toHaveBeenCalled();
+    expect(store.thinking).toBe(true);
+    expect(store.messages.some(entry => entry.text === 'use the api' && !entry.steering)).toBe(true);
+  });
+
+  it('Seals the assistant above a redirect and opens a new bubble below it', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let requestId = '';
+    vi.spyOn(commands, 'hermesChat').mockImplementation(input => {
+      requestId = input.requestId;
+      return new Promise(() => undefined) as never;
+    });
+    vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    await vi.waitFor(() => expect(requestId).not.toBe(''));
+    store.active!.liveSessionId = 'live-1';
+    store.active!.executionGeneration = 7;
+    const chunk = eventMock.listeners.find(listener => listener.event === 'hermes-chunk')!;
+    expect(chunk).toBeDefined();
+    chunk.handler({ payload: { requestId, delta: 'before' } });
+
+    await store.send('use the api');
+
+    const sealed = store.messages.find(entry => entry.role === 'assistant')!;
+    expect(sealed.text).toBe('before');
+    expect(sealed.streaming).toBe(false);
+
+    chunk.handler({ payload: { requestId, delta: 'after' } });
+
+    expect(store.messages.map(entry => `${entry.role}:${entry.text ?? ''}`)).toEqual([
+      'user:initial turn',
+      'assistant:before',
+      'user:use the api',
+      'assistant:after'
+    ]);
+  });
+
+  it('Queues a rejected redirect as the next turn', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let finishTurn!: (value: unknown) => void;
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishTurn = resolve;
+          }) as never
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { text: 'done', sessionId: null, liveSessionId: null, usage: null }
+      } as never);
+    vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'rejected', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    store.active!.liveSessionId = 'live-1';
+    store.active!.executionGeneration = 7;
+
+    await store.send('use the api');
+
+    expect(store.thinking).toBe(true);
+    expect(store.messages.some(entry => entry.text === 'use the api')).toBe(false);
+
+    finishTurn({ status: 'ok', data: { text: 'done', sessionId: null, liveSessionId: null, usage: null } });
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ prompt: 'use the api' });
+  });
+
+  it('Falls back to steer when the runtime cannot redirect', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    vi.spyOn(commands, 'hermesChat').mockImplementation(() => new Promise(() => undefined) as never);
+    const redirect = vi
+      .spyOn(commands, 'hermesRedirect')
+      .mockRejectedValue(new Error('agent does not support active-turn redirect'));
+    const steer = vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    store.active!.liveSessionId = 'live-1';
+    store.active!.executionGeneration = 7;
+
+    await store.send('use the api');
+
+    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null);
+    expect(steer).toHaveBeenCalledWith('live-1', 7, 'use the api', null, null);
+    expect(store.messages.some(entry => entry.text === 'use the api' && entry.steering)).toBe(true);
+  });
+
+  it("Waits for this turn's generation before redirecting", async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let requestId = '';
+    vi.spyOn(commands, 'hermesChat').mockImplementation(input => {
+      requestId = input.requestId;
+      return new Promise(() => undefined) as never;
+    });
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    await vi.waitFor(() => expect(requestId).not.toBe(''));
+    // What the previous turn left behind: the new turn has not claimed a generation yet.
+    store.active!.liveSessionId = 'old-live';
+
+    await store.send('use the api');
+
+    expect(redirect).not.toHaveBeenCalled();
+
+    const listener = eventMock.listeners.filter(entry => entry.event === 'hermes-session').at(-1);
+    expect(listener).toBeDefined();
+    listener!.handler({
+      payload: {
+        requestId,
+        liveSessionId: 'new-live',
+        sessionId: 'stored-1',
+        executionGeneration: 7
+      }
+    });
+
+    await vi.waitFor(() => expect(redirect).toHaveBeenCalledWith('new-live', 'use the api', null, null));
+    expect(redirect).not.toHaveBeenCalledWith('old-live', 'use the api', null, null);
+  });
+
+  it('Uses the busy mode that arrives while a correction is parked', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let requestId = '';
+    vi.spyOn(commands, 'hermesChat').mockImplementation(input => {
+      requestId = input.requestId;
+      return new Promise(() => undefined) as never;
+    });
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const steer = vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    await vi.waitFor(() => expect(requestId).not.toBe(''));
+
+    await store.send('use the api');
+
+    expect(redirect).not.toHaveBeenCalled();
+    expect(steer).not.toHaveBeenCalled();
+
+    const listener = eventMock.listeners.filter(entry => entry.event === 'hermes-session').at(-1);
+    expect(listener).toBeDefined();
+    listener!.handler({
+      payload: {
+        requestId,
+        liveSessionId: 'live-1',
+        sessionId: 'stored-1',
+        executionGeneration: 7,
+        busyInputMode: 'steer'
+      }
+    });
+
+    await vi.waitFor(() => expect(steer).toHaveBeenCalledWith('live-1', 7, 'use the api', null, null));
+    expect(redirect).not.toHaveBeenCalled();
+    expect(store.messages.some(entry => entry.text === 'use the api' && entry.steering)).toBe(true);
+  });
+
+  it('Queues a parked correction when the session reports queue mode', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let requestId = '';
+    let finishTurn!: (value: unknown) => void;
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockImplementationOnce(input => {
+        requestId = input.requestId;
+        return new Promise(resolve => {
+          finishTurn = resolve;
+        }) as never;
+      })
+      .mockResolvedValue({
+        status: 'ok',
+        data: { text: 'done', sessionId: null, liveSessionId: null, usage: null }
+      } as never);
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const steer = vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    await vi.waitFor(() => expect(requestId).not.toBe(''));
+
+    await store.send('use the api');
+
+    const listener = eventMock.listeners.filter(entry => entry.event === 'hermes-session').at(-1);
+    expect(listener).toBeDefined();
+    listener!.handler({
+      payload: {
+        requestId,
+        liveSessionId: 'live-1',
+        sessionId: 'stored-1',
+        executionGeneration: 7,
+        busyInputMode: 'queue'
+      }
+    });
+
+    await vi.waitFor(() => expect(store.messages.some(entry => entry.text === 'use the api')).toBe(false));
+    expect(redirect).not.toHaveBeenCalled();
+    expect(steer).not.toHaveBeenCalled();
+
+    finishTurn({ status: 'ok', data: { text: 'done', sessionId: null, liveSessionId: null, usage: null } });
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ prompt: 'use the api' });
+  });
+
+  it("Clears the previous turn's busy mode when a new turn starts", async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let requestId = '';
+    const chat = vi.spyOn(commands, 'hermesChat').mockImplementation(input => {
+      requestId = input.requestId;
+      return new Promise(() => undefined) as never;
+    });
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const steer = vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('turn one');
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
+    store.active!.busyMode = 'steer';
+    store.stopThinking();
+    void store.send('turn two');
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(store.active!.busyMode).toBeUndefined();
+
+    await store.send('correction');
+
+    expect(steer).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+
+    const listener = eventMock.listeners.filter(entry => entry.event === 'hermes-session').at(-1);
+    expect(listener).toBeDefined();
+    listener!.handler({
+      payload: {
+        requestId,
+        liveSessionId: 'live-2',
+        sessionId: 'stored-2',
+        executionGeneration: 9,
+        busyInputMode: 'interrupt'
+      }
+    });
+
+    await vi.waitFor(() => expect(redirect).toHaveBeenCalledWith('live-2', 'correction', null, null));
+    expect(steer).not.toHaveBeenCalled();
+  });
+
+  it('Queues a parked correction when an approval card is open', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let requestId = '';
+    let finishTurn!: (value: unknown) => void;
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockImplementationOnce(input => {
+        requestId = input.requestId;
+        return new Promise(resolve => {
+          finishTurn = resolve;
+        }) as never;
+      })
+      .mockResolvedValue({
+        status: 'ok',
+        data: { text: 'done', sessionId: null, liveSessionId: null, usage: null }
+      } as never);
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const steer = vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    await vi.waitFor(() => expect(requestId).not.toBe(''));
+
+    await store.send('use the api');
+
+    const ask = eventMock.listeners.find(listener => listener.event === 'hermes-ask')!.handler;
+    ask({
+      payload: {
+        requestId: 'srq-1',
+        turnRequestId: requestId,
+        kind: 'approval',
+        deadline: null,
+        params: { command: 'rm -rf build', choices: ['once', 'deny'] }
+      }
+    });
+
+    const listener = eventMock.listeners.filter(entry => entry.event === 'hermes-session').at(-1);
+    expect(listener).toBeDefined();
+    listener!.handler({
+      payload: {
+        requestId,
+        liveSessionId: 'live-1',
+        sessionId: 'stored-1',
+        executionGeneration: 7,
+        busyInputMode: 'interrupt'
+      }
+    });
+
+    await vi.waitFor(() => expect(store.messages.some(entry => entry.text === 'use the api')).toBe(false));
+    expect(redirect).not.toHaveBeenCalled();
+    expect(steer).not.toHaveBeenCalled();
+
+    finishTurn({ status: 'ok', data: { text: 'done', sessionId: null, liveSessionId: null, usage: null } });
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ prompt: 'use the api' });
+  });
+
+  it('Does not treat a gateway-queued redirect as delivered', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let finishTurn!: (value: unknown) => void;
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishTurn = resolve;
+          }) as never
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { text: 'done', sessionId: null, liveSessionId: null, usage: null }
+      } as never);
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    store.active!.liveSessionId = 'live-1';
+    store.active!.executionGeneration = 7;
+
+    await store.send('use the api');
+
+    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null);
+    expect(store.messages.some(entry => entry.text === 'use the api')).toBe(false);
+
+    finishTurn({ status: 'ok', data: { text: 'done', sessionId: null, liveSessionId: null, usage: null } });
+    await vi.waitFor(() => expect(store.thinking).toBe(false));
+    expect(chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('Queues the text when the runtime busy mode is queue', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let finishTurn!: (value: unknown) => void;
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishTurn = resolve;
+          }) as never
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { text: 'done', sessionId: null, liveSessionId: null, usage: null }
+      } as never);
+    const redirect = vi.spyOn(commands, 'hermesRedirect').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'redirected', delivered: null }
+    } as never);
+    const steer = vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
+      status: 'ok',
+      data: { status: 'queued', delivered: null }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    void store.send('initial turn');
+    store.active!.busyMode = 'queue';
+    store.active!.liveSessionId = 'live-1';
+
+    await store.send('use the api');
+
+    expect(redirect).not.toHaveBeenCalled();
+    expect(steer).not.toHaveBeenCalled();
+    expect(store.messages.some(entry => entry.text === 'use the api')).toBe(false);
+
+    finishTurn({ status: 'ok', data: { text: 'done', sessionId: null, liveSessionId: null, usage: null } });
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ prompt: 'use the api' });
+  });
+
+  it('Queues a rejected steer without keeping a phantom bubble', async () => {
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: true,
+        outdated: false,
+        message: null
+      }
+    });
+    let finishTurn!: (value: unknown) => void;
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishTurn = resolve;
+          }) as never
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { text: 'done', sessionId: null, liveSessionId: null, usage: null }
+      } as never);
     vi.spyOn(commands, 'hermesSteer').mockResolvedValue({
       status: 'ok',
       data: { status: 'rejected', delivered: null }
@@ -1023,15 +1631,21 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
 
     await store.send('steer this');
 
     expect(interrupt).not.toHaveBeenCalled();
     expect(store.stopping).toBe(false);
     expect(store.thinking).toBe(true);
-    expect(store.messages.some(entry => entry.text === 'steer this' && entry.steering)).toBe(true);
+    expect(store.messages.some(entry => entry.text === 'steer this')).toBe(false);
+
+    finishTurn({ status: 'ok', data: { text: 'done', sessionId: null, liveSessionId: null, usage: null } });
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ prompt: 'steer this' });
   });
 
   it('Queues an undelivered steer for the next turn without interrupting', async () => {
@@ -1071,8 +1685,10 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
 
     await store.send('steer this');
 
@@ -1115,6 +1731,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(requestId).not.toBe(''));
     store.active!.liveSessionId = 'live-1';
 
@@ -1169,6 +1786,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
 
     // The turn has not claimed a generation yet, so the steer waits for one.
@@ -1224,6 +1842,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(requestId).not.toBe(''));
     store.active!.liveSessionId = 'live-1';
 
@@ -1287,6 +1906,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(requestId).not.toBe(''));
     const original = store.active!;
     original.liveSessionId = 'live-1';
@@ -1353,6 +1973,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(requestId).not.toBe(''));
     const original = store.active!;
     original.liveSessionId = 'live-1';
@@ -1430,6 +2051,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
     const original = store.active!;
     original.liveSessionId = 'live-1';
@@ -1455,8 +2077,7 @@ describe('Hermes conversation store', () => {
     expect(store.messages.some(entry => entry.text === 'steer this' && !entry.steering)).toBe(true);
   });
 
-  it('Arms stop fallbacks when steering is rejected', async () => {
-    vi.useFakeTimers();
+  it('Queues a steer the runtime cannot accept', async () => {
     vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
       status: 'ok',
       data: {
@@ -1471,24 +2092,39 @@ describe('Hermes conversation store', () => {
         message: null
       }
     });
-    vi.spyOn(commands, 'hermesChat').mockImplementation(() => new Promise(() => undefined) as never);
+    let finishTurn!: (value: unknown) => void;
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            finishTurn = resolve;
+          }) as never
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { text: 'done', sessionId: null, liveSessionId: null, usage: null }
+      } as never);
     const steer = vi.spyOn(commands, 'hermesSteer').mockRejectedValue(new Error('does not support steer'));
-    vi.spyOn(commands, 'hermesInterrupt').mockImplementation(() => new Promise(() => undefined) as never);
-    vi.spyOn(commands, 'hermesStop').mockResolvedValue({ status: 'ok', data: null } as never);
+    const interrupt = vi.spyOn(commands, 'hermesInterrupt').mockResolvedValue({ status: 'ok', data: null } as never);
     const store = useHermesStore();
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     expect(store.thinking).toBe(true);
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
-    void store.send('steer this');
-    for (let attempt = 0; attempt < 8 && !store.stopping; attempt += 1) await Promise.resolve();
+    await store.send('steer this');
+
     expect(steer).toHaveBeenCalledWith('live-1', 7, 'steer this', null, null);
-    expect(store.stopping).toBe(true);
-    vi.advanceTimersByTime(10_000);
-    expect(store.thinking).toBe(false);
+    expect(interrupt).not.toHaveBeenCalled();
     expect(store.stopping).toBe(false);
+    expect(store.messages.some(entry => entry.text === 'steer this')).toBe(false);
+
+    finishTurn({ status: 'ok', data: { text: 'done', sessionId: null, liveSessionId: null, usage: null } });
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ prompt: 'steer this' });
   });
 
   it('Retries a stale steer once with the newer generation and leaves the turn running', async () => {
@@ -1519,6 +2155,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     expect(store.thinking).toBe(true);
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
@@ -1567,6 +2204,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
 
@@ -1604,6 +2242,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
 
@@ -1659,6 +2298,7 @@ describe('Hermes conversation store', () => {
     store.saveModel({ ...store.model, provider: 'openai', model: 'GPT-5.6', endpoint: '' });
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
@@ -1783,6 +2423,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
@@ -1835,6 +2476,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
@@ -1879,6 +2521,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
     await store.send('steer this');
     expect(store.messages.some(entry => entry.text === 'steer this' && entry.steering)).toBe(true);
@@ -1929,6 +2572,7 @@ describe('Hermes conversation store', () => {
     await store.loadRuntime();
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;
@@ -1988,6 +2632,7 @@ describe('Hermes conversation store', () => {
     store.saveModel({ ...store.model, provider: 'openai', model: 'GPT-5.6', endpoint: '' });
     store.newChat();
     void store.send('initial turn');
+    store.active!.busyMode = 'steer';
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(1));
     store.active!.liveSessionId = 'live-1';
     store.active!.executionGeneration = 7;

@@ -32,6 +32,9 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const START_TIMEOUT: Duration = Duration::from_secs(25);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(180);
+/// Best-effort read of `display.busy_input_mode` before the first prompt. A slow or older
+/// gateway must not hold the turn: the official default is `interrupt` anyway.
+const BUSY_MODE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Pause before repeating a catalog read that died on a service-restart close.
 ///
 /// Close code 1012 asks clients to wait 5–30s. The catalog read sits on a UI path that gives
@@ -1153,6 +1156,29 @@ fn emit_settled(app: Option<&AppHandle>, settled: &Value) {
     }
 }
 
+/// The runtime's `display.busy_input_mode` (`interrupt` | `steer` | `queue`). The official
+/// desktop reads the same value from `config.get {key:"busy"}`. Older gateways do not know the
+/// key; the deadline keeps the turn from waiting on a best-effort config read.
+async fn busy_input_mode(socket: &mut Socket, live_session_id: &str) -> String {
+    rpc_within(
+        socket,
+        3,
+        "config.get",
+        json!({"key": "busy", "session_id": live_session_id}),
+        BUSY_MODE_TIMEOUT,
+    )
+    .await
+    .ok()
+    .and_then(|result| {
+        result
+            .get("value")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    })
+    .filter(|value| matches!(value.as_str(), "interrupt" | "steer" | "queue"))
+    .unwrap_or_else(|| "interrupt".to_owned())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn chat_over_socket(
     mut socket: Socket,
@@ -1177,13 +1203,15 @@ async fn chat_over_socket(
     let (live_sid, stored_sid, open_requests, resumed, resumed_generation) =
         open_session(&mut socket, &input, home, remote).await?;
     if let Some(app) = app {
+        let busy_mode = busy_input_mode(&mut socket, &live_sid).await;
         let _ = app.emit(
             "hermes-session",
             json!({
                 "requestId": input.request_id,
                 "liveSessionId": live_sid,
                 "sessionId": stored_sid,
-                "resumed": resumed
+                "resumed": resumed,
+                "busyInputMode": busy_mode
             }),
         );
     }
@@ -1697,6 +1725,48 @@ pub async fn steer(
     steer_result(result)
 }
 
+/// The official desktop's busy-input default: cancel the active model request, keep the work
+/// already shown, insert the correction as a real user row and retry. During tool execution the
+/// runtime degrades this to a steer and answers `redirected` once the tool boundary is safe.
+pub async fn redirect_remote_auth(
+    url: &str,
+    query: &str,
+    live_session_id: &str,
+    text: &str,
+) -> Result<HermesSteerResult, AppError> {
+    if text.trim().is_empty() {
+        return Err(AppError::new("E_HERMES_INPUT", "The message is empty."));
+    }
+    let mut socket = connect_remote_auth(url, query).await?;
+    let result = rpc(
+        &mut socket,
+        1,
+        "session.redirect",
+        redirect_params(live_session_id, text),
+    )
+    .await?;
+    steer_result(result)
+}
+
+pub async fn redirect(
+    state: &HermesRuntimeState,
+    live_session_id: &str,
+    text: &str,
+) -> Result<HermesSteerResult, AppError> {
+    if text.trim().is_empty() {
+        return Err(AppError::new("E_HERMES_INPUT", "The message is empty."));
+    }
+    let mut socket = connect_running(state).await?;
+    let result = rpc(
+        &mut socket,
+        1,
+        "session.redirect",
+        redirect_params(live_session_id, text),
+    )
+    .await?;
+    steer_result(result)
+}
+
 /// Generation a queued steer may echo, or `None` when this frame must not move the stamp.
 ///
 /// Idle `session.info` (the frame `prompt.submit` publishes before the admission is claimed)
@@ -1726,6 +1796,15 @@ fn steer_params(live_session_id: &str, execution_generation: i64, text: &str) ->
         "session_id": live_session_id,
         "text": text,
         "execution_generation": execution_generation
+    })
+}
+
+/// The official desktop sends only the session and text for a redirect; the runtime has no
+/// generation fence on this method.
+fn redirect_params(live_session_id: &str, text: &str) -> Value {
+    json!({
+        "session_id": live_session_id,
+        "text": text
     })
 }
 
@@ -2239,6 +2318,28 @@ mod tests {
                 .expect_err("an unknown steer status must reach the UI")
                 .code,
             "E_HERMES_STEER"
+        );
+    }
+
+    #[test]
+    fn redirect_carries_only_the_session_and_text() {
+        assert_eq!(
+            redirect_params("live-1", "use the API instead"),
+            json!({"session_id": "live-1", "text": "use the API instead"})
+        );
+        assert_eq!(
+            steer_result(json!({"status": "redirected"})).expect("redirected correction"),
+            HermesSteerResult {
+                status: HermesSteerStatus::Redirected,
+                delivered: None
+            }
+        );
+        assert_eq!(
+            steer_result(json!({"status": "rejected"})).expect("an idle redirect reaches the UI"),
+            HermesSteerResult {
+                status: HermesSteerStatus::Rejected,
+                delivered: None
+            }
         );
     }
 
