@@ -16,6 +16,7 @@
 .idea/
 .vscode/*
 !.vscode/extensions.json
+.zcode/
 
 # Dependencies and build outputs.
 node_modules/
