@@ -13,10 +13,10 @@ import {
 describe('Hermes runtime manifest', () => {
   it('pins every versioned component and the release asset', () => {
     const manifest = readRuntimeManifest();
-    expect(manifest.hermes.version).toBe('0.23.2');
-    expect(manifest.hermes.commit).toBe('ae2a81ccc00e9b7c06301523e5bb09608397149c');
-    expect(manifest.release.tag).toBe('hermes-runtime-v0.23.2');
-    expect(manifest.release.asset).toBe('runtime-0.23.2-macos-arm64.tar.gz');
+    expect(manifest.hermes.version).toBe('0.23.3');
+    expect(manifest.hermes.commit).toBe('caafe5389ae585ef77387a962aee05b1bcf17029');
+    expect(manifest.release.tag).toBe('hermes-runtime-v0.23.3');
+    expect(manifest.release.asset).toBe('runtime-0.23.3-macos-arm64.tar.gz');
     expect(manifest.plugins).toContainEqual(
       expect.objectContaining({ name: 'github-copilot', ref: 'df8f1321941125d45dde71ab20196fbeea093191' })
     );
@@ -30,13 +30,13 @@ describe('Hermes runtime manifest', () => {
 
   it('builds the pinned GitHub release URL', () => {
     expect(runtimeReleaseUrl(readRuntimeManifest())).toBe(
-      'https://github.com/opennavo/OpenNavo/releases/download/hermes-runtime-v0.23.2/runtime-0.23.2-macos-arm64.tar.gz'
+      'https://github.com/opennavo/OpenNavo/releases/download/hermes-runtime-v0.23.3/runtime-0.23.3-macos-arm64.tar.gz'
     );
   });
 
   it('downloads runtime source by commit rather than a movable tag', () => {
     expect(runtimeSourceUrl(readRuntimeManifest())).toBe(
-      'https://github.com/NousResearch/hermes-agent/archive/ae2a81ccc00e9b7c06301523e5bb09608397149c.tar.gz'
+      'https://github.com/NousResearch/hermes-agent/archive/caafe5389ae585ef77387a962aee05b1bcf17029.tar.gz'
     );
   });
 
