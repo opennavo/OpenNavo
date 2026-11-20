@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "hermes": {
-    "version": "0.23.2",
-    "tag": "v0.23.2",
-    "commit": "ae2a81ccc00e9b7c06301523e5bb09608397149c",
-    "commitTimestamp": 1794857325
+    "version": "0.23.3",
+    "tag": "v0.23.3",
+    "commit": "caafe5389ae585ef77387a962aee05b1bcf17029",
+    "commitTimestamp": 1795121475
   },
   "python": "3.14",
   "cuaDriver": {
@@ -19,8 +19,8 @@
   ],
   "release": {
     "repository": "opennavo/OpenNavo",
-    "tag": "hermes-runtime-v0.23.2",
-    "asset": "runtime-0.23.2-macos-arm64.tar.gz",
-    "sha256": "6d27348583f273ec199f9e77ef4fdc50f7734b540c83fb59d377f84db09798c8"
+    "tag": "hermes-runtime-v0.23.3",
+    "asset": "runtime-0.23.3-macos-arm64.tar.gz",
+    "sha256": "d6d072bac5904ae57af0ddec84cfd550e7a5bc818b59ae12119c23a72bec7c9b"
   }
 }
