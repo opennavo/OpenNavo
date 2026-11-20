@@ -70,6 +70,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::hermes::hermes_ask_respond,
             commands::hermes::hermes_interrupt,
             commands::hermes::hermes_steer,
+            commands::hermes::hermes_redirect,
             commands::hermes::hermes_secret_set,
             commands::hermes::hermes_secret_status,
             commands::hermes::hermes_secret_delete,
