@@ -2713,7 +2713,7 @@ mod tests {
     #[test]
     fn runtime_manifest_pins_the_expected_version() {
         let manifest = runtime_manifest().unwrap();
-        assert_eq!(manifest.hermes.version, "0.23.2");
+        assert_eq!(manifest.hermes.version, "0.23.3");
         assert_eq!(manifest.plugins.len(), 1);
         assert_eq!(manifest.plugins[0].name, "github-copilot");
         assert_eq!(
