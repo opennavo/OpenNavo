@@ -1,0 +1,17 @@
+# Example only. Replace every placeholder in the host-side copy; never commit credentials.
+# `cloudflared tunnel create` writes credentials-file outside this repository.
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: <WEB_DOMAIN>
+    service: http://127.0.0.1:18088
+  - hostname: www.<WEB_DOMAIN>
+    service: http://127.0.0.1:18088
+  - hostname: api.<WEB_DOMAIN>
+    service: http://127.0.0.1:18088
+  # admin.<WEB_DOMAIN> is served by Cloudflare Pages in the recommended setup. Add it here only
+  # while the origin admin container is still the active backend.
+  # - hostname: admin.<WEB_DOMAIN>
+  #   service: http://127.0.0.1:18088
+  - service: http_status:404

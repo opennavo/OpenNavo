@@ -77,6 +77,28 @@ Production Compose does not start MinIO. Provision S3-compatible storage separat
 
 The initialization command below creates the bucket if absent and configures anonymous reads only for public prefixes. Its credential therefore needs bucket creation/policy permissions during initialization as well as object read/write/list permissions. If your provider prohibits bucket policy updates, have the storage administrator pre-provision the equivalent public-prefix policy and keep backup objects private. Inspect `apps/server/internal/storage` before adapting this policy; do not make the entire bucket public. Public app assets must be readable through `CDN_BASE_URL`, while database backups must remain inaccessible anonymously. Back up storage separately and configure retention/lifecycle policies deliberately.
 
+### Cloudflare R2
+
+R2 public access is bucket-wide through a Custom Domain or `r2.dev`, so it cannot reuse the MinIO
+prefix policy. Create a public bucket (for example `opennavo-public`) and a separate private bucket
+for database backups, then set:
+
+```dotenv
+S3_ENDPOINT=<ACCOUNT_ID>.r2.cloudflarestorage.com
+S3_REGION=auto
+S3_BUCKET=opennavo-public
+S3_PRIVATE_BUCKET=opennavo-private
+S3_PUBLIC_ACCESS=custom-domain
+S3_MANAGE_BUCKETS=false
+S3_USE_SSL=true
+CDN_BASE_URL=https://cdn.<WEB_DOMAIN>
+```
+
+`storage-init` verifies both buckets and skips bucket-policy changes in `custom-domain` mode.
+Clear `CDN_BASE_URL_INTERNAL`; it points at the MinIO container and has no R2 equivalent. Never
+put `backups/` in the public bucket. See [cloudflare/README.md](cloudflare/README.md) for the
+full R2, Pages, Tunnel and Access setup and cutover steps.
+
 ## Initialize in order
 
 Choose one database mode and keep the same setting in later shells:
