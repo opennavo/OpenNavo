@@ -135,7 +135,7 @@ Non-font Casks are automatically marked disabled when the Homebrew commit for th
 | Web                      | Nuxt 4 · Vue 3 · UnoCSS (SSR)                                                     |
 | macOS app                | Tauri 2 · Vue 3 · Rust · SQLite (FTS5)                                            |
 | Admin                    | soybean-admin v2.2.0 · Vue 3 · Naive UI                                           |
-| Backend                  | Go · Gin · GORM · PostgreSQL 18 · Redis 8 · asynq · S3-compatible storage (MinIO) |
+| Backend                  | Go · Gin · GORM · PostgreSQL 18 · Redis 8 · asynq · S3-compatible storage (MinIO or Cloudflare R2) |
 | MCP                      | Python 3.13 · FastMCP · uv                                                        |
 | Contracts and generation | OpenAPI 3.0.3 · oapi-codegen · openapi-typescript · tauri-specta                  |
 

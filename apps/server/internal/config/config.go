@@ -19,6 +19,13 @@ import (
 const DefaultProbeMaxRetryAfter = 15 * time.Minute
 const MaxProbeRetryAfter = 24 * time.Hour
 
+const (
+	// S3PublicAccessBucketPolicy keeps MinIO-compatible prefix policies; S3PublicAccessCustomDomain
+	// relies on an R2 custom domain, which cannot restrict public access to key prefixes.
+	S3PublicAccessBucketPolicy = "bucket-policy"
+	S3PublicAccessCustomDomain = "custom-domain"
+)
+
 // ProbeRetryAfterCap also bounds callers that construct Config without Load.
 func ProbeRetryAfterCap(value time.Duration) time.Duration {
 	if value <= 0 {
@@ -54,6 +61,9 @@ type Config struct {
 	S3Endpoint                  string        `env:"S3_ENDPOINT,required"`
 	S3Region                    string        `env:"S3_REGION,required"`
 	S3Bucket                    string        `env:"S3_BUCKET,required"`
+	S3PrivateBucket             string        `env:"S3_PRIVATE_BUCKET"`
+	S3PublicAccess              string        `env:"S3_PUBLIC_ACCESS" envDefault:"bucket-policy"`
+	S3ManageBuckets             bool          `env:"S3_MANAGE_BUCKETS" envDefault:"true"`
 	S3AccessKey                 string        `env:"S3_ACCESS_KEY,required"`
 	S3SecretKey                 string        `env:"S3_SECRET_KEY,required"`
 	S3UseSSL                    bool          `env:"S3_USE_SSL" envDefault:"true"`
@@ -160,6 +170,23 @@ func (c *Config) Validate() error {
 	}
 	if c.AppEnv != "dev" && c.AppEnv != "staging" && c.AppEnv != "prod" {
 		return errors.New("invalid APP_ENV")
+	}
+	switch c.S3PublicAccess {
+	case "":
+		c.S3PublicAccess = S3PublicAccessBucketPolicy
+	case S3PublicAccessBucketPolicy:
+	case S3PublicAccessCustomDomain:
+		if c.S3PrivateBucket == "" {
+			return errors.New("S3_PRIVATE_BUCKET is required when S3_PUBLIC_ACCESS=custom-domain")
+		}
+		if c.S3PrivateBucket == c.S3Bucket {
+			return errors.New("S3_PRIVATE_BUCKET must differ from S3_BUCKET when S3_PUBLIC_ACCESS=custom-domain")
+		}
+	default:
+		return errors.New("S3_PUBLIC_ACCESS must be bucket-policy or custom-domain")
+	}
+	if c.S3PrivateBucket == "" {
+		c.S3PrivateBucket = c.S3Bucket
 	}
 	for _, origin := range c.PublicCORSOrigins {
 		if strings.TrimSpace(origin) != "" && corsOrigin(origin) == "" {

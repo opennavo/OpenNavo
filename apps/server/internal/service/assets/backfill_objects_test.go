@@ -31,7 +31,7 @@ func TestS3BackfillBoundedRead(t *testing.T) {
 	defer server.Close()
 	client, err := minio.New(strings.TrimPrefix(server.URL, "http://"), &minio.Options{Creds: credentials.NewStaticV4("fixture-access", "fixture-secret", ""), Region: "us-east-1"})
 	require.NoError(t, err)
-	objects := S3Objects{Client: &storage.Client{S3: client, Bucket: "fixture-bucket"}}
+	objects := S3Objects{Client: &storage.Client{S3: client, PublicBucket: "fixture-bucket"}}
 	read, err := objects.ReadLimited(context.Background(), "normalized.png", images.MaxNormalizedBytes)
 	require.NoError(t, err)
 	require.Equal(t, data, read)
@@ -97,7 +97,7 @@ func TestS3BackfillPutMissing(t *testing.T) {
 			defer server.Close()
 			client, err := minio.New(strings.TrimPrefix(server.URL, "http://"), &minio.Options{Creds: credentials.NewStaticV4("fixture-access", "fixture-secret", ""), Region: "us-east-1"})
 			require.NoError(t, err)
-			objects := S3Objects{Client: &storage.Client{S3: client, Bucket: "fixture-bucket"}}
+			objects := S3Objects{Client: &storage.Client{S3: client, PublicBucket: "fixture-bucket"}}
 			for range 2 {
 				err := objects.PutMissing(context.Background(), "icons/fixture.webp", []byte("webp"), "image/webp")
 				require.Equal(t, tc.wantError, err != nil, "%v", err)

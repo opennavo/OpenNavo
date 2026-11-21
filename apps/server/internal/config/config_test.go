@@ -178,3 +178,40 @@ func TestEveryDocumentedEnvironmentVariableHasAField(t *testing.T) {
 		t.Fatalf("example omits variables: %v", names)
 	}
 }
+
+func TestS3PublicAndPrivateBucketConfiguration(t *testing.T) {
+	cfg := validConfig()
+	cfg.S3Bucket = "opennavo"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3PrivateBucket != "opennavo" {
+		t.Fatalf("private bucket default = %q", cfg.S3PrivateBucket)
+	}
+	if cfg.S3PublicAccess != S3PublicAccessBucketPolicy {
+		t.Fatalf("public access default = %q", cfg.S3PublicAccess)
+	}
+
+	customDomain := func(public, private string) Config {
+		c := validConfig()
+		c.S3Bucket, c.S3PrivateBucket, c.S3PublicAccess = public, private, S3PublicAccessCustomDomain
+		return c
+	}
+	validCustomDomain := customDomain("opennavo-public", "opennavo-private")
+	if err := validCustomDomain.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]Config{
+		"missing private bucket": customDomain("opennavo-public", ""),
+		"same bucket":            customDomain("opennavo", "opennavo"),
+	} {
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+	invalid := validConfig()
+	invalid.S3Bucket, invalid.S3PublicAccess = "opennavo", "public-bucket"
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("invalid S3_PUBLIC_ACCESS accepted")
+	}
+}

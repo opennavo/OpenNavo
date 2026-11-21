@@ -15,7 +15,7 @@ var errRenditionObjectConflict = errors.New("existing rendition size mismatch")
 // PutMissing skips previously uploaded content, including objects left by an
 // interrupted transaction. The conditional write also closes the HEAD/PUT race.
 func (s S3Objects) PutMissing(ctx context.Context, key string, data []byte, mime string) error {
-	info, err := s.Client.S3.StatObject(ctx, s.Client.Bucket, key, minio.StatObjectOptions{})
+	info, err := s.Client.S3.StatObject(ctx, s.Client.PublicBucket, key, minio.StatObjectOptions{})
 	if err == nil {
 		if info.Size != int64(len(data)) {
 			return errRenditionObjectConflict
@@ -27,9 +27,9 @@ func (s S3Objects) PutMissing(ctx context.Context, key string, data []byte, mime
 	}
 	options := minio.PutObjectOptions{ContentType: mime, CacheControl: "public, max-age=31536000, immutable", DisableMultipart: true}
 	options.SetMatchETagExcept("*")
-	_, err = s.Client.S3.PutObject(ctx, s.Client.Bucket, key, bytes.NewReader(data), int64(len(data)), options)
+	_, err = s.Client.S3.PutObject(ctx, s.Client.PublicBucket, key, bytes.NewReader(data), int64(len(data)), options)
 	if minio.ToErrorResponse(err).StatusCode == http.StatusPreconditionFailed {
-		info, statErr := s.Client.S3.StatObject(ctx, s.Client.Bucket, key, minio.StatObjectOptions{})
+		info, statErr := s.Client.S3.StatObject(ctx, s.Client.PublicBucket, key, minio.StatObjectOptions{})
 		if statErr != nil {
 			return statErr
 		}

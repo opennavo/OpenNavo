@@ -17,12 +17,17 @@ import (
 	"github.com/opennavo/opennavo/server/internal/storage"
 )
 
+type verificationObject struct {
+	bucket string
+	key    string
+}
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("local infrastructure verification failed", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("verified four public prefixes, private access denied and asynqmon ready")
+	slog.Info("verified four public prefixes, private object isolation and asynqmon ready")
 }
 func run() error {
 	cfg, err := config.Load()
@@ -40,20 +45,20 @@ func run() error {
 	}
 	suffix := "__verify-" + rand.Text() + ".txt"
 	body := "OpenNavo local storage verification"
-	var keys []string
+	var objects []verificationObject
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		for _, key := range keys {
-			_ = client.S3.RemoveObject(cleanup, client.Bucket, key, minio.RemoveObjectOptions{})
+		for _, object := range objects {
+			_ = client.S3.RemoveObject(cleanup, object.bucket, object.key, minio.RemoveObjectOptions{})
 		}
 	}()
-	for _, prefix := range append(append([]string{}, storage.PublicPrefixes...), "private/") {
+	for _, prefix := range storage.PublicPrefixes {
 		key := prefix + suffix
-		if _, err := client.S3.PutObject(ctx, client.Bucket, key, strings.NewReader(body), int64(len(body)), minio.PutObjectOptions{ContentType: "text/plain"}); err != nil {
-			return errors.New("cannot write isolated verification object")
+		if _, err := client.S3.PutObject(ctx, client.PublicBucket, key, strings.NewReader(body), int64(len(body)), minio.PutObjectOptions{ContentType: "text/plain"}); err != nil {
+			return errors.New("cannot write isolated public verification object")
 		}
-		keys = append(keys, key)
+		objects = append(objects, verificationObject{bucket: client.PublicBucket, key: key})
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(cfg.CDNBaseURL, "/")+"/"+key, nil)
 		if err != nil {
 			return err
@@ -67,19 +72,46 @@ func run() error {
 		if readErr != nil {
 			return readErr
 		}
-		if prefix == "private/" {
-			if response.StatusCode != http.StatusForbidden {
-				return errors.New("private object was publicly accessible")
-			}
-		} else if response.StatusCode != http.StatusOK || string(data) != body {
+		if response.StatusCode != http.StatusOK || string(data) != body {
 			return fmt.Errorf("anonymous read failed for prefix %s", prefix)
 		}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:8081/api/queues", nil)
+
+	privateKey := "private/" + suffix
+	if _, err := client.S3.PutObject(ctx, client.PrivateBucket, privateKey, strings.NewReader(body), int64(len(body)), minio.PutObjectOptions{ContentType: "text/plain"}); err != nil {
+		return errors.New("cannot write isolated private verification object")
+	}
+	objects = append(objects, verificationObject{bucket: client.PrivateBucket, key: privateKey})
+	if _, err := client.S3.StatObject(ctx, client.PrivateBucket, privateKey, minio.StatObjectOptions{}); err != nil {
+		return errors.New("cannot read isolated private verification object")
+	}
+	// StatObject only proves the authenticated write. The isolation check is an anonymous GET
+	// through the public CDN: a 200 means the key is reachable publicly, whether the CDN points at
+	// the private bucket or serves a fallback page. Same-bucket MinIO returns 403; a separate
+	// private bucket is absent from the public bucket and returns 404.
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(cfg.CDNBaseURL, "/")+"/"+privateKey, nil)
 	if err != nil {
 		return err
 	}
 	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return errors.New("anonymous private object request failed")
+	}
+	status := response.StatusCode
+	_ = response.Body.Close()
+	switch status {
+	case http.StatusForbidden, http.StatusNotFound:
+	case http.StatusOK:
+		return errors.New("private object was publicly accessible")
+	default:
+		return fmt.Errorf("unexpected private object status %d", status)
+	}
+
+	request, err = http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:8081/api/queues", nil)
+	if err != nil {
+		return err
+	}
+	response, err = http.DefaultClient.Do(request)
 	if err != nil {
 		return errors.New("asynqmon unavailable")
 	}

@@ -207,15 +207,15 @@ func (p PGTools) Restore(ctx context.Context, file string) error {
 type S3Objects struct{ Client *storage.Client }
 
 func (s S3Objects) Put(ctx context.Context, key, file, hash string) error {
-	_, err := s.Client.S3.FPutObject(ctx, s.Client.Bucket, key, file, minio.PutObjectOptions{ContentType: "application/octet-stream", CacheControl: "private, no-store", UserMetadata: map[string]string{"sha256": hash}})
+	_, err := s.Client.S3.FPutObject(ctx, s.Client.PrivateBucket, key, file, minio.PutObjectOptions{ContentType: "application/octet-stream", CacheControl: "private, no-store", UserMetadata: map[string]string{"sha256": hash}})
 	return err
 }
 func (s S3Objects) Get(ctx context.Context, key, file string) (string, error) {
-	info, err := s.Client.S3.StatObject(ctx, s.Client.Bucket, key, minio.StatObjectOptions{})
+	info, err := s.Client.S3.StatObject(ctx, s.Client.PrivateBucket, key, minio.StatObjectOptions{})
 	if err != nil {
 		return "", err
 	}
-	if err := s.Client.S3.FGetObject(ctx, s.Client.Bucket, key, file, minio.GetObjectOptions{}); err != nil {
+	if err := s.Client.S3.FGetObject(ctx, s.Client.PrivateBucket, key, file, minio.GetObjectOptions{}); err != nil {
 		return "", err
 	}
 	for key, value := range info.UserMetadata {
@@ -227,7 +227,7 @@ func (s S3Objects) Get(ctx context.Context, key, file string) (string, error) {
 }
 func (s S3Objects) List(ctx context.Context, prefix string) ([]Object, error) {
 	rows := []Object{}
-	for item := range s.Client.S3.ListObjects(ctx, s.Client.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+	for item := range s.Client.S3.ListObjects(ctx, s.Client.PrivateBucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 		if item.Err != nil {
 			return nil, item.Err
 		}
@@ -236,5 +236,5 @@ func (s S3Objects) List(ctx context.Context, prefix string) ([]Object, error) {
 	return rows, nil
 }
 func (s S3Objects) Delete(ctx context.Context, key string) error {
-	return s.Client.S3.RemoveObject(ctx, s.Client.Bucket, key, minio.RemoveObjectOptions{})
+	return s.Client.S3.RemoveObject(ctx, s.Client.PrivateBucket, key, minio.RemoveObjectOptions{})
 }

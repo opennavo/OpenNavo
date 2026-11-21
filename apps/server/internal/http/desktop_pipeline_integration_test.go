@@ -85,14 +85,14 @@ func TestNativeDesktopReleasePipelineWithRealStorage(t *testing.T) {
 	require.NoError(t, err)
 	endpoint := host + ":" + port.Port()
 	cfg := config.Config{
-		S3Endpoint: endpoint, S3Region: "us-east-1", S3Bucket: "release-verification",
+		S3Endpoint: endpoint, S3Region: "us-east-1", S3Bucket: "release-verification", S3ManageBuckets: true,
 		S3AccessKey: "release-verification", S3SecretKey: "development-release-verification-only",
 		CDNBaseURL: "http://" + endpoint + "/release-verification",
 		JWTSecret:  strings.Repeat("v", 32), JWTAccessTTL: time.Hour, JWTRefreshTTL: time.Hour,
 	}
 	storageClient, err := storage.New(cfg)
 	require.NoError(t, err)
-	require.NoError(t, storageClient.EnsurePublicPrefixes(ctx, cfg.S3Region))
+	require.NoError(t, storageClient.EnsureBuckets(ctx, cfg.S3Region))
 	objects := desktop.S3Objects{S3Objects: assets.S3Objects{Client: storageClient}}
 	data, err := seeds.Load()
 	require.NoError(t, err)
