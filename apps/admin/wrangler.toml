@@ -4,3 +4,4 @@ pages_build_output_dir = "dist"
 
 [vars]
 ADMIN_API_ORIGIN = "https://api.opennavo.com"
+MCP_ORIGIN = "https://admin-origin.opennavo.com"

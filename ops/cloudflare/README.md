@@ -110,6 +110,31 @@ through Cloudflare to `api.<WEB_DOMAIN>`; confirm the API still receives the exp
 and that WAF/rate rules do not challenge `/admin-api/*` from the Pages Function. Add an allow
 rule scoped to the admin API path if the existing rules block it.
 
+### Private MCP on the admin hostname
+
+Pages owns `admin.<WEB_DOMAIN>`, so the origin's private `/mcp` route is no longer reachable
+directly. Keep the endpoint on the same URL with a narrow exception:
+
+1. Add a Tunnel public hostname `admin-origin.<WEB_DOMAIN>` targeting the existing Caddy origin
+   and set its HTTP Host Header to `admin.<WEB_DOMAIN>` (`originRequest.httpHostHeader`). This
+   selects the origin admin route without exposing a second Caddy site.
+2. Protect `admin-origin.<WEB_DOMAIN>` with an Access application whose only policy is
+   **Service Auth** for a service token. Do not add an Allow policy for human users.
+3. Set the Pages production variables `MCP_ORIGIN=https://admin-origin.<WEB_DOMAIN>` and the
+   service-token credentials as encrypted secrets `MCP_ACCESS_CLIENT_ID` and
+   `MCP_ACCESS_CLIENT_SECRET`.
+4. `apps/admin/functions/mcp.js` proxies the exact `/mcp` path and attaches the service token.
+   `apps/admin/functions/_middleware.js` proxies the three OAuth discovery paths.
+5. Add Access **Bypass** applications for the exact `/mcp` path, the three
+   `/.well-known/oauth-*` paths and the `/oauth` path prefix. MCP clients still authenticate
+   with their own Bearer token; the bypass only removes the browser SSO requirement from the
+   protocol endpoints. Keep every other admin path behind Access.
+
+Verify that `admin.<WEB_DOMAIN>/mcp` returns the MCP `401` challenge with a
+`resource_metadata` URL, that the discovery URLs return JSON, that
+`admin-origin.<WEB_DOMAIN>/mcp` returns an Access `403` without the service token, and that
+`admin.<WEB_DOMAIN>/` still redirects to Access.
+
 ## 3. Cloudflare Tunnel and Access
 
 ### Tunnel
