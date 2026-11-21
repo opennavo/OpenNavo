@@ -285,19 +285,36 @@ pub async fn logout(session: &PanelSession) -> Result<(), AppError> {
     Ok(())
 }
 
+/// One authenticated panel response, status included. Diagnostics actions need the raw
+/// status to tell "the profile does not exist on this host" (404) from every other failure;
+/// the session helpers below keep their existing classification.
+pub(crate) struct PanelReply {
+    pub status: reqwest::StatusCode,
+    pub value: serde_json::Value,
+}
+
+/// Join a panel route onto a base URL that may carry a path prefix (`https://host/hermes`).
+pub(crate) fn endpoint_url(base: &str, path: &str) -> Result<reqwest::Url, AppError> {
+    let base = base.trim_end_matches('/');
+    let path = path.trim_start_matches('/');
+    reqwest::Url::parse(&format!("{base}/{path}"))
+        .map_err(|_| AppError::new("E_HERMES_PANEL_URL", "Invalid Hermes panel URL."))
+}
+
 /// One authenticated panel request. Every session read and write goes through here so the
 /// rotated cookies are persisted the same way for GET, PATCH and DELETE.
-async fn send(
+pub(crate) async fn request_raw(
     profile_id: &str,
     method: reqwest::Method,
     path: &str,
     body: Option<serde_json::Value>,
     failure: &str,
-) -> Result<serde_json::Value, AppError> {
+) -> Result<PanelReply, AppError> {
     let session = super::panel_session(profile_id)?;
     let client = client()?;
+    let url = endpoint_url(&session.base_url, path)?;
     let mut request = client
-        .request(method, format!("{}{}", session.base_url, path))
+        .request(method, url)
         .header(COOKIE, cookie_header(&session));
     if let Some(body) = body {
         request = request.json(&body);
@@ -310,10 +327,21 @@ async fn send(
     let headers = response.headers().clone();
     persist_response_cookies(profile_id, &headers)?;
     let value = response.json().await.unwrap_or(serde_json::Value::Null);
-    if !status.is_success() {
-        return Err(status_error(status, failure));
+    Ok(PanelReply { status, value })
+}
+
+async fn send(
+    profile_id: &str,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+    failure: &str,
+) -> Result<serde_json::Value, AppError> {
+    let reply = request_raw(profile_id, method, path, body, failure).await?;
+    if !reply.status.is_success() {
+        return Err(status_error(reply.status, failure));
     }
-    Ok(value)
+    Ok(reply.value)
 }
 
 /// 401 and 403 reject the stored panel session. Profile probes and panel requests share
@@ -351,6 +379,24 @@ fn status_error(status: reqwest::StatusCode, failure: &str) -> AppError {
         "E_HERMES_PANEL"
     };
     AppError::new(code, failure).with_detail(format!("Panel request returned {status}."))
+}
+
+/// Same classification as [`status_error`], but with the host's own `detail` text.
+/// Diagnostics keep the backend message (for example `Profile 'x' does not exist.`).
+pub(crate) fn reply_error(
+    status: reqwest::StatusCode,
+    failure: &str,
+    detail: impl Into<String>,
+) -> AppError {
+    if session_rejected(status) {
+        return session_expired(detail);
+    }
+    let code = if status.as_u16() == 404 {
+        "E_HERMES_PANEL_UNSUPPORTED"
+    } else {
+        "E_HERMES_PANEL"
+    };
+    AppError::new(code, failure).with_detail(detail)
 }
 
 async fn get_json(profile_id: &str, path: &str) -> Result<serde_json::Value, AppError> {

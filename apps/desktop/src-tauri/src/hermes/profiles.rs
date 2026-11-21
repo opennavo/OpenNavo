@@ -91,6 +91,33 @@ pub(crate) fn has_identity(home: &Path) -> bool {
     })
 }
 
+/// Refuse a local CLI call for a named profile this Mac does not have.
+///
+/// The runtime's boot maintenance refuses to materialize a missing named profile
+/// (`Named profile home does not exist`), so a profile name belonging to another
+/// connection would otherwise surface as an unrelated `expose_cli` traceback.
+/// Answer here instead: the UI can show a clean "profile absent on this Mac".
+pub(crate) fn ensure_local_profile(home: &Path, profile: Option<&str>) -> Result<(), AppError> {
+    let Some(name) = profile
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && *name != "default")
+    else {
+        return Ok(());
+    };
+    let path = checked_profile_path(home, name)?;
+    if !has_identity(&path) {
+        return Err(AppError::new(
+            "E_HERMES_PROFILE",
+            "The Hermes profile does not exist on this Mac.",
+        )
+        .with_detail(format!(
+            "Profile '{name}' has no home at {}.",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 /// Whether a profile argument names the root home.
 pub(crate) fn is_default_profile(profile: Option<&str>) -> bool {
     matches!(
@@ -841,6 +868,34 @@ mod tests {
         let mut named = tokio::process::Command::new("hermes");
         pin_default_profile(&mut named, Some("work"));
         assert_eq!(named.as_std().get_args().count(), 0);
+    }
+
+    #[test]
+    fn refuses_a_missing_named_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // The default profile is the root home and needs no marker.
+        assert!(ensure_local_profile(root, None).is_ok());
+        assert!(ensure_local_profile(root, Some("default")).is_ok());
+
+        // A name from another connection must not reach the runtime, and must not
+        // leave a ghost profile dir behind for the next boot to trip over.
+        let error = ensure_local_profile(root, Some("opennavo")).unwrap_err();
+        assert_eq!(error.code, "E_HERMES_PROFILE");
+        assert!(!root.join("profiles").join("opennavo").exists());
+
+        // A real profile (identity marker present) is allowed; an empty shell is not,
+        // because the runtime itself refuses `--profile <name>` without one.
+        std::fs::create_dir_all(root.join("profiles").join("work")).unwrap();
+        std::fs::write(
+            root.join("profiles").join("work").join("config.yaml"),
+            "model: x\n",
+        )
+        .unwrap();
+        assert!(ensure_local_profile(root, Some("work")).is_ok());
+        std::fs::create_dir_all(root.join("profiles").join("empty")).unwrap();
+        assert!(ensure_local_profile(root, Some("empty")).is_err());
     }
 
     #[test]

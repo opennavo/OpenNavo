@@ -203,8 +203,19 @@ pub async fn hermes_mcp_action(
     name: String,
     url: String,
     profile: Option<String>,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::mcp_action(&app, &action, &name, &url, profile.as_deref()).await
+    crate::hermes::mcp_action(
+        &app,
+        &action,
+        &name,
+        &url,
+        profile.as_deref(),
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -214,8 +225,18 @@ pub async fn hermes_skill_action(
     action: String,
     identifier: String,
     profile: Option<String>,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::skill_action(&app, &action, &identifier, profile.as_deref()).await
+    crate::hermes::skill_action(
+        &app,
+        &action,
+        &identifier,
+        profile.as_deref(),
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -225,8 +246,18 @@ pub async fn hermes_tool_action(
     action: String,
     name: String,
     profile: Option<String>,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::tool_action(&app, &action, &name, profile.as_deref()).await
+    crate::hermes::tool_action(
+        &app,
+        &action,
+        &name,
+        profile.as_deref(),
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -236,8 +267,18 @@ pub async fn hermes_cron_action(
     action: String,
     job_id: String,
     profile: Option<String>,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::cron_action(&app, &action, &job_id, profile.as_deref()).await
+    crate::hermes::cron_action(
+        &app,
+        &action,
+        &job_id,
+        profile.as_deref(),
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -246,8 +287,17 @@ pub async fn hermes_cli_read(
     app: tauri::AppHandle,
     kind: String,
     profile: Option<String>,
+    connection_id: Option<String>,
+    gateway_url: Option<String>,
 ) -> Result<String, AppError> {
-    crate::hermes::cli_read(&app, &kind, profile.as_deref()).await
+    crate::hermes::cli_read(
+        &app,
+        &kind,
+        profile.as_deref(),
+        connection_id.as_deref(),
+        gateway_url.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]

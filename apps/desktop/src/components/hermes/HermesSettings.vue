@@ -35,6 +35,8 @@ const draftModel = ref<HermesModelSettings>({ ...store.model });
 const draftMac = ref<HermesMacSettings>({ ...store.mac });
 const editProfileName = ref(store.activeAgentProfileName);
 const secret = ref('');
+/** Invalidates in-flight key-status reads when the provider or scope changes. */
+let secretSeq = 0;
 const uninstallOpen = ref(false);
 const modelOpen = ref(false);
 const auxOpen = ref(false);
@@ -46,6 +48,8 @@ const auditLoading = ref(false);
 const cliKind = ref('tools');
 const cliOutput = ref('');
 const cliLoading = ref(false);
+/** Invalidates in-flight diagnostics reads on a connection/profile switch. */
+let cliRequestSeq = 0;
 const cronJobId = ref('');
 const cronBusy = ref(false);
 const skillName = ref('');
@@ -270,6 +274,37 @@ async function ensureLoginListener() {
  */
 const profileArg = computed(() => (editProfileName.value === 'default' ? null : editProfileName.value));
 
+/**
+ * Diagnostics run where the selected profile lives. A Panel connection's profiles belong to
+ * that host, so the action goes to its REST API; local connections keep the CLI and its
+ * `null`-for-default convention. Remote calls name `default` explicitly — an omitted profile
+ * resolves to the panel process's launch profile, not the profile the sheet is editing.
+ */
+function diagnosticsScope() {
+  const remote = Boolean(store.remoteActive && store.gatewayProfileId && store.gatewayUrl);
+  return {
+    profile: remote ? editProfileName.value || 'default' : profileArg.value,
+    connectionId: remote ? store.gatewayProfileId : null,
+    gatewayUrl: remote ? store.gatewayUrl : null
+  };
+}
+
+/**
+ * Drop every piece of diagnostics state that belongs to the previous connection/profile.
+ * Bumping the request sequence keeps a slow read from painting its old result afterwards;
+ * the action inputs are cleared so an id/name from one host is never sent to another.
+ */
+function resetDiagnostics() {
+  cliRequestSeq += 1;
+  cliOutput.value = '';
+  cliLoading.value = false;
+  cronJobId.value = '';
+  skillName.value = '';
+  toolName.value = '';
+  mcpName.value = '';
+  mcpUrl.value = '';
+}
+
 async function openLogin() {
   const key = provider.value.login;
   if (!key) return;
@@ -335,6 +370,13 @@ async function copyLoginCode() {
 }
 
 async function refreshSecret() {
+  // Capture the target scope and a sequence before the first await. A connection/profile
+  // switch repaints the sheet and calls this again, so an older reply must not write its
+  // keySet into the new draft (it would show a saved key that belongs to another profile).
+  const seq = ++secretSeq;
+  const profile = profileArg.value;
+  const connection = store.activeProfileId;
+  const current = () => seq === secretSeq && profile === profileArg.value && connection === store.activeProfileId;
   if (remoteCredentials.value) {
     draftModel.value.keySet = false;
     await refreshLogin();
@@ -348,6 +390,7 @@ async function refreshSecret() {
   }
   if (info.localAuth) {
     await refreshLogin();
+    if (!current()) return;
   }
   if (info.oauth) {
     // An OAuth account is not a stored API key; claiming one would offer a
@@ -359,7 +402,8 @@ async function refreshSecret() {
   // runtime's own store, so it can disappear outside this app (CLI, uninstall, a
   // failed write); a cached `true` must never suppress the check.
   try {
-    draftModel.value.keySet = await unwrap(commands.hermesSecretStatus(draftModel.value.provider, profileArg.value));
+    const keySet = await unwrap(commands.hermesSecretStatus(draftModel.value.provider, profileArg.value));
+    if (current()) draftModel.value.keySet = keySet;
   } catch {
     // An unreadable credential file must not block the settings sheet.
   }
@@ -373,12 +417,36 @@ function changeProfileScope(event: Event) {
   secret.value = '';
   resetTest();
   // The diagnostics pane reads per-profile runtime state (MCP servers, skills, toolsets,
-  // cron jobs), so re-read it for the new scope instead of leaving the previous profile's
-  // output on screen.
-  cliOutput.value = '';
+  // cron jobs), so drop its output and action inputs for the new scope.
+  resetDiagnostics();
   if (activeTab.value === 'tools') void loadCli(cliKind.value);
   void refreshSecret();
   void store.loadModelOptions(false, draftModel.value, secret.value, target.value).then(alignOfficialModel);
+}
+
+/**
+ * Repaint the whole sheet from the store's CURRENT connection/profile state. Both opening the
+ * sheet and switching the connection while it is open go through here; reusing one path keeps
+ * a draft (provider/model/endpoint/Mac settings) from leaking into the next connection.
+ */
+function loadSheetFromStore() {
+  editProfileName.value = store.activeAgentProfileName;
+  draftModel.value = { ...store.model };
+  draftMac.value = { ...store.mac };
+  secret.value = '';
+  modelOpen.value = false;
+  auxOpen.value = false;
+  resetTest();
+  resetDiagnostics();
+  void refreshSecret();
+  void refreshPermissions();
+  // Paint only from a catalog owned by this connection, profile and endpoint. A fresh entry
+  // is reused; a stale one is revalidated while the cached list stays on screen. A catalog
+  // left over from another profile must not rewrite the model being edited here.
+  if (scopedModelOptions.value) alignOfficialModel();
+  void ensureRuntime()
+    .then(() => store.loadModelOptions(false, draftModel.value, secret.value, editProfileName.value))
+    .then(alignOfficialModel);
 }
 
 watch(
@@ -386,22 +454,7 @@ watch(
   open => {
     if (!open) return;
     activeTab.value = props.tab;
-    editProfileName.value = store.activeAgentProfileName;
-    draftModel.value = { ...store.model };
-    draftMac.value = { ...store.mac };
-    secret.value = '';
-    modelOpen.value = false;
-    auxOpen.value = false;
-    resetTest();
-    void refreshSecret();
-    void refreshPermissions();
-    // Paint only from a catalog owned by this connection, profile and endpoint. A fresh entry
-    // is reused; a stale one is revalidated while the cached list stays on screen. A catalog
-    // left over from another profile must not rewrite the model being edited here.
-    if (scopedModelOptions.value) alignOfficialModel();
-    void ensureRuntime()
-      .then(() => store.loadModelOptions(false, draftModel.value, secret.value, editProfileName.value))
-      .then(alignOfficialModel);
+    loadSheetFromStore();
   }
 );
 watch(
@@ -411,6 +464,22 @@ watch(
       activeTab.value = tab;
       if (tab === 'mac') void refreshPermissions();
     }
+  }
+);
+// A profile name belongs to one connection. Switching the connection while the sheet is open
+// must not keep editing (or reading diagnostics from) the previous connection's profile.
+watch(
+  () => store.activeProfileId,
+  () => {
+    if (!props.open) return;
+    // A sign-in flow started for the previous host must not keep feeding the new one.
+    if (loginOpen.value) {
+      loginOpen.value = false;
+      loginLines.value = [];
+      void commands.hermesLoginCancel().catch(() => undefined);
+    }
+    loadSheetFromStore();
+    if (activeTab.value === 'tools') void loadCli(cliKind.value);
   }
 );
 
@@ -622,15 +691,22 @@ async function uninstallHermes() {
 
 async function loadCli(kind: string) {
   cliKind.value = kind;
+  // A connection/profile switch starts a new read; the older one must not paint its result
+  // (or clear the newer spinner) when it lands.
+  const seq = ++cliRequestSeq;
   cliLoading.value = true;
   try {
-    cliOutput.value = await unwrap(commands.hermesCliRead(kind, profileArg.value));
+    const scope = diagnosticsScope();
+    const output = await unwrap(commands.hermesCliRead(kind, scope.profile, scope.connectionId, scope.gatewayUrl));
+    if (seq !== cliRequestSeq) return;
+    cliOutput.value = output;
   } catch (error) {
+    if (seq !== cliRequestSeq) return;
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
     cliOutput.value = detail;
     toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.title, description: detail });
   } finally {
-    cliLoading.value = false;
+    if (seq === cliRequestSeq) cliLoading.value = false;
   }
 }
 
@@ -639,7 +715,10 @@ async function runCronAction(action: 'pause' | 'resume' | 'remove') {
   if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.cronConfirm)) return;
   cronBusy.value = true;
   try {
-    await unwrap(commands.hermesCronAction(action, cronJobId.value.trim(), profileArg.value));
+    const scope = diagnosticsScope();
+    await unwrap(
+      commands.hermesCronAction(action, cronJobId.value.trim(), scope.profile, scope.connectionId, scope.gatewayUrl)
+    );
     await loadCli('cron');
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -653,13 +732,36 @@ async function runMcp(action: 'list' | 'add' | 'remove') {
   if (action !== 'list' && !mcpName.value.trim()) return;
   if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.mcpRemoveConfirm)) return;
   mcpBusy.value = true;
+  // The list writes straight into the pane; make it invalidate any load still in flight and
+  // itself yield to a newer connection/profile read.
+  const seq = ++cliRequestSeq;
   try {
+    const scope = diagnosticsScope();
     const output = await unwrap(
-      commands.hermesMcpAction(action, mcpName.value.trim(), mcpUrl.value.trim(), profileArg.value)
+      commands.hermesMcpAction(
+        action,
+        mcpName.value.trim(),
+        mcpUrl.value.trim(),
+        scope.profile,
+        scope.connectionId,
+        scope.gatewayUrl
+      )
     );
-    if (action === 'list') cliOutput.value = output;
-    else await loadCli('tools');
+    // A connection/profile switch superseded this request: neither its output nor a reload
+    // belongs on the new pane.
+    if (seq !== cliRequestSeq) return;
+    if (action === 'list') {
+      cliOutput.value = output;
+      // This request invalidated the loadCli whose `finally` would have stopped the spinner;
+      // finish it here or the pane stays on "loading" with the list already fetched.
+      cliLoading.value = false;
+    } else {
+      await loadCli('tools');
+    }
   } catch (error) {
+    if (seq !== cliRequestSeq) return;
+    // The invalidated loadCli cannot clear the spinner; this request owns it now.
+    cliLoading.value = false;
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
     toasts.push({ tone: 'warning', title: 'MCP', description: detail });
   } finally {
@@ -673,7 +775,15 @@ async function runSkillAction(action: 'install' | 'uninstall') {
   if (action === 'uninstall' && !window.confirm(content.value.settings.diagnostics.uninstallConfirm)) return;
   actionBusy.value = true;
   try {
-    await unwrap(commands.hermesSkillAction(action, skillName.value.trim(), profileArg.value));
+    const scope = diagnosticsScope();
+    const output = await unwrap(
+      commands.hermesSkillAction(action, skillName.value.trim(), scope.profile, scope.connectionId, scope.gatewayUrl)
+    );
+    // A remote hub action spawns a background install/uninstall; the list will not
+    // change until it finishes, so keep the spawn receipt visible to the user.
+    if (scope.connectionId && output.trim()) {
+      toasts.push({ tone: 'info', title: content.value.settings.diagnostics.skills, description: output.trim() });
+    }
     await loadCli('skills');
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -688,7 +798,10 @@ async function runToolAction(action: 'enable' | 'disable') {
   if (action === 'disable' && !window.confirm(content.value.settings.diagnostics.disableConfirm)) return;
   actionBusy.value = true;
   try {
-    await unwrap(commands.hermesToolAction(action, toolName.value.trim(), profileArg.value));
+    const scope = diagnosticsScope();
+    await unwrap(
+      commands.hermesToolAction(action, toolName.value.trim(), scope.profile, scope.connectionId, scope.gatewayUrl)
+    );
     await loadCli('tools');
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
