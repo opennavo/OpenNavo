@@ -13,10 +13,10 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("local object-storage bootstrap failed")
+		slog.Error("object-storage bootstrap failed")
 		os.Exit(1)
 	}
-	slog.Info("object-storage public prefixes ready")
+	slog.Info("object-storage buckets ready")
 }
 func run() error {
 	cfg, err := config.Load()
@@ -29,5 +29,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return client.EnsurePublicPrefixes(ctx, cfg.S3Region)
+	slog.Info("object-storage configuration", "public_bucket", cfg.S3Bucket, "private_bucket", cfg.S3PrivateBucket, "public_access", cfg.S3PublicAccess)
+	return client.EnsureBuckets(ctx, cfg.S3Region)
 }

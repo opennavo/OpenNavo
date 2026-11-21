@@ -19,7 +19,7 @@ type Objects interface {
 type S3Objects struct{ Client *storage.Client }
 
 func (s S3Objects) Delete(ctx context.Context, key string) error {
-	return s.Client.S3.RemoveObject(ctx, s.Client.Bucket, key, minio.RemoveObjectOptions{})
+	return s.Client.S3.RemoveObject(ctx, s.Client.PublicBucket, key, minio.RemoveObjectOptions{})
 }
 
 type Service struct {

@@ -34,10 +34,10 @@ func TestMakeSeedE2EWithIsolatedInfrastructure(t *testing.T) {
 	port, err := container.MappedPort(ctx, "9000/tcp")
 	require.NoError(t, err)
 	endpoint := host + ":" + port.Port()
-	cfg := config.Config{S3Endpoint: endpoint, S3Region: "us-east-1", S3Bucket: "opennavo", S3AccessKey: "e2e-minio", S3SecretKey: "e2e-minio-dev-only", CDNBaseURL: "http://" + endpoint + "/opennavo"}
+	cfg := config.Config{S3Endpoint: endpoint, S3Region: "us-east-1", S3Bucket: "opennavo", S3ManageBuckets: true, S3AccessKey: "e2e-minio", S3SecretKey: "e2e-minio-dev-only", CDNBaseURL: "http://" + endpoint + "/opennavo"}
 	objects, err := storage.New(cfg)
 	require.NoError(t, err)
-	require.NoError(t, objects.EnsurePublicPrefixes(ctx, cfg.S3Region))
+	require.NoError(t, objects.EnsureBuckets(ctx, cfg.S3Region))
 	root, err := filepath.Abs("../../../../..")
 	require.NoError(t, err)
 	defaults, err := os.ReadFile(filepath.Join(root, "apps", "server", ".env.example"))

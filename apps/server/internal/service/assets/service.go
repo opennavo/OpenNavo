@@ -53,7 +53,7 @@ func (s S3Objects) Put(ctx context.Context, key string, data []byte, mime string
 	if strings.HasSuffix(key, "latest.json") {
 		cacheControl = "public, max-age=60"
 	}
-	_, err := s.Client.S3.PutObject(ctx, s.Client.Bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: mime, CacheControl: cacheControl})
+	_, err := s.Client.S3.PutObject(ctx, s.Client.PublicBucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: mime, CacheControl: cacheControl})
 	return err
 }
 func (s S3Objects) URL(key string) string {
@@ -61,12 +61,12 @@ func (s S3Objects) URL(key string) string {
 }
 
 func (s S3Objects) Delete(ctx context.Context, key string) error {
-	return s.Client.S3.RemoveObject(ctx, s.Client.Bucket, key, minio.RemoveObjectOptions{})
+	return s.Client.S3.RemoveObject(ctx, s.Client.PublicBucket, key, minio.RemoveObjectOptions{})
 }
 
 func (s S3Objects) List(ctx context.Context, prefix string) ([]string, error) {
 	keys := []string{}
-	for object := range s.Client.S3.ListObjects(ctx, s.Client.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+	for object := range s.Client.S3.ListObjects(ctx, s.Client.PublicBucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 		if object.Err != nil {
 			return nil, object.Err
 		}
@@ -155,7 +155,7 @@ func (s S3Objects) Read(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (s S3Objects) ReadLimited(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
-	object, err := s.Client.S3.GetObject(ctx, s.Client.Bucket, key, minio.GetObjectOptions{})
+	object, err := s.Client.S3.GetObject(ctx, s.Client.PublicBucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, err
 	}
