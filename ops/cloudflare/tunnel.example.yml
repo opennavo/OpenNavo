@@ -14,4 +14,10 @@ ingress:
   # while the origin admin container is still the active backend.
   # - hostname: admin.<WEB_DOMAIN>
   #   service: http://127.0.0.1:18088
+  # The Pages MCP proxy reaches the origin admin route with a service token. Keep the Host header
+  # on the admin domain so Caddy selects the existing /mcp handle.
+  - hostname: admin-origin.<WEB_DOMAIN>
+    service: http://127.0.0.1:18088
+    originRequest:
+      httpHostHeader: admin.<WEB_DOMAIN>
   - service: http_status:404
