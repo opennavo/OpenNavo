@@ -1,0 +1,39 @@
+name: Deploy admin to Cloudflare Pages
+
+# Manual cutover helper. The existing SSH deployment keeps managing the admin container until
+# admin.<domain> is pointed at this Pages project; running this workflow alone changes nothing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-admin-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter "@opennavo/admin..."
+      - run: pnpm --filter @opennavo/admin build
+      - run: |
+          mkdir -p apps/admin/dist/third-party
+          cp -R docs/legal/third-party/. apps/admin/dist/third-party/
+      - name: Deploy
+        working-directory: apps/admin
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm dlx wrangler@4.166.0 pages deploy --project-name=opennavo-admin --branch=main
