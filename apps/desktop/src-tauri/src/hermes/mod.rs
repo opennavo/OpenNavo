@@ -21,6 +21,7 @@ use yaml_rust2::{Yaml, YamlEmitter, YamlLoader, yaml::Hash};
 
 use crate::AppError;
 
+pub(crate) mod diagnostics;
 pub(crate) mod env_store;
 pub(crate) mod gateway;
 pub(crate) mod install;
@@ -716,6 +717,8 @@ pub async fn mcp_action(
     name: &str,
     url: &str,
     profile: Option<&str>,
+    connection_id: Option<&str>,
+    gateway_url: Option<&str>,
 ) -> Result<String, AppError> {
     let name = name.trim();
     if !matches!(action, "list" | "add" | "remove") {
@@ -727,13 +730,25 @@ pub async fn mcp_action(
             "A valid MCP server name is required.",
         ));
     }
+    let url = url.trim();
+    if action == "add" && !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(AppError::new(
+            "E_HERMES_INPUT",
+            "MCP URL must start with http:// or https://.",
+        ));
+    }
+    if let Some(connection_id) = diagnostics::remote_connection(connection_id, gateway_url) {
+        return diagnostics::mcp_action(connection_id, profile, action, name, url).await;
+    }
     let Some(bin) = runtime_bin(app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed.",
         ));
     };
-    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    let root = hermes_home(app)?;
+    profiles::ensure_local_profile(&root, profile)?;
+    let home = profiles::resolve_home(&root, profile)?;
     let mut command = runtime_command(&bin)?;
     profiles::pin_default_profile(&mut command, profile);
     command.arg("mcp");
@@ -745,13 +760,6 @@ pub async fn mcp_action(
             command.arg("remove").arg(name);
         }
         "add" => {
-            let url = url.trim();
-            if !(url.starts_with("https://") || url.starts_with("http://")) {
-                return Err(AppError::new(
-                    "E_HERMES_INPUT",
-                    "MCP URL must start with http:// or https://.",
-                ));
-            }
             command.arg("add").arg(name).arg("--url").arg(url);
         }
         _ => {}
@@ -784,6 +792,8 @@ pub async fn skill_action(
     action: &str,
     identifier: &str,
     profile: Option<&str>,
+    connection_id: Option<&str>,
+    gateway_url: Option<&str>,
 ) -> Result<String, AppError> {
     let action = match action {
         "install" | "uninstall" => action,
@@ -796,13 +806,18 @@ pub async fn skill_action(
             "A valid skill identifier is required.",
         ));
     }
+    if let Some(connection_id) = diagnostics::remote_connection(connection_id, gateway_url) {
+        return diagnostics::skill_action(connection_id, profile, action, identifier).await;
+    }
     let Some(bin) = runtime_bin(app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed.",
         ));
     };
-    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    let root = hermes_home(app)?;
+    profiles::ensure_local_profile(&root, profile)?;
+    let home = profiles::resolve_home(&root, profile)?;
     let mut command = runtime_command(&bin)?;
     profiles::pin_default_profile(&mut command, profile);
     command
@@ -837,6 +852,8 @@ pub async fn tool_action(
     action: &str,
     name: &str,
     profile: Option<&str>,
+    connection_id: Option<&str>,
+    gateway_url: Option<&str>,
 ) -> Result<String, AppError> {
     let action = match action {
         "enable" | "disable" => action,
@@ -849,13 +866,18 @@ pub async fn tool_action(
             "A valid toolset or MCP tool name is required.",
         ));
     }
+    if let Some(connection_id) = diagnostics::remote_connection(connection_id, gateway_url) {
+        return diagnostics::tool_action(connection_id, profile, action, name).await;
+    }
     let Some(bin) = runtime_bin(app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed.",
         ));
     };
-    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    let root = hermes_home(app)?;
+    profiles::ensure_local_profile(&root, profile)?;
+    let home = profiles::resolve_home(&root, profile)?;
     let mut command = runtime_command(&bin)?;
     profiles::pin_default_profile(&mut command, profile);
     command
@@ -889,6 +911,8 @@ pub async fn cron_action(
     action: &str,
     job_id: &str,
     profile: Option<&str>,
+    connection_id: Option<&str>,
+    gateway_url: Option<&str>,
 ) -> Result<String, AppError> {
     let action = match action {
         "pause" | "resume" | "remove" => action,
@@ -901,13 +925,18 @@ pub async fn cron_action(
             "A valid cron job id is required.",
         ));
     }
+    if let Some(connection_id) = diagnostics::remote_connection(connection_id, gateway_url) {
+        return diagnostics::cron_action(connection_id, profile, action, job_id).await;
+    }
     let Some(bin) = runtime_bin(app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed.",
         ));
     };
-    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    let root = hermes_home(app)?;
+    profiles::ensure_local_profile(&root, profile)?;
+    let home = profiles::resolve_home(&root, profile)?;
     let mut command = runtime_command(&bin)?;
     profiles::pin_default_profile(&mut command, profile);
     command
@@ -940,17 +969,27 @@ pub async fn cli_read(
     app: &AppHandle,
     kind: &str,
     profile: Option<&str>,
+    connection_id: Option<&str>,
+    gateway_url: Option<&str>,
 ) -> Result<String, AppError> {
+    if let Some(connection_id) = diagnostics::remote_connection(connection_id, gateway_url) {
+        return diagnostics::read(connection_id, profile, kind).await;
+    }
     let Some(bin) = runtime_bin(app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Hermes runtime is not installed.",
         ));
     };
-    let home = profiles::resolve_home(&hermes_home(app)?, profile)?;
+    let root = hermes_home(app)?;
+    profiles::ensure_local_profile(&root, profile)?;
+    let home = profiles::resolve_home(&root, profile)?;
     let args: &[&str] = match kind {
         "tools" => &["tools", "list"],
         "skills" => &["skills", "list"],
+        // `--all` includes disabled/completed jobs; the profile is already pinned by
+        // `HERMES_HOME` (and `--profile default` for the root home). Without it the local
+        // pane hides exactly the rows the remote `include_disabled=True` list shows.
         "cron" => &["cron", "list", "--all"],
         _ => {
             return Err(AppError::new(

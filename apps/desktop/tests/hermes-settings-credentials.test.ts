@@ -5,6 +5,7 @@ import { commands } from '@/ipc/client';
 import { useHermesStore } from '@/stores/hermes';
 import HermesSettings from '@/components/hermes/HermesSettings.vue';
 import { i18n } from '@/i18n';
+import { en } from '@/hermes/content';
 
 const ok = <T>(data: T) => ({ status: 'ok' as const, data });
 
@@ -370,7 +371,244 @@ describe('Hermes settings credentials', () => {
 
     // MCP servers, skills, toolsets and cron jobs are per profile; reading them from the root
     // home listed the default profile's state while another profile was selected.
-    await vi.waitFor(() => expect(cliRead).toHaveBeenCalledWith('tools', 'research'));
+    await vi.waitFor(() => expect(cliRead).toHaveBeenCalledWith('tools', 'research', null, null));
+  });
+
+  it('Routes diagnostics to the Panel connection and names its profile explicitly', async () => {
+    seedConnection('panel');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    const cliRead = vi.spyOn(commands, 'hermesCliRead').mockResolvedValue(ok('mcp servers: none'));
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    wrapper = mount(HermesSettings, {
+      props: { open: false, tab: 'tools' },
+      attachTo: document.body,
+      global: { plugins: [i18n] }
+    });
+    await wrapper.setProps({ open: true });
+    await vi.waitFor(() => expect(commands.hermesModelOptions).toHaveBeenCalled());
+
+    const select = profileScopeSelect();
+    expect(select).not.toBeNull();
+    // Selecting the profile (even the already-active one) is what re-reads the diagnostics pane.
+    select!.value = 'default';
+    select!.dispatchEvent(new Event('change'));
+    await vi.waitFor(() =>
+      expect(cliRead).toHaveBeenCalledWith('tools', 'default', 'panel-1', 'http://panel.tail1234.ts.net:9119')
+    );
+
+    select!.value = 'research';
+    select!.dispatchEvent(new Event('change'));
+
+    // A Panel profile belongs to that host: a remote name must never run the local CLI.
+    await vi.waitFor(() =>
+      expect(cliRead).toHaveBeenCalledWith('tools', 'research', 'panel-1', 'http://panel.tail1234.ts.net:9119')
+    );
+  });
+
+  it('Repaints the model draft when the connection changes while the sheet is open', async () => {
+    seedConnection('panel');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    wrapper = mount(HermesSettings, {
+      props: { open: false, tab: 'model' },
+      attachTo: document.body,
+      global: { plugins: [i18n] }
+    });
+    await wrapper.setProps({ open: true });
+    await vi.waitFor(() => expect(commands.hermesModelOptions).toHaveBeenCalled());
+
+    const input = document.body.querySelector<HTMLInputElement>('#hermes-model');
+    expect(input).not.toBeNull();
+    input!.value = 'unsaved-panel-draft';
+    input!.dispatchEvent(new Event('input'));
+    expect(input!.value).toBe('unsaved-panel-draft');
+
+    // A switch must repaint from the new connection's state, not keep saving the old draft.
+    store.switchProfile('local');
+    await vi.waitFor(() => expect(input!.value).not.toBe('unsaved-panel-draft'));
+    expect(input!.value.length).toBeGreaterThan(0);
+  });
+
+  it('Ignores a diagnostics read that lands after the connection switch', async () => {
+    seedConnection('panel');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    type CliReadResult = Awaited<ReturnType<typeof commands.hermesCliRead>>;
+    let resolvePanel!: (value: CliReadResult) => void;
+    const panelRead = new Promise<CliReadResult>(resolve => {
+      resolvePanel = resolve;
+    });
+    let resolveLocal!: (value: CliReadResult) => void;
+    const localRead = new Promise<CliReadResult>(resolve => {
+      resolveLocal = resolve;
+    });
+    vi.spyOn(commands, 'hermesCliRead').mockImplementation((_kind, _profile, connectionId) =>
+      connectionId === 'panel-1' ? panelRead : localRead
+    );
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    wrapper = mount(HermesSettings, {
+      props: { open: false, tab: 'tools' },
+      attachTo: document.body,
+      global: { plugins: [i18n] }
+    });
+    await wrapper.setProps({ open: true });
+    await vi.waitFor(() => expect(commands.hermesModelOptions).toHaveBeenCalled());
+
+    const select = profileScopeSelect();
+    expect(select).not.toBeNull();
+    select!.value = 'research';
+    select!.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(commands.hermesCliRead).toHaveBeenCalledTimes(1));
+
+    const cronInput = document.body.querySelector<HTMLInputElement>('input[placeholder="Cron job ID"]');
+    expect(cronInput).not.toBeNull();
+    cronInput!.value = 'job-from-panel';
+    cronInput!.dispatchEvent(new Event('input'));
+
+    store.switchProfile('local');
+    await vi.waitFor(() => expect(commands.hermesCliRead).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(cronInput!.value).toBe(''));
+
+    resolveLocal(ok('local output'));
+    await vi.waitFor(() => expect(sheetText()).toContain('local output'));
+
+    // The panel read was already in flight when the connection changed; it must not paint.
+    resolvePanel(ok('panel output'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(sheetText()).not.toContain('panel output');
+    expect(sheetText()).toContain('local output');
+  });
+
+  it('Stops the diagnostics spinner when an MCP list supersedes a pending read', async () => {
+    seedConnection('panel');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    type CliReadResult = Awaited<ReturnType<typeof commands.hermesCliRead>>;
+    let resolveTools!: (value: CliReadResult) => void;
+    const toolsRead = new Promise<CliReadResult>(resolve => {
+      resolveTools = resolve;
+    });
+    vi.spyOn(commands, 'hermesCliRead').mockReturnValue(toolsRead);
+    const mcpList = vi.spyOn(commands, 'hermesMcpAction').mockResolvedValue(ok('mcp servers: none'));
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    wrapper = mount(HermesSettings, {
+      props: { open: false, tab: 'tools' },
+      attachTo: document.body,
+      global: { plugins: [i18n] }
+    });
+    await wrapper.setProps({ open: true });
+    await vi.waitFor(() => expect(commands.hermesModelOptions).toHaveBeenCalled());
+
+    // Start a tools read and leave it pending: the pane is on "Loading…".
+    const select = profileScopeSelect();
+    expect(select).not.toBeNull();
+    select!.value = 'research';
+    select!.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(commands.hermesCliRead).toHaveBeenCalledTimes(1));
+    expect(document.body.querySelector('pre')?.textContent).toContain(en.common.loading);
+
+    // The MCP list supersedes it. Its own success must also stop the spinner; otherwise the
+    // pane would keep "Loading…" forever because the pending read's finally is now stale.
+    const listButton = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.settings.diagnostics.mcpList
+    );
+    expect(listButton).not.toBeUndefined();
+    listButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(mcpList).toHaveBeenCalled());
+    await vi.waitFor(() => expect(document.body.querySelector('pre')?.textContent).toContain('mcp servers: none'));
+
+    // The tools read lands afterwards; it is stale and must not replace the MCP list.
+    resolveTools(ok('tools output'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(document.body.querySelector('pre')?.textContent).toContain('mcp servers: none');
+  });
+
+  it('Drops a key status that lands after the profile switched', async () => {
+    seedConnection('local');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    type SecretStatusResult = Awaited<ReturnType<typeof commands.hermesSecretStatus>>;
+    let resolveDefault!: (value: SecretStatusResult) => void;
+    const defaultStatus = new Promise<SecretStatusResult>(resolve => {
+      resolveDefault = resolve;
+    });
+    let resolveResearch!: (value: SecretStatusResult) => void;
+    const researchStatus = new Promise<SecretStatusResult>(resolve => {
+      resolveResearch = resolve;
+    });
+    vi.spyOn(commands, 'hermesSecretStatus').mockImplementation((_provider, profile) =>
+      profile === 'research' ? researchStatus : defaultStatus
+    );
+    const store = useHermesStore();
+    // Both profiles use an API-key provider, so both reads go through hermesSecretStatus.
+    store.saveModel({ ...store.model, provider: 'openai', model: 'gpt-5.6' });
+    store.setAgentProfileModel('research', { ...store.model, provider: 'openai', model: 'gpt-5.6' });
+    await store.loadAgentProfiles();
+    wrapper = mount(HermesSettings, {
+      props: { open: false, tab: 'model' },
+      attachTo: document.body,
+      global: { plugins: [i18n] }
+    });
+    await wrapper.setProps({ open: true });
+    await vi.waitFor(() => expect(commands.hermesSecretStatus).toHaveBeenCalledTimes(1));
+
+    const select = profileScopeSelect();
+    expect(select).not.toBeNull();
+    select!.value = 'research';
+    select!.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(commands.hermesSecretStatus).toHaveBeenCalledTimes(2));
+
+    resolveResearch(ok(false));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const keyInput = document.body.querySelector<HTMLInputElement>('#hermes-auth');
+    expect(keyInput).not.toBeNull();
+    expect(keyInput!.placeholder).toBe('sk-…');
+
+    // The default profile's reply is stale: it must not mark the research draft as keyed.
+    resolveDefault(ok(true));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(keyInput!.placeholder).toBe('sk-…');
+  });
+
+  it('Keeps the newest login status when an older read lands last', async () => {
+    type LoginStatusResult = Awaited<ReturnType<typeof commands.hermesLoginStatus>>;
+    let resolveDefault!: (value: LoginStatusResult) => void;
+    const defaultStatus = new Promise<LoginStatusResult>(resolve => {
+      resolveDefault = resolve;
+    });
+    let resolveResearch!: (value: LoginStatusResult) => void;
+    const researchStatus = new Promise<LoginStatusResult>(resolve => {
+      resolveResearch = resolve;
+    });
+    vi.spyOn(commands, 'hermesLoginStatus').mockImplementation(profile =>
+      profile === 'research' ? researchStatus : defaultStatus
+    );
+    const store = useHermesStore();
+    const status = (nous: boolean) => ({
+      codex: false,
+      claudeCode: false,
+      copilot: false,
+      opencode: false,
+      opencodeGo: false,
+      nous,
+      codexSource: null,
+      claudeCodeSource: null,
+      copilotSource: null,
+      opencodeSource: null,
+      opencodeGoSource: null,
+      nousSource: null
+    });
+
+    const defaultRead = store.loadLoginStatus('default');
+    const researchRead = store.loadLoginStatus('research');
+    resolveResearch(ok(status(true)));
+    await researchRead;
+    expect(store.loginStatus?.nous).toBe(true);
+
+    resolveDefault(ok(status(false)));
+    await defaultRead;
+    expect(store.loginStatus?.nous).toBe(true);
   });
 
   it('Shows the shared loading ring while updating the local runtime', async () => {

@@ -2488,14 +2488,23 @@ export const useHermesStore = defineStore('hermes', () => {
     persist();
   }
 
+  /**
+   * Only the newest login-status read may write. Opening settings, changing profile, and
+   * switching connections all start a read; a slower reply from the previous host/profile
+   * must not overwrite the current `loginStatus`.
+   */
+  let loginStatusSeq = 0;
+
   async function loadLoginStatus(profileName = activeAgentProfileName.value) {
+    const seq = ++loginStatusSeq;
     try {
       // Official logins live in the agent profile's own `auth.json`, so the status must be
       // read from the profile being inspected, not from the shared root home.
       const profileArg = !profileName || profileName === 'default' ? null : profileName;
-      loginStatus.value = await unwrap(commands.hermesLoginStatus(profileArg));
+      const status = await unwrap(commands.hermesLoginStatus(profileArg));
+      if (seq === loginStatusSeq) loginStatus.value = status;
     } catch {
-      loginStatus.value = null;
+      if (seq === loginStatusSeq) loginStatus.value = null;
     }
   }
 

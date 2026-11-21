@@ -534,7 +534,7 @@ export const en = {
     },
     diagnostics: {
       title: 'Hermes diagnostics',
-      body: 'View and manage tools and capabilities in local Hermes. Destructive actions ask for confirmation.',
+      body: 'View and manage tools and capabilities in the Hermes behind the active connection. Destructive actions ask for confirmation.',
       tools: 'Toolsets',
       skills: 'Skills',
       cron: 'Scheduled jobs',
@@ -1305,7 +1305,7 @@ export const zhCN: HermesContent = {
     },
     diagnostics: {
       title: 'Hermes 诊断',
-      body: '查看并管理本机 Hermes 的工具与能力；破坏性操作会二次确认。',
+      body: '查看并管理当前连接所指向的 Hermes 的工具与能力；破坏性操作会二次确认。',
       tools: '工具集',
       skills: '技能',
       cron: '定时任务',
