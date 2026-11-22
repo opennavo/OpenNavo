@@ -341,7 +341,7 @@ jobs:
       - name: Render cask
         run: >-
           node apps/desktop/scripts/render-cask.mjs --dir release-artifacts --version "$VERSION"
-          --homepage "$WEB_HOMEPAGE" --out tap/Casks/opennavo.rb
+          --repository "$GITHUB_REPOSITORY" --homepage "$WEB_HOMEPAGE" --out tap/Casks/opennavo.rb
 
       - uses: actions/upload-artifact@v6
         with:

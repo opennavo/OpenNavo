@@ -95,19 +95,29 @@ export function releaseBody({ version, channel, artifacts, notesEn, notes, minMa
   };
 }
 
-/** Render the cask template; validate all values so arbitrary text cannot enter Ruby source. */
-export function renderCask(template, { version, sha256, downloadUrl, manifestUrl, homepage }) {
+/**
+ * Render the cask template; validate all values so arbitrary text cannot enter Ruby source.
+ * downloadUrl is the verified GitHub DMG. The cask interpolates version itself, so the URL
+ * must be exactly that interpolation for this version.
+ */
+export function renderCask(template, { version, sha256, downloadUrl, repository, homepage }) {
   if (!isReleaseVersion(version)) throw new Error(`invalid version: ${version}`);
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error('invalid sha256');
-  for (const url of [downloadUrl, manifestUrl, homepage]) {
-    if (!/^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._/-]*)?$/.test(url)) throw new Error(`invalid url: ${url}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository) || repository.endsWith('/..')) {
+    throw new Error('invalid GitHub repository');
   }
+  if (!/^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._/-]*)?$/.test(homepage)) {
+    throw new Error(`invalid url: ${homepage}`);
+  }
+  const expected = githubArtifactUrl(repository, version, `OpenNavo_${version}_universal.dmg`);
+  if (downloadUrl !== expected) throw new Error('invalid DMG url');
   // Omit the template's introductory comment from the tap.
   const body = template.slice(template.indexOf('cask "'));
-  return body
+  const cask = body
     .replaceAll('{{version}}', version)
     .replaceAll('{{sha256}}', sha256)
-    .replaceAll('{{downloadUrl}}', downloadUrl)
-    .replaceAll('{{manifestUrl}}', manifestUrl)
+    .replaceAll('{{repository}}', repository)
     .replaceAll('{{homepage}}', homepage);
+  if (cask.includes('{{') || cask.includes('}}')) throw new Error('unreplaced cask placeholder');
+  return cask;
 }

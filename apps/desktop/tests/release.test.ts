@@ -73,26 +73,30 @@ describe('Draft registration', () => {
 
 describe('Cask template', () => {
   it('Replace placeholders, omit introductory comments, reject invalid values', () => {
+    const downloadUrl =
+      'https://github.com/opennavo/OpenNavo/releases/download/desktop-v0.3.0/OpenNavo_0.3.0_universal.dmg';
     const cask = renderCask(template, {
       version: '0.3.0',
       sha256: sha,
-      downloadUrl: 'https://github.com/acme/opennavo/releases/download/desktop-v0.3.0/OpenNavo_0.3.0_universal.dmg',
-      manifestUrl: 'https://cdn.opennavo.com/desktop/stable/latest.json',
+      downloadUrl,
+      repository: 'opennavo/OpenNavo',
       homepage: 'https://opennavo.example/'
     });
     expect(cask.startsWith('cask "opennavo" do')).toBe(true);
     expect(cask).toContain('version "0.3.0"');
     expect(cask).toContain(`sha256 "${sha}"`);
     expect(cask).toContain(
-      'url "https://github.com/acme/opennavo/releases/download/desktop-v0.3.0/OpenNavo_0.3.0_universal.dmg"'
+      'url "https://github.com/opennavo/OpenNavo/releases/download/desktop-v#{version}/OpenNavo_#{version}_universal.dmg"'
     );
+    expect(cask).toContain('depends_on macos: :ventura');
     expect(cask).not.toContain('{{');
+    expect(cask).not.toContain('cdn.opennavo.com');
     expect(() =>
       renderCask(template, {
         version: '0.3.0',
         sha256: 'zz',
-        downloadUrl: 'https://a.b',
-        manifestUrl: 'https://a.b',
+        downloadUrl,
+        repository: 'opennavo/OpenNavo',
         homepage: 'https://a.b'
       })
     ).toThrow();
@@ -100,11 +104,11 @@ describe('Cask template', () => {
       renderCask(template, {
         version: '0.3.0',
         sha256: sha,
-        downloadUrl: 'https://a.b/"; system "x',
-        manifestUrl: 'https://a.b',
+        downloadUrl: 'https://cdn.example.test/OpenNavo.dmg',
+        repository: 'opennavo/OpenNavo',
         homepage: 'https://a.b'
       })
-    ).toThrow();
+    ).toThrow(/DMG/);
   });
 });
 
@@ -140,8 +144,8 @@ describe('Artifact collection and cask rendering commands', () => {
       'dmg-universal',
       '--version',
       '0.3.0',
-      '--base-url',
-      'https://cdn.opennavo.example/desktop',
+      '--repository',
+      'opennavo/OpenNavo',
       '--bundle-dir',
       join(root, 'universal'),
       '--out',
@@ -161,7 +165,34 @@ describe('Artifact collection and cask rendering commands', () => {
     expect(image.file).toBe('OpenNavo_0.3.0_universal.dmg');
 
     const caskPath = join(root, 'Casks', 'opennavo.rb');
-    run([join(scripts, 'render-cask.mjs'), '--dir', out, '--version', '0.3.0', '--out', caskPath]);
-    expect(readFileSync(caskPath, 'utf8')).toContain(`sha256 "${image.sha256}"`);
+    run([
+      join(scripts, 'render-cask.mjs'),
+      '--dir',
+      out,
+      '--version',
+      '0.3.0',
+      '--repository',
+      'opennavo/OpenNavo',
+      '--out',
+      caskPath
+    ]);
+    const rendered = readFileSync(caskPath, 'utf8');
+    expect(rendered).toContain(`sha256 "${image.sha256}"`);
+    expect(rendered).toContain('strategy :github_latest');
+    expect(rendered).toContain(image.url.replaceAll('0.3.0', '#{version}'));
+    writeFileSync(join(out, 'dmg-universal.json'), JSON.stringify({ ...image, url: 'https://cdn.example.test/app.dmg' }));
+    expect(() =>
+      run([
+        join(scripts, 'render-cask.mjs'),
+        '--dir',
+        out,
+        '--version',
+        '0.3.0',
+        '--repository',
+        'opennavo/OpenNavo',
+        '--out',
+        caskPath
+      ])
+    ).toThrow(/does not match/);
   });
 });

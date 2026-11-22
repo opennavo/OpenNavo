@@ -44,7 +44,7 @@ export async function publishedCask(values, fetcher = fetch) {
     version: values.version,
     sha256: dmg.sha256,
     downloadUrl: expected,
-    manifestUrl: values['manifest-url'],
+    repository: values.repository,
     homepage: values.homepage
   });
 }
