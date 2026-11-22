@@ -1,24 +1,27 @@
 # Project tap opennavo/homebrew-tap cask (06 §15), rendered by release-desktop.yml through scripts/render-cask.mjs.
-# Double-brace placeholders: version, sha256 (Universal DMG), downloadUrl (GitHub DMG), manifestUrl (published stable manifest), homepage.
+# Double-brace placeholders: version, sha256 (Universal DMG), repository (owner/name), homepage.
+# The download URL interpolates version in Ruby so `brew audit` treats it as versioned.
+# livecheck follows GitHub's latest release (assets are public only after upload), not every desktop-v* tag.
+# The tag is desktop-vX.Y.Z, so the default vX.Y.Z regex does not match and this one is required.
+# Updating the tap still waits for the admin stable release; published-cask.mjs checks that before writing this file.
 # Remove these comments when rendering; publish only the cask body.
 cask "opennavo" do
   version "{{version}}"
   sha256 "{{sha256}}"
 
-  url "{{downloadUrl}}"
+  url "https://github.com/{{repository}}/releases/download/desktop-v#{version}/OpenNavo_#{version}_universal.dmg"
   name "OpenNavo"
-  desc "Graphical app store for Homebrew packages"
+  desc "Graphical interface for installing and updating command-line packages"
   homepage "{{homepage}}"
 
   livecheck do
-    url "{{manifestUrl}}"
-    strategy :json do |json|
-      json["version"]
-    end
+    url :url
+    strategy :github_latest
+    regex(/^desktop[._-]v?(\d+(?:\.\d+)+)$/i)
   end
 
   auto_updates true
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "OpenNavo.app"
 

@@ -187,8 +187,8 @@ describe('Tap publication gate', () => {
     });
   it('Renders the GitHub cask when the stable release, manifest, and anonymous DMG contents agree', async () => {
     const cask = await publishedCask(values, fetcher());
-    expect(cask).toContain(dmg.url);
-    expect(cask).toContain(values['manifest-url']);
+    expect(cask).toContain('desktop-v#{version}/OpenNavo_#{version}_universal.dmg');
+    expect(cask).not.toContain(values['manifest-url']);
   });
   it('Rejects unpublished backend releases, unchanged manifests, and mismatched DMG URLs or contents', async () => {
     await expect(publishedCask(values, fetcher('0.2.0'))).rejects.toThrow('published stable');

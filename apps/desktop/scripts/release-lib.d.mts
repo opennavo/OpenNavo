@@ -41,5 +41,5 @@ export function releaseBody(input: {
 }): ReleaseBody;
 export function renderCask(
   template: string,
-  values: { version: string; sha256: string; downloadUrl: string; manifestUrl: string; homepage: string }
+  values: { version: string; sha256: string; downloadUrl: string; repository: string; homepage: string }
 ): string;
