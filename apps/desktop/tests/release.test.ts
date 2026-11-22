@@ -180,7 +180,10 @@ describe('Artifact collection and cask rendering commands', () => {
     expect(rendered).toContain(`sha256 "${image.sha256}"`);
     expect(rendered).toContain('strategy :github_latest');
     expect(rendered).toContain(image.url.replaceAll('0.3.0', '#{version}'));
-    writeFileSync(join(out, 'dmg-universal.json'), JSON.stringify({ ...image, url: 'https://cdn.example.test/app.dmg' }));
+    writeFileSync(
+      join(out, 'dmg-universal.json'),
+      JSON.stringify({ ...image, url: 'https://cdn.example.test/app.dmg' })
+    );
     expect(() =>
       run([
         join(scripts, 'render-cask.mjs'),
