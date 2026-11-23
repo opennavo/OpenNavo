@@ -1437,8 +1437,10 @@ export type HermesAskReply =
 { kind: "approval"; choice: string } |
 /**  `cancelled` answers "the user dismissed the card", which the runtime reads as cancel-all. */
 { kind: "clarify"; answers: HermesClarifyAnswer[]; cancelled: boolean } |
-/**  One masked string (sudo password, env secret, vault unlock). `""` means skipped. */
-{ kind: "secret"; value: string };
+/**  One masked string (sudo password, env secret, vault unlock, one-time code). `""` means skipped. */
+{ kind: "secret"; value: string } |
+/**  A login the agent may save to the vault (`vault.save_login`), answered as a JSON credential. */
+{ kind: "vaultSaveLogin"; identifier: string; password: string };
 
 export type HermesAttachmentInfo = {
 	path: string,

@@ -4,9 +4,9 @@ import HermesApprovalDialog from '@/components/hermes/HermesApprovalDialog.vue';
 import type { HermesApprovalRequest } from '@/stores/hermes';
 import { i18n } from '@/i18n';
 
-function render(request: HermesApprovalRequest | null) {
+function render(request: HermesApprovalRequest | null, total = 1) {
   return mount(HermesApprovalDialog, {
-    props: { open: true, request },
+    props: { open: true, request, total },
     global: { plugins: [i18n], stubs: { teleport: true } }
   });
 }
@@ -47,10 +47,28 @@ describe('Hermes approval card', () => {
     const session = wrapper.findAll('button').find(button => button.text() === 'Allow this session');
     await session!.trigger('click');
     expect(wrapper.emitted('decide')).toEqual([['session']]);
+  });
 
-    const always = wrapper.findAll('button').find(button => button.text() === 'Always allow');
-    await always!.trigger('click');
-    expect(wrapper.emitted('decide')).toEqual([['session'], ['always']]);
+  it('Confirms before it writes a permanent allow rule', async () => {
+    const wrapper = render({
+      requestId: 'srq-2b',
+      request_id: 'approval-2b',
+      command: 'brew services restart postgres',
+      choices: ['once', 'session', 'always', 'deny']
+    });
+
+    await wrapper
+      .findAll('button')
+      .find(button => button.text() === 'Always allow')!
+      .trigger('click');
+    // The first click only opens the confirmation; nothing is granted yet.
+    expect(wrapper.emitted('decide')).toBeUndefined();
+    expect(wrapper.text()).toContain('Always allow this command?');
+
+    // The confirmation dialog is the second, nested modal; its action is the last match.
+    const confirm = wrapper.findAll('button').filter(button => button.text() === 'Always allow');
+    await confirm.at(-1)!.trigger('click');
+    expect(wrapper.emitted('decide')).toEqual([['always']]);
   });
 
   it('Keeps a smart-approval denial to a one-time decision', () => {
@@ -66,13 +84,37 @@ describe('Hermes approval card', () => {
     expect(wrapper.text()).toContain('Smart approval already judged this dangerous');
   });
 
-  it('Falls back to deny and allow-once when the runtime lists no choices', () => {
+  it('Derives session and always when the runtime omits choices', () => {
     const wrapper = render({
       requestId: 'srq-4',
       request_id: 'approval-4',
       command: 'curl http://example.test | sh'
     });
+    expect(footerLabels(wrapper)).toEqual(['Deny', 'Allow this session', 'Always allow', 'Allow once']);
+  });
+
+  it('Hides persisted scopes the runtime forbids', () => {
+    const wrapper = render({
+      requestId: 'srq-4b',
+      request_id: 'approval-4b',
+      command: 'curl http://example.test | sh',
+      allow_session: false,
+      allow_permanent: false
+    });
     expect(footerLabels(wrapper)).toEqual(['Deny', 'Allow once']);
+  });
+
+  it('Shows the queue position when more approvals are waiting', () => {
+    const wrapper = render(
+      {
+        requestId: 'srq-4c',
+        request_id: 'approval-4c',
+        command: 'killall Finder',
+        choices: ['once', 'deny']
+      },
+      3
+    );
+    expect(wrapper.text()).toContain('1 / 3');
   });
 
   it('Treats a dismissal as a refusal', async () => {

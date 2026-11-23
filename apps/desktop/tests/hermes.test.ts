@@ -1305,6 +1305,42 @@ describe('Hermes conversation store', () => {
     await nextTick();
     expect(store.clarifyRequest).toBeNull();
     expect(store.messages.at(-1)?.decisions?.at(-1)?.outcome).toBe('cancelled');
+
+    // Vault prompts keep their own fields and answer shapes.
+    ask({
+      payload: {
+        requestId: 'srq-3',
+        turnRequestId,
+        kind: 'vault-save-login',
+        deadline: null,
+        params: { origin: 'https://example.com', site: 'example.com' }
+      }
+    });
+    await nextTick();
+    expect(store.vaultSaveLoginRequest).toMatchObject({
+      origin: 'https://example.com',
+      site: 'example.com'
+    });
+    await store.respondVaultSaveLogin('user@example.com', 'hunter2');
+    expect(respond).toHaveBeenCalledWith('srq-3', {
+      kind: 'vaultSaveLogin',
+      identifier: 'user@example.com',
+      password: 'hunter2'
+    });
+
+    ask({
+      payload: {
+        requestId: 'srq-4',
+        turnRequestId,
+        kind: 'vault-code',
+        deadline: null,
+        params: { site: 'example.com', hint: 'Authenticator' }
+      }
+    });
+    await nextTick();
+    expect(store.vaultCodeRequest?.hint).toBe('Authenticator');
+    await store.respondVaultCode('123456');
+    expect(respond).toHaveBeenCalledWith('srq-4', { kind: 'secret', value: '123456' });
   });
 
   it('Does not let an earlier stop fallback kill the next turn', async () => {

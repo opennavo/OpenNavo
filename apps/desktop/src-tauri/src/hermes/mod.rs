@@ -284,8 +284,13 @@ pub enum HermesAskReply {
         answers: Vec<HermesClarifyAnswer>,
         cancelled: bool,
     },
-    /// One masked string (sudo password, env secret, vault unlock). `""` means skipped.
+    /// One masked string (sudo password, env secret, vault unlock, one-time code). `""` means skipped.
     Secret { value: String },
+    /// A login the agent may save to the vault (`vault.save_login`), answered as a JSON credential.
+    VaultSaveLogin {
+        identifier: String,
+        password: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -311,6 +316,10 @@ pub struct HermesRuntimeState {
     /// the id inside the answer picks the request, so a clarify and an approval can be open together.
     pub(crate) asks: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<AskAnswer>>>,
     pub(crate) approval_cancel: tokio::sync::Notify,
+    /// Test seam: fires when a live server request becomes an open card, so the stalled-turn
+    /// regression test can wait for registration instead of guessing with yields.
+    #[cfg(test)]
+    pub(crate) ask_opened: tokio::sync::Notify,
     installing: AtomicBool,
     pub(crate) install_cancel: AtomicBool,
 }
