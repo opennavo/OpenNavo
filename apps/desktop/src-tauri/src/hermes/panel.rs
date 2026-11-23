@@ -95,9 +95,17 @@ fn cookie_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<Stri
         let Some((key, value)) = pair.split_once('=') else {
             continue;
         };
-        if key.trim() == name {
-            return Some(value.to_owned());
+        if key.trim() != name {
+            continue;
         }
+        // A deletion (`name=""; Max-Age=0`, sent when the panel rejects the session) is not a
+        // rotated token. Treating the quoted empty value as one would write an unusable cookie
+        // into the session store and clobber a login that landed while the request was in flight.
+        let value = value.trim();
+        if value.trim_matches('"').is_empty() {
+            continue;
+        }
+        return Some(value.to_owned());
     }
     None
 }
@@ -1536,6 +1544,65 @@ mod media_url_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set_cookies(values: &[&'static str]) -> reqwest::header::HeaderMap {
+        let mut headers = reqwest::header::HeaderMap::new();
+        for value in values {
+            headers.append(SET_COOKIE, reqwest::header::HeaderValue::from_static(value));
+        }
+        headers
+    }
+
+    #[test]
+    fn ignores_the_deletion_cookies_sent_with_a_rejected_session() {
+        // The panel's expired-session response clears both cookies. Storing the quoted empty
+        // values as tokens would replace a session that logged in while this response was in
+        // flight, and every later request would carry the dead value.
+        let headers = set_cookies(&[
+            "hermes_session_at=\"\"; HttpOnly; Max-Age=0",
+            "hermes_session_rt=\"\"; HttpOnly; Max-Age=0",
+        ]);
+        assert_eq!(cookie_value(&headers, "hermes_session_at"), None);
+        assert_eq!(cookie_value(&headers, "hermes_session_rt"), None);
+        assert_eq!(
+            cookie_value(&headers, "hermes_session_at=; Max-Age=0"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_rejected_session_never_rotates_the_stored_tokens() {
+        let session = PanelSession {
+            base_url: "http://panel.tail1234.ts.net:9119".to_owned(),
+            provider: "basic".to_owned(),
+            access_token: "access-token".to_owned(),
+            refresh_token: "refresh-token".to_owned(),
+        };
+        let cleared = set_cookies(&[
+            "hermes_session_at=\"\"; HttpOnly; Max-Age=0",
+            "hermes_session_rt=\"\"; HttpOnly; Max-Age=0",
+        ]);
+        // `None` keeps the caller from writing anything: the stored session is untouched.
+        assert!(refreshed_session(&session, &cleared).is_none());
+    }
+
+    #[test]
+    fn keeps_the_real_cookie_value_verbatim() {
+        let headers = set_cookies(&[
+            "hermes_session_at=access-token; Path=/; HttpOnly",
+            "hermes_session_rt=refresh-token; Path=/; HttpOnly",
+        ]);
+        assert_eq!(
+            cookie_value(&headers, "hermes_session_at").as_deref(),
+            Some("access-token")
+        );
+        assert_eq!(
+            cookie_value(&headers, "hermes_session_rt").as_deref(),
+            Some("refresh-token")
+        );
+        // Multiple Set-Cookie rows: an unrelated name must not mask the one asked for.
+        assert_eq!(cookie_value(&headers, "hermes_session_pkce"), None);
+    }
 
     /// Real-host smoke test for the history slices: every slice must come back with the
     /// envelope the renderer expects, and the two lists a person opens must not be empty on a

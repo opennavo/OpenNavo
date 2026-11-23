@@ -993,8 +993,13 @@ export const useHermesStore = defineStore('hermes', () => {
     // the turn, not proof that the panel session expired. Only the panel's own auth error
     // may open the sign-in sheet.
     if (!(error instanceof IpcError) || error.code !== 'E_HERMES_PANEL_AUTH') return;
-    if (panelAuthExpired.value === activeProfile.value.id) return;
-    panelAuthExpired.value = activeProfile.value.id;
+    // The panel rejected the stored session even if its public status route still answers:
+    // keep the connection in its sign-in state instead of showing it as connected.
+    const profile = activeProfile.value;
+    profile.status = 'error';
+    profile.error = error.detail?.trim() || error.message;
+    if (panelAuthExpired.value === profile.id) return;
+    panelAuthExpired.value = profile.id;
     toasts.push({
       tone: 'warning',
       title: 'Hermes Panel',
@@ -2101,29 +2106,49 @@ export const useHermesStore = defineStore('hermes', () => {
     await loadAgentProfiles();
     await loadModelOptions(true);
     panelAuthExpired.value = null;
+    // Nothing watches the connection records: persist the new endpoint/status here. A probe
+    // still in flight when the generation changed above skips its own persist, so without this
+    // the next launch would restore the old sign-in state until a probe succeeds.
+    persist();
   }
 
   async function probeConnections() {
     const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!tauri) return;
+    // A sign-in can finish while a probe is still waiting on a slow panel. Its late answer
+    // belongs to the session that was replaced, so it must not mark the new one failed or
+    // clear the error the new session's own probe is reporting.
+    const generation = panelAuthGeneration;
     await Promise.all(
       profiles.value
         .filter(profile => profile.kind !== 'local')
         .map(async profile => {
           try {
             const result = await unwrap(commands.hermesConnectionProbe(profile.id, profile.endpoint));
+            if (generation !== panelAuthGeneration) return;
             profile.status = result.ok ? 'connected' : 'error';
             profile.latency = result.latencyMs;
             profile.version = /(\d+\.\d+\.\d+)/.exec(result.version ?? '')?.[1] ?? profile.version;
             profile.error = undefined;
           } catch (error) {
-            profile.status = 'offline';
-            profile.error = 'Connection probe failed';
+            if (generation !== panelAuthGeneration) return;
+            const code = error instanceof IpcError ? error.code : '';
+            const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+            // A panel that answers its public status route but rejects the session is not a
+            // connection drop: keep 认证失败 + the auth detail instead of flipping to "connected"
+            // on the next probe.
+            if (code === 'E_HERMES_PANEL_AUTH') {
+              profile.status = 'error';
+              profile.error = detail;
+            } else {
+              profile.status = 'offline';
+              profile.error = 'Connection probe failed';
+            }
             if (profile.id === activeProfile.value.id) notePanelAuthError(error);
           }
         })
     );
-    persist();
+    if (generation === panelAuthGeneration) persist();
   }
 
   async function removeProfile(profileId: string) {
@@ -2251,6 +2276,11 @@ export const useHermesStore = defineStore('hermes', () => {
 
   async function loadAgentProfilesInner(connection: HermesProfile) {
     const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    // A sign-in replaces the panel session. A list read that started before it belongs to the
+    // old session: its late success (or 401) must not overwrite the state the new session's
+    // own reads are writing. Local reads have no session to replace.
+    const authGeneration = panelAuthGeneration;
+    const stale = () => connection.kind === 'panel' && authGeneration !== panelAuthGeneration;
     const fallback: HermesAgentProfile[] = [
       {
         name: activeAgentProfiles.value[connection.id] ?? 'default',
@@ -2274,6 +2304,7 @@ export const useHermesStore = defineStore('hermes', () => {
           connection.kind !== 'local' ? connection.endpoint : null
         )
       );
+      if (stale()) return list;
       agentProfilesByConnection.value = { ...agentProfilesByConnection.value, [connection.id]: list };
       connection.status = 'connected';
       connection.models = list.length;
@@ -2287,6 +2318,7 @@ export const useHermesStore = defineStore('hermes', () => {
       }
       return list;
     } catch (error) {
+      if (stale()) return fallback;
       const code = error instanceof IpcError ? error.code : '';
       const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
       connection.status = 'error';
@@ -2461,6 +2493,9 @@ export const useHermesStore = defineStore('hermes', () => {
     const profileArg = agentProfileArg();
     const allProfiles = panelAllProfiles.value;
     const generation = panelHistoryGeneration;
+    // A sign-in replaces the panel session. A page read that started before it belongs to the
+    // old session and must not reopen the sign-in sheet when its late 401 arrives.
+    const authGeneration = panelAuthGeneration;
     const requestId = `${key}::${slice}`;
     const state = sliceState(slice, key);
     if (state.loading) {
@@ -2485,10 +2520,13 @@ export const useHermesStore = defineStore('hermes', () => {
         commands.hermesPanelHistory(connectionId, profileArg, allProfiles, slice, limit, offset)
       );
       // The user moved to another profile or changed the aggregate scope while this page was in
-      // flight. Folding it into the new list would tag rows with the wrong owner and persist them.
+      // flight, or a re-login replaced the session this request was sent under. Folding it into
+      // the new list would tag rows with the wrong owner, cache a page the new session has not
+      // read, and persist it.
       if (
         seq !== panelHistoryRequests.get(requestId) ||
         generation !== panelHistoryGeneration ||
+        authGeneration !== panelAuthGeneration ||
         key !== stateKey() ||
         connectionId !== activeProfile.value.id ||
         allProfiles !== panelAllProfiles.value
@@ -2521,7 +2559,12 @@ export const useHermesStore = defineStore('hermes', () => {
       }
       persist();
     } catch (error) {
-      if (seq === panelHistoryRequests.get(requestId) && generation === panelHistoryGeneration && key === stateKey()) {
+      if (
+        seq === panelHistoryRequests.get(requestId) &&
+        generation === panelHistoryGeneration &&
+        authGeneration === panelAuthGeneration &&
+        key === stateKey()
+      ) {
         notePanelAuthError(error);
         // Not cached as empty: the next open retries instead of showing "no history".
         state.error = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
