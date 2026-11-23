@@ -231,6 +231,10 @@ watch(() => props.message.attachments, loadAttachmentPreviews, { immediate: true
           </button>
         </div>
         <div v-if="text" class="whitespace-pre-wrap">{{ text }}</div>
+        <div v-if="message.queued" class="mt-6px flex items-center gap-5px text-10.5px text-ink-tertiary">
+          <OnIcon name="lucide:clock" :size="11" />
+          {{ content.composer.queued }}
+        </div>
       </div>
       <HermesCopyButton v-if="text && !message.streaming" :text="text" />
     </div>
@@ -384,6 +388,13 @@ watch(() => props.message.attachments, loadAttachmentPreviews, { immediate: true
           v-if="message.streaming && text"
           class="ml-2px inline-block h-13px w-7px animate-pulse rounded-2px bg-ink-secondary align-[-2px]"
         />
+        <div
+          v-if="message.interrupted && !message.streaming"
+          class="mt-6px flex items-center gap-6px text-11px leading-[1.5] text-ink-tertiary"
+        >
+          <OnIcon name="lucide:circle-stop" :size="12" />
+          <span class="font-500">{{ content.composer.responseStopped }}</span>
+        </div>
       </div>
 
       <div

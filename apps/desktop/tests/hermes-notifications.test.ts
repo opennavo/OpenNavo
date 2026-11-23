@@ -63,7 +63,7 @@ function mockTauri() {
 function mockChatReply(text = 'Remote reply') {
   return vi.spyOn(commands, 'hermesChat').mockResolvedValue({
     status: 'ok',
-    data: { text, sessionId: 'panel-session', liveSessionId: null, usage: null }
+    data: { text, sessionId: 'panel-session', liveSessionId: null, usage: null, interrupted: false }
   });
 }
 
@@ -207,7 +207,7 @@ describe('Hermes reply notifications', () => {
     store.newChat();
     pending[0]!({
       status: 'ok',
-      data: { text: 'Late reply', sessionId: 'panel-session', liveSessionId: null, usage: null }
+      data: { text: 'Late reply', sessionId: 'panel-session', liveSessionId: null, usage: null, interrupted: false }
     });
     await turn;
 

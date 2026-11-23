@@ -243,6 +243,8 @@ export const en = {
     showMore: 'Show more',
     archive: 'Archive',
     restore: 'Restore',
+    replying: 'Replying…',
+    waitingAsk: 'Waiting for your answer',
     allProfiles: 'All profiles',
     degraded: 'This panel version cannot merge profiles, so only the current one is listed.',
     views: {
@@ -309,9 +311,14 @@ export const en = {
     thinking: 'Hermes is thinking…',
     reasoning: 'Reasoning',
     stop: 'Stop',
+    responseStopped: 'Response stopped',
     attachmentsBusy: 'Wait for the current reply before attaching files.',
     steerFallback: 'This model does not support mid-turn steering. The message was queued for the next reply.',
-    stopping: 'Stopping…'
+    stopping: 'Stopping…',
+    queued: 'Queued',
+    backgroundReplying: 'Another conversation is replying',
+    backgroundWaiting: 'Another conversation is waiting for your answer',
+    backgroundOpen: 'Open'
   },
   steering: 'Steering',
   media: {
@@ -1018,6 +1025,8 @@ export const zhCN: HermesContent = {
     showMore: '显示更多',
     archive: '归档',
     restore: '恢复',
+    replying: '正在回复…',
+    waitingAsk: '等待你的确认',
     allProfiles: '所有 Profile',
     degraded: '该面板版本不支持合并 Profile，只显示当前 Profile。',
     views: {
@@ -1084,9 +1093,14 @@ export const zhCN: HermesContent = {
     thinking: 'Hermes 正在思考…',
     reasoning: '思考过程',
     stop: '停止',
+    responseStopped: '回复已停止',
     attachmentsBusy: '请等待当前回复结束再发送附件。',
     steerFallback: '当前模型不支持中途引导，这条消息已排队到本轮结束后发送。',
-    stopping: '停止中…'
+    stopping: '停止中…',
+    queued: '待发送',
+    backgroundReplying: '另一个会话正在回复',
+    backgroundWaiting: '另一个会话正在等待你的确认',
+    backgroundOpen: '打开'
   },
   steering: '引导',
   media: {

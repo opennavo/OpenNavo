@@ -1563,7 +1563,22 @@ async fn stream_turn(
                     append_audit(home, input, "failed", Some(stored_sid), Some(&text));
                     return Err(AppError::new("E_HERMES_GATEWAY_STREAM", text));
                 }
-                append_audit(home, input, "succeeded", Some(stored_sid), None);
+                // Official desktop treats `interrupted` as a stopped turn: Hermes
+                // blanks the "waiting for model response" sentinel, so this text
+                // is often empty while the preamble already streamed. Recording
+                // that as success made the bubble look like a finished answer.
+                let interrupted = status == "interrupted";
+                append_audit(
+                    home,
+                    input,
+                    if interrupted {
+                        "interrupted"
+                    } else {
+                        "succeeded"
+                    },
+                    Some(stored_sid),
+                    None,
+                );
                 let usage = payload
                     .get("usage")
                     .cloned()
@@ -1573,6 +1588,7 @@ async fn stream_turn(
                     session_id: Some(stored_sid.to_owned()),
                     live_session_id: Some(live_sid.to_owned()),
                     usage,
+                    interrupted,
                 });
             }
             "error" => {

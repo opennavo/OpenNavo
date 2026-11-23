@@ -167,8 +167,15 @@ export interface HermesMessage {
   attachments?: string[];
   /** This user message was injected into the running turn. */
   steering?: boolean;
+  /**
+   * Visible in the transcript but waiting for the shared turn slot to free up. The row is the
+   * queue entry: it keeps the conversation in history and is reused when the turn starts.
+   */
+  queued?: boolean;
   /** True while Hermes is still streaming this message. */
   streaming?: boolean;
+  /** The turn was stopped. Streamed text stays; this is not a finished answer. */
+  interrupted?: boolean;
   reasoning?: string;
   at: number;
 }
@@ -229,9 +236,36 @@ export interface HermesAsk {
   requestId: string;
   /** The chat turn that opened this card; other windows ignore its broadcast events. */
   turnRequestId?: string;
+  /** Conversation showing the card. A background turn keeps its card until the user returns. */
+  conversationId?: string;
   kind: HermesAskKind;
   deadline: number | null;
   params: Record<string, unknown>;
+}
+
+/**
+ * One in-flight chat turn, owned by its conversation rather than by the view.
+ *
+ * Switching a profile or opening another conversation only changes what is on screen; the turn
+ * keeps its own request id, owning `connection::agentProfile`, gateway coordinates and live
+ * session, so stream events and a later Stop still reach the right backend. This mirrors the
+ * official desktop, where background profiles keep their sockets and events are applied to the
+ * session's own state (`store/session-states.ts`), not to whichever chat is active.
+ */
+interface LiveHermesTurn {
+  turn: number;
+  requestId: string;
+  conversationId: string;
+  /** `connection::agentProfile` that owns the conversation. */
+  ownerKey: string;
+  /** Gateway coordinates captured at send time; a profile switch must not retarget Stop. */
+  gatewayUrl: string | null;
+  gatewayProfileId: string | null;
+  /** Provider chosen when the turn was composed, for error classification after a switch. */
+  provider: HermesProvider;
+  liveSessionId?: string;
+  stopping: boolean;
+  stopRequested: boolean;
 }
 
 export interface HermesClarifyAnswer {
@@ -556,6 +590,25 @@ function panelConversationFromRow(
   };
 }
 
+/** Hermes blanks this on the live `message.complete`, but the stored row still carries it. */
+const INTERRUPT_WAITING_PREFIX = 'Operation interrupted: waiting for model response (';
+
+function isInterruptSentinel(text: string): boolean {
+  return text.trimStart().startsWith(INTERRUPT_WAITING_PREFIX);
+}
+
+function panelRowInterrupted(row: Record<string, unknown>): boolean {
+  const meta = row.display_metadata;
+  if (!meta) return false;
+  if (typeof meta === 'object') return (meta as { interrupted?: unknown }).interrupted === true;
+  if (typeof meta !== 'string') return false;
+  try {
+    return (JSON.parse(meta) as { interrupted?: unknown }).interrupted === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Panel transcripts interleave user/assistant turns with tool payloads; tool rows fold into
  * the assistant turn that called them, the way the panel's own transcript does. */
 function panelMessagesFrom(entries: unknown[], sessionId: string): HermesMessage[] {
@@ -611,9 +664,17 @@ function panelMessagesFrom(entries: unknown[], sessionId: string): HermesMessage
     }
 
     if (row.role !== 'user' && row.role !== 'assistant') continue;
-    const text = typeof row.content === 'string' ? row.content : '';
+    const rawText = typeof row.content === 'string' ? row.content : '';
+    const interrupted = row.role === 'assistant' && (panelRowInterrupted(row) || isInterruptSentinel(rawText));
+    const text = isInterruptSentinel(rawText) ? '' : rawText;
     const stored = Array.isArray(row.tool_calls) ? row.tool_calls : [];
-    if (!text.trim() && !stored.length) continue;
+    // A stop after tools is stored as its own assistant row whose only text is the
+    // interrupt sentinel. Fold that onto the bubble that already has the preamble,
+    // matching the official transcript (the row says the reply was stopped).
+    if (!text.trim() && !stored.length) {
+      if (interrupted && lastAssistant) lastAssistant.interrupted = true;
+      if (!interrupted || lastAssistant) continue;
+    }
 
     const at = timeOf(row.timestamp);
     const tools: HermesToolCall[] = stored.flatMap(call => {
@@ -648,6 +709,7 @@ function panelMessagesFrom(entries: unknown[], sessionId: string): HermesMessage
       id: `panel-${sessionId}-${String(row.id ?? index)}`
     };
     if (tools.length) built.tools = tools;
+    if (interrupted) built.interrupted = true;
     messages.push(built);
     if (row.role === 'assistant') lastAssistant = built;
     for (const call of tools) {
@@ -833,8 +895,12 @@ export const useHermesStore = defineStore('hermes', () => {
   const turnSessionIds = ref<Record<string, string>>({});
   /** Server→client requests the running turn is parked on: approval, clarify, masked prompts. */
   const asks = ref<HermesAsk[]>([]);
+  /** Only the cards belonging to the conversation on screen; a background turn keeps its own. */
+  const activeAsks = computed(() =>
+    asks.value.filter(ask => !ask.conversationId || ask.conversationId === activeId.value)
+  );
   /** The runtime coalesces its own approval queue, so the cards are answered one at a time. */
-  const headAsk = computed(() => asks.value[0] ?? null);
+  const headAsk = computed(() => activeAsks.value[0] ?? null);
   const approvalRequest = computed<HermesApprovalRequest | null>(() => {
     const ask = headAsk.value;
     if (!ask || ask.kind !== 'approval') return null;
@@ -947,7 +1013,6 @@ export const useHermesStore = defineStore('hermes', () => {
   }
   let replyTimer: ReturnType<typeof setTimeout> | undefined;
   let turnSeq = 0;
-  let activeTurn = 0;
   let stopKillTimer: number | undefined;
   let stopFinalizeTimer: number | undefined;
   let historySaveTimer: number | undefined;
@@ -995,7 +1060,17 @@ export const useHermesStore = defineStore('hermes', () => {
     mode: 'interrupt' | 'steer' | null;
   }
   const pendingSteers = new Map<string, PendingSteer[]>();
-  const queuedAfterTurn = new Map<string, string[]>();
+  /**
+   * Text waiting for the next turn in its conversation. `messageId` points at the visible user
+   * row shown for a queued send, so the drain can reuse that row instead of duplicating it.
+   */
+  interface QueuedSend {
+    text: string;
+    messageId?: string;
+    /** Files composed with the message; a pre-flight requeue has to take them along. */
+    attachments?: string[];
+  }
+  const queuedAfterTurn = new Map<string, QueuedSend[]>();
   /**
    * The assistant bubble currently receiving this conversation's stream events. A correction
    * seals it, so the next delta opens a fresh bubble below the correction — the official
@@ -1003,12 +1078,27 @@ export const useHermesStore = defineStore('hermes', () => {
    */
   const streamingAssistantIds = new Map<string, string>();
   /**
+   * Turns that are still running, keyed by turn id and by conversation. They survive profile and
+   * conversation switches; only Stop (or deleting the conversation) retires them.
+   */
+  const liveTurns = new Map<number, LiveHermesTurn>();
+  const liveTurnByConversation = new Map<string, number>();
+  /** The turn the shared stop timers belong to, so another turn's completion cannot clear them. */
+  let stopTimerTurn: number | null = null;
+  /**
    * The conversation whose queued text is already inside `send`. One drain at a time.
    * `stopThinking` clears it: that bump retires the in-flight turn, and a hung chat would
    * otherwise leave `select` unable to start the rows still queued.
    */
   let queuedDrain: { id: string; epoch: number } | null = null;
   let queuedDrainEpoch = 0;
+  /**
+   * Turns force-retired before the gateway announced their session. The `hermes-session`
+   * listener stays registered until `hermesChat` settles, so when the id finally arrives it can
+   * send the interrupt that retirement could not. A local turn is hard-stopped instead; a
+   * remote/panel turn has no such handle until this event.
+   */
+  const pendingTurnInterrupts = new Map<string, { gatewayUrl: string | null; profileId: string | null }>();
 
   function preferredAgentProfile(connectionId: string) {
     return activeAgentProfiles.value[connectionId] ?? defaultAgentProfiles.value[connectionId] ?? 'default';
@@ -1024,6 +1114,236 @@ export const useHermesStore = defineStore('hermes', () => {
       next[key.includes('::') ? key : `${key}::default`] = value;
     }
     return next;
+  }
+
+  // ── Background turns ──────────────────────────────────────────────────────
+  // A turn belongs to its conversation, not to the visible chat. These lookups route a stream
+  // event or a completion to the owning profile state even after the user switched away.
+
+  function conversationForOwner(conversationId: string, ownerKey: string): HermesConversation | undefined {
+    if (ownerKey === stateKey()) {
+      return conversations.value.find(item => item.id === conversationId);
+    }
+    return profileStates.value[ownerKey]?.conversations.find(item => item.id === conversationId);
+  }
+
+  function findConversationById(conversationId: string): HermesConversation | undefined {
+    const active = conversations.value.find(item => item.id === conversationId);
+    if (active) return active;
+    for (const state of Object.values(profileStates.value)) {
+      const found = state.conversations.find(item => item.id === conversationId);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  function liveTurnForConversation(conversationId: string | null | undefined): LiveHermesTurn | undefined {
+    if (!conversationId) return undefined;
+    const turn = liveTurnByConversation.get(conversationId);
+    return turn === undefined ? undefined : liveTurns.get(turn);
+  }
+
+  function activeLiveTurn(): LiveHermesTurn | undefined {
+    return liveTurnForConversation(activeId.value);
+  }
+
+  function turnConversation(turnId: number): HermesConversation | undefined {
+    const turn = liveTurns.get(turnId);
+    return turn ? conversationForOwner(turn.conversationId, turn.ownerKey) : undefined;
+  }
+
+  /** `liveTurns` is a plain Map; this ref lets the UI react to a turn starting or ending. */
+  const liveTurnRevision = ref(0);
+
+  /** What a history row should say about its conversation's live turn. */
+  function conversationActivity(conversationId: string): 'replying' | 'waiting' | null {
+    void liveTurnRevision.value;
+    const turn = liveTurnForConversation(conversationId);
+    if (!turn) return null;
+    return asks.value.some(ask => ask.turnRequestId === turn.requestId) ? 'waiting' : 'replying';
+  }
+
+  /** Turns running somewhere other than the conversation on screen, for the status banner. */
+  const backgroundTurns = computed(() => {
+    void liveTurnRevision.value;
+    return [...liveTurns.values()]
+      .filter(turn => turn.conversationId !== activeId.value)
+      .map(turn => {
+        const conversation = conversationForOwner(turn.conversationId, turn.ownerKey);
+        const firstUser = conversation?.messages.find(entry => entry.role === 'user');
+        return {
+          conversationId: turn.conversationId,
+          title: conversation?.title?.trim() || (firstUser?.text ?? '').slice(0, 48),
+          waiting: asks.value.some(ask => ask.turnRequestId === turn.requestId),
+          stopping: turn.stopping,
+          // A turn from another profile is reachable too: `openBackgroundTurn` switches first.
+          // Only a deleted row or an owner whose profile is gone has nowhere to open.
+          openable:
+            Boolean(conversation) &&
+            (turn.ownerKey === stateKey() ||
+              profiles.value.some(profile => turn.ownerKey.startsWith(`${profile.id}::`)))
+        };
+      });
+  });
+
+  /** Show a background conversation without disturbing its turn, switching profile if needed. */
+  async function openBackgroundTurn(conversationId: string): Promise<boolean> {
+    const turn = liveTurnForConversation(conversationId);
+    if (!turn) return false;
+    if (turn.ownerKey !== stateKey()) {
+      const [connectionId, agentProfile] = turn.ownerKey.split('::');
+      if (!connectionId || !profiles.value.some(profile => profile.id === connectionId)) return false;
+      switchProfile(connectionId, agentProfile || undefined);
+    }
+    // `applyProfileState` fills the list synchronously; select now so the user sees the row.
+    if (!conversations.value.some(item => item.id === conversationId)) return false;
+    select(conversationId);
+    // The switch kicked off `loadHistory`; its restored `activeId` must not replace the row the
+    // user just asked for. Re-select once that read has settled.
+    if (!historyLoaded) {
+      await historyReadyPromise;
+      if (conversations.value.some(item => item.id === conversationId) && activeId.value !== conversationId) {
+        select(conversationId);
+      }
+    }
+    return true;
+  }
+
+  /** `thinking`/`stopping` describe the conversation on screen, never a background one. */
+  function syncTurnUi() {
+    const turn = activeLiveTurn();
+    thinking.value = Boolean(turn);
+    stopping.value = Boolean(turn?.stopping);
+    stopRequested.value = Boolean(turn?.stopRequested);
+  }
+
+  function registerLiveTurn(turn: LiveHermesTurn) {
+    liveTurns.set(turn.turn, turn);
+    liveTurnByConversation.set(turn.conversationId, turn.turn);
+    liveTurnRevision.value += 1;
+    syncTurnUi();
+  }
+
+  function clearAsksForTurn(requestId: string) {
+    if (!requestId) return;
+    asks.value = asks.value.filter(ask => ask.turnRequestId !== requestId);
+  }
+
+  /** Forget a turn. Returns its context so callers can still interrupt or finalize it. */
+  function retireLiveTurn(turnId: number): LiveHermesTurn | undefined {
+    const turn = liveTurns.get(turnId);
+    if (!turn) return undefined;
+    liveTurns.delete(turnId);
+    if (liveTurnByConversation.get(turn.conversationId) === turnId) {
+      liveTurnByConversation.delete(turn.conversationId);
+    }
+    clearAsksForTurn(turn.requestId);
+    if (turnSessionIds.value[turn.conversationId]) {
+      const remainingTurnSessions = { ...turnSessionIds.value };
+      delete remainingTurnSessions[turn.conversationId];
+      turnSessionIds.value = remainingTurnSessions;
+    }
+    liveTurnRevision.value += 1;
+    syncTurnUi();
+    // A background profile is not covered by the `conversations` watcher that persists the
+    // active one. Flush its finished state so a restart does not resurrect the partial turn.
+    if (turn.ownerKey !== stateKey()) persist();
+    return turn;
+  }
+
+  /**
+   * Interrupt this turn's own session. The conversation's `liveSessionId` still names the
+   * previous turn until this turn's `hermes-session` event arrives, so it is never a fallback
+   * here: an early Stop would interrupt the turn before this one and let this one keep running.
+   * Returns false when this turn has not claimed a session yet.
+   */
+  async function interruptTurn(turn: LiveHermesTurn): Promise<boolean> {
+    const live = turn.liveSessionId;
+    if (!live) return false;
+    if (!turn.gatewayUrl) await unwrap(commands.hermesInterrupt(live, null, null));
+    else await unwrap(commands.hermesInterrupt(live, turn.gatewayUrl, turn.gatewayProfileId));
+    return true;
+  }
+
+  /**
+   * Ask a turn's backend to stop. An early Stop has no session id to target yet, so it sends
+   * nothing: the 1.2 s retry and the `hermes-session` handler take over as soon as the id is
+   * known. Only a caller that is already retiring the turn (`force`) may hard-stop the local
+   * gateway as a last resort, never the first button press.
+   */
+  async function requestTurnStop(turn: LiveHermesTurn, force: boolean) {
+    if (turn.liveSessionId) {
+      try {
+        await interruptTurn(turn);
+        return;
+      } catch (error) {
+        if (!force) throw error;
+      }
+    }
+    if (!force) return;
+    // Register before yielding: a `hermes-session` can arrive while `hermesStop` is in flight,
+    // and that event is the only one this request id may ever get. Dropping it here left the
+    // prompt running on a gateway that then refused to stop. A successful hard stop makes the
+    // registration moot and is removed; a failed one keeps it for the late session.
+    pendingTurnInterrupts.set(turn.requestId, {
+      gatewayUrl: turn.gatewayUrl,
+      profileId: turn.gatewayProfileId
+    });
+    if (!turn.gatewayUrl && runtime.value?.ready) {
+      try {
+        await commands.hermesStop();
+        pendingTurnInterrupts.delete(turn.requestId);
+        return;
+      } catch {
+        // Best effort: the turn is already retired locally; the registration above still
+        // covers a session the surviving gateway announces afterwards.
+      }
+    }
+  }
+
+  /** Stamp every open assistant bubble in the conversation as stopped. */
+  function markConversationStopped(conversation: HermesConversation) {
+    const current = streamingAssistant(conversation);
+    if (current) {
+      current.streaming = false;
+      current.interrupted = true;
+      if (!current.text) current.text = '已停止。';
+    }
+    for (const entry of conversation.messages) {
+      if (entry.role === 'assistant' && entry.streaming) {
+        entry.streaming = false;
+        entry.interrupted = true;
+        if (!entry.text) entry.text = '已停止。';
+      }
+    }
+    streamingAssistantIds.delete(conversation.id);
+    const last = [...conversation.messages].reverse().find(entry => entry.role === 'assistant');
+    if (last && !last.text) last.text = '已停止。';
+    conversation.liveSessionId = undefined;
+    conversation.executionGeneration = undefined;
+    conversation.updatedAt = Date.now();
+  }
+
+  /** Retire one turn immediately and ask its backend to stop. Used by Stop's hung fallback. */
+  function forceStopTurn(turnId: number) {
+    const turn = liveTurns.get(turnId);
+    if (!turn) return;
+    const conversation = turnConversation(turnId);
+    if (conversation) markConversationStopped(conversation);
+    // The turn's own session id is the only safe target; the conversation may still hold the
+    // previous turn's id, and interrupting that would leave this turn running.
+    void requestTurnStop(turn, true).catch(() => undefined);
+    retireLiveTurn(turnId);
+    if (stopTimerTurn === turnId) clearStopTimers();
+    // Start whatever was queued behind this turn, in its own conversation.
+    drainQueuedTurns();
+  }
+
+  /** Delete/clear/Stop paths that remove a conversation also end the turn running in it. */
+  function stopTurnForConversation(conversationId: string) {
+    const turn = liveTurnForConversation(conversationId);
+    if (!turn) return;
+    forceStopTurn(turn.turn);
   }
 
   const activeProfile = computed(
@@ -1106,6 +1426,8 @@ export const useHermesStore = defineStore('hermes', () => {
     auxiliary.value = { ...state.auxiliary };
     forceAuxVision.value = state.forceAuxVision;
     mac.value = { ...(state.mac ?? DEFAULT_MAC) };
+    // The conversation that just became visible may own a background turn (or none at all).
+    syncTurnUi();
   }
 
   function saveActiveProfileState() {
@@ -1436,6 +1758,8 @@ export const useHermesStore = defineStore('hermes', () => {
         } else {
           conversations.value = restored;
           activeId.value = typeof parsed.activeId === 'string' ? parsed.activeId : null;
+          // The restored conversation may be the one still streaming in this profile.
+          syncTurnUi();
         }
       }
     } catch {
@@ -1452,6 +1776,9 @@ export const useHermesStore = defineStore('hermes', () => {
         historyLoaded = true;
         historyReady.value = true;
         if (!hasBackend && historySaveEnabled) scheduleHistorySave();
+        // The runtime queue is not persisted, but a queued row is. Rebuild it and resume when
+        // the conversation it belongs to is in this profile and the slot is free.
+        drainQueuedTurns();
       }
       done();
     }
@@ -1808,6 +2135,22 @@ export const useHermesStore = defineStore('hermes', () => {
       panelAuthGeneration += 1;
     }
     invalidateModelOptionsCacheFor(profileId);
+    // Removing a connection removes its conversations; their turns must not keep writing into
+    // deleted state or leave the backend running unattended.
+    for (const turn of liveTurns.values()) {
+      if (!turn.ownerKey.startsWith(`${profileId}::`)) continue;
+      const conversation = conversationForOwner(turn.conversationId, turn.ownerKey);
+      if (conversation) markConversationStopped(conversation);
+      void requestTurnStop(turn, true).catch(() => undefined);
+      retireLiveTurn(turn.turn);
+    }
+    // Queues are keyed by conversation, not by profile: drop every one that belonged to the
+    // state being removed, or an orphan key would keep waiting forever. The active profile's
+    // conversations live in `conversations`, not in its saved state, so include both.
+    if (activeProfileId.value === profileId) forgetQueuesFor(conversations.value);
+    for (const [key, state] of Object.entries(profileStates.value)) {
+      if (key.startsWith(`${profileId}::`)) forgetQueuesFor(state.conversations);
+    }
     const wasActive = activeProfileId.value === profileId;
     profiles.value = profiles.value.filter(item => item.id !== profileId);
     const nextStates = { ...profileStates.value };
@@ -1836,7 +2179,8 @@ export const useHermesStore = defineStore('hermes', () => {
   function switchProfile(profileId: string, agentName?: string) {
     const profile = profiles.value.find(item => item.id === profileId);
     if (!profile || (profileId === activeProfileId.value && !agentName)) return;
-    stopThinking();
+    // A turn keeps running in the profile being left behind: switching only moves the view.
+    // `applyProfileState` below re-derives the stop button for the new profile's conversation.
     // Persist the outgoing profile's conversations before the active route changes, so a
     // delayed debounce cannot write them into the next profile's file.
     flushHistorySave();
@@ -2220,8 +2564,67 @@ export const useHermesStore = defineStore('hermes', () => {
     }
     // Turning the aggregate off drops the rows other profiles contributed, so they cannot linger in
     // this profile's list (and in its persisted state) after the scope changed.
+    if (all) return;
     const owner = activeAgentProfileName.value;
-    conversations.value = all ? conversations.value : conversations.value.filter(item => ownsPanelRow(item, owner));
+    const kept: HermesConversation[] = [];
+    let rehomed = false;
+    for (const conversation of conversations.value) {
+      if (ownsPanelRow(conversation, owner)) {
+        kept.push(conversation);
+        continue;
+      }
+      // This row belongs to another agent profile. A turn started on it from this window still
+      // carries this profile as its owner; hand the conversation and the turn to the row's own
+      // state, or chunks and the completion would look for it here and lose it (and
+      // `syncConversation` would re-insert it on completion). Rows with a queued send move too.
+      const turn = liveTurnForConversation(conversation.id);
+      // A turn from another profile already writes into that profile's own copy; replacing it
+      // with this list row would drop the live transcript.
+      if (turn && turn.ownerKey !== stateKey()) continue;
+      const homeOwner = conversation.panelProfile?.trim();
+      const hasLocalWork =
+        Boolean(turn) ||
+        Boolean(queuedAfterTurn.get(conversation.id)?.length) ||
+        Boolean(pendingSteers.get(conversation.id)?.length) ||
+        conversation.messages.some(entry => !entry.id.startsWith('panel-'));
+      if (!homeOwner || !hasLocalWork) continue;
+      const homeKey = stateKey(activeProfileId.value, homeOwner);
+      if (turn) turn.ownerKey = homeKey;
+      const home = profileStates.value[homeKey] ?? blankProfileState();
+      const existing = home.conversations.find(item => item.id === conversation.id);
+      // Keep a transcript the home profile already loaded; append this row's own messages. A
+      // live turn's user row and bubble are among them by reference, so chunks keep landing on
+      // the bubble even though the stored conversation object is new.
+      const messageIds = new Set((existing?.messages ?? []).map(entry => entry.id));
+      const moved = existing
+        ? {
+            ...existing,
+            ...conversation,
+            messages: [...existing.messages, ...conversation.messages.filter(entry => !messageIds.has(entry.id))],
+            messagesLoaded: existing.messagesLoaded,
+            panelOffset: existing.panelOffset,
+            panelHasOlder: existing.panelHasOlder
+          }
+        : conversation;
+      profileStates.value = {
+        ...profileStates.value,
+        [homeKey]: {
+          ...home,
+          conversations: [moved, ...home.conversations.filter(item => item.id !== conversation.id)]
+        }
+      };
+      rehomed = true;
+    }
+    conversations.value = kept;
+    if (activeId.value && !kept.some(item => item.id === activeId.value)) {
+      activeId.value = kept[0]?.id ?? null;
+    }
+    syncTurnUi();
+    if (rehomed) {
+      // The banner derives the row's owner; it must re-read the moved turn.
+      liveTurnRevision.value += 1;
+      persist();
+    }
   }
 
   /** Archive or restore a panel row; the archive is its own slice on the host. */
@@ -2254,9 +2657,21 @@ export const useHermesStore = defineStore('hermes', () => {
     target.panelArchived = archived;
     target.panelRevision = (target.panelRevision ?? 0) + 1;
     // The row belongs to another list now: drop it from the one on screen and reload that list
-    // once the user comes back to it.
+    // once the user comes back to it. A live turn would re-insert it locally on completion, so
+    // end that turn first — archiving a conversation is a lifecycle action, unlike navigation.
+    // Its queue must go before the stop (the stop may start the next queued send), and a
+    // restored row must not replay text that was waiting when it was archived.
+    forgetQueuesFor([target]);
+    for (const entry of target.messages) {
+      if (entry.role === 'user' && entry.queued) entry.queued = false;
+    }
+    stopTurnForConversation(idValue);
     conversations.value = conversations.value.filter(item => item.id !== idValue);
-    if (activeId.value === idValue) activeId.value = conversations.value[0]?.id ?? null;
+    if (activeId.value === idValue) {
+      activeId.value = conversations.value[0]?.id ?? null;
+      // The new row on screen may own the (only) live turn.
+      syncTurnUi();
+    }
     invalidatePanelSlices();
     persist();
   }
@@ -2363,7 +2778,8 @@ export const useHermesStore = defineStore('hermes', () => {
   async function switchAgentProfile(name: string) {
     if (!name || name === activeAgentProfileName.value) return;
     const switchSeq = ++profileSwitchSeq;
-    stopThinking();
+    // Like a connection switch, this is navigation: the outgoing profile's running turn stays
+    // alive and keeps writing into its own conversations (official desktop behavior).
     flushHistorySave();
     profileSwitchingTo.value = name;
     saveActiveProfileState();
@@ -2415,6 +2831,11 @@ export const useHermesStore = defineStore('hermes', () => {
       delete nextStates[oldKey];
       profileStates.value = nextStates;
     }
+    // A running turn looks its conversation up by owner key; follow the rename so it keeps
+    // streaming into the same state instead of losing the conversation mid-answer.
+    for (const turn of liveTurns.values()) {
+      if (turn.ownerKey === oldKey) turn.ownerKey = newKey;
+    }
     if (activeAgentProfileName.value === name) {
       activeAgentProfiles.value = { ...activeAgentProfiles.value, [activeProfileId.value]: newName };
     }
@@ -2436,9 +2857,20 @@ export const useHermesStore = defineStore('hermes', () => {
     const args = connectionArgs();
     await unwrap(commands.hermesAgentProfileDelete(args.connectionId, args.gatewayUrl, name));
     invalidateModelOptionsCacheFor(activeProfileId.value, name);
+    const removedKey = stateKey(activeProfileId.value, name);
+    // The profile's state is about to disappear; stop anything still writing into it.
+    for (const turn of liveTurns.values()) {
+      if (turn.ownerKey !== removedKey) continue;
+      const conversation = conversationForOwner(turn.conversationId, turn.ownerKey);
+      if (conversation) markConversationStopped(conversation);
+      void requestTurnStop(turn, true).catch(() => undefined);
+      retireLiveTurn(turn.turn);
+    }
     if (activeAgentProfileName.value === name) {
       await switchAgentProfile('default');
     }
+    const removedState = profileStates.value[removedKey];
+    if (removedState) forgetQueuesFor(removedState.conversations);
     const nextStates = { ...profileStates.value };
     delete nextStates[stateKey(activeProfileId.value, name)];
     profileStates.value = nextStates;
@@ -2552,6 +2984,8 @@ export const useHermesStore = defineStore('hermes', () => {
   function select(idValue: string) {
     if (!conversations.value.some(item => item.id === idValue)) return;
     activeId.value = idValue;
+    // The selected conversation may still be streaming in the background.
+    syncTurnUi();
     // A panel row is metadata only until it is opened.
     void loadPanelConversation(idValue);
     // A steer that failed while this conversation was in the background waits here.
@@ -2583,6 +3017,8 @@ export const useHermesStore = defineStore('hermes', () => {
 
   function newChat() {
     activeId.value = null;
+    // The previous conversation may still be streaming in the background; a fresh draft is idle.
+    syncTurnUi();
   }
 
   async function deleteConversation(idValue: string) {
@@ -2615,13 +3051,19 @@ export const useHermesStore = defineStore('hermes', () => {
         return;
       }
     }
-    if (activeId.value === idValue) {
-      stopThinking();
-      activeId.value = null;
-    }
+    // Drop this row's queue before stopping its turn: the turn's stop path may start the next
+    // queued send, and that must never be a message belonging to the conversation being deleted.
     pendingSteers.delete(idValue);
     queuedAfterTurn.delete(idValue);
     streamingAssistantIds.delete(idValue);
+    // A turn keeps writing into its conversation even while the row is off screen. Stop it
+    // whether or not it is selected: its completion path would otherwise re-insert the row
+    // (`syncConversation`) and persist the conversation the user just deleted.
+    stopTurnForConversation(idValue);
+    if (activeId.value === idValue) {
+      activeId.value = null;
+      syncTurnUi();
+    }
     conversations.value = conversations.value.filter(item => item.id !== idValue);
     // The host dropped the row: other slices still list it until they are re-read.
     if (target?.panel) invalidatePanelSlices();
@@ -2671,16 +3113,19 @@ export const useHermesStore = defineStore('hermes', () => {
 
   async function clearHistory() {
     if (historyLoadStarted && !historyLoaded) await historyReadyPromise;
-    stopThinking();
     // Panel rows live on the host, so only this Mac's own conversations can be cleared here.
     const cleared = conversations.value.filter(item => !item.panel).map(item => item.id);
-    conversations.value = conversations.value.filter(item => item.panel);
+    // Drop every queue first: stopping a turn can start the next queued send, and no cleared
+    // conversation may be started (and then re-inserted) by that drain.
     for (const idValue of cleared) {
       pendingSteers.delete(idValue);
       queuedAfterTurn.delete(idValue);
       streamingAssistantIds.delete(idValue);
     }
+    for (const idValue of cleared) stopTurnForConversation(idValue);
+    conversations.value = conversations.value.filter(item => item.panel);
     if (activeId.value && !conversations.value.some(item => item.id === activeId.value)) activeId.value = null;
+    syncTurnUi();
     persist();
     flushHistorySave();
   }
@@ -2828,16 +3273,62 @@ export const useHermesStore = defineStore('hermes', () => {
   }
 
   function dropSteeringMessage(conversationId: string, messageId: string) {
-    const target = conversations.value.find(item => item.id === conversationId);
+    // A steer can outlive a switch, so the row may live in a background profile's state.
+    const target = findConversationById(conversationId);
     const index = target?.messages.findIndex(entry => entry.id === messageId) ?? -1;
     if (!target || index < 0) return;
     target.messages.splice(index, 1);
     target.updatedAt = Date.now();
   }
 
-  function queueSteerAfterTurn(conversationId: string, text: string, front = false) {
+  /** Runtime queues belong to conversations; drop them when their conversation is removed. */
+  function forgetQueuesFor(conversationsToForget: Iterable<HermesConversation>) {
+    for (const conversation of conversationsToForget) {
+      pendingSteers.delete(conversation.id);
+      queuedAfterTurn.delete(conversation.id);
+      streamingAssistantIds.delete(conversation.id);
+    }
+  }
+
+  function queueSteerAfterTurn(
+    conversationId: string,
+    text: string,
+    front = false,
+    messageId?: string,
+    attachments?: string[]
+  ) {
     const queued = queuedAfterTurn.get(conversationId) ?? [];
-    queuedAfterTurn.set(conversationId, front ? [text, ...queued] : [...queued, text]);
+    const entry: QueuedSend = {
+      text,
+      messageId,
+      attachments: attachments?.length ? [...attachments] : undefined
+    };
+    queuedAfterTurn.set(conversationId, front ? [entry, ...queued] : [...queued, entry]);
+    return entry;
+  }
+
+  /**
+   * A queued row is persisted with its conversation, but the queue itself is runtime state.
+   * Rebuild the queue from the visible rows after a reload or a profile restore so a row saved
+   * as `queued` can still be sent instead of sitting in the transcript forever.
+   */
+  function hydrateQueuedRows(conversationId: string) {
+    const conversation = findConversationById(conversationId);
+    if (!conversation) return;
+    const queued = queuedAfterTurn.get(conversationId) ?? [];
+    const attached = new Set(queued.map(entry => entry.messageId).filter((value): value is string => Boolean(value)));
+    const missing = conversation.messages.filter(
+      entry => entry.role === 'user' && entry.queued && !attached.has(entry.id)
+    );
+    if (!missing.length) return;
+    queuedAfterTurn.set(conversationId, [
+      ...queued,
+      ...missing.map(entry => ({
+        text: entry.text ?? '',
+        messageId: entry.id,
+        attachments: entry.attachments?.length ? [...entry.attachments] : undefined
+      }))
+    ]);
   }
 
   /** A steer accepted before its generation arrived still has to be sent on a later turn. */
@@ -2851,21 +3342,32 @@ export const useHermesStore = defineStore('hermes', () => {
     }
   }
 
-  function drainQueuedAfterTurn(conversationId: string) {
+  function drainQueuedAfterTurn(conversationId: string, allowBackground = false, parked?: QueuedSend) {
+    // Reloaded/profile-restored conversations keep their queued rows but not the runtime queue.
+    hydrateQueuedRows(conversationId);
     if (thinking.value || queuedDrain) return;
-    // Turns are global but the queue belongs to one conversation. Switching away before the
-    // failed steer returns must not start this text in whichever conversation is active now.
-    if (active.value?.id !== conversationId) return;
+    // One runtime turn at a time: a background turn also owns the backend resources.
+    if (liveTurns.size > 0) return;
+    // A failed steer waits for its own conversation to come back on screen; the turn-end path
+    // may start it in the background because the user was promised that send.
+    if (!allowBackground && active.value?.id !== conversationId) return;
+    // The target must still exist; the text belongs to its own conversation even when that
+    // conversation is not the one on screen (the turn then runs in the background).
+    if (!conversations.value.some(item => item.id === conversationId)) return;
     const queued = queuedAfterTurn.get(conversationId);
     if (!queued?.length) return;
-    const next = queued[0];
+    // A pre-submit Stop parks its row in the queue. It never owns the drain that follows: the
+    // rows behind it do. (Only a parked row at the head changes which entry starts; a row that
+    // was queued behind others stays there.)
+    const nextIndex = parked !== undefined && queued[0] === parked ? 1 : 0;
+    const next = queued[nextIndex];
     if (!next) return;
-    const rest = queued.slice(1);
+    const rest = queued.filter((_, index) => index !== nextIndex);
     if (rest.length) queuedAfterTurn.set(conversationId, rest);
     else queuedAfterTurn.delete(conversationId);
     const epoch = ++queuedDrainEpoch;
     queuedDrain = { id: conversationId, epoch };
-    void send(next, [], conversationId).finally(() => {
+    void send(next.text, next.attachments ?? [], conversationId, next.messageId).finally(() => {
       if (queuedDrain?.epoch === epoch) queuedDrain = null;
     });
   }
@@ -2876,6 +3378,31 @@ export const useHermesStore = defineStore('hermes', () => {
 
   function drainActiveQueue() {
     if (activeId.value) drainQueuedAfterTurn(activeId.value);
+  }
+
+  /**
+   * Start the next queued send now that no turn owns the shared slot. Prefer the conversation
+   * on screen, then any other conversation in this profile: a queued row was promised a send
+   * when the blocking turn ended, even if the user has since opened another chat.
+   */
+  function drainQueuedTurns() {
+    if (thinking.value || queuedDrain || liveTurns.size > 0) return;
+    const candidates = [
+      ...(activeId.value ? [activeId.value] : []),
+      ...[...queuedAfterTurn.keys()].filter(queuedId => queuedId !== activeId.value)
+    ];
+    for (const conversationId of candidates) {
+      hydrateQueuedRows(conversationId);
+      if (!queuedAfterTurn.get(conversationId)?.length) continue;
+      // A queue can outlive its conversation in this list: it belongs to another profile (its
+      // visible row is restored with that profile), or the row was deleted/archived. Skipping
+      // it must not park every later queue behind an id that is not here. The entry stays in
+      // the map so returning to its profile can resume it.
+      if (!conversations.value.some(item => item.id === conversationId)) continue;
+      drainQueuedAfterTurn(conversationId, true);
+      // A started send claims the shared slot; never start a second turn behind it.
+      if (queuedDrain || liveTurns.size > 0 || thinking.value) return;
+    }
   }
 
   function steerFailureDetail(error: unknown) {
@@ -3059,36 +3586,91 @@ export const useHermesStore = defineStore('hermes', () => {
     void notifyHermesReply(kind, conversationId, text);
   }
 
-  async function send(text: string, attachments: string[] = [], targetConversationId?: string) {
+  /**
+   * Attachments never join a queue: `send` rejects the whole message while the conversation on
+   * screen is replying, another turn owns the runtime slot, or this conversation still has rows
+   * waiting. The composer asks first, so a rejected send keeps the text and the selected files
+   * instead of clearing both for a turn that never starts.
+   */
+  function attachmentsBlocked() {
+    if (thinking.value) return true;
+    // One runtime turn at a time, even when it belongs to another conversation.
+    if (liveTurns.size > 0) return true;
+    const conversation = active.value;
+    if (!conversation) return false;
+    hydrateQueuedRows(conversation.id);
+    return (queuedAfterTurn.get(conversation.id)?.length ?? 0) > 0;
+  }
+
+  async function send(
+    text: string,
+    attachments: string[] = [],
+    targetConversationId?: string,
+    queuedMessageId?: string
+  ) {
     const findTarget = () =>
       targetConversationId ? (conversations.value.find(item => item.id === targetConversationId) ?? null) : null;
-    const targetIsActive = () =>
+    // A targeted send comes from the queue drain and may belong to a background conversation;
+    // it may still start once the shared turn slot is free, as long as its target exists.
+    const targetSendable = () => targetConversationId === undefined || Boolean(findTarget());
+    // A correction belongs to the turn on screen: `thinking` describes that conversation only.
+    const targetActive = () =>
       targetConversationId === undefined || (active.value?.id === targetConversationId && Boolean(findTarget()));
-    const restoreTargetQueue = () => {
-      if (targetConversationId) queueSteerAfterTurn(targetConversationId, text, true);
-    };
     let pendingUserId: string | undefined;
     let pendingAssistantId: string | undefined;
-    const restoreUnsentTurn = (conversation: HermesConversation) => {
+    /** The queued row this send is consuming, so an abort can put the text back behind it. */
+    let activeQueuedMessageId = queuedMessageId;
+    /** The pending user row was already on screen as queued; keep it and re-mark it on abort. */
+    let pendingUserQueued = false;
+    /** This send handed its row back to the queue before submitting; the finally must not drain it. */
+    let returnedToQueue = false;
+    const restoreTargetQueue = (front = true) => {
+      if (targetConversationId) {
+        return queueSteerAfterTurn(targetConversationId, text, front, activeQueuedMessageId, attachments);
+      }
+      return undefined;
+    };
+    const restoreUnsentTurn = (conversation: HermesConversation, requeueDirect = false, front = true) => {
+      // A direct send that lost its claim was never submitted. Keep its visible row and park it
+      // in the conversation's queue, so switching back resumes it instead of deleting the only
+      // copy of the message. A stop parks it behind the rows already waiting; a profile switch
+      // keeps it in front of them.
+      const directRow = requeueDirect && targetConversationId === undefined && Boolean(pendingUserId);
+      if (directRow) pendingUserQueued = true;
       // A profile switch can replace the live array with a restored copy; clean both the object
       // this send started with and the one currently in the store, so neither keeps a phantom turn.
-      const targets = new Set([conversation, conversations.value.find(item => item.id === conversation.id)]);
+      const targets = new Set([
+        conversation,
+        conversations.value.find(item => item.id === conversation.id),
+        // A re-home may already have moved the conversation into its own profile state.
+        profileStates.value[turnContext.ownerKey]?.conversations.find(item => item.id === conversation.id)
+      ]);
       for (const target of targets) {
         if (!target) continue;
+        const queuedRow =
+          pendingUserQueued && pendingUserId
+            ? target.messages.find(entry => entry.id === pendingUserId && entry.role === 'user')
+            : undefined;
+        if (queuedRow) queuedRow.queued = true;
         target.messages = target.messages.filter(
-          entry => entry.id !== pendingUserId && entry.id !== pendingAssistantId
+          entry => entry.id !== pendingAssistantId && (entry.id !== pendingUserId || Boolean(queuedRow) || directRow)
         );
         target.updatedAt = Date.now();
       }
       streamingAssistantIds.delete(conversation.id);
-      restoreTargetQueue();
+      if (directRow) {
+        const parked = queueSteerAfterTurn(conversation.id, value, front, pendingUserId, attachments);
+        persist();
+        return parked;
+      }
+      return restoreTargetQueue(front);
     };
     const value = text.trim();
     if (!value && !attachments.length) return;
     // Decide steer versus a new turn before any await. History and credential checks used to
     // leave `thinking` false, so two drains could both start `hermesChat`.
     if (thinking.value) {
-      if (!targetIsActive()) {
+      if (!targetActive()) {
         restoreTargetQueue();
         return;
       }
@@ -3128,11 +3710,59 @@ export const useHermesStore = defineStore('hermes', () => {
       drainQueuedAfterTurn(conversation.id);
       return;
     }
-    if (!targetIsActive()) {
+    if (!targetSendable()) {
       restoreTargetQueue();
       return;
     }
     const prompt = value || '请查看附件。';
+    // A fresh send belongs behind rows already waiting in its conversation. A drain send carries
+    // a target conversation and is already the row being started, so it never re-queues here.
+    const queuedTarget = targetConversationId === undefined ? active.value : null;
+    if (queuedTarget) hydrateQueuedRows(queuedTarget.id);
+    const queuedAhead = queuedTarget ? (queuedAfterTurn.get(queuedTarget.id)?.length ?? 0) : 0;
+    // The runtime's turn bookkeeping (one local gateway/ask channel, server-side concurrency
+    // limits) is not safe for two live turns at once. Keep the background turn alive and queue
+    // this row for when it settles instead of silently interrupting either one.
+    if (liveTurns.size > 0 || queuedAhead > 0) {
+      if (attachments.length) {
+        toasts.push({ tone: 'warning', title: 'Hermes', description: '请等待当前回复结束再发送附件。' });
+        return;
+      }
+      const conversation = findTarget() ?? ensureConversation();
+      // A drain that raced another turn still has its visible row; queue behind it. A fresh send
+      // gets a visible queued row now: an empty placeholder conversation is filtered out of
+      // history, and its text would be lost as soon as the user opened another chat.
+      const existingRow =
+        queuedMessageId !== undefined
+          ? conversation.messages.find(entry => entry.id === queuedMessageId && entry.role === 'user')
+          : undefined;
+      let queueMessageId = queuedMessageId;
+      if (!existingRow) {
+        const waiting = message({ role: 'user', text: value, queued: true });
+        conversation.messages = [...conversation.messages, waiting];
+        conversation.updatedAt = Date.now();
+        queueMessageId = waiting.id;
+      }
+      queueSteerAfterTurn(conversation.id, value, false, queueMessageId);
+      persist();
+      // The slot is free but the conversation already had a queue: its head owns the slot now,
+      // in order. (With a live turn, that turn's completion drains the queue instead.)
+      const queueOwnsSlot = liveTurns.size === 0;
+      if (queueOwnsSlot) drainQueuedAfterTurn(conversation.id);
+      const waitingForAnswer = [...liveTurns.values()].some(turn =>
+        asks.value.some(ask => ask.turnRequestId === turn.requestId)
+      );
+      toasts.push({
+        tone: 'info',
+        title: 'Hermes',
+        description: queueOwnsSlot
+          ? '前面的消息还在队列中，这条消息已排在它们之后发送。'
+          : waitingForAnswer
+            ? '另一个会话正在等待你的确认，这条消息已排队，等它结束后发送。'
+            : '另一个会话正在回复，这条消息已排队，等它结束后发送。'
+      });
+      return;
+    }
     let conversation = findTarget() ?? ensureConversation();
     // The drain that called us published this epoch synchronously, before the first await.
     const drainEpoch = queuedDrain?.id === conversation.id ? queuedDrain.epoch : undefined;
@@ -3141,31 +3771,96 @@ export const useHermesStore = defineStore('hermes', () => {
     // (for example, redirect a turn the runtime now says should queue).
     conversation.executionGeneration = undefined;
     conversation.busyMode = undefined;
-    const userMessage = message({
-      role: 'user',
-      text: value,
-      attachments: attachments.length ? [...attachments] : undefined
-    });
+    // Reuse the row that was shown while waiting instead of appending the same text twice.
+    const queuedRow =
+      queuedMessageId !== undefined
+        ? conversation.messages.find(entry => entry.id === queuedMessageId && entry.role === 'user')
+        : undefined;
+    let userMessage: HermesMessage;
+    if (queuedRow) {
+      userMessage = queuedRow;
+      pendingUserQueued = true;
+    } else {
+      // A drain whose visible row was lost (history reload) recreates one and keeps it as the
+      // queue handle, so an abort still leaves something to send and something to see.
+      const wasQueued = queuedMessageId !== undefined;
+      userMessage = message({
+        role: 'user',
+        text: value,
+        queued: wasQueued || undefined,
+        attachments: attachments.length ? [...attachments] : undefined
+      });
+      pendingUserQueued = wasQueued;
+      conversation.messages = [...conversation.messages, userMessage];
+    }
     pendingUserId = userMessage.id;
-    conversation.messages = [...conversation.messages, userMessage];
+    activeQueuedMessageId = queuedMessageId !== undefined ? userMessage.id : activeQueuedMessageId;
     conversation.updatedAt = Date.now();
-    thinking.value = true;
     const turn = ++turnSeq;
-    activeTurn = turn;
-    const abandonClaim = () => {
-      restoreUnsentTurn(conversation);
-      if (activeTurn === turn) {
-        thinking.value = false;
-        activeTurn = ++turnSeq;
+    const requestId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `hermes-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Own the turn from the moment the user row exists. Stream events, Stop and the final reply
+    // all resolve through this context, so switching profile/conversation only changes the view.
+    const turnContext: LiveHermesTurn = {
+      turn,
+      requestId,
+      conversationId: conversation.id,
+      ownerKey: stateKey(),
+      gatewayUrl: gatewayUrl.value,
+      gatewayProfileId: gatewayProfileId.value,
+      provider: model.value.provider,
+      stopping: false,
+      stopRequested: false
+    };
+    registerLiveTurn(turnContext);
+    // The turn owns the shared slot now; the row is no longer waiting. `syncTurnUi` (inside
+    // `registerLiveTurn`) only shows Stop for the conversation on screen; a turn that started
+    // from a background queue keeps running without claiming the visible composer.
+    userMessage.queued = false;
+    const abandonClaim = (returnToQueue = false) => {
+      pendingTurnInterrupts.delete(requestId);
+      if (returnToQueue) returnedToQueue = true;
+      // A stop parks the row behind the messages that were already waiting, so they keep their
+      // order and the freed slot. A profile switch resumes it in front of them instead.
+      const stopped = turnContext.stopping || turnContext.stopRequested;
+      const parked = restoreUnsentTurn(conversation, returnToQueue, !(returnToQueue && stopped));
+      // Corrections composed while this turn was pre-flight never reached a session; hand them
+      // to the queue so a later turn sends them instead of leaving them parked for a stranger.
+      deferPendingSteers(conversation.id);
+      retireLiveTurn(turn);
+      if (returnToQueue && stopped) {
+        // This send still holds the drain epoch it took. Release it before asking the queue to
+        // run, then start the first row behind the parked prompt. Draining the parked row here
+        // would resubmit the prompt the user just cancelled.
+        if (queuedDrain?.id === conversation.id && queuedDrain.epoch === drainEpoch) queuedDrain = null;
+        drainQueuedAfterTurn(conversation.id, true, parked);
       }
     };
+    // A pre-flight send still belongs to the profile that composed it. Once `hermesChat` starts,
+    // the turn keeps running; before that, a profile switch restores the row to the queue, and a
+    // Stop must never submit the prompt the user already cancelled.
+    const claimStillOurs = () => liveTurns.has(turn) && turnContext.ownerKey === stateKey() && !turnContext.stopping;
+    // Nothing was submitted. A profile switch leaves the turn alive under its old owner; Stop
+    // leaves `stopping` set even after its 10 s fallback retires the turn. Both mean the row
+    // belongs back in its conversation's queue. Delete/archive retires the turn with neither
+    // signal, and there is no conversation left to queue in.
+    const claimLostBeforeSubmit = () =>
+      turnContext.stopping || turnContext.stopRequested || (liveTurns.has(turn) && turnContext.ownerKey !== stateKey());
     // `loadHistory` may swap `conversations` for new objects while this await is in flight.
     // The user row was appended to the object captured above; carry it onto the live one
     // or the assistant reply and session metadata land on a conversation the store dropped.
     const syncConversation = () => {
-      const live = conversations.value.find(item => item.id === conversation.id);
+      // `loadHistory` replaces the active list with objects parsed from the file. A turn that
+      // kept streaming after a profile switch still holds the previous object, so its final
+      // reply would land on a conversation the store no longer shows.
+      const ownedHere = turnContext.ownerKey === stateKey();
+      const live = ownedHere
+        ? conversations.value.find(item => item.id === conversation.id)
+        : profileStates.value[turnContext.ownerKey]?.conversations.find(item => item.id === conversation.id);
       if (!live) {
-        conversations.value = [conversation, ...conversations.value];
+        if (ownedHere) conversations.value = [conversation, ...conversations.value];
         return;
       }
       if (live === conversation) return;
@@ -3179,8 +3874,8 @@ export const useHermesStore = defineStore('hermes', () => {
     };
     if (historyLoadStarted && !historyLoaded) {
       await historyReadyPromise;
-      if (!targetIsActive() || activeTurn !== turn) {
-        abandonClaim();
+      if (!claimStillOurs()) {
+        abandonClaim(claimLostBeforeSubmit());
         return;
       }
       syncConversation();
@@ -3190,29 +3885,32 @@ export const useHermesStore = defineStore('hermes', () => {
       // used to let the turn through and fail later with a provider error.
       const info = HERMES_PROVIDER_MAP[model.value.provider];
       if (requiresStoredKey(model.value, info) && !(await refreshCredentialState())) {
-        abandonClaim();
-        toasts.push({
-          tone: 'warning',
-          title: 'Hermes profile',
-          description: 'Configure this profile’s model and credentials before chatting.'
-        });
+        // A switch or Stop during the check means the verdict belongs to the attempt we just
+        // left: the row is already back in its queue, so its warning must not pop on the new one.
+        const requeue = claimLostBeforeSubmit();
+        abandonClaim(requeue);
+        if (!requeue) {
+          toasts.push({
+            tone: 'warning',
+            title: 'Hermes profile',
+            description: 'Configure this profile’s model and credentials before chatting.'
+          });
+        }
         return;
       }
     }
-    // The active conversation or profile can change while an await above is in flight.
-    if (!targetIsActive() || activeTurn !== turn) {
-      abandonClaim();
+    // The profile can change, or Stop can arrive, while an await above is in flight. Before the
+    // turn is submitted, that means the row belongs back in the queue; after submission neither
+    // check is used.
+    if (!claimStillOurs()) {
+      abandonClaim(claimLostBeforeSubmit());
       return;
     }
 
     const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!runtime.value && tauri) await loadRuntime();
-    if (!targetIsActive() || activeTurn !== turn) {
-      restoreUnsentTurn(conversation);
-      if (activeTurn === turn) {
-        thinking.value = false;
-        activeTurn = ++turnSeq;
-      }
+    if (!claimStillOurs()) {
+      abandonClaim(claimLostBeforeSubmit());
       return;
     }
     if (!runtime.value?.ready && tauri && !remoteActive.value) {
@@ -3228,10 +3926,6 @@ export const useHermesStore = defineStore('hermes', () => {
     }
     if (runtime.value?.ready || remoteActive.value) {
       syncConversation();
-      const requestId =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `hermes-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const assistant = message({ role: 'assistant', text: '', streaming: true });
       pendingAssistantId = assistant.id;
       conversation.messages = [...conversation.messages, assistant];
@@ -3247,8 +3941,8 @@ export const useHermesStore = defineStore('hermes', () => {
         try {
           const { listen } = await import('@tauri-apps/api/event');
           const unlistenChunk = await listen<HermesChunk>('hermes-chunk', event => {
-            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
-            const target = conversations.value.find(item => item.id === conversation.id);
+            if (event.payload.requestId !== requestId || !liveTurns.has(turn)) return;
+            const target = turnConversation(turn);
             if (!target) return;
             // A correction seals the bubble above it; the first delta afterwards opens a fresh
             // bubble below the correction (official arrival order).
@@ -3257,10 +3951,26 @@ export const useHermesStore = defineStore('hermes', () => {
             target.updatedAt = Date.now();
           });
           const unlistenSession = await listen<HermesSessionEvent>('hermes-session', event => {
-            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
-            const target = conversations.value.find(item => item.id === conversation.id);
+            if (event.payload.requestId !== requestId) return;
+            // The turn may have been force-retired (Stop's 10 s fallback, delete, archive or a
+            // removed profile) before the gateway announced its session. This listener is the
+            // only place that still knows the request id, so it sends the interrupt now.
+            const parked = pendingTurnInterrupts.get(requestId);
+            if (parked) {
+              pendingTurnInterrupts.delete(requestId);
+              void commands
+                .hermesInterrupt(event.payload.liveSessionId, parked.gatewayUrl, parked.profileId)
+                .catch(() => undefined);
+              return;
+            }
+            if (!liveTurns.has(turn)) return;
+            const target = turnConversation(turn);
             if (!target) return;
+            turnContext.liveSessionId = event.payload.liveSessionId;
             target.liveSessionId = event.payload.liveSessionId;
+            // Stop was pressed before this turn claimed its session, so the retries had no id
+            // to target. Interrupt now instead of waiting out the 10 s fallback.
+            if (turnContext.stopping) void requestTurnStop(turnContext, false).catch(() => undefined);
             if (event.payload.busyInputMode) {
               target.busyMode = event.payload.busyInputMode;
             }
@@ -3281,20 +3991,23 @@ export const useHermesStore = defineStore('hermes', () => {
           });
           // The turn is parked on a human answer: approval, clarify questions or a masked prompt.
           const unlistenAsk = await listen<HermesAsk>('hermes-ask', event => {
-            if (event.payload.turnRequestId !== requestId) return;
-            asks.value = [...asks.value.filter(ask => ask.requestId !== event.payload.requestId), event.payload];
+            if (event.payload.turnRequestId !== requestId || !liveTurns.has(turn)) return;
+            asks.value = [
+              ...asks.value.filter(ask => ask.requestId !== event.payload.requestId),
+              { ...event.payload, conversationId: conversation.id }
+            ];
           });
           // The runtime settled the request (answered here, withdrawn, or its own deadline passed):
           // drop the card and keep the decision visible in the transcript.
           const unlistenSettled = await listen<HermesDecision>('hermes-ask-settled', event => {
             if (event.payload.turnRequestId !== requestId) return;
             asks.value = asks.value.filter(ask => ask.requestId !== event.payload.requestId);
-            const target = conversations.value.find(item => item.id === conversation.id);
+            const target = turnConversation(turn);
             if (target) recordDecision(event.payload, conversation.id, turnAssistant(target).id);
           });
           const unlistenTool = await listen<HermesToolEvent>('hermes-tool', event => {
-            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
-            const target = conversations.value.find(item => item.id === conversation.id);
+            if (event.payload.requestId !== requestId || !liveTurns.has(turn)) return;
+            const target = turnConversation(turn);
             if (!target) return;
             // A tool started before a correction may finish after its bubble was sealed; keep
             // the completion on that same bubble instead of duplicating it below the correction.
@@ -3330,8 +4043,8 @@ export const useHermesStore = defineStore('hermes', () => {
             target.updatedAt = Date.now();
           });
           const unlistenReasoning = await listen<{ requestId: string; delta: string }>('hermes-reasoning', event => {
-            if (event.payload.requestId !== requestId || activeTurn !== turn) return;
-            const target = conversations.value.find(item => item.id === conversation.id);
+            if (event.payload.requestId !== requestId || !liveTurns.has(turn)) return;
+            const target = turnConversation(turn);
             if (!target) return;
             const entry = ensureStreamingAssistant(target);
             entry.reasoning = `${entry.reasoning ?? ''}${event.payload.delta}`;
@@ -3349,8 +4062,8 @@ export const useHermesStore = defineStore('hermes', () => {
         }
       }
       try {
-        if (!targetIsActive() || activeTurn !== turn) {
-          restoreUnsentTurn(conversation);
+        if (!claimStillOurs()) {
+          abandonClaim(claimLostBeforeSubmit());
           return;
         }
         syncConversation();
@@ -3385,16 +4098,37 @@ export const useHermesStore = defineStore('hermes', () => {
             confirmWrites: remoteActive.value ? true : mac.value.confirmWrites
           })
         );
-        if (activeTurn !== turn) return;
+        if (!liveTurns.has(turn)) return;
+        // The turn may have finished while its profile is on screen again, after `loadHistory`
+        // swapped in a newer object. Reattach before writing the final text, and write that
+        // object: `turnConversation` can still see the detached copy in a background snapshot.
         syncConversation();
-        const target = conversations.value.find(item => item.id === conversation.id);
+        const target = conversation;
         const entry = target
           ? (streamingAssistant(target) ??
             lastAssistantFrom(target, turnStartIndex) ??
             ensureStreamingAssistant(target))
           : undefined;
+        // A completion that races the Stop button must still read as stopped: the user asked
+        // for the turn to end, even if the model happened to finish before the interrupt landed.
+        const stoppedByUser = turnContext.stopping || turnContext.stopRequested;
+        const interrupted = reply.interrupted === true || isInterruptSentinel(reply.text) || stoppedByUser;
         if (target && entry) {
-          entry.text = reply.text || entry.text || 'Hermes returned an empty response.';
+          const visible = (isInterruptSentinel(reply.text) ? '' : reply.text).trim();
+          if (interrupted) {
+            // Official desktop: a stopped complete may only extend what is
+            // already on screen. A shorter or different text, including the
+            // blanked "waiting for model response" sentinel, never replaces it.
+            entry.interrupted = true;
+            const shown = (entry.text ?? '').trim();
+            // A stopped completion may only extend text that already reached the screen. With
+            // nothing streamed there is nothing to extend, so keep the stop marker instead of
+            // pasting the full answer the user cancelled.
+            entry.text =
+              shown && visible.startsWith(shown) && visible.length > shown.length ? visible : shown || '已停止。';
+          } else {
+            entry.text = visible || entry.text || 'Hermes returned an empty response.';
+          }
           entry.streaming = false;
           streamingAssistantIds.delete(conversation.id);
           if (reply.sessionId) target.sessionId = reply.sessionId;
@@ -3410,14 +4144,17 @@ export const useHermesStore = defineStore('hermes', () => {
           }
           target.updatedAt = Date.now();
         }
-        maybeNotifyHermesReply('turnDone', conversation.id, reply.text);
+        if (!interrupted) {
+          maybeNotifyHermesReply('turnDone', conversation.id, reply.text);
+        }
       } catch (error) {
-        if (activeTurn !== turn) return;
+        if (!liveTurns.has(turn)) return;
         syncConversation();
-        if (stopping.value || stopRequested.value) {
-          const target = conversations.value.find(item => item.id === conversation.id);
-          const entry = target ? (streamingAssistant(target) ?? lastAssistantFrom(target, turnStartIndex)) : undefined;
-          if (target && entry) {
+        if (turnContext.stopping || turnContext.stopRequested) {
+          const target = conversation;
+          const entry = streamingAssistant(target) ?? lastAssistantFrom(target, turnStartIndex);
+          if (entry) {
+            entry.interrupted = true;
             entry.text = entry.text || '已停止。';
             entry.streaming = false;
             streamingAssistantIds.delete(conversation.id);
@@ -3428,7 +4165,7 @@ export const useHermesStore = defineStore('hermes', () => {
         notePanelAuthError(error);
         const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
         const expiredOpenCode =
-          (model.value.provider === 'opencode-go' || model.value.provider === 'opencode') &&
+          (turnContext.provider === 'opencode-go' || turnContext.provider === 'opencode') &&
           /api key has expired|401/i.test(detail);
         const messageText = expiredOpenCode
           ? `${detail}
@@ -3436,13 +4173,10 @@ export const useHermesStore = defineStore('hermes', () => {
 OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.ai/console) 创建新的 API Key，然后在 Hermes 设置 → OpenCode Go 中填写。`
           : detail;
         syncConversation();
-        const target = conversations.value.find(item => item.id === conversation.id);
-        const entry = target
-          ? (streamingAssistant(target) ??
-            lastAssistantFrom(target, turnStartIndex) ??
-            ensureStreamingAssistant(target))
-          : undefined;
-        if (target && entry) {
+        const target = conversation;
+        const entry =
+          streamingAssistant(target) ?? lastAssistantFrom(target, turnStartIndex) ?? ensureStreamingAssistant(target);
+        if (entry) {
           entry.text = entry.text || messageText;
           entry.streaming = false;
           streamingAssistantIds.delete(conversation.id);
@@ -3455,34 +4189,35 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
         });
         maybeNotifyHermesReply('turnError', conversation.id, detail);
       } finally {
+        // The session listener is about to unregister; no late id can be interrupted after this.
+        pendingTurnInterrupts.delete(requestId);
         unlisten?.();
         if (turnSessionId && turnSessionIds.value[conversation.id] === turnSessionId) {
           const remainingTurnSessions = { ...turnSessionIds.value };
           delete remainingTurnSessions[conversation.id];
           turnSessionIds.value = remainingTurnSessions;
         }
-        if (activeTurn === turn) {
-          clearStopTimers();
-          thinking.value = false;
-          stopping.value = false;
-          stopRequested.value = false;
-          asks.value = [];
-          const finished = conversations.value.find(item => item.id === conversation.id);
-          if (finished) {
-            sealStreamingAssistant(finished);
-            finished.executionGeneration = undefined;
-          } else {
-            streamingAssistantIds.delete(conversation.id);
-          }
-          deferPendingSteers(conversation.id);
+        const ctx = liveTurns.get(turn);
+        if (ctx) {
+          // Another turn's Stop must not be finalized by this turn's completion.
+          if (stopTimerTurn === turn) clearStopTimers();
+          syncConversation();
+          sealStreamingAssistant(conversation);
+          conversation.executionGeneration = undefined;
+          // Steering state is keyed by conversation and may now live in a background profile.
+          deferPendingSteers(ctx.conversationId);
+          retireLiveTurn(turn);
           // Let the next queued row start. This send's own finally still holds the previous epoch.
-          releaseQueuedDrain(conversation.id);
-          drainQueuedAfterTurn(conversation.id);
+          releaseQueuedDrain(ctx.conversationId);
+          // Prefer the conversation on screen, then any other queue this turn was blocking.
+          drainQueuedTurns();
         } else if (active.value?.id === conversation.id && !thinking.value) {
           // `stopThinking` retired this turn, so the branch above did not run. Continue the
           // queue once this chat settles, and only clear the guard epoch this send took.
           if (queuedDrain?.id === conversation.id && queuedDrain.epoch === drainEpoch) queuedDrain = null;
-          if (!queuedDrain) drainQueuedAfterTurn(conversation.id);
+          // A pre-submit Stop parked this row in its queue; `abandonClaim` already resumed the
+          // rows behind it. Draining again here would resubmit the prompt just cancelled.
+          if (!returnedToQueue && !queuedDrain) drainQueuedAfterTurn(conversation.id);
         }
       }
       return;
@@ -3490,15 +4225,13 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
 
     const reply = assistantFor(scenarioFor(value));
     replyTimer = setTimeout(() => {
-      const target = conversations.value.find(item => item.id === conversation.id);
+      const target = conversationForOwner(turnContext.conversationId, turnContext.ownerKey);
       if (target) {
         target.messages = [...target.messages, reply];
         target.updatedAt = Date.now();
       }
-      thinking.value = false;
-      stopping.value = false;
-      stopRequested.value = false;
-      clearStopTimers();
+      if (stopTimerTurn === turn) clearStopTimers();
+      retireLiveTurn(turn);
       replyTimer = undefined;
     }, 520);
   }
@@ -3508,52 +4241,41 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     if (stopFinalizeTimer) clearTimeout(stopFinalizeTimer);
     stopKillTimer = undefined;
     stopFinalizeTimer = undefined;
+    stopTimerTurn = null;
   }
 
   function stopThinking() {
     if (replyTimer) clearTimeout(replyTimer);
     replyTimer = undefined;
-    clearStopTimers();
-    activeTurn = ++turnSeq;
-    thinking.value = false;
-    stopping.value = false;
-    stopRequested.value = false;
-    asks.value = [];
-    // The superseded send skips its drain, and a hung chat never settles to clear this.
-    // Drop it now so a later select can start the rows still queued.
-    queuedDrain = null;
-    // Read the live id before clearing it: the remote interrupt below used to run with
-    // `undefined` and never stopped the turn on a remote gateway.
-    const live = active.value?.liveSessionId;
-    if (active.value) {
-      const conversationId = active.value.id;
-      active.value.liveSessionId = undefined;
-      active.value.executionGeneration = undefined;
+    const turn = activeLiveTurn();
+    if (turn) {
+      const conversationId = turn.conversationId;
+      // Marks the bubbles, interrupts the turn's own backend and retires it.
+      forceStopTurn(turn.turn);
       // Same handoff as a finished turn. Deleting the wait list left the steering bubble
       // on screen and gave select nothing to send.
       deferPendingSteers(conversationId);
-    }
-    if (active.value) {
+    } else if (active.value) {
+      // No tracked turn, but a superseded request may have left an open bubble and a live
+      // session id behind. Stop that session on the connection that is visible now.
+      const conversation = active.value;
+      const live = conversation.liveSessionId;
       // A correction may have left its own user row at the tail; seal every streaming assistant
-      // in the conversation, then stamp the last one so the stop is visible. Keep an empty
-      // placeholder here (it becomes the visible stop note) instead of dropping it.
-      const current = streamingAssistant(active.value);
-      if (current) {
-        current.streaming = false;
-        if (!current.text) current.text = '已停止。';
+      // in the conversation, then stamp the last one so the stop is visible.
+      markConversationStopped(conversation);
+      if (live) {
+        if (remoteActive.value) {
+          void commands.hermesInterrupt(live, gatewayUrl.value, gatewayProfileId.value).catch(() => undefined);
+        } else {
+          // Same rule as a tracked turn's Stop: interrupt the session, keep the gateway warm.
+          void commands.hermesInterrupt(live, null, null).catch(() => undefined);
+        }
       }
-      for (const entry of active.value.messages) {
-        if (entry.role === 'assistant' && entry.streaming) entry.streaming = false;
-      }
-      streamingAssistantIds.delete(active.value.id);
-      const last = [...active.value.messages].reverse().find(entry => entry.role === 'assistant');
-      if (last && !last.text) last.text = '已停止。';
     }
-    if (live && remoteActive.value) {
-      void commands.hermesInterrupt(live, gatewayUrl.value, gatewayProfileId.value).catch(() => undefined);
-    } else if (runtime.value?.ready && !remoteActive.value) {
-      void commands.hermesStop().catch(() => undefined);
-    }
+    // The superseded send skips its drain, and a hung chat never settles to clear this.
+    // Drop it now so a later select can start the rows still queued.
+    queuedDrain = null;
+    syncTurnUi();
   }
 
   /**
@@ -3561,7 +4283,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
    * command is visible after the fact (the runtime redacts what it sends; a secret never travels).
    */
   function recordDecision(decision: HermesDecision, conversationId: string, assistantId: string) {
-    const target = conversations.value.find(item => item.id === conversationId);
+    const target = findConversationById(conversationId);
     if (!target) return;
     const entry = target.messages.find(item => item.id === assistantId);
     if (!entry) return;
@@ -3608,40 +4330,44 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     return answerAsk(ask.requestId, { kind: 'secret', value });
   }
 
-  function armStopFallbacks(turn: number, conversationId: string | undefined) {
+  function armStopFallbacks(turnId: number, conversationId: string | undefined) {
     // Arm the fallbacks before awaiting IPC: a hung interrupt must not disable them.
     clearStopTimers();
+    stopTimerTurn = turnId;
     stopKillTimer = window.setTimeout(() => {
-      if (activeTurn !== turn || !thinking.value || !stopping.value) return;
-      void commands.hermesStop().catch(() => undefined);
+      const turn = liveTurns.get(turnId);
+      if (!turn || !turn.stopping) return;
+      // Retry against the turn's own backend; the visible profile may have changed. If the
+      // session is still unknown, the `hermes-session` handler interrupts as soon as it arrives.
+      void requestTurnStop(turn, false).catch(() => undefined);
     }, 1200);
     stopFinalizeTimer = window.setTimeout(() => {
-      if (activeTurn !== turn || !thinking.value) return;
-      if (conversationId && active.value?.id !== conversationId) return;
-      stopThinking();
+      // A turn retired before this fires was retired by a path that already resumed its queue:
+      // the pre-flight abort parks its row and drains behind it, delete/archive drops the queue.
+      if (!liveTurns.has(turnId)) return;
+      forceStopTurn(turnId);
+      if (conversationId) deferPendingSteers(conversationId);
     }, 10_000);
   }
 
   async function stop() {
-    if (!thinking.value) return;
-    if (stopping.value) {
+    // Stop belongs to the conversation on screen; background turns keep running untouched.
+    const turn = activeLiveTurn();
+    if (!turn) return;
+    if (turn.stopping) {
       // A steer failure can mark the turn as stopping before this button is pressed.
-      armStopFallbacks(activeTurn, active.value?.id);
+      armStopFallbacks(turn.turn, turn.conversationId);
       return;
     }
-    const turn = activeTurn;
-    const stoppedConversation = active.value?.id;
-    asks.value = [];
+    turn.stopRequested = true;
+    turn.stopping = true;
+    clearAsksForTurn(turn.requestId);
     stopRequested.value = true;
     stopping.value = true;
-    armStopFallbacks(turn, stoppedConversation);
-    const live = active.value?.liveSessionId;
-    try {
-      if (live) await unwrap(commands.hermesInterrupt(live, gatewayUrl.value, gatewayProfileId.value));
-      else if (!remoteActive.value) await unwrap(commands.hermesStop());
-    } catch {
-      if (!remoteActive.value) await commands.hermesStop().catch(() => undefined);
-    }
+    armStopFallbacks(turn.turn, turn.conversationId);
+    // Nothing is sent when this turn has not claimed a session yet: the retry, the session
+    // event and the 10 s fallback finish the stop without ever touching the previous turn's id.
+    await requestTurnStop(turn, false).catch(() => undefined);
   }
 
   function credentialsUsable(settings: HermesModelSettings) {
@@ -3711,8 +4437,13 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     }
     try {
       // A key belongs to the agent profile whose `.env` holds it, not the shared root.
+      const owner = stateKey();
       const profileArg = activeAgentProfileName.value === 'default' ? null : activeAgentProfileName.value;
       const keySet = await unwrap(commands.hermesSecretStatus(provider, profileArg));
+      // The profile can change while the runtime answers. The result then describes the profile
+      // that asked: writing it onto the new profile's model would persist the wrong key state,
+      // and a "present" answer would drain that profile's queue by mistake.
+      if (stateKey() !== owner) return keySet;
       if (model.value.provider === provider) {
         model.value = { ...model.value, keySet };
       }
@@ -3751,6 +4482,9 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     mediaSessionId,
     history,
     thinking,
+    backgroundTurns,
+    conversationActivity,
+    openBackgroundTurn,
     historyReady,
     approvalRequest,
     respondApproval,
@@ -3856,6 +4590,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     clearHistory,
     exportHistory,
     send,
+    attachmentsBlocked,
     stopThinking,
     saveModel,
     saveMac,
