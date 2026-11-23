@@ -489,6 +489,146 @@ describe('Hermes conversation store', () => {
     expect(store.panelAuthExpired).toBeNull();
   });
 
+  it('Retries the first turn once by resuming the session a provider 401 just created', async () => {
+    seedPanelProfile();
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: PANEL_CATALOG
+    });
+    let calls = 0;
+    const chat = vi.spyOn(commands, 'hermesChat').mockImplementation(async input => {
+      calls += 1;
+      const session = eventMock.listeners.filter(listener => listener.event === 'hermes-session').at(-1);
+      session?.handler({
+        payload: {
+          requestId: input.requestId,
+          liveSessionId: calls === 1 ? 'live-new' : 'live-new',
+          sessionId: 'stored-new',
+          resumed: calls > 1
+        }
+      });
+      if (calls === 1) {
+        throw new IpcError({
+          code: 'E_HERMES_GATEWAY_STREAM',
+          message: "custom rejected your API key, so the model can't be reached.",
+          detail: 'Provider said: HTTP 401: Invalid token'
+        });
+      }
+      return {
+        status: 'ok' as const,
+        data: {
+          text: 'Recovered after resume',
+          sessionId: 'stored-new',
+          liveSessionId: 'live-new',
+          usage: null,
+          interrupted: false
+        }
+      };
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    eventMock.listeners.length = 0;
+    const store = useHermesStore();
+    await store.loadModelOptions(false);
+    store.newChat();
+    useToasts().clear();
+
+    await store.send('Who are you?');
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+    await vi.waitFor(() => expect(store.messages.at(-1)?.text).toBe('Recovered after resume'));
+
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ sessionId: 'stored-new' });
+    expect(store.messages.filter(entry => entry.role === 'user')).toHaveLength(1);
+    expect(store.messages.filter(entry => entry.role === 'assistant')).toHaveLength(1);
+    expect(useToasts().items.value.some(toast => toast.tone === 'danger')).toBe(false);
+  });
+
+  it('Keeps a queued message behind a first-turn retry', async () => {
+    seedPanelProfile();
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: PANEL_CATALOG
+    });
+    let calls = 0;
+    const chat = vi.spyOn(commands, 'hermesChat').mockImplementation(async input => {
+      calls += 1;
+      const session = eventMock.listeners.filter(listener => listener.event === 'hermes-session').at(-1);
+      session?.handler({
+        payload: {
+          requestId: input.requestId,
+          liveSessionId: `live-${calls}`,
+          sessionId: 'stored-new',
+          resumed: calls > 1,
+          busyInputMode: 'queue'
+        }
+      });
+      if (calls === 1) {
+        throw new IpcError({
+          code: 'E_HERMES_GATEWAY_STREAM',
+          message: "custom rejected your API key, so the model can't be reached.",
+          detail: 'Provider said: HTTP 401: Invalid token'
+        });
+      }
+      return {
+        status: 'ok' as const,
+        data: {
+          text: calls === 2 ? 'Retry reply' : 'Queued reply',
+          sessionId: 'stored-new',
+          liveSessionId: `live-${calls}`,
+          usage: null,
+          interrupted: false
+        }
+      };
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    eventMock.listeners.length = 0;
+    const store = useHermesStore();
+    await store.loadModelOptions(false);
+    store.newChat();
+
+    const first = store.send('first');
+    await vi.waitFor(() =>
+      expect(eventMock.listeners.some(listener => listener.event === 'hermes-session')).toBe(true)
+    );
+    // The first turn is parked on its retry delay with the turn still live, so the next message
+    // cannot start: the queue policy holds it until the retry's turn settles.
+    await store.send('next');
+    await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(3), { timeout: 3_000 });
+    await first;
+    await vi.waitFor(() =>
+      expect(
+        store.messages.filter(entry => entry.role === 'assistant').map(entry => entry.text)
+      ).toEqual(['Retry reply', 'Queued reply'])
+    );
+
+    expect(chat.mock.calls[1]?.[0]).toMatchObject({ sessionId: 'stored-new', prompt: 'first' });
+    expect(chat.mock.calls[2]?.[0]).toMatchObject({ prompt: 'next' });
+  });
+
+  it('Does not retry a provider 401 when the turn resumed an existing session', async () => {
+    seedPanelProfile();
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: PANEL_CATALOG
+    });
+    const chat = vi.spyOn(commands, 'hermesChat').mockRejectedValue(
+      new IpcError({
+        code: 'E_HERMES_GATEWAY_STREAM',
+        message: 'custom rejected your API key',
+        detail: 'Provider said: HTTP 401: Invalid token'
+      })
+    );
+    const store = useHermesStore();
+    await store.loadModelOptions(false);
+    store.conversations.push({ id: 'resume-chat', messages: [], updatedAt: 1, sessionId: 'stored-old' });
+    store.activeId = 'resume-chat';
+
+    await store.send('Use the stored session');
+    await new Promise(resolve => setTimeout(resolve, 400));
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(useToasts().items.value.some(toast => toast.title === 'Hermes Panel')).toBe(true);
+  });
+
   it('Still asks for a panel login when the panel session itself expired', async () => {
     seedPanelProfile();
     vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
