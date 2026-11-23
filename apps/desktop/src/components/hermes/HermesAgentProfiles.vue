@@ -137,13 +137,25 @@ async function remove() {
   }
 }
 
-async function saveSoul() {
-  if (!selected.value) return;
+async function saveSoul(openNewChat = false) {
+  const profile = selected.value;
+  if (!profile) return;
+  // The list stays clickable while the save is in flight; pin the profile and the exact text
+  // being written so a selection/editor change cannot move the baseline or start a new chat in
+  // the wrong profile.
+  const name = profile.name;
+  const nextSoul = soul.value;
   soulSaving.value = true;
   error.value = '';
   try {
-    await store.saveAgentProfileSoul(selected.value.name, soul.value);
-    soulOriginal.value = soul.value;
+    await store.saveAgentProfileSoul(name, nextSoul);
+    if (selected.value?.name === name) soulOriginal.value = nextSoul;
+    if (openNewChat && store.activeAgentProfileName === name) {
+      // The runtime freezes a session's system prompt, so a new SOUL is only read by the next
+      // session. Starting one here is what makes the save visible immediately.
+      store.newChat();
+      emit('close');
+    }
   } catch (cause) {
     error.value = details(cause);
   } finally {
@@ -492,13 +504,23 @@ async function importProfile() {
                     <h4 class="m-0 text-11px font-600 text-ink-primary">{{ content.agentProfiles.soulTitle }}</h4>
                     <p class="m-0 mt-3px text-9.5px text-ink-tertiary">{{ content.agentProfiles.soulDesc }}</p>
                   </div>
-                  <OnButton
-                    variant="ghost"
-                    size="sm"
-                    :disabled="soulLoading || soulSaving || soul === soulOriginal"
-                    @click="saveSoul"
-                    >{{ soulSaving ? content.agentProfiles.savingSoul : content.agentProfiles.saveSoul }}</OnButton
-                  >
+                  <div class="flex flex-wrap items-center justify-end gap-4px">
+                    <OnButton
+                      v-if="selected.name === store.activeAgentProfileName"
+                      variant="ghost"
+                      size="sm"
+                      :disabled="soulLoading || soulSaving || soul === soulOriginal"
+                      @click="saveSoul(true)"
+                      >{{ content.agentProfiles.saveSoulNewChat }}</OnButton
+                    >
+                    <OnButton
+                      variant="ghost"
+                      size="sm"
+                      :disabled="soulLoading || soulSaving || soul === soulOriginal"
+                      @click="saveSoul()"
+                      >{{ soulSaving ? content.agentProfiles.savingSoul : content.agentProfiles.saveSoul }}</OnButton
+                    >
+                  </div>
                 </div>
                 <textarea
                   v-if="!soulLoading"

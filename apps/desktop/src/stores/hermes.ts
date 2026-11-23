@@ -421,6 +421,13 @@ const LEGACY_MODEL_OPTIONS_CACHE_KEY = 'ONV_HERMES_MODEL_OPTIONS_V2';
 const MODEL_OPTIONS_CACHE_PREFIX = 'ONV_HERMES_MODEL_OPTIONS_V3';
 const MODEL_OPTIONS_CACHE_SCHEMA = 3;
 const MODEL_OPTIONS_CACHE_TTL = 15 * 60_000;
+/**
+ * Delay before resuming a panel session whose first turn a provider rejected. The failure comes
+ * from the host resolving a freshly-created session's model override before its profile
+ * credential is available; the resume path reads the profile's own route, so one retry inside
+ * the same turn is enough. The short delay lets the failed attempt settle on the host first.
+ */
+const PROVIDER_AUTH_RETRY_DELAY_MS = 250;
 const PROFILES_KEY = 'ONV_HERMES_PROFILES_V1';
 
 const RECTANGLE: PackageSummary = {
@@ -595,6 +602,16 @@ const INTERRUPT_WAITING_PREFIX = 'Operation interrupted: waiting for model respo
 
 function isInterruptSentinel(text: string): boolean {
   return text.trimStart().startsWith(INTERRUPT_WAITING_PREFIX);
+}
+
+/**
+ * A provider rejected the model request's credential. The desktop distinguishes this from a
+ * panel-session failure by the gateway code and the runtime's own copy; only this class is
+ * retried by resuming the session a first turn just created.
+ */
+function isProviderAuthFailure(error: unknown): boolean {
+  if (!(error instanceof IpcError) || error.code !== 'E_HERMES_GATEWAY_STREAM') return false;
+  return /rejected your api key|invalid token|http 401/i.test(`${error.message}\n${error.detail ?? ''}`);
 }
 
 function panelRowInterrupted(row: Record<string, unknown>): boolean {
@@ -2858,6 +2875,22 @@ export const useHermesStore = defineStore('hermes', () => {
   async function createAgentProfile(name: string, cloneFrom: string | null, soul: string | null) {
     const args = connectionArgs();
     await unwrap(commands.hermesAgentProfileCreate(args.connectionId, args.gatewayUrl, name, cloneFrom, soul));
+    if (soul?.trim()) {
+      // The create endpoint's `soul` field is not honored by every panel host (older builds
+      // ignore an unknown field). Verify what the profile really holds before switching to it:
+      // a first session that reads a cloned/default identity is exactly the silent failure this
+      // check exists to surface. The profile itself exists, so the form keeps the actionable
+      // error instead of closing as a success.
+      try {
+        await verifyAgentProfileSoul(name, soul);
+      } catch (error) {
+        await loadAgentProfiles();
+        throw new Error(
+          `Profile 已创建，但 SOUL.md 未能写入：${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
+        );
+      }
+    }
     await loadAgentProfiles();
     await switchAgentProfile(name);
   }
@@ -2942,9 +2975,37 @@ export const useHermesStore = defineStore('hermes', () => {
     return unwrap(commands.hermesAgentProfileSoul(args.connectionId, args.gatewayUrl, name));
   }
 
-  async function saveAgentProfileSoul(name: string, content: string) {
+  /**
+   * Write one profile's SOUL.md and prove the host stored it. A save is a plain file write, but
+   * the editor must not report success for a host that answered OK while keeping another file
+   * (create-time `soul` handling on older panel builds, or a per-profile resolution failure).
+   */
+  async function storeAgentProfileSoul(name: string, content: string) {
     const args = connectionArgs();
     await unwrap(commands.hermesAgentProfileSoulSave(args.connectionId, args.gatewayUrl, name, content));
+    const expected = content.trim();
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const stored = await loadAgentProfileSoul(name);
+      if (stored.trim() === expected) return;
+      if (attempt === 0) await new Promise(resolve => window.setTimeout(resolve, 80));
+    }
+    throw new Error('Hermes 未能写入该 Profile 的 SOUL.md。');
+  }
+
+  /** Make sure `content` is the profile's stored SOUL.md, writing it only when it is not. */
+  async function verifyAgentProfileSoul(name: string, content: string) {
+    const expected = content.trim();
+    try {
+      const stored = await loadAgentProfileSoul(name);
+      if (stored.trim() === expected) return;
+    } catch {
+      // An unreadable file is exactly the case the explicit write below recovers.
+    }
+    await storeAgentProfileSoul(name, content);
+  }
+
+  async function saveAgentProfileSoul(name: string, content: string) {
+    await storeAgentProfileSoul(name, content);
   }
 
   function updateProfile(profileId: string, patch: Partial<HermesProfile>) {
@@ -3667,6 +3728,11 @@ export const useHermesStore = defineStore('hermes', () => {
     let pendingUserQueued = false;
     /** This send handed its row back to the queue before submitting; the finally must not drain it. */
     let returnedToQueue = false;
+    /**
+     * The panel turn resumed a stored session instead of creating one. A provider rejection on a
+     * resume is the profile's real credential, not the first-turn race, so it is never retried.
+     */
+    let attemptedResume = false;
     const restoreTargetQueue = (front = true) => {
       if (targetConversationId) {
         return queueSteerAfterTurn(targetConversationId, text, front, activeQueuedMessageId, attachments);
@@ -4111,36 +4177,82 @@ export const useHermesStore = defineStore('hermes', () => {
         }
         syncConversation();
         const chatTarget = remoteActive.value ? remoteChatTarget() : null;
-        const reply = await unwrap(
-          commands.hermesChat({
-            prompt,
-            requestId,
-            sessionId: conversation.sessionId ?? null,
-            provider: chatTarget?.provider ?? model.value.provider,
-            model: chatTarget?.model ?? modelId(model.value.model),
-            effort: model.value.effort,
-            fast: model.value.fast,
-            apiKey: apiKey.value.trim() || null,
-            endpoint: model.value.endpoint.trim() || null,
-            cwd: workingDir.value.trim() || null,
-            attachments: [...attachments],
-            auxiliary: HERMES_AUX_TASKS.map(task => ({ task, ...auxiliary.value[task] })),
-            forceAuxVision: forceAuxVision.value,
-            gatewayUrl: gatewayUrl.value,
-            profileId: gatewayProfileId.value,
-            profile: activeAgentProfileName.value,
-            panelAuth: panelActive.value,
-            macEnabled: !remoteActive.value && mac.value.enabled,
-            controlLevel: remoteActive.value ? 'open' : mac.value.level,
-            macTerminal: !remoteActive.value && mac.value.terminal,
-            macScreen: !remoteActive.value && mac.value.screen,
-            macFiles: !remoteActive.value && mac.value.files,
-            macCron: !remoteActive.value && mac.value.cron,
-            // A remote host's tools still need a user decision; only this Mac's capability
-            // switches are forced off. Without this the backend denied every remote approval.
-            confirmWrites: remoteActive.value ? true : mac.value.confirmWrites
-          })
-        );
+        attemptedResume = Boolean(conversation.sessionId);
+        const chatInput = {
+          prompt,
+          requestId,
+          sessionId: conversation.sessionId ?? null,
+          provider: chatTarget?.provider ?? model.value.provider,
+          model: chatTarget?.model ?? modelId(model.value.model),
+          effort: model.value.effort,
+          fast: model.value.fast,
+          apiKey: apiKey.value.trim() || null,
+          endpoint: model.value.endpoint.trim() || null,
+          cwd: workingDir.value.trim() || null,
+          attachments: [...attachments],
+          auxiliary: HERMES_AUX_TASKS.map(task => ({ task, ...auxiliary.value[task] })),
+          forceAuxVision: forceAuxVision.value,
+          gatewayUrl: gatewayUrl.value,
+          profileId: gatewayProfileId.value,
+          profile: activeAgentProfileName.value,
+          panelAuth: panelActive.value,
+          macEnabled: !remoteActive.value && mac.value.enabled,
+          controlLevel: remoteActive.value ? 'open' : mac.value.level,
+          macTerminal: !remoteActive.value && mac.value.terminal,
+          macScreen: !remoteActive.value && mac.value.screen,
+          macFiles: !remoteActive.value && mac.value.files,
+          macCron: !remoteActive.value && mac.value.cron,
+          // A remote host's tools still need a user decision; only this Mac's capability
+          // switches are forced off. Without this the backend denied every remote approval.
+          confirmWrites: remoteActive.value ? true : mac.value.confirmWrites
+        };
+        const requestTurn = () => unwrap(commands.hermesChat(chatInput));
+        /**
+         * A first turn has no visible output to protect: no streamed text, reasoning, tool card
+         * or answered decision. Anything else is a real mid-turn failure and must not be replayed.
+         */
+        const cleanFirstTurn = () => {
+          const failed = streamingAssistant(conversation) ?? lastAssistantFrom(conversation, turnStartIndex);
+          return (
+            !failed?.text?.trim() && !failed?.reasoning?.trim() && !failed?.tools?.length && !failed?.decisions?.length
+          );
+        };
+        const firstTurnAuthRetryable = (error: unknown) =>
+          !attemptedResume &&
+          targetConversationId === undefined &&
+          !pendingUserQueued &&
+          // Attachments were already staged on the first live session; re-sending them on a
+          // resume could deliver the same files twice, so only text turns are retried.
+          attachments.length === 0 &&
+          Boolean(turnContext.gatewayUrl) &&
+          Boolean(conversation.sessionId) &&
+          Boolean(pendingUserId) &&
+          isProviderAuthFailure(error) &&
+          cleanFirstTurn();
+        let reply: Awaited<ReturnType<typeof requestTurn>>;
+        try {
+          reply = await requestTurn();
+        } catch (error) {
+          if (!firstTurnAuthRetryable(error)) throw error;
+          // A panel host resolves a freshly-created session's model override before the profile
+          // credential is available, so its first prompt can 401 while the session itself now
+          // exists. Stay inside this turn (do not let the finally retire it and drain the queue),
+          // let the failed attempt settle, then resubmit on the stored session — the same resume a
+          // manual retry goes through.
+          await new Promise(resolve => window.setTimeout(resolve, PROVIDER_AUTH_RETRY_DELAY_MS));
+          if (
+            !liveTurns.has(turn) ||
+            turnContext.stopping ||
+            turnContext.stopRequested ||
+            turnContext.ownerKey !== stateKey()
+          ) {
+            throw error;
+          }
+          syncConversation();
+          chatInput.sessionId = conversation.sessionId ?? null;
+          if (!chatInput.sessionId) throw error;
+          reply = await requestTurn();
+        }
         if (!liveTurns.has(turn)) return;
         // The turn may have finished while its profile is on screen again, after `loadHistory`
         // swapped in a newer object. Reattach before writing the final text, and write that
@@ -4227,7 +4339,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
         }
         toasts.push({
           tone: 'danger',
-          title: expiredOpenCode ? 'OpenCode API Key' : 'Local Hermes',
+          title: expiredOpenCode ? 'OpenCode API Key' : turnContext.gatewayUrl ? 'Hermes Panel' : 'Local Hermes',
           description: expiredOpenCode ? 'OpenCode Go Key 已过期，请创建新的 API Key。' : detail
         });
         maybeNotifyHermesReply('turnError', conversation.id, detail);

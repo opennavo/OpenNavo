@@ -187,22 +187,50 @@ export interface OfficialProviderRow {
  * scoped variants such as `custom:newapi` on a Hermes Panel host. A canonical skeleton row
  * with the same slug is *always* present when the payload includes unconfigured providers,
  * so a plain `find(slug)` picks that empty row and the model list looks broken.
+ *
+ * A bare `custom` row can also look usable next to the scoped row that really answers (the
+ * host stamps every non-skeleton row `authenticated`, including its model-config fallback).
+ * Row order puts the bare row first, so a plain `find(authenticated)` sends `custom` and the
+ * host resolves it to a stale endpoint. Prefer the scoped `custom:<name>` row whenever one
+ * carries models; the bare row is only the answer when no named entry is usable.
  */
 export function pickOfficialProvider<T extends OfficialProviderRow>(
   rows: readonly T[],
   card: HermesProvider
 ): T | undefined {
+  // Only the two endpoint cards are served by the shared user-defined provider. A built-in
+  // card must never fall onto `openavoo-custom`: it would show the custom endpoint's models
+  // and `providerCardForSlug` would rewrite the selection to `custom`.
+  const endpointCard = card === 'custom' || card === 'local';
   // A host may register the endpoint under the card's own id (`custom:newapi`) or under
-  // the name this app writes (`openavoo-custom`), so match both vocabularies.
-  const names = new Set([hermesProviderSlug(card), card, 'openavoo-custom'].filter(Boolean));
+  // the name this app writes (`openavoo-custom`), so match both vocabularies for these cards.
+  const names = new Set([hermesProviderSlug(card), card, ...(endpointCard ? ['openavoo-custom'] : [])].filter(Boolean));
   const candidates = rows.filter(row => {
     const slug = row.slug ?? '';
     return names.has(slug) || [...names].some(name => slug.startsWith(`${name}:`));
   });
   if (!candidates.length) return undefined;
+  const usable = candidates.filter(row => (row.models?.length ?? 0) > 0);
+  const authenticated = usable.filter(row => row.authenticated);
+  if (!endpointCard) {
+    return authenticated[0] ?? usable[0] ?? candidates.find(row => row.is_current) ?? candidates[0];
+  }
+  // A scoped row (`custom:newapi`) is a named endpoint only for the endpoint cards.
+  const scoped = (row: T) => [...names].some(name => (row.slug ?? '').startsWith(`${name}:`));
+  // The panel host's stale fallback row has the bare slug `custom`; the desktop's own local
+  // block writes `openavoo-custom`, so a bare `custom` is the row that must not win by order.
+  // A usable `openavoo-custom` row is the local route and outranks a merely authenticated
+  // scoped entry; the scoped row only wins when it is itself current.
+  const scopedCurrent = authenticated.find(row => row.is_current && scoped(row));
+  const openavoo = authenticated.find(row => row.slug === 'openavoo-custom');
+  const bareCustom = authenticated.some(row => row.slug === 'custom');
+  const preferScoped = scopedCurrent ?? (bareCustom && !openavoo ? authenticated.find(scoped) : undefined);
   return (
-    candidates.find(row => row.authenticated && (row.models?.length ?? 0) > 0) ??
-    candidates.find(row => (row.models?.length ?? 0) > 0) ??
+    preferScoped ??
+    openavoo ??
+    authenticated[0] ??
+    usable.find(scoped) ??
+    usable[0] ??
     candidates.find(row => row.is_current) ??
     candidates[0]
   );
