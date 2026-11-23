@@ -204,9 +204,7 @@ export function pickOfficialProvider<T extends OfficialProviderRow>(
   const endpointCard = card === 'custom' || card === 'local';
   // A host may register the endpoint under the card's own id (`custom:newapi`) or under
   // the name this app writes (`openavoo-custom`), so match both vocabularies for these cards.
-  const names = new Set(
-    [hermesProviderSlug(card), card, ...(endpointCard ? ['openavoo-custom'] : [])].filter(Boolean)
-  );
+  const names = new Set([hermesProviderSlug(card), card, ...(endpointCard ? ['openavoo-custom'] : [])].filter(Boolean));
   const candidates = rows.filter(row => {
     const slug = row.slug ?? '';
     return names.has(slug) || [...names].some(name => slug.startsWith(`${name}:`));
@@ -215,12 +213,7 @@ export function pickOfficialProvider<T extends OfficialProviderRow>(
   const usable = candidates.filter(row => (row.models?.length ?? 0) > 0);
   const authenticated = usable.filter(row => row.authenticated);
   if (!endpointCard) {
-    return (
-      authenticated[0] ??
-      usable[0] ??
-      candidates.find(row => row.is_current) ??
-      candidates[0]
-    );
+    return authenticated[0] ?? usable[0] ?? candidates.find(row => row.is_current) ?? candidates[0];
   }
   // A scoped row (`custom:newapi`) is a named endpoint only for the endpoint cards.
   const scoped = (row: T) => [...names].some(name => (row.slug ?? '').startsWith(`${name}:`));

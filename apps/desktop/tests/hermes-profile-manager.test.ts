@@ -48,7 +48,16 @@ function seedPanelConnection() {
       version: 1,
       activeProfileId: 'panel-1',
       profiles: [
-        { id: 'local', name: 'Local Mac', kind: 'local', endpoint: '', status: 'connected', version: '0.23.3', latency: null, models: 0 },
+        {
+          id: 'local',
+          name: 'Local Mac',
+          kind: 'local',
+          endpoint: '',
+          status: 'connected',
+          version: '0.23.3',
+          latency: null,
+          models: 0
+        },
         {
           id: 'panel-1',
           name: 'Panel',
@@ -97,10 +106,12 @@ describe('Hermes profile manager', () => {
   it('writes the soul again when a create did not store it', async () => {
     vi.spyOn(commands, 'hermesAgentProfileCreate').mockResolvedValue(ok(null));
     let stored = 'You are Hermes.';
-    const save = vi.spyOn(commands, 'hermesAgentProfileSoulSave').mockImplementation(async (_connectionId, _url, _name, content) => {
-      stored = content;
-      return ok(null);
-    });
+    const save = vi
+      .spyOn(commands, 'hermesAgentProfileSoulSave')
+      .mockImplementation(async (_connectionId, _url, _name, content) => {
+        stored = content;
+        return ok(null);
+      });
     vi.spyOn(commands, 'hermesAgentProfileSoul').mockImplementation(async () => ok(stored));
 
     const store = useHermesStore();
@@ -119,9 +130,11 @@ describe('Hermes profile manager', () => {
       stored = content;
       return ok(null);
     });
-    const chat = vi.spyOn(commands, 'hermesChat').mockResolvedValue(
-      ok({ text: 'Hello', sessionId: 'stored-1', liveSessionId: null, usage: null, interrupted: false })
-    );
+    const chat = vi
+      .spyOn(commands, 'hermesChat')
+      .mockResolvedValue(
+        ok({ text: 'Hello', sessionId: 'stored-1', liveSessionId: null, usage: null, interrupted: false })
+      );
     const store = useHermesStore();
 
     await store.createAgentProfile('xdx', 'default', 'You are XDX.');

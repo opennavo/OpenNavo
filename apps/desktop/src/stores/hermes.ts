@@ -4171,10 +4171,7 @@ export const useHermesStore = defineStore('hermes', () => {
         const cleanFirstTurn = () => {
           const failed = streamingAssistant(conversation) ?? lastAssistantFrom(conversation, turnStartIndex);
           return (
-            !failed?.text?.trim() &&
-            !failed?.reasoning?.trim() &&
-            !(failed?.tools?.length) &&
-            !(failed?.decisions?.length)
+            !failed?.text?.trim() && !failed?.reasoning?.trim() && !failed?.tools?.length && !failed?.decisions?.length
           );
         };
         const firstTurnAuthRetryable = (error: unknown) =>

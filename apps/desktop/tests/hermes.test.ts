@@ -595,9 +595,10 @@ describe('Hermes conversation store', () => {
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(3), { timeout: 3_000 });
     await first;
     await vi.waitFor(() =>
-      expect(
-        store.messages.filter(entry => entry.role === 'assistant').map(entry => entry.text)
-      ).toEqual(['Retry reply', 'Queued reply'])
+      expect(store.messages.filter(entry => entry.role === 'assistant').map(entry => entry.text)).toEqual([
+        'Retry reply',
+        'Queued reply'
+      ])
     );
 
     expect(chat.mock.calls[1]?.[0]).toMatchObject({ sessionId: 'stored-new', prompt: 'first' });
