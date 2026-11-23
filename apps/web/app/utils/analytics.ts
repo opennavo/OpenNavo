@@ -110,7 +110,10 @@ export function classifyAiSource(value: string | null | undefined): string | nul
   let host: string;
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-    host = url.hostname.toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+    host = url.hostname
+      .toLowerCase()
+      .replace(/^www\./, '')
+      .replace(/\.$/, '');
   } catch {
     return null;
   }
@@ -132,13 +135,7 @@ function aiSourceFromSearch(search: string): string | null {
  * Remember the original page view before consent can run. This stays in memory only; capture()
  * persists the record once analytics is active.
  */
-export function rememberInitialReferral(
-  referrer: string,
-  landingPath: string,
-  search = '',
-  title = '',
-  language = ''
-) {
+export function rememberInitialReferral(referrer: string, landingPath: string, search = '', title = '', language = '') {
   initialReferrer = referrer;
   initialLandingPath = landingPath;
   initialSearch = search;
@@ -343,8 +340,7 @@ export function trackPageView() {
       initialTitle || document.title,
       initialLanguage || document.documentElement.lang
     );
-    if (landing !== current)
-      sendPageView(current, location.pathname, document.title, document.documentElement.lang);
+    if (landing !== current) sendPageView(current, location.pathname, document.title, document.documentElement.lang);
     return;
   }
   sendPageView(current, location.pathname, document.title, document.documentElement.lang);
