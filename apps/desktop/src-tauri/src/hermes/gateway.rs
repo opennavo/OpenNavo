@@ -20,6 +20,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use yaml_rust2::Yaml;
 
 use super::{
     AppError, AskAnswer, HermesAskReply, HermesChatInput, HermesChatReply, HermesChunk,
@@ -818,11 +819,19 @@ pub async fn chat_remote_auth(
     chat_over_socket(socket, home, state, input, attachments, app, sink, true).await
 }
 
-/// Fallback window when a request carries no `timeout_s`. Matches the runtime's own
+/// Fallback window when an approval carries no `timeout_s`. Matches the runtime's own
 /// `approvals.timeout` default, so a card lives as long as the agent is willing to wait.
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
-/// Longest a card may stay open, whatever the runtime asks for (a bad value must not park the turn).
-const APPROVAL_TIMEOUT_MAX: Duration = Duration::from_secs(3600);
+/// `agent.clarify_timeout` default since config schema 53.
+const CLARIFY_TIMEOUT: Duration = Duration::from_secs(90);
+/// The runtime's sudo / env secret / vault unlock prompt deadlines (`agent_callbacks.py`).
+const CREDENTIAL_TIMEOUT: Duration = Duration::from_secs(120);
+/// The runtime's vault save-login / one-time-code card deadlines (`session_vault_prompt.py`).
+const VAULT_FORM_TIMEOUT: Duration = Duration::from_secs(180);
+/// Longest window we honor, whatever the runtime asks for. A configured `approvals.timeout` above
+/// this still works server-side (`request.cancel` settles the card); the cap only keeps a malformed
+/// value from overflowing an `Instant` or parking the turn forever.
+const MAX_ASK_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// The refusal the official renderer sends when no window of its own serves a bridge tool
 /// (`server_requests.py::NOT_SHOWN_CODE`). It is not a JSON-RPC code, so it is spelled out here.
 const NOT_SHOWN_CODE: i64 = 4404;
@@ -840,7 +849,11 @@ const WINDOW_OWNED_REQUESTS: [&str; 5] = [
 enum AskKind {
     Approval,
     Clarify,
+    Sudo,
     Secret,
+    VaultUnlock,
+    VaultSaveLogin,
+    VaultCode,
 }
 
 impl AskKind {
@@ -848,9 +861,11 @@ impl AskKind {
         match method {
             "approval" => Some(Self::Approval),
             "clarify" => Some(Self::Clarify),
-            // One masked string each (`ValueResult { value }`): the sudo password, an env secret, a
-            // vault unlock, a one-time code. `vault.save_login` wants a JSON blob and is refused.
-            "sudo" | "secret" | "vault.unlock_prompt" | "vault.code" => Some(Self::Secret),
+            "sudo" => Some(Self::Sudo),
+            "secret" => Some(Self::Secret),
+            "vault.unlock_prompt" => Some(Self::VaultUnlock),
+            "vault.save_login" => Some(Self::VaultSaveLogin),
+            "vault.code" => Some(Self::VaultCode),
             _ => None,
         }
     }
@@ -859,7 +874,11 @@ impl AskKind {
         match self {
             Self::Approval => "approval",
             Self::Clarify => "clarify",
+            Self::Sudo => "sudo",
             Self::Secret => "secret",
+            Self::VaultUnlock => "vault-unlock",
+            Self::VaultSaveLogin => "vault-save-login",
+            Self::VaultCode => "vault-code",
         }
     }
 
@@ -869,7 +888,14 @@ impl AskKind {
             Self::Approval => json!({"choice": "deny"}),
             // An empty object is clarify's "cancelled": nobody answered, which is not an answer.
             Self::Clarify => json!({}),
-            Self::Secret => json!({"value": ""}),
+            // Every remaining kind answers one `ValueResult { value }`; "" declines.
+            Self::Sudo
+            | Self::Secret
+            | Self::VaultUnlock
+            | Self::VaultSaveLogin
+            | Self::VaultCode => {
+                json!({"value": ""})
+            }
         }
     }
 }
@@ -901,6 +927,8 @@ struct AskPolicy {
     ask_user: bool,
     /// This Mac's full-control mode: approve without a prompt.
     full_control: bool,
+    /// `agent.clarify_timeout` for this profile; `None` is the runtime's "wait forever" (`<= 0`).
+    clarify_timeout: Option<Duration>,
 }
 
 /// One card the user still has to answer. The read loop keeps running while it is open: uvicorn pings
@@ -912,7 +940,8 @@ struct PendingAsk {
     turn_request_id: String,
     /// What the settled note in the transcript names (the command, the env var, the first question).
     summary: String,
-    deadline: Instant,
+    /// `None` when the runtime waits forever (`agent.clarify_timeout <= 0`).
+    deadline: Option<Instant>,
 }
 
 enum Step {
@@ -923,6 +952,9 @@ enum Step {
 }
 
 /// Show a card for a server→client request, or answer it from the turn's own policy.
+///
+/// `restored` marks a request replayed from `open_requests`: its remaining time is unknown, so the
+/// card gets no countdown and the backend's `request.cancel` is the authority.
 #[allow(clippy::too_many_arguments)]
 async fn open_ask(
     socket: &mut Socket,
@@ -933,8 +965,10 @@ async fn open_ask(
     policy: &AskPolicy,
     live_sid: &str,
     turn_request_id: &str,
+    restored: bool,
 ) -> Result<Option<PendingAsk>, AppError> {
-    let window = ask_window(&params);
+    let window = ask_window(kind, &params, policy.clarify_timeout);
+    let display_window = if restored { None } else { window };
     // Only approvals have a policy: a clarify or a password prompt is the agent asking something the
     // app cannot answer for the user, so those always reach the card.
     if kind == AskKind::Approval && !policy.ask_user {
@@ -949,7 +983,7 @@ async fn open_ask(
                 "requestId": target.id(),
                 "turnRequestId": turn_request_id,
                 "kind": kind.wire(),
-                "deadline": unix_millis() + window.as_millis() as u64,
+                "deadline": display_window.map(|window| unix_millis() + window.as_millis() as u64),
                 "params": params,
             }),
         );
@@ -959,20 +993,136 @@ async fn open_ask(
         target,
         kind,
         turn_request_id: turn_request_id.to_owned(),
-        deadline: Instant::now() + window,
+        deadline: window.map(|window| Instant::now() + window),
     }))
 }
 
-/// The window the runtime is willing to wait (`approvals.timeout`, forwarded as `timeout_s`), bounded
-/// so a malformed value cannot park the turn forever.
-fn ask_window(params: &Value) -> Duration {
+/// The window the runtime is willing to wait, bounded so a malformed value cannot park the turn
+/// forever. Only approvals forward `timeout_s`; the other prompts keep their deadline server-side,
+/// so the fallback mirrors each method's own deadline or the displayed countdown disappears early.
+/// A `None` result means the runtime waits forever (`agent.clarify_timeout <= 0`).
+fn ask_window(
+    kind: AskKind,
+    params: &Value,
+    clarify_timeout: Option<Duration>,
+) -> Option<Duration> {
     params
         .get("timeout_s")
         .and_then(Value::as_u64)
         .filter(|seconds| *seconds > 0)
         .map(Duration::from_secs)
-        .map(|window| window.min(APPROVAL_TIMEOUT_MAX))
-        .unwrap_or(APPROVAL_TIMEOUT)
+        .map(|window| window.min(MAX_ASK_WINDOW))
+        .or(match kind {
+            AskKind::Approval => Some(APPROVAL_TIMEOUT),
+            AskKind::Clarify => clarify_timeout,
+            AskKind::Sudo | AskKind::Secret | AskKind::VaultUnlock => Some(CREDENTIAL_TIMEOUT),
+            AskKind::VaultSaveLogin | AskKind::VaultCode => Some(VAULT_FORM_TIMEOUT),
+        })
+}
+
+/// `<= 0` is the runtime's "wait forever"; a missing/invalid value falls back to the schema default.
+fn window_from_seconds(seconds: Option<i64>) -> Option<Duration> {
+    match seconds {
+        Some(seconds) if seconds <= 0 => None,
+        Some(seconds) => Some(Duration::from_secs(
+            (seconds as u64).min(MAX_ASK_WINDOW.as_secs()),
+        )),
+        None => Some(CLARIFY_TIMEOUT),
+    }
+}
+
+fn yaml_seconds(value: &Yaml) -> Option<i64> {
+    match value {
+        Yaml::Integer(seconds) => Some(*seconds),
+        Yaml::Real(text) => text.parse::<f64>().ok().map(|value| value as i64),
+        Yaml::String(text) => text.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn json_seconds(value: &Value) -> Option<i64> {
+    if let Some(seconds) = value.as_i64() {
+        return Some(seconds);
+    }
+    if let Some(seconds) = value.as_f64() {
+        return Some(seconds as i64);
+    }
+    value
+        .as_str()
+        .and_then(|text| text.trim().parse::<i64>().ok())
+}
+
+/// `clarify.timeout` (legacy, explicit) wins over `agent.clarify_timeout`, exactly like
+/// `tools/clarify_gateway.py::resolve_clarify_timeout`. The runtime keeps the clarify deadline
+/// server-side (its frame carries no `timeout_s`), and `<= 0` means it waits forever.
+fn clarify_timeout(home: &Path) -> Option<Duration> {
+    clarify_timeout_from_config(
+        std::fs::read_to_string(home.join("config.yaml"))
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn clarify_timeout_from_config(raw: Option<&str>) -> Option<Duration> {
+    let Some(raw) = raw else {
+        return Some(CLARIFY_TIMEOUT);
+    };
+    let doc = super::config_doc(Some(raw));
+    let Some(root) = doc.as_hash() else {
+        return Some(CLARIFY_TIMEOUT);
+    };
+    let legacy = root
+        .get(&Yaml::String("clarify".to_owned()))
+        .and_then(Yaml::as_hash)
+        .and_then(|clarify| clarify.get(&Yaml::String("timeout".to_owned())))
+        .filter(|value| !matches!(value, Yaml::Null | Yaml::BadValue));
+    let seconds = match legacy {
+        // An explicit legacy value wins even when it is non-numeric; the runtime then uses 90.
+        Some(value) => yaml_seconds(value),
+        None => root
+            .get(&Yaml::String("agent".to_owned()))
+            .and_then(Yaml::as_hash)
+            .and_then(|agent| agent.get(&Yaml::String("clarify_timeout".to_owned())))
+            .and_then(yaml_seconds),
+    };
+    window_from_seconds(seconds)
+}
+
+/// The same resolution against a gateway's `config.get full` payload. A remote profile keeps its
+/// own config, so its clarify window cannot be read from this Mac's `config.yaml`. When the read
+/// fails we cannot know the remote window, so the card gets no local deadline at all (the
+/// backend's `request.cancel` stays authoritative) instead of guessing a possibly shorter one.
+async fn remote_clarify_timeout(socket: &mut Socket, live_sid: &str) -> Option<Duration> {
+    // One small config read before the turn starts; a slow tailnet must not stall the chat.
+    let result = rpc_within(
+        socket,
+        5,
+        "config.get",
+        json!({"key": "full", "session_id": live_sid}),
+        Duration::from_secs(5),
+    )
+    .await
+    .ok()?;
+    let config = result.get("config")?;
+    clarify_timeout_from_value(config)
+}
+
+fn clarify_timeout_from_value(config: &Value) -> Option<Duration> {
+    let root = config.as_object();
+    let legacy = root
+        .and_then(|root| root.get("clarify"))
+        .and_then(Value::as_object)
+        .and_then(|clarify| clarify.get("timeout"))
+        .filter(|value| !value.is_null());
+    let seconds = match legacy {
+        Some(value) => json_seconds(value),
+        None => root
+            .and_then(|root| root.get("agent"))
+            .and_then(Value::as_object)
+            .and_then(|agent| agent.get("clarify_timeout"))
+            .and_then(json_seconds),
+    };
+    window_from_seconds(seconds)
 }
 
 fn unix_millis() -> u64 {
@@ -1005,11 +1155,17 @@ fn ask_summary(kind: AskKind, params: &Value) -> String {
                     .and_then(Value::as_str)
             })
             .unwrap_or_default(),
+        AskKind::Sudo => field("command").unwrap_or_default(),
         AskKind::Secret => field("env_var")
-            .or_else(|| field("display_name"))
-            .or_else(|| field("site"))
-            .or_else(|| field("command"))
+            .or_else(|| field("prompt"))
             .unwrap_or_default(),
+        AskKind::VaultUnlock => field("display_name")
+            .or_else(|| field("backend"))
+            .unwrap_or_default(),
+        AskKind::VaultSaveLogin => field("site")
+            .or_else(|| field("origin"))
+            .unwrap_or_default(),
+        AskKind::VaultCode => field("site").or_else(|| field("hint")).unwrap_or_default(),
     };
     let mut summary = text.chars().take(200).collect::<String>();
     if text.chars().count() > 200 {
@@ -1137,13 +1293,40 @@ fn answer_result(ask: &PendingAsk, reply: HermesAskReply) -> (Value, Value) {
                 settled("submitted", None, Some(answered)),
             )
         }
-        (AskKind::Secret, HermesAskReply::Secret { value }) => {
+        (
+            AskKind::Sudo | AskKind::Secret | AskKind::VaultUnlock | AskKind::VaultCode,
+            HermesAskReply::Secret { value },
+        ) => {
             let outcome = if value.trim().is_empty() {
                 "skipped"
             } else {
                 "submitted"
             };
             (json!({"value": value}), settled(outcome, None, None))
+        }
+        (
+            AskKind::VaultSaveLogin,
+            HermesAskReply::VaultSaveLogin {
+                identifier,
+                password,
+            },
+        ) => {
+            // The runtime stores the pair as a JSON string under `value`; an empty password declines.
+            if password.is_empty() {
+                return (
+                    AskKind::VaultSaveLogin.refusal(),
+                    settled("skipped", None, None),
+                );
+            }
+            let credential = json!({
+                "identifier": identifier.trim(),
+                "password": password,
+            })
+            .to_string();
+            (
+                json!({"value": credential}),
+                settled("submitted", None, None),
+            )
         }
         // A reply that does not match its card is a renderer bug: fail closed rather than park the agent.
         (kind, _) => (kind.refusal(), settled("cancelled", None, None)),
@@ -1202,6 +1385,18 @@ async fn chat_over_socket(
     .await;
     let (live_sid, stored_sid, open_requests, resumed, resumed_generation) =
         open_session(&mut socket, &input, home, remote).await?;
+    // The runtime keeps clarify's deadline server-side, so mirror its configured value: the local
+    // profile's config.yaml, or a remote host's own config. Unreadable config falls back to the
+    // schema default; `None` means the runtime waits forever.
+    let clarify_window = if remote {
+        remote_clarify_timeout(&mut socket, &live_sid).await
+    } else {
+        super::profiles::resolve_home(home, input.profile.as_deref())
+            .ok()
+            .map_or(Some(CLARIFY_TIMEOUT), |config_home| {
+                clarify_timeout(&config_home)
+            })
+    };
     if let Some(app) = app {
         let busy_mode = busy_input_mode(&mut socket, &live_sid).await;
         let _ = app.emit(
@@ -1223,6 +1418,7 @@ async fn chat_over_socket(
             && input.mac_enabled
             && input.control_level == "full"
             && !input.confirm_writes,
+        clarify_timeout: clarify_window,
     };
     if policy.full_control {
         let _ = rpc(
@@ -1323,6 +1519,7 @@ async fn stream_turn(
                     &policy,
                     live_sid,
                     &input.request_id,
+                    true,
                 )
                 .await?
                 {
@@ -1370,17 +1567,23 @@ async fn stream_turn(
                 Err(error) => return Err(error),
             }
         } else {
-            let soonest = asks
-                .iter()
-                .map(|ask| ask.deadline)
-                .min()
-                .unwrap_or(deadline);
-            let wait = soonest.saturating_duration_since(Instant::now());
-            let step = tokio::select! {
-                frame = next_frame(socket, None) => Step::Frame(frame?),
-                answer = answered.recv() => Step::Answer(answer),
-                _ = state.approval_cancel.notified() => Step::Cancelled,
-                _ = sleep(wait) => Step::Expired,
+            let soonest = asks.iter().filter_map(|ask| ask.deadline).min();
+            let step = match soonest {
+                Some(soonest) => {
+                    let wait = soonest.saturating_duration_since(Instant::now());
+                    tokio::select! {
+                        frame = next_frame(socket, None) => Step::Frame(frame?),
+                        answer = answered.recv() => Step::Answer(answer),
+                        _ = state.approval_cancel.notified() => Step::Cancelled,
+                        _ = sleep(wait) => Step::Expired,
+                    }
+                }
+                // Every open card waits forever (`agent.clarify_timeout <= 0`): no local expiry.
+                None => tokio::select! {
+                    frame = next_frame(socket, None) => Step::Frame(frame?),
+                    answer = answered.recv() => Step::Answer(answer),
+                    _ = state.approval_cancel.notified() => Step::Cancelled,
+                },
             };
             match step {
                 Step::Frame(value) => value,
@@ -1394,6 +1597,9 @@ async fn stream_turn(
                         send_response(socket, &ask.target, result, live_sid).await?;
                         emit_settled(app, &settled);
                     }
+                    // The card may have been open past the stall budget; the agent now owes the
+                    // next frame, so restart the budget instead of interrupting on the stale one.
+                    deadline = Instant::now() + MESSAGE_TIMEOUT;
                     continue;
                 }
                 // The turn was stopped (⌘⇧.) or the channel died: fail closed on every open card.
@@ -1402,17 +1608,22 @@ async fn stream_turn(
                         send_response(socket, &ask.target, ask.kind.refusal(), live_sid).await?;
                         emit_settled(app, &settled_note(&ask, "cancelled", None, None));
                     }
+                    deadline = Instant::now() + MESSAGE_TIMEOUT;
                     continue;
                 }
                 Step::Expired => {
                     let now = Instant::now();
-                    let (expired, live): (Vec<PendingAsk>, Vec<PendingAsk>) =
-                        asks.drain(..).partition(|ask| ask.deadline <= now);
+                    let (expired, live): (Vec<PendingAsk>, Vec<PendingAsk>) = asks
+                        .drain(..)
+                        .partition(|ask| ask.deadline.is_some_and(|deadline| deadline <= now));
                     asks = live;
                     for ask in expired {
                         send_response(socket, &ask.target, ask.kind.refusal(), live_sid).await?;
                         emit_settled(app, &settled_note(&ask, "timeout", None, None));
                     }
+                    // A card the user took minutes to answer must not consume the next frame's
+                    // stall budget: re-arm it once the card settles.
+                    deadline = Instant::now() + MESSAGE_TIMEOUT;
                     continue;
                 }
             }
@@ -1450,10 +1661,13 @@ async fn stream_turn(
                         &policy,
                         live_sid,
                         &input.request_id,
+                        false,
                     )
                     .await?
                     {
                         asks.push(ask);
+                        #[cfg(test)]
+                        state.ask_opened.notify_one();
                     }
                 }
                 None => refuse_request(socket, id, method).await?,
@@ -1635,6 +1849,7 @@ async fn stream_turn(
                     &policy,
                     live_sid,
                     &input.request_id,
+                    false,
                 )
                 .await?
                 {
@@ -2192,39 +2407,200 @@ mod tests {
             target,
             kind,
             turn_request_id: "turn-1".into(),
-            deadline: Instant::now() + APPROVAL_TIMEOUT,
+            deadline: Some(Instant::now() + APPROVAL_TIMEOUT),
         }
     }
 
     #[test]
-    fn the_card_window_follows_the_runtime_deadline() {
-        // The runtime forwards its own `approvals.timeout`, so the card lives exactly as long as the
-        // agent is willing to wait instead of denying on a client-side guess.
+    fn the_card_window_matches_the_runtime_deadline() {
+        // An approval forwards its `approvals.timeout`; the card lives exactly as long as the agent
+        // is willing to wait instead of denying on a client-side guess.
         assert_eq!(
-            ask_window(&json!({"timeout_s": 300})),
-            Duration::from_secs(300)
+            ask_window(AskKind::Approval, &json!({"timeout_s": 300}), None),
+            Some(Duration::from_secs(300))
         );
         assert_eq!(
-            ask_window(&json!({"timeout_s": 45})),
-            Duration::from_secs(45)
+            ask_window(AskKind::Approval, &json!({"timeout_s": 45}), None),
+            Some(Duration::from_secs(45))
         );
-        assert_eq!(ask_window(&json!({})), APPROVAL_TIMEOUT);
-        assert_eq!(ask_window(&json!({"timeout_s": 0})), APPROVAL_TIMEOUT);
+        // A long configured approvals.timeout is honored, not truncated to an hour.
         assert_eq!(
-            ask_window(&json!({"timeout_s": 999_999})),
-            APPROVAL_TIMEOUT_MAX
+            ask_window(AskKind::Approval, &json!({"timeout_s": 7200}), None),
+            Some(Duration::from_secs(7200))
         );
+        // Only an absurd value is capped, so it cannot overflow an Instant.
+        assert_eq!(
+            ask_window(AskKind::Approval, &json!({"timeout_s": 999_999}), None),
+            Some(MAX_ASK_WINDOW)
+        );
+
+        // The other prompt frames carry no `timeout_s`: mirror each method's own deadline so the
+        // countdown does not vanish while the backend is still waiting.
+        for (kind, window) in [
+            (AskKind::Approval, APPROVAL_TIMEOUT),
+            (AskKind::Clarify, CLARIFY_TIMEOUT),
+            (AskKind::Sudo, CREDENTIAL_TIMEOUT),
+            (AskKind::Secret, CREDENTIAL_TIMEOUT),
+            (AskKind::VaultUnlock, CREDENTIAL_TIMEOUT),
+            (AskKind::VaultSaveLogin, VAULT_FORM_TIMEOUT),
+            (AskKind::VaultCode, VAULT_FORM_TIMEOUT),
+        ] {
+            assert_eq!(
+                ask_window(kind, &json!({}), Some(CLARIFY_TIMEOUT)),
+                Some(window),
+                "{:?}",
+                kind
+            );
+            assert_eq!(
+                ask_window(kind, &json!({"timeout_s": 0}), Some(CLARIFY_TIMEOUT)),
+                Some(window),
+                "{:?}",
+                kind
+            );
+        }
+
+        // A configured clarify timeout drives the card; `<= 0` means the runtime never cancels.
+        assert_eq!(
+            ask_window(
+                AskKind::Clarify,
+                &json!({}),
+                Some(Duration::from_secs(3600))
+            ),
+            Some(Duration::from_secs(3600))
+        );
+        assert_eq!(ask_window(AskKind::Clarify, &json!({}), None), None);
+    }
+
+    #[test]
+    fn clarify_timeout_follows_the_configured_value() {
+        assert_eq!(clarify_timeout_from_config(None), Some(CLARIFY_TIMEOUT));
+        assert_eq!(
+            clarify_timeout_from_config(Some("agent:\n  clarify_timeout: 3600\n")),
+            Some(Duration::from_secs(3600))
+        );
+        // A quoted / float value is still seconds.
+        assert_eq!(
+            clarify_timeout_from_config(Some("agent:\n  clarify_timeout: \"120\"\n")),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            clarify_timeout_from_config(Some("agent:\n  clarify_timeout: 120.0\n")),
+            Some(Duration::from_secs(120))
+        );
+        // `<= 0` is the runtime's "wait forever".
+        assert_eq!(
+            clarify_timeout_from_config(Some("agent:\n  clarify_timeout: 0\n")),
+            None
+        );
+        assert_eq!(
+            clarify_timeout_from_config(Some("agent:\n  clarify_timeout: -1\n")),
+            None
+        );
+        // Missing or malformed config keeps the schema default.
+        assert_eq!(
+            clarify_timeout_from_config(Some("agent: {}\n")),
+            Some(CLARIFY_TIMEOUT)
+        );
+
+        // The legacy `clarify.timeout` wins when explicitly set, even over a numeric agent value.
+        assert_eq!(
+            clarify_timeout_from_config(Some(
+                "clarify:\n  timeout: 3600\nagent:\n  clarify_timeout: 90\n"
+            )),
+            Some(Duration::from_secs(3600))
+        );
+        assert_eq!(
+            clarify_timeout_from_config(Some(
+                "clarify:\n  timeout: 0\nagent:\n  clarify_timeout: 3600\n"
+            )),
+            None
+        );
+        // A non-numeric legacy value resolves to 90 instead of falling through to the agent value.
+        assert_eq!(
+            clarify_timeout_from_config(Some(
+                "clarify:\n  timeout: never\nagent:\n  clarify_timeout: 3600\n"
+            )),
+            Some(CLARIFY_TIMEOUT)
+        );
+        assert_eq!(
+            clarify_timeout_from_config(Some(":::")),
+            Some(CLARIFY_TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn remote_clarify_timeout_uses_the_same_precedence() {
+        assert_eq!(
+            clarify_timeout_from_value(&json!({"agent": {"clarify_timeout": 120}})),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            clarify_timeout_from_value(&json!({
+                "clarify": {"timeout": "120"},
+                "agent": {"clarify_timeout": 3600}
+            })),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            clarify_timeout_from_value(&json!({
+                "clarify": {"timeout": 0},
+                "agent": {"clarify_timeout": 3600}
+            })),
+            None
+        );
+        assert_eq!(
+            clarify_timeout_from_value(&json!({"clarify": {"timeout": null}})),
+            Some(CLARIFY_TIMEOUT)
+        );
+        assert_eq!(
+            clarify_timeout_from_value(&json!({})),
+            Some(CLARIFY_TIMEOUT)
+        );
+    }
+
+    /// A failed remote config read must not shorten the card: without the remote's window we give
+    /// the card no local deadline and let `request.cancel` settle it.
+    #[tokio::test]
+    async fn a_remote_config_read_failure_leaves_the_window_to_the_backend() {
+        let (mut client, mut server) = ws_pair().await;
+        let server_task = tokio::spawn(async move {
+            let request = next_text(&mut server).await;
+            assert_eq!(request["method"], "config.get");
+            assert_eq!(request["params"]["key"], "full");
+            server
+                .send(Message::Text(
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": request["id"],
+                        "error": {"code": -32601, "message": "unknown key"}
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .expect("reply");
+        });
+        assert_eq!(remote_clarify_timeout(&mut client, "live-1").await, None);
+        server_task.await.unwrap();
     }
 
     #[test]
     fn every_card_kind_maps_to_the_methods_the_runtime_uses() {
         assert_eq!(AskKind::of("approval"), Some(AskKind::Approval));
         assert_eq!(AskKind::of("clarify"), Some(AskKind::Clarify));
-        for method in ["sudo", "secret", "vault.unlock_prompt", "vault.code"] {
-            assert_eq!(AskKind::of(method), Some(AskKind::Secret), "{method}");
-        }
-        // `vault.save_login` wants a JSON credential blob, and bridges need windows we do not have.
-        for method in ["vault.save_login", "preview.read", "tour", "setup_beat"] {
+        assert_eq!(AskKind::of("secret"), Some(AskKind::Secret));
+        assert_eq!(AskKind::of("sudo"), Some(AskKind::Sudo));
+        assert_eq!(
+            AskKind::of("vault.unlock_prompt"),
+            Some(AskKind::VaultUnlock)
+        );
+        assert_eq!(
+            AskKind::of("vault.save_login"),
+            Some(AskKind::VaultSaveLogin)
+        );
+        assert_eq!(AskKind::of("vault.code"), Some(AskKind::VaultCode));
+        // Bridges need windows this build does not have; onboarding is not a normal chat turn.
+        for method in ["preview.read", "tour", "setup_beat"] {
             assert_eq!(AskKind::of(method), None, "{method}");
         }
     }
@@ -2637,6 +3013,104 @@ mod tests {
         assert_eq!(settled["outcome"], "skipped");
     }
 
+    #[tokio::test]
+    async fn every_single_value_prompt_answers_its_value() {
+        let (mut client, mut server) = ws_pair().await;
+        for (kind, params, answer, summary) in [
+            (
+                AskKind::Sudo,
+                json!({"command": "sudo brew install ripgrep"}),
+                "hunter2",
+                "sudo brew install ripgrep",
+            ),
+            (
+                AskKind::VaultUnlock,
+                json!({"backend": "1password", "display_name": "1Password"}),
+                "master-password",
+                "1Password",
+            ),
+            (
+                AskKind::VaultCode,
+                json!({"site": "example.com", "hint": "Authenticator"}),
+                "123456",
+                "example.com",
+            ),
+        ] {
+            let open = ask(
+                AskTarget::Request(format!("srq-{}", kind.wire())),
+                kind,
+                params,
+            );
+            let (result, settled) = answer_result(
+                &open,
+                HermesAskReply::Secret {
+                    value: answer.into(),
+                },
+            );
+            send_response(&mut client, &open.target, result, "live-1")
+                .await
+                .expect("answer");
+            assert_eq!(
+                next_text(&mut server).await["result"]["value"],
+                answer,
+                "{}",
+                kind.wire()
+            );
+            assert_eq!(settled["kind"], kind.wire());
+            assert_eq!(settled["outcome"], "submitted");
+            assert_eq!(settled["summary"], summary);
+            assert!(!settled.to_string().contains(answer));
+        }
+    }
+
+    #[tokio::test]
+    async fn vault_save_login_answers_a_json_credential() {
+        let (mut client, mut server) = ws_pair().await;
+        let open = ask(
+            AskTarget::Request("srq-vault-save".into()),
+            AskKind::VaultSaveLogin,
+            json!({"origin": "https://example.com", "site": "example.com"}),
+        );
+        let (result, settled) = answer_result(
+            &open,
+            HermesAskReply::VaultSaveLogin {
+                identifier: "  user@example.com  ".into(),
+                password: "hunter2".into(),
+            },
+        );
+        send_response(&mut client, &open.target, result, "live-1")
+            .await
+            .expect("answer");
+
+        let frame = next_text(&mut server).await;
+        let value = frame["result"]["value"]
+            .as_str()
+            .expect("the runtime reads a JSON string under value");
+        assert_eq!(
+            value,
+            r#"{"identifier":"user@example.com","password":"hunter2"}"#
+        );
+        assert_eq!(settled["outcome"], "submitted");
+        assert_eq!(settled["summary"], "example.com");
+        assert!(!settled.to_string().contains("hunter2"));
+
+        // No password means the user declined to save: answer "" instead of a credential blob.
+        let skipped = ask(
+            AskTarget::Request("srq-vault-save-2".into()),
+            AskKind::VaultSaveLogin,
+            json!({"origin": "https://example.com", "site": "example.com"}),
+        );
+        let (result, settled) = answer_result(
+            &skipped,
+            HermesAskReply::VaultSaveLogin {
+                identifier: "user@example.com".into(),
+                password: String::new(),
+            },
+        );
+        assert_eq!(result, json!({"value": ""}));
+        assert_eq!(settled["outcome"], "skipped");
+    }
+
     /// A bridge tool gets the renderer's "no window shows this chat" decline; anything else says
     /// "no handler". Either way the request settles at once instead of parking the agent.
     #[tokio::test]
@@ -2668,9 +3142,11 @@ mod tests {
             &AskPolicy {
                 ask_user: false,
                 full_control: true,
+                clarify_timeout: Some(CLARIFY_TIMEOUT),
             },
             "live-1",
             "turn-1",
+            false,
         )
         .await
         .expect("open");
@@ -2687,25 +3163,155 @@ mod tests {
             &AskPolicy {
                 ask_user: true,
                 full_control: false,
+                clarify_timeout: Some(CLARIFY_TIMEOUT),
             },
             "live-1",
             "turn-1",
+            false,
         )
         .await
         .expect("open");
         assert!(card.is_some());
     }
 
-    /// A clarify question is not a policy decision: it reaches the user even in full-control mode.
+    /// A card can stay open past `MESSAGE_TIMEOUT`. Answering it must not charge the agent for that
+    /// wait: the stall budget starts when the card settles, not when the turn did.
+    #[tokio::test(start_paused = true)]
+    async fn answering_a_card_after_the_stall_budget_keeps_the_turn_alive() {
+        use std::sync::Arc;
+
+        let dir = std::env::temp_dir().join(format!("hermes-stall-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (client, mut server) = ws_pair().await;
+        let input = HermesChatInput {
+            prompt: "hi".into(),
+            request_id: "req-1".into(),
+            session_id: None,
+            provider: "custom".into(),
+            model: "m".into(),
+            effort: "low".into(),
+            fast: false,
+            api_key: None,
+            endpoint: None,
+            cwd: None,
+            attachments: Vec::new(),
+            auxiliary: Vec::new(),
+            force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
+            mac_enabled: true,
+            control_level: "ask".into(),
+            mac_terminal: true,
+            mac_screen: true,
+            mac_files: true,
+            mac_cron: false,
+            confirm_writes: true,
+        };
+        let policy = AskPolicy {
+            ask_user: true,
+            full_control: false,
+            clarify_timeout: Some(CLARIFY_TIMEOUT),
+        };
+        let state = Arc::new(HermesRuntimeState::default());
+        let task_state = state.clone();
+        let task_dir = dir.clone();
+        let task = tokio::spawn(async move {
+            let mut client = client;
+            stream_turn(
+                &mut client,
+                &task_dir,
+                &task_state,
+                &input,
+                None,
+                None,
+                "live-1",
+                "stored-1",
+                policy,
+                Vec::new(),
+                None,
+            )
+            .await
+        });
+
+        let opened = state.ask_opened.notified();
+        tokio::pin!(opened);
+        opened.as_mut().enable();
+        server
+            .send(Message::Text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": "srq-1",
+                    "method": "approval",
+                    "params": {"command": "rm -rf build", "choices": ["once", "deny"]}
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("ask");
+        // Wait until the read loop has actually parked on the card before moving the clock.
+        opened.await;
+        // Well past the 180s stall budget, still inside the approval's 300s window.
+        tokio::time::advance(Duration::from_secs(200)).await;
+
+        let answers = state.asks.lock().await.clone().expect("a live turn");
+        answers
+            .send(AskAnswer {
+                request_id: "srq-1".into(),
+                reply: HermesAskReply::Approval {
+                    choice: "once".into(),
+                },
+            })
+            .expect("answer");
+        server
+            .send(Message::Text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": {"type": "message.complete", "payload": {"text": "done"}}
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("complete");
+        let reply = task
+            .await
+            .expect("turn task")
+            .expect("the answered card must not time the turn out");
+        assert_eq!(reply.text, "done");
+        let response = next_text(&mut server).await;
+        assert_eq!(response["id"], "srq-1");
+        assert_eq!(response["result"]["choice"], "once");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A clarify question or a credential prompt is not a policy decision: it reaches the user even in
+    /// full-control mode.
     #[tokio::test]
-    async fn clarify_and_secret_prompts_ignore_the_approval_policy() {
+    async fn clarify_and_prompt_cards_ignore_the_approval_policy() {
         let (mut client, _server) = ws_pair().await;
         for (kind, params) in [
             (
                 AskKind::Clarify,
                 json!({"questions": [{"qid": "q1", "question": "Which database?"}]}),
             ),
+            (
+                AskKind::Sudo,
+                json!({"command": "sudo brew install ripgrep"}),
+            ),
             (AskKind::Secret, json!({"env_var": "TOKEN"})),
+            (
+                AskKind::VaultUnlock,
+                json!({"backend": "1password", "display_name": "1Password"}),
+            ),
+            (
+                AskKind::VaultSaveLogin,
+                json!({"origin": "https://example.com", "site": "example.com"}),
+            ),
+            (AskKind::VaultCode, json!({"site": "example.com"})),
         ] {
             let card = open_ask(
                 &mut client,
@@ -2716,9 +3322,11 @@ mod tests {
                 &AskPolicy {
                     ask_user: false,
                     full_control: true,
+                    clarify_timeout: Some(CLARIFY_TIMEOUT),
                 },
                 "live-1",
                 "turn-1",
+                false,
             )
             .await
             .expect("open");

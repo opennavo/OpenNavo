@@ -203,7 +203,7 @@ WebKit's own WebsiteData remains under
   previous turn's `liveSessionId`, and the busy policy is cleared at every turn
   start so a parked correction re-reads this turn's `busy_input_mode` instead
   of the previous turn's value. A parked correction also queues when an
-  approval, clarify or secret card is open, matching a live send. A rejected
+  approval, clarify or credential card is open, matching a live send. A rejected
   or failed correction is removed from the transcript and queued for the next
   turn instead of being left as a phantom bubble. A redirect answered `queued` (compression/build window) is
   removed too and reported as Hermes's next turn: the one-turn chat stream

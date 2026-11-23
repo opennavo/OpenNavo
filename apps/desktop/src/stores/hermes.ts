@@ -207,7 +207,14 @@ export interface HermesApprovalRequest {
   allow_permanent?: boolean | null;
 }
 
-export type HermesAskKind = 'approval' | 'clarify' | 'secret';
+export type HermesAskKind =
+  | 'approval'
+  | 'clarify'
+  | 'sudo'
+  | 'secret'
+  | 'vault-unlock'
+  | 'vault-save-login'
+  | 'vault-code';
 
 export interface HermesClarifyQuestion {
   qid: string;
@@ -222,14 +229,45 @@ export interface HermesClarifyRequest {
   questions: HermesClarifyQuestion[];
 }
 
-/** One masked string the agent needs: a sudo password, an env secret, a vault unlock. */
+/** The sudo password the terminal tool needs to run the command it names. */
+export interface HermesSudoRequest {
+  requestId: string;
+  deadline?: number | null;
+  /** Already redacted by the runtime; it never carries the password. */
+  command?: string;
+}
+
+/** One masked string the agent needs for a named environment variable. */
 export interface HermesSecretRequest {
   requestId: string;
   deadline?: number | null;
-  /** What the runtime calls the value; also what the transcript note names (never the value). */
-  label: string;
+  envVar: string;
   /** The runtime's own sentence, when it sent one. */
   prompt?: string;
+}
+
+/** The master password for an external password manager (1Password, Bitwarden, …). */
+export interface HermesVaultUnlockRequest {
+  requestId: string;
+  deadline?: number | null;
+  backend?: string;
+  displayName?: string;
+}
+
+/** A login the agent may save for the page it is filling. */
+export interface HermesVaultSaveLoginRequest {
+  requestId: string;
+  deadline?: number | null;
+  origin?: string;
+  site?: string;
+}
+
+/** A one-time / 2FA code the user reads from their device. */
+export interface HermesVaultCodeRequest {
+  requestId: string;
+  deadline?: number | null;
+  site?: string;
+  hint?: string;
 }
 
 export interface HermesAsk {
@@ -532,6 +570,12 @@ let sequence = 0;
 function id(prefix: string) {
   sequence += 1;
   return `${prefix}-${Date.now().toString(36)}-${sequence}`;
+}
+
+/** A trimmed string field from a server request's raw params, or undefined when absent/blank. */
+function paramText(params: Record<string, unknown>, name: string): string | undefined {
+  const value = params[name];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function message(entry: Omit<HermesMessage, 'id' | 'at'> & { at?: number }): HermesMessage {
@@ -936,18 +980,50 @@ export const useHermesStore = defineStore('hermes', () => {
   const secretRequest = computed<HermesSecretRequest | null>(() => {
     const ask = headAsk.value;
     if (!ask || ask.kind !== 'secret') return null;
-    const text = (name: string) => {
-      const value = ask.params[name];
-      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-    };
     return {
       requestId: ask.requestId,
       deadline: ask.deadline,
-      // The runtime names the value differently per gate: an env var, a vault, a site, a sudo command.
-      label: text('env_var') ?? text('display_name') ?? text('site') ?? text('backend') ?? text('command') ?? '',
-      prompt: text('prompt') ?? text('hint')
+      envVar: paramText(ask.params, 'env_var') ?? '',
+      prompt: paramText(ask.params, 'prompt')
     };
   });
+  const sudoRequest = computed<HermesSudoRequest | null>(() => {
+    const ask = headAsk.value;
+    if (!ask || ask.kind !== 'sudo') return null;
+    return { requestId: ask.requestId, deadline: ask.deadline, command: paramText(ask.params, 'command') };
+  });
+  const vaultUnlockRequest = computed<HermesVaultUnlockRequest | null>(() => {
+    const ask = headAsk.value;
+    if (!ask || ask.kind !== 'vault-unlock') return null;
+    return {
+      requestId: ask.requestId,
+      deadline: ask.deadline,
+      backend: paramText(ask.params, 'backend'),
+      displayName: paramText(ask.params, 'display_name')
+    };
+  });
+  const vaultSaveLoginRequest = computed<HermesVaultSaveLoginRequest | null>(() => {
+    const ask = headAsk.value;
+    if (!ask || ask.kind !== 'vault-save-login') return null;
+    return {
+      requestId: ask.requestId,
+      deadline: ask.deadline,
+      origin: paramText(ask.params, 'origin'),
+      site: paramText(ask.params, 'site')
+    };
+  });
+  const vaultCodeRequest = computed<HermesVaultCodeRequest | null>(() => {
+    const ask = headAsk.value;
+    if (!ask || ask.kind !== 'vault-code') return null;
+    return {
+      requestId: ask.requestId,
+      deadline: ask.deadline,
+      site: paramText(ask.params, 'site'),
+      hint: paramText(ask.params, 'hint')
+    };
+  });
+  /** Approvals still waiting in this conversation, for the card's `1 / N` counter. */
+  const approvalQueueSize = computed(() => activeAsks.value.filter(ask => ask.kind === 'approval').length);
   const historyReady = ref(false);
   const stopping = ref(false);
   const stopRequested = ref(false);
@@ -4452,6 +4528,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
       | { kind: 'approval'; choice: HermesApprovalChoice }
       | { kind: 'clarify'; answers: HermesClarifyAnswer[]; cancelled: boolean }
       | { kind: 'secret'; value: string }
+      | { kind: 'vaultSaveLogin'; identifier: string; password: string }
   ) {
     // Drop the card before the IPC round-trip: the settled event only records the outcome, so a hung
     // send would otherwise leave a card that can be answered twice.
@@ -4483,6 +4560,30 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     const ask = secretRequest.value;
     if (!ask) return Promise.resolve();
     return answerAsk(ask.requestId, { kind: 'secret', value });
+  }
+
+  function respondSudo(value: string) {
+    const ask = sudoRequest.value;
+    if (!ask) return Promise.resolve();
+    return answerAsk(ask.requestId, { kind: 'secret', value });
+  }
+
+  function respondVaultUnlock(value: string) {
+    const ask = vaultUnlockRequest.value;
+    if (!ask) return Promise.resolve();
+    return answerAsk(ask.requestId, { kind: 'secret', value });
+  }
+
+  function respondVaultCode(value: string) {
+    const ask = vaultCodeRequest.value;
+    if (!ask) return Promise.resolve();
+    return answerAsk(ask.requestId, { kind: 'secret', value });
+  }
+
+  function respondVaultSaveLogin(identifier: string, password: string) {
+    const ask = vaultSaveLoginRequest.value;
+    if (!ask) return Promise.resolve();
+    return answerAsk(ask.requestId, { kind: 'vaultSaveLogin', identifier, password });
   }
 
   function armStopFallbacks(turnId: number, conversationId: string | undefined) {
@@ -4642,11 +4743,20 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     openBackgroundTurn,
     historyReady,
     approvalRequest,
+    approvalQueueSize,
     respondApproval,
     clarifyRequest,
     respondClarify,
     secretRequest,
     respondSecret,
+    sudoRequest,
+    respondSudo,
+    vaultUnlockRequest,
+    respondVaultUnlock,
+    vaultSaveLoginRequest,
+    respondVaultSaveLogin,
+    vaultCodeRequest,
+    respondVaultCode,
     stopping,
     stop,
     profiles,

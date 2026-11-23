@@ -10,7 +10,8 @@ import HermesGatewayModal from '@/components/hermes/HermesGatewayModal.vue';
 import HermesAgentProfiles from '@/components/hermes/HermesAgentProfiles.vue';
 import HermesApprovalDialog from '@/components/hermes/HermesApprovalDialog.vue';
 import HermesClarifyDialog from '@/components/hermes/HermesClarifyDialog.vue';
-import HermesSecretPrompt from '@/components/hermes/HermesSecretPrompt.vue';
+import HermesValuePrompt from '@/components/hermes/HermesValuePrompt.vue';
+import HermesVaultSaveLoginPrompt from '@/components/hermes/HermesVaultSaveLoginPrompt.vue';
 import { useHermesStore } from '@/stores/hermes';
 import { commands, unwrap } from '@/ipc/client';
 import { useHermesUiStore } from '@/stores/hermesUi';
@@ -28,6 +29,28 @@ const store = useHermesStore();
 const ui = useHermesUiStore();
 const content = useHermesContent();
 const toasts = useToasts();
+
+/** Card titles keep the runtime's own names (env var, vault, site) where it sent one. */
+const vaultName = computed(
+  () => store.vaultUnlockRequest?.displayName || store.vaultUnlockRequest?.backend || content.value.ask.vaultUnlockName
+);
+const vaultUnlockTitle = computed(() => content.value.ask.vaultUnlockTitle.replace('{name}', vaultName.value));
+const vaultUnlockBody = computed(() => content.value.ask.vaultUnlockBody.replace('{name}', vaultName.value));
+const vaultSaveTitle = computed(() =>
+  content.value.ask.vaultSaveTitle.replace(
+    '{site}',
+    store.vaultSaveLoginRequest?.site || content.value.ask.vaultSaveSite
+  )
+);
+const vaultSaveBody = computed(() =>
+  content.value.ask.vaultSaveBody.replace(
+    '{origin}',
+    store.vaultSaveLoginRequest?.origin || content.value.ask.vaultSaveOrigin
+  )
+);
+const vaultCodeTitle = computed(() =>
+  content.value.ask.vaultCodeTitle.replace('{site}', store.vaultCodeRequest?.site || content.value.ask.vaultCodeSite)
+);
 
 const input = ref('');
 const historyOpen = ref(false);
@@ -876,6 +899,7 @@ onBeforeUnmount(() => {
     <HermesApprovalDialog
       :open="Boolean(store.approvalRequest)"
       :request="store.approvalRequest"
+      :total="store.approvalQueueSize"
       @decide="store.respondApproval"
       @close="store.respondApproval('deny')"
     />
@@ -885,11 +909,73 @@ onBeforeUnmount(() => {
       @submit="store.respondClarify"
       @cancel="store.respondClarify([], true)"
     />
-    <HermesSecretPrompt
+    <HermesValuePrompt
+      :open="Boolean(store.sudoRequest)"
+      :request-key="store.sudoRequest?.requestId ?? ''"
+      :deadline="store.sudoRequest?.deadline ?? null"
+      :title="content.ask.sudoTitle"
+      :description="content.ask.sudoBody"
+      :context="store.sudoRequest?.command"
+      :context-label="content.ask.sudoCommandLabel"
+      :placeholder="content.ask.sudoPlaceholder"
+      :submit-label="content.ask.sudoSubmit"
+      :skip-label="content.ask.cancel"
+      @submit="store.respondSudo"
+      @skip="store.respondSudo('')"
+    />
+    <HermesValuePrompt
       :open="Boolean(store.secretRequest)"
-      :request="store.secretRequest"
+      :request-key="store.secretRequest?.requestId ?? ''"
+      :deadline="store.secretRequest?.deadline ?? null"
+      :title="store.secretRequest?.envVar || content.ask.secretTitle"
+      :description="store.secretRequest?.prompt || content.ask.secretBody"
+      :placeholder="content.ask.secretPlaceholder"
+      :submit-label="content.ask.secretSubmit"
+      :skip-label="content.ask.skip"
       @submit="store.respondSecret"
       @skip="store.respondSecret('')"
+    />
+    <HermesValuePrompt
+      :open="Boolean(store.vaultUnlockRequest)"
+      :request-key="store.vaultUnlockRequest?.requestId ?? ''"
+      :deadline="store.vaultUnlockRequest?.deadline ?? null"
+      :title="vaultUnlockTitle"
+      :description="vaultUnlockBody"
+      :placeholder="content.ask.vaultUnlockPlaceholder"
+      :submit-label="content.ask.vaultUnlockSubmit"
+      :skip-label="content.ask.keepLocked"
+      @submit="store.respondVaultUnlock"
+      @skip="store.respondVaultUnlock('')"
+    />
+    <HermesVaultSaveLoginPrompt
+      :open="Boolean(store.vaultSaveLoginRequest)"
+      :request-key="store.vaultSaveLoginRequest?.requestId ?? ''"
+      :deadline="store.vaultSaveLoginRequest?.deadline ?? null"
+      :title="vaultSaveTitle"
+      :description="vaultSaveBody"
+      :identifier-label="content.ask.identifierLabel"
+      :identifier-placeholder="content.ask.identifierPlaceholder"
+      :password-label="content.ask.passwordLabel"
+      :submit-label="content.ask.vaultSaveSubmit"
+      :decline-label="content.ask.declineSave"
+      @save="store.respondVaultSaveLogin"
+      @decline="store.respondVaultSaveLogin('', '')"
+    />
+    <HermesValuePrompt
+      :open="Boolean(store.vaultCodeRequest)"
+      :request-key="store.vaultCodeRequest?.requestId ?? ''"
+      :deadline="store.vaultCodeRequest?.deadline ?? null"
+      :title="vaultCodeTitle"
+      :description="store.vaultCodeRequest?.hint || content.ask.vaultCodeBody"
+      :masked="false"
+      input-mode="numeric"
+      autocomplete="one-time-code"
+      :placeholder="content.ask.vaultCodePlaceholder"
+      :submit-label="content.ask.vaultCodeSubmit"
+      :skip-label="content.ask.skip"
+      sanitize="code"
+      @submit="store.respondVaultCode"
+      @skip="store.respondVaultCode('')"
     />
 
     <OnModal

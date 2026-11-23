@@ -83,6 +83,8 @@ mac-notification-sys = "=0.6.15"
 [dev-dependencies]
 tempfile = "3"
 tauri = { version = "2.12", features = ["test"] }
+# Paused-time tests cover the gateway's stall budget without waiting minutes.
+tokio = { version = "1", features = ["full", "test-util"] }
 
 [profile.release]
 codegen-units = 1
