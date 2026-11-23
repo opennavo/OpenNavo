@@ -8,7 +8,13 @@ import {
 // Starts configured analytics after the page is idle so it never competes with rendering; later navigations
 // send their own page views.
 export default defineNuxtPlugin(nuxtApp => {
-  rememberInitialReferral(document.referrer, location.pathname);
+  rememberInitialReferral(
+    document.referrer,
+    location.pathname,
+    location.search,
+    document.title,
+    document.documentElement.lang
+  );
   const consent = useAnalyticsConsent();
   const changed = (event: StorageEvent) => {
     if (event.key === CONSENT_STORAGE_KEY && event.newValue === 'denied') consent.decline();

@@ -34,7 +34,20 @@ const AI_REFERRER_HOSTS = [
   'grok.com',
   'x.ai',
   'you.com',
-  'phind.com'
+  'phind.com',
+  'meta.ai'
+] as const;
+
+const CAMPAIGN_QUERY_KEYS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_id',
+  'utm_content',
+  'utm_term',
+  'utm_source_platform',
+  'utm_creative_format',
+  'utm_marketing_tactic'
 ] as const;
 
 export const CONSENT_STORAGE_KEY = 'onv:analytics-consent';
@@ -62,6 +75,9 @@ let currentAiTouch: AiFirstTouch | null = null;
 let aiReferralSent = false;
 let initialReferrer = '';
 let initialLandingPath = '';
+let initialSearch: string | null = null;
+let initialTitle = '';
+let initialLanguage = '';
 
 function safeStorage(): Storage | null {
   try {
@@ -79,26 +95,55 @@ function isAiFirstTouch(value: unknown): value is AiFirstTouch {
   );
 }
 
-/** Canonical AI-assistant host for an external referrer, or null when it is not one. */
-export function classifyAiReferrer(referrer: string): string | null {
-  let url: URL;
+/** Canonical AI-assistant host for a referrer or campaign source, or null when it is not one. */
+export function classifyAiSource(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  // Bare hosts are accepted, but a scheme other than http(s) is not a referral. A bare host
+  // may still carry a numeric port, which must not be mistaken for a scheme.
+  const scheme = /^([a-z][a-z\d+.-]*):/i.exec(trimmed);
+  if (scheme) {
+    const rest = trimmed.slice(scheme[0].length);
+    const name = scheme[1] ?? '';
+    if (!/^\d+(?:[/?#]|$)/.test(rest) && (!/^https?$/i.test(name) || !rest.startsWith('//'))) return null;
+  }
+  let host: string;
   try {
-    url = new URL(referrer);
+    const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    host = url.hostname.toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
   } catch {
     return null;
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (!host) return null;
   return AI_REFERRER_HOSTS.find(candidate => host === candidate || host.endsWith(`.${candidate}`)) ?? null;
+}
+
+/** Canonical AI-assistant host for an external referrer, or null when it is not one. */
+export function classifyAiReferrer(referrer: string): string | null {
+  return classifyAiSource(referrer);
+}
+
+function aiSourceFromSearch(search: string): string | null {
+  if (!search) return null;
+  return classifyAiSource(new URLSearchParams(search).get('utm_source'));
 }
 
 /**
  * Remember the original page view before consent can run. This stays in memory only; capture()
  * persists the record once analytics is active.
  */
-export function rememberInitialReferral(referrer: string, landingPath: string) {
+export function rememberInitialReferral(
+  referrer: string,
+  landingPath: string,
+  search = '',
+  title = '',
+  language = ''
+) {
   initialReferrer = referrer;
   initialLandingPath = landingPath;
+  initialSearch = search;
+  initialTitle = title;
+  initialLanguage = language;
 }
 
 /** Read the stored first touch, falling back to this page's in-memory copy. */
@@ -135,11 +180,12 @@ function normalizeLandingPath(value: string): string {
  */
 export function captureAiReferral(
   referrer = initialReferrer || (typeof document === 'undefined' ? '' : document.referrer),
-  landingPath = initialLandingPath || (typeof location === 'undefined' ? '/' : location.pathname)
+  landingPath = initialLandingPath || (typeof location === 'undefined' ? '/' : location.pathname),
+  search = initialSearch ?? (typeof location === 'undefined' ? '' : location.search)
 ): { firstTouch: AiFirstTouch; created: boolean } | null {
   const existing = readAiFirstTouch();
   if (existing) return { firstTouch: existing, created: false };
-  const source = classifyAiReferrer(referrer);
+  const source = classifyAiReferrer(referrer) ?? aiSourceFromSearch(search);
   if (!source) return null;
   const firstTouch: AiFirstTouch = {
     source,
@@ -156,21 +202,29 @@ export function captureAiReferral(
   return { firstTouch, created: true };
 }
 
-/**
- * Set the first-touch user properties and send the landing event once. The event is emitted only
- * for a newly captured referral; a stored first touch is attached to later key events instead.
- */
-export function trackAiReferral(result: ReturnType<typeof captureAiReferral>) {
+/** Set first-touch user properties before the first page view of the activation. */
+export function setAiUserProperties(result: ReturnType<typeof captureAiReferral>) {
   if (!result || !activeId || !window.gtag) return;
-  const { firstTouch, created } = result;
+  const { firstTouch } = result;
   window.gtag('set', 'user_properties', {
     ai_first_touch_source: firstTouch.source,
     ai_first_touch_landing: firstTouch.landing_path
   });
+}
+
+/**
+ * Send the landing event once. The event is emitted only for a newly captured referral; a stored
+ * first touch is attached to later key events instead.
+ */
+export function trackAiReferral(result: ReturnType<typeof captureAiReferral>) {
+  if (!result || !activeId || !window.gtag) return;
+  const { firstTouch, created } = result;
   if (!created || aiReferralSent) return;
   aiReferralSent = true;
   window.gtag('event', 'ai_referral_landing', {
-    ...params(),
+    page_location: pageLocation(firstTouch.landing_path, initialSearch ?? ''),
+    page_title: initialTitle || document.title,
+    ...params(firstTouch.landing_path, initialLanguage || document.documentElement.lang),
     ai_source: firstTouch.source,
     landing_path: firstTouch.landing_path
   });
@@ -228,7 +282,7 @@ export function loadGtag(id: string) {
 
 export function stopGtag(id: string) {
   activeId = '';
-  lastPageView = '';
+  lastPageLocation = '';
   (window as unknown as Record<string, unknown>)[`ga-disable-${id}`] = true;
   window.gtag?.('consent', 'update', { analytics_storage: 'denied' });
   const names = document.cookie
@@ -242,24 +296,58 @@ export function stopGtag(id: string) {
   }
 }
 
-function params() {
+function params(pathname = location.pathname, language = document.documentElement.lang) {
   return {
-    page_type: webRouteType(location.pathname),
-    content_language: document.documentElement.lang
+    page_type: webRouteType(pathname),
+    content_language: language
   };
 }
 
-let lastPageView = '';
+function pageLocation(pathname = location.pathname, queryString = location.search) {
+  const search = new URLSearchParams(queryString);
+  const campaign = new URLSearchParams();
+  for (const key of CAMPAIGN_QUERY_KEYS) {
+    for (const value of search.getAll(key)) campaign.append(key, value);
+  }
+  const query = campaign.toString();
+  return `${location.origin}${pathname}${query ? `?${query}` : ''}`;
+}
 
-/** Page views are sent manually so they carry the page type; query strings are left out. */
-export function trackPageView() {
-  if (!activeId || !window.gtag || lastPageView === location.pathname) return;
-  lastPageView = location.pathname;
-  window.gtag('event', 'page_view', {
-    page_location: `${location.origin}${location.pathname}`,
-    page_title: document.title,
-    ...params()
+let lastPageLocation = '';
+let initialPageViewPending = true;
+
+function sendPageView(page: string, pathname: string, title: string, language: string) {
+  if (lastPageLocation === page) return;
+  // Manual page views do not update document.referrer. Without an explicit value later
+  // client-side navigations inherit the original external referrer instead of the previous page.
+  const referrer = lastPageLocation || initialReferrer || document.referrer || '';
+  lastPageLocation = page;
+  window.gtag!('event', 'page_view', {
+    page_location: page,
+    page_title: title,
+    page_referrer: referrer,
+    ...params(pathname, language)
   });
+}
+
+/** Page views are sent manually so they carry the page type; only campaign parameters are retained. */
+export function trackPageView() {
+  if (!activeId || !window.gtag) return;
+  const current = pageLocation();
+  if (initialPageViewPending) {
+    initialPageViewPending = false;
+    const landing = initialLandingPath ? pageLocation(initialLandingPath, initialSearch ?? '') : current;
+    sendPageView(
+      landing,
+      initialLandingPath || location.pathname,
+      initialTitle || document.title,
+      initialLanguage || document.documentElement.lang
+    );
+    if (landing !== current)
+      sendPageView(current, location.pathname, document.title, document.documentElement.lang);
+    return;
+  }
+  sendPageView(current, location.pathname, document.title, document.documentElement.lang);
 }
 
 /** Key events (marked in GA4) and install-intent events. A no-op until analytics is active. */

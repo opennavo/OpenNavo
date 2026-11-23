@@ -52,6 +52,7 @@ function startGtag() {
 describe('AI referral classification', () => {
   it.each([
     ['https://chatgpt.com/c/123', 'chatgpt.com'],
+    ['http://chatgpt.com/', 'chatgpt.com'],
     ['https://www.chatgpt.com/', 'chatgpt.com'],
     ['https://chat.openai.com/chat', 'chat.openai.com'],
     ['https://perplexity.ai/search?q=mac', 'perplexity.ai'],
@@ -62,9 +63,21 @@ describe('AI referral classification', () => {
     ['https://grok.com/', 'grok.com'],
     ['https://x.ai/', 'x.ai'],
     ['https://you.com/search', 'you.com'],
-    ['https://phind.com/search', 'phind.com']
+    ['https://phind.com/search', 'phind.com'],
+    ['https://meta.ai/', 'meta.ai']
   ])('classifies %s as %s', (url, source) => {
     expect(analytics.classifyAiReferrer(url)).toBe(source);
+  });
+
+  it.each([
+    ['chatgpt.com', 'chatgpt.com'],
+    ['CHATGPT.COM', 'chatgpt.com'],
+    ['www.perplexity.ai', 'perplexity.ai'],
+    ['https://claude.ai/new', 'claude.ai'],
+    ['chatgpt.com/c/123', 'chatgpt.com'],
+    ['chatgpt.com:443', 'chatgpt.com']
+  ])('classifies campaign source %s as %s', (value, source) => {
+    expect(analytics.classifyAiSource(value)).toBe(source);
   });
 
   it('ignores non-AI, malformed and lookalike referrers', () => {
@@ -77,6 +90,21 @@ describe('AI referral classification', () => {
       'https://opennavo.com/'
     ])
       expect(analytics.classifyAiReferrer(url), url).toBeNull();
+  });
+
+  it('ignores non-AI campaign sources', () => {
+    for (const value of ['', 'opennavo.com', 'example.com', 'not a host', 'notchatgpt.com'])
+      expect(analytics.classifyAiSource(value), value).toBeNull();
+  });
+
+  it('ignores schemes other than http and https', () => {
+    for (const value of [
+      'javascript://chatgpt.com',
+      'file://chatgpt.com',
+      'intent://chatgpt.com',
+      'mailto:chatgpt.com'
+    ])
+      expect(analytics.classifyAiSource(value), value).toBeNull();
   });
 });
 
@@ -92,6 +120,19 @@ describe('AI first touch', () => {
     expect(JSON.parse(localStorage.getItem(analytics.AI_FIRST_TOUCH_STORAGE_KEY)!)).toEqual(result?.firstTouch);
   });
 
+  it('uses an AI utm_source when the referrer is missing', () => {
+    const result = analytics.captureAiReferral('', '/apps/vscode?utm_source=chatgpt.com', '?utm_source=chatgpt.com');
+    expect(result?.created).toBe(true);
+    expect(result?.firstTouch).toMatchObject({
+      source: 'chatgpt.com',
+      landing_path: '/apps/vscode'
+    });
+  });
+
+  it('ignores a non-AI utm_source without a referrer', () => {
+    expect(analytics.captureAiReferral('', '/apps/vscode', '?utm_source=opennavo.com')).toBeNull();
+  });
+
   it('keeps the first AI touch and does not overwrite it on a later visit', () => {
     const first = analytics.captureAiReferral('https://chatgpt.com/', '/first');
     const second = analytics.captureAiReferral('https://claude.ai/', '/second');
@@ -102,6 +143,7 @@ describe('AI first touch', () => {
   it('sets user properties and sends the landing event once', () => {
     startGtag();
     const result = analytics.captureAiReferral('https://chatgpt.com/c/1', '/apps/vscode');
+    analytics.setAiUserProperties(result);
     analytics.trackAiReferral(result);
     const sent = calls();
     expect(sent).toContainEqual([
@@ -113,6 +155,8 @@ describe('AI first touch', () => {
       'event',
       'ai_referral_landing',
       expect.objectContaining({
+        page_location: `${location.origin}/apps/vscode`,
+        page_title: 'Visual Studio Code · OpenNavo',
         ai_source: 'chatgpt.com',
         landing_path: '/apps/vscode',
         page_type: 'app'
@@ -178,6 +222,98 @@ describe('AI first touch', () => {
       'ai_referral_landing',
       expect.objectContaining({ landing_path: '/apps/visual-studio-code' })
     ]);
+    const events = calls().filter(call => call[0] === 'event');
+    expect(events[0]?.[2]).toEqual({
+      page_location: `${location.origin}/apps/visual-studio-code`,
+      page_title: 'Visual Studio Code · OpenNavo',
+      page_referrer: 'https://chatgpt.com/c/1',
+      page_type: 'app',
+      content_language: 'en-US'
+    });
+    expect(events[1]?.[2]).toEqual({
+      page_location: `${location.origin}/download`,
+      page_title: 'Visual Studio Code · OpenNavo',
+      page_referrer: `${location.origin}/apps/visual-studio-code`,
+      page_type: 'download',
+      content_language: 'en-US'
+    });
+    expect(events[2]?.[2]).toEqual({
+      page_location: `${location.origin}/apps/visual-studio-code`,
+      page_title: 'Visual Studio Code · OpenNavo',
+      page_type: 'app',
+      content_language: 'en-US',
+      ai_source: 'chatgpt.com',
+      landing_path: '/apps/visual-studio-code'
+    });
+  });
+
+  it('sends the original landing page view before the AI event when consent is accepted later', async () => {
+    localStorage.setItem(analytics.CONSENT_STORAGE_KEY, 'denied');
+    analytics.rememberInitialReferral(
+      '',
+      '/apps/visual-studio-code',
+      '?email=private%40example.com&fbclid=tracking&utm_source=chatgpt.com',
+      'Visual Studio Code · OpenNavo',
+      'en-US'
+    );
+    const consent = useAnalyticsConsent();
+    await consent.start();
+    document.title = 'Download OpenNavo';
+    document.documentElement.lang = 'de-DE';
+    window.history.replaceState({}, '', '/download');
+    consent.accept();
+    expect(JSON.parse(localStorage.getItem(analytics.AI_FIRST_TOUCH_STORAGE_KEY)!)).toMatchObject({
+      source: 'chatgpt.com',
+      landing_path: '/apps/visual-studio-code'
+    });
+    const events = calls().filter(call => call[0] === 'event');
+    expect(events.map(call => call[1])).toEqual(['page_view', 'page_view', 'ai_referral_landing']);
+    expect(
+      calls()
+        .filter(
+          call =>
+            (call[0] === 'set' && call[1] === 'user_properties') ||
+            (call[0] === 'event' && ['page_view', 'ai_referral_landing'].includes(String(call[1])))
+        )
+        .map(call => (call[0] === 'set' ? 'set:user_properties' : call[1]))
+    ).toEqual(['set:user_properties', 'page_view', 'page_view', 'ai_referral_landing']);
+    expect(calls().find(call => call[0] === 'set' && call[1] === 'user_properties')?.[2]).toEqual({
+      ai_first_touch_source: 'chatgpt.com',
+      ai_first_touch_landing: '/apps/visual-studio-code'
+    });
+    expect(events[0]?.[2]).toEqual({
+      page_location: `${location.origin}/apps/visual-studio-code?utm_source=chatgpt.com`,
+      page_title: 'Visual Studio Code · OpenNavo',
+      page_referrer: '',
+      page_type: 'app',
+      content_language: 'en-US'
+    });
+    expect(events[1]?.[2]).toEqual({
+      page_location: `${location.origin}/download`,
+      page_title: 'Download OpenNavo',
+      page_referrer: `${location.origin}/apps/visual-studio-code?utm_source=chatgpt.com`,
+      page_type: 'download',
+      content_language: 'de-DE'
+    });
+    expect(events[2]?.[2]).toEqual({
+      page_location: `${location.origin}/apps/visual-studio-code?utm_source=chatgpt.com`,
+      page_title: 'Visual Studio Code · OpenNavo',
+      page_type: 'app',
+      content_language: 'en-US',
+      ai_source: 'chatgpt.com',
+      landing_path: '/apps/visual-studio-code'
+    });
+  });
+
+  it('does not treat a later utm_source as the original landing source', async () => {
+    localStorage.setItem(analytics.CONSENT_STORAGE_KEY, 'denied');
+    analytics.rememberInitialReferral('', '/apps/visual-studio-code', '');
+    const consent = useAnalyticsConsent();
+    await consent.start();
+    window.history.replaceState({}, '', '/download?utm_source=chatgpt.com');
+    consent.accept();
+    expect(localStorage.getItem(analytics.AI_FIRST_TOUCH_STORAGE_KEY)).toBeNull();
+    expect(calls().some(call => call[1] === 'ai_referral_landing')).toBe(false);
   });
 
   it('starts tracking the landing event after the default consent path', async () => {
