@@ -69,6 +69,7 @@ it.each([null, 'granted', 'invalid', ''])('starts GA4 without a prompt for store
       {
         page_location: `${location.origin}/apps/visual-studio-code`,
         page_title: document.title,
+        page_referrer: '',
         page_type: 'app',
         content_language: 'en-US'
       }

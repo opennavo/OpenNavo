@@ -31,7 +31,8 @@ describe('gtag loader', () => {
   const page = {
     pathname: '/zh/apps/visual-studio-code',
     origin: 'https://opennavo.example',
-    hostname: 'opennavo.example'
+    hostname: 'opennavo.example',
+    search: ''
   };
   vi.stubGlobal('window', globalThis);
   vi.stubGlobal('location', page);
@@ -76,7 +77,7 @@ describe('gtag loader', () => {
     expect(calls()[2]).toEqual(['config', 'G-TEST1', { send_page_view: false }]);
   });
 
-  it('Sends page views without query strings and events with the page type only', () => {
+  it('Sends page views with campaign parameters only and events with the page type only', () => {
     trackPageView();
     trackPageView();
     trackEvent('copy_install_command');
@@ -88,11 +89,48 @@ describe('gtag loader', () => {
         {
           page_location: 'https://opennavo.example/zh/apps/visual-studio-code',
           page_title: 'Visual Studio Code · OpenNavo',
+          page_referrer: '',
           page_type: 'app',
           content_language: 'zh-CN'
         }
       ],
       ['event', 'copy_install_command', { page_type: 'app', content_language: 'zh-CN' }]
+    ]);
+  });
+
+  it('Keeps standard campaign parameters but strips unrelated query data', () => {
+    page.pathname = '/download';
+    page.search =
+      '?email=private%40example.com&utm_source=chatgpt.com&utm_medium=referral&utm_campaign=ai-launch&fbclid=tracking';
+    trackPageView();
+    expect(calls().at(-1)).toEqual([
+      'event',
+      'page_view',
+      {
+        page_location:
+          'https://opennavo.example/download?utm_source=chatgpt.com&utm_medium=referral&utm_campaign=ai-launch',
+        page_title: 'Visual Studio Code · OpenNavo',
+        page_referrer: 'https://opennavo.example/zh/apps/visual-studio-code',
+        page_type: 'download',
+        content_language: 'zh-CN'
+      }
+    ]);
+  });
+
+  it('Deduplicates page views by campaign-aware URL instead of pathname', () => {
+    page.pathname = '/pricing';
+    page.search = '';
+    trackPageView();
+    page.search = '?utm_source=chatgpt.com&utm_medium=referral';
+    trackPageView();
+    expect(
+      calls()
+        .filter(call => call[1] === 'page_view')
+        .slice(-2)
+        .map(call => (call[2] as { page_location: string }).page_location)
+    ).toEqual([
+      'https://opennavo.example/pricing',
+      'https://opennavo.example/pricing?utm_source=chatgpt.com&utm_medium=referral'
     ]);
   });
 

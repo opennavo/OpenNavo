@@ -3,6 +3,7 @@ import {
   analyticsPlan,
   captureAiReferral,
   loadGtag,
+  setAiUserProperties,
   stopGtag,
   trackAiReferral,
   trackPageView
@@ -42,8 +43,10 @@ export function useAnalyticsConsent() {
     if (!enabled.value) return;
     if (measurementId.value) loadGtag(measurementId.value);
     active.value = true;
-    trackAiReferral(captureAiReferral());
+    const referral = captureAiReferral();
+    setAiUserProperties(referral);
     trackPageView();
+    trackAiReferral(referral);
   }
 
   async function start() {
