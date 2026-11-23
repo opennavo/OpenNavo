@@ -1497,6 +1497,11 @@ export type HermesChatReply = {
 	sessionId: string | null,
 	liveSessionId: string | null,
 	usage: HermesUsage | null,
+	/**
+	 *  The gateway ended the turn with `message.complete` status `interrupted`.
+	 *  The text already streamed stays; this is not a finished answer.
+	 */
+	interrupted: boolean,
 };
 
 export type HermesClarifyAnswer = {

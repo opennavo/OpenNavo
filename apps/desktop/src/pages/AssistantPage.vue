@@ -246,7 +246,7 @@ function send() {
   const files = attachments.value.map(item => item.path);
   if (!value && !files.length) return;
   if (store.stopping) return;
-  if (store.thinking && files.length) {
+  if (files.length && store.attachmentsBlocked()) {
     toasts.push({
       tone: 'warning',
       title: content.value.composer.attach,
@@ -290,7 +290,7 @@ function suggestion(prompt: string) {
 }
 
 function newChat() {
-  store.stopThinking();
+  // Switching views never stops a running turn; it keeps streaming into its own conversation.
   store.newChat();
   historyOpen.value = false;
   input.value = '';
@@ -299,13 +299,19 @@ function newChat() {
 }
 
 function selectConversation(id: string) {
-  store.stopThinking();
+  // A background turn in another conversation is not interrupted by opening this one.
   store.select(id);
   attachments.value = [];
   historyOpen.value = false;
   void nextTick(() => {
     scroll.value?.scrollTo({ top: 0 });
   });
+}
+
+async function openBackgroundTurn(conversationId: string) {
+  if (!(await store.openBackgroundTurn(conversationId))) return;
+  historyOpen.value = false;
+  void nextTick(() => scrollToBottom());
 }
 
 async function openNotificationConversation(open: HermesNotificationOpen) {
@@ -609,6 +615,34 @@ onBeforeUnmount(() => {
               {{ content.composer.thinking }}
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Background turns keep running; say so without hiding a card or the way back to it. -->
+      <div v-if="store.backgroundTurns.length" class="mx-auto w-full max-w-720px shrink-0 pb-2px">
+        <div
+          v-for="turn in store.backgroundTurns"
+          :key="turn.conversationId"
+          class="flex items-center gap-7px rounded-default border border-solid border-line-subtle bg-surface-card px-10px py-8px text-11px text-ink-secondary"
+          data-hermes-background-turn
+        >
+          <OnIcon
+            :name="turn.waiting ? 'lucide:hand' : 'lucide:loader-circle'"
+            :size="12"
+            :class="turn.waiting ? 'shrink-0 text-status-warning' : 'shrink-0 animate-spin text-ink-tertiary'"
+          />
+          <span class="shrink-0 font-500">{{
+            turn.waiting ? content.composer.backgroundWaiting : content.composer.backgroundReplying
+          }}</span>
+          <span v-if="turn.title" class="min-w-0 truncate text-ink-tertiary">· {{ turn.title }}</span>
+          <button
+            v-if="turn.openable"
+            type="button"
+            class="ml-auto shrink-0 rounded-tiny px-6px py-2px text-10.5px font-600 text-ink-secondary outline-none hover:bg-surface-control hover:text-ink-primary focus-visible:shadow-focus-ring"
+            @click="openBackgroundTurn(turn.conversationId)"
+          >
+            {{ content.composer.backgroundOpen }}
+          </button>
         </div>
       </div>
 

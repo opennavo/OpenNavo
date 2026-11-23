@@ -229,6 +229,15 @@ function showProfileChip(conversation: HermesConversation): boolean {
   return Boolean(profile) && profile !== store.activeAgentProfileName;
 }
 
+/** A row can be running in the background, including one parked on an approval card. */
+function activityOf(conversation: HermesConversation): 'replying' | 'waiting' | null {
+  return store.conversationActivity(conversation.id);
+}
+
+function activityLabel(activity: 'replying' | 'waiting'): string {
+  return activity === 'waiting' ? content.value.history.waitingAsk : content.value.history.replying;
+}
+
 function startRename(id: string, current: string) {
   editingId.value = id;
   editTitle.value = current;
@@ -507,6 +516,19 @@ onBeforeUnmount(() => {
             />
             <b v-else class="block truncate text-11.5px font-600 text-ink-primary">{{ item.title }}</b>
             <span class="mt-1px block truncate text-11px text-ink-tertiary">{{ item.preview }}</span>
+            <span
+              v-if="activityOf(item.conversation)"
+              class="mt-2px flex items-center gap-3px text-10px"
+              :class="activityOf(item.conversation) === 'waiting' ? 'text-status-warning' : 'text-ink-tertiary'"
+              data-hermes-history-activity
+            >
+              <OnIcon
+                :name="activityOf(item.conversation) === 'waiting' ? 'lucide:hand' : 'lucide:loader-circle'"
+                :size="9"
+                :class="activityOf(item.conversation) === 'waiting' ? '' : 'animate-spin'"
+              />
+              {{ activityLabel(activityOf(item.conversation)!) }}
+            </span>
             <span
               v-if="showProfileChip(item.conversation)"
               class="mt-2px inline-flex items-center gap-3px text-10px text-ink-tertiary"

@@ -170,6 +170,9 @@ pub struct HermesChatReply {
     pub session_id: Option<String>,
     pub live_session_id: Option<String>,
     pub usage: Option<HermesUsage>,
+    /// The gateway ended the turn with `message.complete` status `interrupted`.
+    /// The text already streamed stays; this is not a finished answer.
+    pub interrupted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -2190,6 +2193,7 @@ async fn chat_with_bin(
         session_id: session,
         live_session_id: None,
         usage: None,
+        interrupted: false,
     })
 }
 
