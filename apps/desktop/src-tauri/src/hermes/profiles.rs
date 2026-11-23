@@ -407,6 +407,59 @@ fn probe_status_error(status: reqwest::StatusCode) -> AppError {
     )
 }
 
+/// `/api/status` is public: a 2xx only proves the host is reachable. The identity route is behind
+/// the dashboard's session gate — the same gate that mints a ws ticket — so a rejected identity
+/// check means the stored cookies are dead even while the status route keeps answering. Only
+/// 401/403 count: an older panel without `/api/auth/me` must not fail the probe.
+fn identity_status_error(status: reqwest::StatusCode, detail: Option<String>) -> Option<AppError> {
+    if !super::panel::session_rejected(status) {
+        return None;
+    }
+    Some(super::panel::session_expired(
+        detail
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("Gateway identity returned {status}.")),
+    ))
+}
+
+async fn verify_session(
+    connection_id: &str,
+    client: &reqwest::Client,
+    base_url: &str,
+) -> Result<(), AppError> {
+    let response = client
+        .get(panel_url(base_url, "/api/auth/me")?)
+        .header(
+            reqwest::header::COOKIE,
+            super::panel::cookie_header_for(connection_id).await?,
+        )
+        .send()
+        .await
+        .map_err(|error| {
+            AppError::new("E_HERMES_PROBE", "Could not verify the gateway session.")
+                .with_detail(error.to_string())
+        })?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let value: Value = response.json().await.unwrap_or(Value::Null);
+    if let Some(error) = identity_status_error(
+        status,
+        value
+            .get("detail")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    ) {
+        return Err(error);
+    }
+    // Only a successful check can carry a rotated session. A rejected one may carry the
+    // deletion Set-Cookie, which must never replace the stored tokens — a slow 401 from before
+    // a re-login would otherwise erase the new session.
+    if status.is_success() {
+        super::panel::persist_response_cookies(connection_id, &headers)?;
+    }
+    Ok(())
+}
+
 pub async fn probe(
     connection_id: &str,
     _gateway_url: &str,
@@ -415,8 +468,10 @@ pub async fn probe(
     if !super::panel::has_session(connection_id) {
         return Err(super::panel::session_missing());
     }
-    let url = panel_url(&super::panel::base_url_for(connection_id)?, "/api/status")?;
+    let base_url = super::panel::base_url_for(connection_id)?;
+    let url = panel_url(&base_url, "/api/status")?;
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(12))
         .no_proxy()
         .build()
@@ -438,11 +493,14 @@ pub async fn probe(
         })?;
     let status = response.status();
     let headers = response.headers().clone();
-    super::panel::persist_response_cookies(connection_id, &headers)?;
     let value: Value = response.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         return Err(probe_status_error(status));
     }
+    super::panel::persist_response_cookies(connection_id, &headers)?;
+    // A public status answer is not proof of a live session; verify the cookies first so the
+    // periodic probe cannot flip an expired panel back to "connected".
+    verify_session(connection_id, &client, &base_url).await?;
     Ok(HermesConnectionProbe {
         ok: true,
         latency_ms: started.elapsed().as_millis() as u64,
@@ -1017,6 +1075,30 @@ mod tests {
         assert_eq!(failed.code, "E_HERMES_PROBE");
         assert_eq!(failed.message, "Gateway status returned 502 Bad Gateway.");
         assert!(failed.detail.is_none());
+    }
+
+    #[test]
+    fn only_a_rejected_identity_check_expires_the_probed_session() {
+        let expired = identity_status_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            Some("Unauthorized".into()),
+        )
+        .expect("a rejected identity check must expire the session");
+        assert_eq!(expired.code, "E_HERMES_PANEL_AUTH");
+        assert_eq!(expired.detail.as_deref(), Some("Unauthorized"));
+
+        let fallback =
+            identity_status_error(reqwest::StatusCode::FORBIDDEN, None).expect("403 is rejected");
+        assert_eq!(
+            fallback.detail.as_deref(),
+            Some("Gateway identity returned 403 Forbidden.")
+        );
+
+        // A panel older than the identity route, or a temporary server fault, must not turn a
+        // reachable connection into a sign-in prompt.
+        assert!(identity_status_error(reqwest::StatusCode::NOT_FOUND, None).is_none());
+        assert!(identity_status_error(reqwest::StatusCode::INTERNAL_SERVER_ERROR, None).is_none());
+        assert!(identity_status_error(reqwest::StatusCode::OK, None).is_none());
     }
 
     #[tokio::test]

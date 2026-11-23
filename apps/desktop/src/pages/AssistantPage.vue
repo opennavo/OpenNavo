@@ -71,6 +71,16 @@ const macTone = computed<'success' | 'neutral'>(() =>
 const connectionReady = computed(() =>
   store.remoteActive ? store.activeProfile.status === 'connected' : store.runtimeReady
 );
+/** A panel's own state, not the local runtime's: "Not installed" is meaningless for one. */
+const connectionLabel = computed(() => {
+  if (!store.remoteActive) {
+    return connectionReady.value ? content.value.header.local : content.value.header.demo;
+  }
+  if (connectionReady.value) return content.value.profiles.remoteOnly;
+  if (store.activeProfile.status === 'error') return content.value.profiles.error;
+  if (store.activeProfile.status === 'offline') return content.value.profiles.offline;
+  return content.value.profiles.connecting;
+});
 
 /** Older panel rows are only offered once this conversation's transcript is on screen. */
 const showEarlier = computed(() => {
@@ -356,14 +366,19 @@ const streamingAssistant = computed(() =>
 );
 watch(() => store.thinking, scrollToBottom, { flush: 'post' });
 watch(lastMessage, scrollToBottom, { deep: true, flush: 'post' });
+function openRelogin(profile: import('@/stores/hermes').HermesProfile) {
+  reloginProfile.value = profile;
+  gatewayOpen.value = true;
+  ui.closeProfiles();
+}
+
 watch(
   () => store.panelAuthExpired,
   profileId => {
     if (!profileId) return;
     const profile = store.profiles.find(item => item.id === profileId);
     if (!profile) return;
-    reloginProfile.value = profile;
-    gatewayOpen.value = true;
+    openRelogin(profile);
   }
 );
 watch(
@@ -466,14 +481,17 @@ onBeforeUnmount(() => {
         <span class="text-17px font-600 tracking-[-0.015em] text-ink-primary">Hermes</span>
         <OnChip tone="neutral">{{ content.header.builtin }}</OnChip>
         <span class="inline-flex shrink-0 items-center gap-5px whitespace-nowrap text-11px text-ink-tertiary"
-          ><i class="h-6px w-6px rounded-full" :class="connectionReady ? 'bg-status-success' : 'bg-status-warning'"></i
-          >{{
-            connectionReady
-              ? store.remoteActive
-                ? content.profiles.remoteOnly
-                : content.header.local
-              : content.header.demo
-          }}</span
+          ><i
+            class="h-6px w-6px rounded-full"
+            :class="
+              store.activeProfile.status === 'error'
+                ? 'bg-status-danger'
+                : connectionReady
+                  ? 'bg-status-success'
+                  : 'bg-status-warning'
+            "
+          ></i
+          >{{ connectionLabel }}</span
         >
         <div v-if="!compactHeader" class="flex shrink-0 items-center gap-10px">
           <OnChip :tone="macTone" dot class="shrink-0 whitespace-nowrap">{{ macLabel }}</OnChip>
@@ -504,7 +522,7 @@ onBeforeUnmount(() => {
     </header>
 
     <div
-      v-if="!connectionReady"
+      v-if="!store.remoteActive && !store.runtimeReady"
       class="flex min-h-0 flex-1 flex-col items-center justify-center px-24px pb-40px text-center"
     >
       <HermesMark :size="54" />
@@ -522,6 +540,32 @@ onBeforeUnmount(() => {
       >
         {{ store.runtime.message }}
       </p>
+    </div>
+
+    <!--
+      A panel that is signed out is not a Mac missing its local runtime: say so and offer the
+      panel sign-in instead of the local install gate.
+    -->
+    <div
+      v-else-if="!connectionReady"
+      class="flex min-h-0 flex-1 flex-col items-center justify-center px-24px pb-40px text-center"
+    >
+      <HermesMark :size="54" />
+      <h2 class="m-0 mt-16px text-21px font-600 tracking-[-0.02em] text-ink-primary">
+        {{ content.profiles.panelUnavailableTitle }}
+      </h2>
+      <p class="m-0 mt-7px max-w-430px text-13px leading-[1.7] text-ink-secondary">
+        {{ store.activeProfile.error || content.profiles.panelUnavailableBody }}
+      </p>
+      <OnButton
+        v-if="store.activeProfile.kind === 'panel'"
+        class="mt-20px"
+        variant="accent"
+        size="md"
+        icon="lucide:key-round"
+        @click="openRelogin(store.activeProfile)"
+        >{{ content.profiles.relogin }}</OnButton
+      >
     </div>
 
     <template v-else>
@@ -807,6 +851,7 @@ onBeforeUnmount(() => {
     <HermesProfiles
       :open="ui.profilesOpen"
       @close="ui.closeProfiles()"
+      @relogin="openRelogin"
       @add="
         gatewayOpen = true;
         ui.closeProfiles();

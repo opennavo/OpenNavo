@@ -46,6 +46,39 @@ const PANEL_CATALOG = {
   provider: 'custom'
 };
 
+const PANEL_AGENT_PROFILES = [
+  {
+    name: 'default',
+    displayName: null,
+    path: '/tmp/hermes',
+    isDefault: true,
+    model: 'grok-4.7',
+    provider: 'custom',
+    skillCount: 0,
+    hasEnv: false,
+    description: null,
+    botTitle: null,
+    distributionName: null,
+    distributionVersion: null
+  }
+];
+
+function panelLoginMocks() {
+  vi.spyOn(commands, 'hermesPanelLogout').mockResolvedValue({ status: 'ok', data: null });
+  vi.spyOn(commands, 'hermesPanelLogin').mockResolvedValue({
+    status: 'ok',
+    data: { baseUrl: 'http://panel.tail1234.ts.net:9119', provider: 'basic' }
+  });
+  vi.spyOn(commands, 'hermesConnectionProbe').mockResolvedValue({
+    status: 'ok',
+    data: { ok: true, latencyMs: 4, version: '0.23.3', profiles: 1 }
+  });
+  vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+    status: 'ok',
+    data: PANEL_CATALOG
+  });
+}
+
 function seedPanelProfile() {
   localStorage.setItem(
     PROFILES_KEY,
@@ -508,6 +541,222 @@ describe('Hermes conversation store', () => {
     await store.send('Trigger the panel auth error');
 
     expect(store.panelAuthExpired).toBe('panel-1');
+    // A missing session has no detail; the message is the only useful thing to show.
+    const panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    expect(panel.error).toBe('Hermes Panel session is missing. Sign in again.');
+  });
+
+  it('Keeps a rejected panel session out of the connected state during a probe', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesConnectionProbe').mockRejectedValue(
+      new IpcError({
+        code: 'E_HERMES_PANEL_AUTH',
+        message: 'Hermes Panel session expired. Sign in again.',
+        detail: 'Unauthorized'
+      })
+    );
+    const store = useHermesStore();
+
+    await store.probeConnections();
+
+    // The panel's public /api/status still answers when the session is dead; the profile must
+    // stay on "sign in again" instead of flipping back to connected every minute.
+    const panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    expect(panel.status).toBe('error');
+    expect(panel.error).toBe('Unauthorized');
+    expect(store.panelAuthExpired).toBe('panel-1');
+  });
+
+  it('Ignores a probe that answers after the panel signed in again', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    let rejectStaleProbe: (reason: unknown) => void = () => undefined;
+    vi.spyOn(commands, 'hermesConnectionProbe')
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectStaleProbe = reject;
+          }) as never
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { ok: true, latencyMs: 4, version: '0.23.3', profiles: 1 }
+      } as never);
+    vi.spyOn(commands, 'hermesPanelLogout').mockResolvedValue({ status: 'ok', data: null });
+    vi.spyOn(commands, 'hermesPanelLogin').mockResolvedValue({
+      status: 'ok',
+      data: { baseUrl: 'http://panel.tail1234.ts.net:9119', provider: 'basic' }
+    });
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue({
+      status: 'ok',
+      data: [
+        {
+          name: 'default',
+          displayName: null,
+          path: '/tmp/hermes',
+          isDefault: true,
+          model: 'grok-4.7',
+          provider: 'custom',
+          skillCount: 0,
+          hasEnv: false,
+          description: null,
+          botTitle: null,
+          distributionName: null,
+          distributionVersion: null
+        }
+      ]
+    });
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: PANEL_CATALOG
+    });
+    const store = useHermesStore();
+
+    const probing = store.probeConnections();
+    await store.reloginPanel('panel-1', 'http://panel.tail1234.ts.net:9119', 'admin', 'secret');
+    // The probe's request left before the sign-in; its 401 must not undo the new session.
+    rejectStaleProbe(
+      new IpcError({
+        code: 'E_HERMES_PANEL_AUTH',
+        message: 'Hermes Panel session expired. Sign in again.',
+        detail: 'Unauthorized'
+      })
+    );
+    await probing;
+
+    const panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    expect(panel.status).toBe('connected');
+    expect(panel.error).toBeUndefined();
+    expect(store.panelAuthExpired).toBeNull();
+
+    // The next launch reads this record: it must not restore the pre-login error state.
+    const persisted = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}') as {
+      profiles?: { id: string; status: string; error?: string }[];
+    };
+    const saved = persisted.profiles?.find(profile => profile.id === 'panel-1');
+    expect(saved?.status).toBe('connected');
+    expect(saved?.error).toBeUndefined();
+  });
+
+  it('Ignores a profile list that answers after the panel signed in again', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    let rejectStaleProfiles: (reason: unknown) => void = () => undefined;
+    let panelCalls = 0;
+    vi.spyOn(commands, 'hermesAgentProfiles').mockImplementation(((connectionId: string | null) => {
+      if (connectionId !== 'panel-1') return Promise.resolve({ status: 'ok', data: [] });
+      panelCalls += 1;
+      if (panelCalls === 1) {
+        return new Promise((_resolve, reject) => {
+          rejectStaleProfiles = reject;
+        });
+      }
+      return Promise.resolve({ status: 'ok', data: PANEL_AGENT_PROFILES });
+    }) as never);
+    panelLoginMocks();
+    const store = useHermesStore();
+
+    const loading = store.loadAllAgentProfiles();
+    await store.reloginPanel('panel-1', 'http://panel.tail1234.ts.net:9119', 'admin', 'secret');
+    // The list read left before the sign-in; its 401 must not undo the new session.
+    rejectStaleProfiles(
+      new IpcError({
+        code: 'E_HERMES_PANEL_AUTH',
+        message: 'Hermes Panel session expired. Sign in again.',
+        detail: 'Unauthorized'
+      })
+    );
+    await loading;
+
+    const panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    expect(panel.status).toBe('connected');
+    expect(panel.error).toBeUndefined();
+    expect(store.panelAuthExpired).toBeNull();
+  });
+
+  it('Ignores panel history that answers after the panel signed in again', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    let rejectStaleHistory: (reason: unknown) => void = () => undefined;
+    vi.spyOn(commands, 'hermesPanelHistory').mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectStaleHistory = reject;
+        }) as never
+    );
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue({
+      status: 'ok',
+      data: PANEL_AGENT_PROFILES
+    });
+    panelLoginMocks();
+    const store = useHermesStore();
+
+    const loading = store.loadPanelHistory();
+    await store.reloginPanel('panel-1', 'http://panel.tail1234.ts.net:9119', 'admin', 'secret');
+    // The page read left before the sign-in; its 401 must not reopen the sign-in sheet.
+    rejectStaleHistory(
+      new IpcError({
+        code: 'E_HERMES_PANEL_AUTH',
+        message: 'Hermes Panel session expired. Sign in again.',
+        detail: 'Unauthorized'
+      })
+    );
+    await loading;
+
+    const panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    expect(panel.status).toBe('connected');
+    expect(panel.error).toBeUndefined();
+    expect(store.panelAuthExpired).toBeNull();
+  });
+
+  it('Does not cache panel history that succeeded after the panel signed in again', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    let resolveStaleHistory: (value: unknown) => void = () => undefined;
+    vi.spyOn(commands, 'hermesPanelHistory').mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          resolveStaleHistory = resolve;
+        }) as never
+    );
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue({
+      status: 'ok',
+      data: PANEL_AGENT_PROFILES
+    });
+    panelLoginMocks();
+    const store = useHermesStore();
+
+    const loading = store.loadPanelHistory();
+    await store.reloginPanel('panel-1', 'http://panel.tail1234.ts.net:9119', 'admin', 'secret');
+    // A page served under the old session must not become the new session's cache: otherwise the
+    // next open of history trusts it instead of reading the slice from the signed-in panel.
+    resolveStaleHistory({
+      status: 'ok',
+      data: JSON.stringify({
+        sessions: [
+          {
+            id: 'stale-session',
+            display_name: null,
+            title: 'Before re-login',
+            preview: 'Old page',
+            message_count: 2,
+            runtime_revision: 3,
+            runtime_generation: 1,
+            started_at: 1_700_000_000,
+            last_activity_at: 1_700_000_500,
+            last_active: 1_700_000_400
+          }
+        ],
+        total: 1,
+        hasMore: false,
+        degraded: false
+      })
+    });
+    await loading;
+
+    expect(store.conversations.some(item => item.id === 'stale-session')).toBe(false);
+    expect(store.panelSlices['panel-1::default']?.recents?.loaded).toBe(false);
   });
 
   it('Starts with an empty desktop history', () => {
