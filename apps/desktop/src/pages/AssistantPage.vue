@@ -86,6 +86,8 @@ const composerEditor = useHermesComposerEditor({
   attachClipboardImage,
   isComposing: () => compositionActive.value
 });
+let composerObserver: ResizeObserver | undefined;
+let composerWidth = 0;
 const dragging = ref(false);
 let unlistenDrop: (() => void) | undefined;
 let stopNotificationWatch: (() => void) | undefined;
@@ -191,6 +193,53 @@ function followStreaming() {
 // A transcript remounted after the connection gate reopens starts pinned again, at its newest row.
 watch(scroll, element => {
   if (element) scrollToBottom();
+});
+
+/** Mirrors the composer's `max-h-110px`: past that the draft scrolls instead of growing. */
+const COMPOSER_MAX_HEIGHT_PX = 110;
+
+/**
+ * Fit the composer to its draft, the way chat composers do it: reset the height so `scrollHeight`
+ * reports the content rather than the previous frame, then write that height back and only let the
+ * field scroll once the cap is reached.
+ */
+function onComposerInput() {
+  composerEditor.onInput();
+  resizeComposer();
+}
+
+function resizeComposer() {
+  const element = composer.value;
+  if (!element) return;
+  const previousHeight = element.style.height;
+  element.style.height = 'auto';
+  const contentHeight = element.scrollHeight;
+  element.style.height = `${Math.min(contentHeight, COMPOSER_MAX_HEIGHT_PX)}px`;
+  element.style.overflowY = contentHeight > COMPOSER_MAX_HEIGHT_PX ? 'auto' : 'hidden';
+  // The transcript is a flex sibling, so a taller composer takes height from it; keep a reader
+  // who was following the tail at the tail.
+  if (followTail.value && element.style.height !== previousHeight) scrollToBottom();
+}
+
+// The input handler measures during typing and IME. This watcher covers Send and New Chat, which
+// change the draft without an input event.
+watch(input, resizeComposer, { flush: 'post' });
+
+// Re-wrapping changes the line count without an input event (window resizes, layout changes).
+watch(composer, element => {
+  composerObserver?.disconnect();
+  composerObserver = undefined;
+  composerWidth = 0;
+  if (!element) return;
+  resizeComposer();
+  composerObserver = new ResizeObserver(entries => {
+    const width = entries[0]?.contentRect.width ?? 0;
+    // Height is ours to set, so only a width change can need another measurement.
+    if (width === composerWidth) return;
+    composerWidth = width;
+    resizeComposer();
+  });
+  composerObserver.observe(element);
 });
 
 const directoryLabel = computed(() => {
@@ -735,6 +784,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (connectionProbeTimer) window.clearInterval(connectionProbeTimer);
   headerObserver?.disconnect();
+  composerObserver?.disconnect();
   window.removeEventListener('keydown', onKeydown);
   window.removeEventListener('paste', onPaste);
   unlistenDrop?.();
@@ -1009,10 +1059,10 @@ onBeforeUnmount(() => {
               aria-multiline="true"
               contenteditable="true"
               data-empty
-              class="hermes-composer block max-h-110px min-h-42px w-full overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent px-4px pb-8px pt-4px font-sans text-13.5px leading-[1.55] text-ink-primary outline-none"
+              class="hermes-composer block max-h-110px min-h-42px w-full resize-none overflow-y-hidden whitespace-pre-wrap break-words border-none bg-transparent px-4px pb-8px pt-4px font-sans text-13.5px leading-[1.55] text-ink-primary outline-none"
               :data-placeholder="content.composer.placeholder"
               :aria-label="content.composer.placeholder"
-              @input="composerEditor.onInput"
+              @input="onComposerInput"
               @paste="composerEditor.onPaste"
               @keydown="composerEditor.onKeydown"
               @compositionstart="onCompositionStart"

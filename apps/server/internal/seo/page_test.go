@@ -36,14 +36,6 @@ func TestPageDecisionMatrix(t *testing.T) {
 						require.False(t, d.InSitemap)
 						return
 					}
-					if kind == PageVersions && locale != f.SourceLocale {
-						require.Equal(t, "versions_source_only", d.Reason)
-						require.Equal(t, "noindex, follow", d.Robots)
-						require.False(t, d.InSitemap)
-						require.False(t, d.Announce)
-						require.Empty(t, d.Hreflang)
-						return
-					}
 					if kind == PageDependencies {
 						// Dependency content keeps the tab's own URL, but the tab is never indexed.
 						require.Equal(t, PageDecision{Robots: "noindex, follow", Hreflang: []string{}, Reason: ReasonSupportingPage}, d)
@@ -51,11 +43,9 @@ func TestPageDecisionMatrix(t *testing.T) {
 					}
 					require.Equal(t, IndexableRobots, d.Robots)
 					require.Empty(t, d.CanonicalPath)
-					if kind == PageVersions {
-						require.Equal(t, []string{f.SourceLocale}, d.Hreflang)
-					} else {
-						require.Equal(t, Locales, d.Hreflang)
-					}
+					// A versions page shares the overview's set because every language has enough translated
+					// notes on this page: one policy, one reciprocal set.
+					require.Equal(t, Locales, d.Hreflang)
 					require.Equal(t, page == 1, d.InSitemap)
 					require.True(t, d.Announce)
 					require.Empty(t, d.Reason)
@@ -63,11 +53,17 @@ func TestPageDecisionMatrix(t *testing.T) {
 			}
 		}
 	}
-	// A thin page removes that locale from every equivalent page's hreflang set, not just itself.
+	// A thin translation removes that locale from every equivalent page's hreflang set, not just itself.
 	f.NotesPages[2]["fr-FR"] = NotesFacts{Chars: 299, Entries: VersionsMinNoteEntries}
 	// Long notes on too few releases are thin too: one or two notes repeat the overview's latest release.
 	f.NotesPages[3]["ja-JP"] = NotesFacts{Chars: 5000, Entries: VersionsMinNoteEntries - 1}
 	for page, thin := range map[int]string{2: "fr-FR", 3: "ja-JP"} {
+		want := make([]string, 0, len(Locales)-1)
+		for _, locale := range Locales {
+			if locale != thin {
+				want = append(want, locale)
+			}
+		}
 		for _, locale := range Locales {
 			d := DecidePage(f, PageRef{Kind: PageVersions, Locale: locale, Page: page}, p)
 			require.NotContains(t, d.Hreflang, thin)
@@ -76,7 +72,10 @@ func TestPageDecisionMatrix(t *testing.T) {
 				require.False(t, d.Announce)
 				require.Empty(t, d.CanonicalPath)
 				require.Empty(t, d.Hreflang)
-				require.Equal(t, "versions_source_only", d.Reason)
+				require.Equal(t, "thin_notes_page", d.Reason)
+			} else {
+				// Every qualified language lists the same set, so the links stay reciprocal.
+				require.Equal(t, want, d.Hreflang, locale)
 			}
 		}
 	}
@@ -303,28 +302,25 @@ func TestSitemapPopularityOnlyChangesInclusion(t *testing.T) {
 	}
 }
 
-func TestFontAndTranslatedVersionsNeverAnnounce(t *testing.T) {
+func TestFontsNeverAnnounceAndTranslatedVersionsShareTheAppHreflang(t *testing.T) {
 	for _, override := range []string{OverrideAuto, OverrideIndex} {
 		f := eligible()
 		f.Override = override
 		f.ReadyLocales = Locales
 		f.NotesPages = map[int]map[string]NotesFacts{1: {}}
 		for _, locale := range Locales {
-			f.NotesPages[1][locale] = NotesFacts{Chars: 1000, Entries: 3}
+			f.NotesPages[1][locale] = NotesFacts{Chars: 1000, Entries: VersionsMinNoteEntries}
 		}
 		policy := Policy{VersionsSitemap: true}
 		for _, locale := range Locales {
 			d := DecidePage(f, PageRef{Kind: PageVersions, Locale: locale}, policy)
-			if locale == f.SourceLocale {
-				require.True(t, d.Announce)
-				require.Equal(t, []string{f.SourceLocale}, d.Hreflang)
-			} else {
-				require.Equal(t, "versions_source_only", d.Reason)
-				require.Equal(t, "noindex, follow", d.Robots)
-				require.False(t, d.Announce)
-				require.False(t, d.InSitemap)
-				require.Empty(t, d.Hreflang)
-			}
+			// Every language has translated notes on this page, so a translated version page is indexed
+			// as itself and lists the same alternates as the app page.
+			require.Equal(t, IndexableRobots, d.Robots)
+			require.True(t, d.Announce)
+			require.True(t, d.InSitemap)
+			require.Equal(t, Locales, d.Hreflang)
+			require.Empty(t, d.Reason)
 			for _, tokenFont := range []bool{false, true} {
 				font := f
 				font.IsFont = true

@@ -397,7 +397,7 @@
       "aliases": "以前の token"
     },
     "versionsMetaTitle": "{name}のバージョン履歴と更新内容 · OpenNavo",
-    "versionsMetaDescription": "{name}の最新バージョンは{version}（{date}）です。各リリースの変更内容をご覧ください。",
+    "versionsMetaDescription": "{name}の最新バージョンは{version}（{date}）です。各リリースの変更内容、macOS の対応バージョン、ダウンロード方法、インストールとアンインストールの手順を OpenNavo で確認できます。旧バージョンのダウンロードとよくある質問も掲載しています。",
     "metaTitleCask": "{name}：{summary} — Homebrewでインストール · OpenNavo",
     "metaDescription": "{summary}。インストールコマンド：{command}。最新バージョンは{version}、過去30日間のインストール数は{installs}回です。",
     "seo": {
@@ -424,8 +424,8 @@
       "descriptionUnavailableNoSummary": "{name}は Homebrew で無効化されています。バージョン履歴や類似アプリを確認できます。",
       "versionsTitle": "{name}の更新履歴 · OpenNavo",
       "versionsTitleLatest": "{name}の更新履歴（最新 {version}）· OpenNavo",
-      "versionsDescriptionNoDate": "{name}の最新バージョンは{version}です。各リリースの変更内容をご覧ください。",
-      "versionsDescriptionNoVersion": "{name}の各リリースの変更内容をご覧ください。"
+      "versionsDescriptionNoDate": "{name}の最新バージョンは{version}です。各リリースの変更内容、macOS の対応バージョン、ダウンロード方法、インストールとアンインストールの手順を OpenNavo で確認できます。旧バージョンのダウンロードとよくある質問も掲載しています。",
+      "versionsDescriptionNoVersion": "{name}の各リリースの変更内容、macOS の対応バージョン、ダウンロード方法、インストールとアンインストールの手順を OpenNavo で確認できます。旧バージョンのダウンロードとよくある質問も掲載しています。"
     },
     "removed": {
       "metaTitle": "{name} は Homebrew から削除されました · OpenNavo",

@@ -39,7 +39,7 @@ function request(path: string) {
 }
 
 describe('disabled sitemap buckets', () => {
-  it.each(['/__sitemap__/fonts-bucket-1.xml', '/__sitemap__/versions-bucket-1.xml'])(
+  it.each(['/__sitemap__/fonts-bucket-1.xml', '/__sitemap__/versions-bucket-6.xml'])(
     'returns 410 with uncacheable headers while the source is disabled: %s',
     async path => {
       const { default: middleware } = await import('../server/middleware/sitemap-fonts');
@@ -54,13 +54,13 @@ describe('disabled sitemap buckets', () => {
   it('keeps the approved versions-sitemap pilot available while versions are disabled', async () => {
     const { default: middleware } = await import('../server/middleware/sitemap-fonts');
     await expect(middleware(request(`/__sitemap__/${VERSIONS_SITEMAP_PILOT_BUCKET}.xml`))).resolves.toBeUndefined();
-    await expect(middleware(request('/__sitemap__/versions-bucket-1.xml'))).rejects.toMatchObject({ statusCode: 410 });
+    await expect(middleware(request('/__sitemap__/versions-bucket-6.xml'))).rejects.toMatchObject({ statusCode: 410 });
   });
 
   it('follows runtime switches without retaining a disabled response', async () => {
     const { default: middleware } = await import('../server/middleware/sitemap-fonts');
     const fonts = request('/__sitemap__/fonts-bucket-1.xml');
-    const versions = request('/__sitemap__/versions-bucket-1.xml');
+    const versions = request('/__sitemap__/versions-bucket-6.xml');
 
     state.fonts = true;
     state.versions = true;
@@ -70,12 +70,12 @@ describe('disabled sitemap buckets', () => {
     state.fonts = false;
     state.versions = false;
     await expect(middleware(request('/__sitemap__/fonts-bucket-1.xml'))).rejects.toMatchObject({ statusCode: 410 });
-    await expect(middleware(request('/__sitemap__/versions-bucket-1.xml'))).rejects.toMatchObject({ statusCode: 410 });
+    await expect(middleware(request('/__sitemap__/versions-bucket-6.xml'))).rejects.toMatchObject({ statusCode: 410 });
 
     state.fonts = true;
     state.versions = true;
     await expect(middleware(request('/__sitemap__/fonts-bucket-1.xml'))).resolves.toBeUndefined();
-    await expect(middleware(request('/__sitemap__/versions-bucket-1.xml'))).resolves.toBeUndefined();
+    await expect(middleware(request('/__sitemap__/versions-bucket-6.xml'))).resolves.toBeUndefined();
   });
 
   it('leaves unknown bucket numbers to the sitemap module when the source is enabled', async () => {
@@ -108,8 +108,8 @@ describe('disabled sitemap buckets', () => {
     );
     await import('../server/plugins/error-cache-control');
     for (const path of [
-      '/__sitemap__/versions-bucket-1.xml',
-      '/__nuxt_error?url=%2F__sitemap__%2Fversions-bucket-1.xml'
+      '/__sitemap__/versions-bucket-6.xml',
+      '/__nuxt_error?url=%2F__sitemap__%2Fversions-bucket-6.xml'
     ]) {
       const event = request(path);
       onError({ statusCode: 410 }, { event });

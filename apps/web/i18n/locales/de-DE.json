@@ -397,7 +397,7 @@
       "aliases": "Frühere Tokens"
     },
     "versionsMetaTitle": "{name}: Versionsverlauf und Neuerungen · OpenNavo",
-    "versionsMetaDescription": "Neueste Version von {name}: {version} ({date}). Sehen Sie, was sich in jeder Version geändert hat.",
+    "versionsMetaDescription": "Neueste Version von {name}: {version} ({date}). Sehen Sie, was sich in jeder Version geändert hat, inklusive macOS-Anforderungen, Download-Links sowie Installations- und Deinstallationshinweisen auf OpenNavo.",
     "metaTitleCask": "{name}: {summary} — mit Homebrew installieren · OpenNavo",
     "metaDescription": "{summary}. Installation: {command}. Neueste Version {version}, {installs} Installation in den letzten 30 Tagen. | {summary}. Installation: {command}. Neueste Version {version}, {installs} Installationen in den letzten 30 Tagen.",
     "seo": {
@@ -424,8 +424,8 @@
       "descriptionUnavailableNoSummary": "Homebrew hat {name} deaktiviert; hier finden Sie den Versionsverlauf und ähnliche Apps.",
       "versionsTitle": "{name}: Versionshinweise · OpenNavo",
       "versionsTitleLatest": "{name}: Versionshinweise (aktuell {version}) · OpenNavo",
-      "versionsDescriptionNoDate": "Neueste Version von {name}: {version}. Sehen Sie, was sich in jeder Version geändert hat.",
-      "versionsDescriptionNoVersion": "Sehen Sie, was sich in jeder Version von {name} geändert hat."
+      "versionsDescriptionNoDate": "Neueste Version von {name}: {version}. Sehen Sie, was sich in jeder Version geändert hat, inklusive macOS-Anforderungen, Download-Links sowie Installations- und Deinstallationshinweisen auf OpenNavo.",
+      "versionsDescriptionNoVersion": "Sehen Sie, was sich in jeder Version von {name} geändert hat, inklusive macOS-Anforderungen, Download-Links sowie Installations- und Deinstallationshinweisen auf OpenNavo."
     },
     "removed": {
       "metaTitle": "{name} wurde aus Homebrew entfernt · OpenNavo",

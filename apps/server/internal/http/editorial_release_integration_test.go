@@ -184,17 +184,28 @@ func TestEditorialReleaseLocaleIsolationAndPageDecision(t *testing.T) {
 					require.Equal(t, translated, *entry.BodyMarkdown)
 				}
 			}
-			// 72a38e4 restricts indexing to the package's source locale; localized notes still render and count.
-			wantIndex := tc.localized && tc.locale == "zh-CN"
+			// A version page is indexed in a language only when that language's notes on the page meet
+			// the threshold. The translated page is its own indexed page, not a copy of the source.
+			wantIndex := tc.localized
+			wantHreflang := []publicapi.Locale{}
+			if wantIndex {
+				wantHreflang = []publicapi.Locale{"zh-CN"}
+				switch tc.locale {
+				case "en-US":
+					wantHreflang = []publicapi.Locale{"en-US", "zh-CN"}
+				case "ja-JP":
+					wantHreflang = []publicapi.Locale{"zh-CN", "ja-JP"}
+				}
+			}
 			require.Equal(t, wantIndex, seo.DecisionRobots(string(page.Data.Indexing.Robots)).Index)
 			require.Equal(t, wantIndex, page.Data.Indexing.Announce)
-			if tc.locale != "zh-CN" {
-				require.Equal(t, "versions_source_only", page.Data.Indexing.Reason)
-				require.False(t, page.Data.Indexing.InSitemap)
-				require.Empty(t, page.Data.Indexing.Hreflang)
+			require.Equal(t, wantHreflang, page.Data.Indexing.Hreflang)
+			if wantIndex {
+				require.Empty(t, page.Data.Indexing.Reason)
 			} else {
-				require.Equal(t, []publicapi.Locale{"zh-CN"}, page.Data.Indexing.Hreflang)
+				require.Equal(t, "thin_notes_page", page.Data.Indexing.Reason)
 			}
+			require.False(t, page.Data.Indexing.InSitemap)
 			var detail publicapi.PackageDetailResponse
 			require.NoError(t, json.Unmarshal(call("GET", "/packages/cask/"+token+"?locale="+tc.locale, ""), &detail))
 			require.NotNil(t, detail.Data.LatestRelease)
@@ -206,8 +217,8 @@ func TestEditorialReleaseLocaleIsolationAndPageDecision(t *testing.T) {
 			if tc.locale != "zh-CN" {
 				require.NotContains(t, string(lookup), "中文摘要")
 			}
-			// Source-only indexing still preserves per-language notes facts: this version is the third release
-			// with notes in the requested language only when its notes count in that language.
+			// The notes facts decide indexing for the requested language: this version is the third
+			// release with notes in that language only when its notes count in that language.
 			row, found, err := st.IndexRowByID(ctx, id)
 			require.NoError(t, err)
 			require.True(t, found)
@@ -220,11 +231,13 @@ func TestEditorialReleaseLocaleIsolationAndPageDecision(t *testing.T) {
 				decision := seo.DecidePage(rows[0].Facts(), seo.PageRef{Kind: seo.PageVersions, Locale: tc.locale, Page: 1}, policy)
 				require.Equal(t, wantIndex, seo.DecisionRobots(string(decision.Robots)).Index, mode)
 				require.Equal(t, wantIndex, decision.Announce, mode)
-				if tc.locale != row.SourceLocale {
-					require.Equal(t, "versions_source_only", decision.Reason, mode)
-					require.False(t, decision.InSitemap, mode)
-					require.Empty(t, decision.Hreflang, mode)
+				require.Equal(t, wantHreflang, decision.Hreflang, mode)
+				if wantIndex {
+					require.Empty(t, decision.Reason, mode)
+				} else {
+					require.Equal(t, "thin_notes_page", decision.Reason, mode)
 				}
+				require.False(t, decision.InSitemap, mode)
 			}
 		})
 	}

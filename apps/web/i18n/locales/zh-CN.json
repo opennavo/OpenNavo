@@ -424,8 +424,8 @@
       "descriptionUnavailableNoSummary": "{name} 已被 Homebrew 停用，可以查看版本记录和同类软件。",
       "versionsTitle": "{name} 更新日志 · OpenNavo",
       "versionsTitleLatest": "{name} 更新日志（最新 {version}）· OpenNavo",
-      "versionsDescriptionNoDate": "{name} 最新版本 {version}。查看每个版本更新了什么。",
-      "versionsDescriptionNoVersion": "查看 {name} 每个版本更新了什么。"
+      "versionsDescriptionNoDate": "{name} 最新版本 {version}。查看每个版本的更新内容、支持的 macOS 版本、下载方式、安装与卸载步骤以及旧版本信息。",
+      "versionsDescriptionNoVersion": "查看 {name} 每个版本的更新内容、支持的 macOS 版本、下载方式、安装与卸载步骤以及旧版本信息。"
     },
     "removed": {
       "metaTitle": "{name} 已从 Homebrew 移除 · OpenNavo",
