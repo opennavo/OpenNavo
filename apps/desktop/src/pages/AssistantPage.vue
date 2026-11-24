@@ -131,14 +131,53 @@ function enableMac() {
   });
 }
 
+/** A streaming turn may keep the transcript in view only while the reader is already at the end. */
+const followTail = ref(true);
+const TAIL_SLACK_PX = 24;
+/** Set while we move the transcript ourselves: its scroll event is not reader intent. */
+let programmaticScroll = false;
+
+function atTail(element: HTMLElement) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= TAIL_SLACK_PX;
+}
+
+/** Scrolling away from the end stops the chase; scrolling back resumes it. */
+function onScroll() {
+  const element = scroll.value;
+  if (!element) return;
+  const tail = atTail(element);
+  // Our own move always lands on the tail; never let its scroll event re-open following. A
+  // position off the tail is the reader, even while that event is still in flight.
+  if (programmaticScroll && tail) return;
+  followTail.value = tail;
+}
+
 function scrollToBottom() {
+  followTail.value = true;
   void nextTick(() => {
     window.requestAnimationFrame(() => {
       const element = scroll.value;
-      if (element) element.scrollTop = element.scrollHeight;
+      // A token may queue this frame and the reader may scroll up before it runs.
+      if (!element || !followTail.value) return;
+      programmaticScroll = true;
+      element.scrollTop = element.scrollHeight;
+      // Scroll events for this move are dispatched no later than the next frame.
+      window.requestAnimationFrame(() => {
+        programmaticScroll = false;
+      });
     });
   });
 }
+
+/** Streaming rewrites the last message on every token; never yank a reader who scrolled up. */
+function followStreaming() {
+  if (followTail.value) scrollToBottom();
+}
+
+// A transcript remounted after the connection gate reopens starts pinned again, at its newest row.
+watch(scroll, element => {
+  if (element) scrollToBottom();
+});
 
 const directoryLabel = computed(() => {
   if (store.remoteActive) return content.value.profiles.remoteWorkspace;
@@ -328,6 +367,7 @@ function newChat() {
   historyOpen.value = false;
   input.value = '';
   attachments.value = [];
+  scrollToBottom();
   void nextTick(() => composer.value?.focus());
 }
 
@@ -336,9 +376,8 @@ function selectConversation(id: string) {
   store.select(id);
   attachments.value = [];
   historyOpen.value = false;
-  void nextTick(() => {
-    scroll.value?.scrollTo({ top: 0 });
-  });
+  // Opening a conversation is navigation, not reading: start at its newest row and follow it.
+  scrollToBottom();
 }
 
 async function openBackgroundTurn(conversationId: string) {
@@ -351,9 +390,7 @@ async function openNotificationConversation(open: HermesNotificationOpen) {
   if (!(await store.revealConversation(open.conversationId))) return;
   attachments.value = [];
   historyOpen.value = false;
-  void nextTick(() => {
-    scroll.value?.scrollTo({ top: 0 });
-  });
+  scrollToBottom();
 }
 
 const contextPercent = computed(() => {
@@ -387,8 +424,8 @@ const lastMessage = computed(() => store.messages.at(-1));
 const streamingAssistant = computed(() =>
   store.messages.some(message => message.role === 'assistant' && message.streaming === true)
 );
-watch(() => store.thinking, scrollToBottom, { flush: 'post' });
-watch(lastMessage, scrollToBottom, { deep: true, flush: 'post' });
+watch(() => store.thinking, followStreaming, { flush: 'post' });
+watch(lastMessage, followStreaming, { deep: true, flush: 'post' });
 function openRelogin(profile: import('@/stores/hermes').HermesProfile) {
   reloginProfile.value = profile;
   gatewayOpen.value = true;
@@ -404,11 +441,11 @@ watch(
     openRelogin(profile);
   }
 );
+// Selecting a conversation, opening a notification or starting a draft all land on the newest
+// row: an explicit navigation resets following instead of inheriting the previous scroll state.
 watch(
   () => store.activeId,
-  () => {
-    void nextTick(() => scroll.value?.scrollTo({ top: 0 }));
-  }
+  () => scrollToBottom()
 );
 
 async function installRuntime() {
@@ -592,7 +629,12 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
-      <div ref="scroll" class="min-h-0 flex-1 overflow-y-auto py-18px">
+      <div
+        ref="scroll"
+        data-hermes-transcript
+        class="min-h-0 flex-1 overflow-y-auto py-18px"
+        @scroll.passive="onScroll"
+      >
         <div class="mx-auto flex w-full max-w-720px flex-col gap-22px">
           <div v-if="showEarlier" class="flex items-center justify-center">
             <button
