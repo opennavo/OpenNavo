@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach } from 'vitest';
+import type { VueWrapper } from '@vue/test-utils';
 import type { Pinia } from 'pinia';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import type { RouteRecordRaw, Router } from 'vue-router';
@@ -190,6 +191,14 @@ export async function setup(
   await router.push(path);
   await router.isReady();
   return { pinia, router, state };
+}
+
+/** The composer is a contenteditable editor, not an input: write text and emit its input event. */
+export async function setComposerText(wrapper: VueWrapper, text: string) {
+  const editor = wrapper.get<HTMLElement>('#hermes-composer');
+  editor.element.textContent = text;
+  await editor.trigger('input');
+  return editor;
 }
 
 /** jsdom lacks matchMedia: answer shell media queries using the supplied width. */

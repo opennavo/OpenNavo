@@ -388,6 +388,31 @@ pub fn hermes_attachment_info(paths: Vec<String>) -> Vec<crate::hermes::HermesAt
 
 #[tauri::command]
 #[specta::specta]
+pub fn hermes_save_pasted_text(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<crate::hermes::HermesAttachmentInfo, AppError> {
+    crate::hermes::save_pasted_text(&app, &text)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_save_attachment_image(
+    app: tauri::AppHandle,
+    data_url: String,
+    name: Option<String>,
+) -> Result<crate::hermes::HermesAttachmentInfo, AppError> {
+    crate::hermes::save_pasted_image(&app, &data_url, name.as_deref())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn hermes_discard_attachment(app: tauri::AppHandle, path: String) -> Result<(), AppError> {
+    crate::hermes::discard_attachment(&app, &path)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn hermes_media_resolve(
     app: tauri::AppHandle,
     input: crate::hermes::media::HermesMediaInput,

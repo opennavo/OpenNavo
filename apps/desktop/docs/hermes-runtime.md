@@ -262,6 +262,15 @@ conversation/config file; generated Hermes cache directories are exempt.
   `image.attach` accepts but the authority session does not, is sent with
   `file.attach` and a `data_url`. `image.attach` is only used for a local
   gateway, which can read this Mac's path.
+- The composer paste path mirrors the official desktop. An http(s) link in the
+  pasted text becomes an `@url:` chip and a bare `@path` becomes `@file:` or
+  `@folder:`; chips serialize back to `@kind:`value``in the submitted prompt.
+A paste over 3,000 characters is written to`<HERMES*HOME>/composer-pastes/pasted_content*\*.txt`and attached instead of
+flooding the editor. Clipboard images are read from the paste's file items,
+then`files`, then a base64 `data:image`payload, and finally inline`<img>`
+  data URLs when the copy has no prose; images and text in one paste are both
+  kept. A non-image file copied in Finder is still not a paste attachment: use
+  the picker or drag it in.
 
 `hermes_media_resolve` dynamically allows each local file in the asset protocol
 scope; `tauri.conf.json` does not need a blanket `$HOME/**` scope. The CSP

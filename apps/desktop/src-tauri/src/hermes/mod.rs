@@ -44,6 +44,10 @@ const DATA_ROOT_DIR: &str = "OpenNavoData";
 const RUNTIME_DIR: &str = "runtime/hermes";
 const HERMES_HOME_DIR: &str = "hermes";
 const AUDIT_FILE: &str = "audit.jsonl";
+const COMPOSER_PASTES_DIR: &str = "composer-pastes";
+const COMPOSER_IMAGES_DIR: &str = "composer-images";
+const MAX_PASTED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+const MAX_PASTED_TEXT_BYTES: usize = 50 * 1024 * 1024;
 const RUNTIME_MANIFEST_JSON: &str = include_str!("../../../hermes/runtime.json");
 
 #[derive(Debug, Deserialize)]
@@ -651,14 +655,221 @@ pub fn attachment_info(paths: Vec<String>) -> Vec<HermesAttachmentInfo> {
         .collect()
 }
 
+/// Persist a large plain-text paste as a `.txt` the composer can attach. The renderer never
+/// chooses the path: the file lands in the runtime home alongside Hermes' own composer-pastes,
+/// matching the official desktop so a local gateway and a panel can both read it.
+pub fn save_pasted_text(app: &AppHandle, text: &str) -> Result<HermesAttachmentInfo, AppError> {
+    let dir = hermes_home(app)?.join(COMPOSER_PASTES_DIR);
+    std::fs::create_dir_all(&dir)?;
+    save_pasted_text_in(&dir, text)
+}
+
+fn save_pasted_text_in(dir: &Path, text: &str) -> Result<HermesAttachmentInfo, AppError> {
+    if text.is_empty() {
+        return Err(AppError::new("E_HERMES_PASTE", "The pasted text is empty."));
+    }
+    // Refuse before writing: an oversized paste must not leave a file nothing can attach.
+    if text.len() > MAX_PASTED_TEXT_BYTES {
+        return Err(AppError::new(
+            "E_HERMES_PASTE",
+            "Pasted text is limited to 50 MB.",
+        ));
+    }
+    let name = format!(
+        "pasted_content_{}_{}.txt",
+        chrono::Utc::now().format("%Y%m%d_%H%M%S"),
+        uuid::Uuid::new_v4().simple()
+    );
+    let path = dir.join(&name);
+    std::fs::write(&path, text.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Pasted material can be sensitive; keep it owner-only like Hermes' own config.
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(HermesAttachmentInfo {
+        path: path.display().to_string(),
+        name,
+        size: text.len() as u64,
+        is_image: false,
+    })
+}
+
+/// Save a pasted image (a `data:image/...;base64,` payload from the renderer) so it becomes a
+/// regular attachment the existing image/file pipeline can send in both local and panel modes.
+pub fn save_pasted_image(
+    app: &AppHandle,
+    data_url: &str,
+    name: Option<&str>,
+) -> Result<HermesAttachmentInfo, AppError> {
+    let dir = data_root(app)?.join(COMPOSER_IMAGES_DIR);
+    std::fs::create_dir_all(&dir)?;
+    save_pasted_image_in(&dir, data_url, name)
+}
+
+fn pasted_image_extension(mime: &str) -> Option<&'static str> {
+    match mime.to_ascii_lowercase().as_str() {
+        "image/png" => Some("png"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/bmp" => Some("bmp"),
+        "image/tiff" => Some("tiff"),
+        "image/svg+xml" => Some("svg"),
+        "image/x-icon" | "image/vnd.microsoft.icon" => Some("ico"),
+        _ => None,
+    }
+}
+
+fn pasted_image_stem(name: Option<&str>) -> String {
+    let raw = name
+        .unwrap_or_default()
+        .split(['/', '\\'])
+        .next_back()
+        .unwrap_or_default();
+    let stem = raw.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(raw);
+    let cleaned: String = stem
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed: String = cleaned
+        .trim_matches(['.', '_', '-'])
+        .chars()
+        .take(80)
+        .collect();
+    if trimmed.is_empty() {
+        "pasted-image".to_owned()
+    } else {
+        trimmed
+    }
+}
+
+fn save_pasted_image_in(
+    dir: &Path,
+    data_url: &str,
+    name: Option<&str>,
+) -> Result<HermesAttachmentInfo, AppError> {
+    let (header, payload) = data_url
+        .split_once(',')
+        .ok_or_else(|| AppError::new("E_HERMES_PASTE", "The pasted image is not a data URL."))?;
+    let header = header.trim();
+    if !header.starts_with("data:") || !header.to_ascii_lowercase().contains(";base64") {
+        return Err(AppError::new(
+            "E_HERMES_PASTE",
+            "The pasted image is not a base64 data URL.",
+        ));
+    }
+    let mime = header
+        .trim_start_matches("data:")
+        .split(';')
+        .next()
+        .unwrap_or_default();
+    let extension = pasted_image_extension(mime)
+        .ok_or_else(|| AppError::new("E_HERMES_PASTE", "Unsupported pasted image type."))?;
+    // Base64 decodes to 3/4 of its encoded length (minus padding). Check that estimate before
+    // allocating the decoded buffer so an absurd payload never becomes 25 MB+ of image in memory.
+    let encoded = payload.trim();
+    let padding = encoded
+        .as_bytes()
+        .iter()
+        .rev()
+        .take_while(|byte| **byte == b'=')
+        .count();
+    if encoded.len() / 4 * 3 > MAX_PASTED_IMAGE_BYTES + padding {
+        return Err(AppError::new(
+            "E_HERMES_PASTE",
+            "Pasted images are limited to 25 MB.",
+        ));
+    }
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload.trim())
+        .map_err(|error| {
+            AppError::new("E_HERMES_PASTE", "The pasted image is not valid base64.")
+                .with_detail(error.to_string())
+        })?;
+    if bytes.is_empty() {
+        return Err(AppError::new(
+            "E_HERMES_PASTE",
+            "The pasted image is empty.",
+        ));
+    }
+    if bytes.len() > MAX_PASTED_IMAGE_BYTES {
+        return Err(AppError::new(
+            "E_HERMES_PASTE",
+            "Pasted images are limited to 25 MB.",
+        ));
+    }
+    let name = format!(
+        "{}_{}.{}",
+        pasted_image_stem(name),
+        uuid::Uuid::new_v4().simple(),
+        extension
+    );
+    let path = dir.join(&name);
+    std::fs::write(&path, &bytes)?;
+    Ok(HermesAttachmentInfo {
+        path: path.display().to_string(),
+        name,
+        size: bytes.len() as u64,
+        is_image: gateway::attachment_is_image(&path),
+    })
+}
+
+/// Whether `path` resolves inside one of the composer-owned paste directories. Canonicalizing
+/// both sides means a symlink cannot make a user file look managed.
+fn is_managed_composer_path(path: &Path, pastes_dir: &Path, images_dir: &Path) -> bool {
+    let Ok(target) = path.canonicalize() else {
+        return false;
+    };
+    [pastes_dir, images_dir].iter().any(|dir| {
+        dir.canonicalize()
+            .map(|dir| target.starts_with(dir))
+            .unwrap_or(false)
+    })
+}
+
+fn discard_managed_file(
+    path: &Path,
+    pastes_dir: &Path,
+    images_dir: &Path,
+) -> Result<(), AppError> {
+    // Idempotent: a chip removed twice, or a file already cleaned up, is not an error.
+    if !path.exists() {
+        return Ok(());
+    }
+    if !is_managed_composer_path(path, pastes_dir, images_dir) {
+        return Err(AppError::new(
+            "E_HERMES_PASTE",
+            "Refusing to delete a file the composer did not create.",
+        ));
+    }
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+/// Remove a paste file when its chip is removed or its attachment was refused. Only files under
+/// `composer-pastes` / `composer-images` qualify; picker and drag attachments are never touched.
+pub fn discard_attachment(app: &AppHandle, path: &str) -> Result<(), AppError> {
+    let pastes_dir = hermes_home(app)?.join(COMPOSER_PASTES_DIR);
+    let images_dir = data_root(app)?.join(COMPOSER_IMAGES_DIR);
+    discard_managed_file(Path::new(path), &pastes_dir, &images_dir)
+}
+
 fn append_audit(
     home: &Path,
     input: &HermesChatInput,
     outcome: &str,
     session: Option<&str>,
     detail: Option<&str>,
-) {
-    let entry = serde_json::json!({
+) {    let entry = serde_json::json!({
         "at": chrono::Utc::now().to_rfc3339(),
         "provider": input.provider,
         "model": input.model,
@@ -2346,6 +2557,109 @@ mod tests {
         assert!(!info[1].is_image);
         assert!(info[2].is_image);
         assert!(!info[3].is_image);
+    }
+
+    #[test]
+    fn saves_pasted_text_as_an_attachable_txt() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "line one\nline two";
+        let info = save_pasted_text_in(dir.path(), text).unwrap();
+
+        assert!(info.name.starts_with("pasted_content_"));
+        assert!(info.name.ends_with(".txt"));
+        assert_eq!(info.size, text.len() as u64);
+        assert!(!info.is_image);
+        assert_eq!(std::fs::read_to_string(&info.path).unwrap(), text);
+        assert!(std::path::Path::new(&info.path).is_file());
+    }
+
+    #[test]
+    fn rejects_an_empty_paste() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = save_pasted_text_in(dir.path(), "").unwrap_err();
+        assert_eq!(error.code, "E_HERMES_PASTE");
+    }
+
+    #[test]
+    fn rejects_pasted_text_over_the_limit_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "a".repeat(MAX_PASTED_TEXT_BYTES + 1);
+        let error = save_pasted_text_in(dir.path(), &text).unwrap_err();
+        assert_eq!(error.code, "E_HERMES_PASTE");
+        // A refused paste must not leave a file nothing can attach.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn rejects_oversized_image_payloads_before_decoding() {
+        let dir = tempfile::tempdir().unwrap();
+        // Invalid base64 on purpose: the payload must be refused for its size before decoding,
+        // not after the decoder has walked it.
+        let payload = "*".repeat(MAX_PASTED_IMAGE_BYTES / 3 * 4 + 8);
+        let data_url = format!("data:image/png;base64,{payload}");
+        let error = save_pasted_image_in(dir.path(), &data_url, None).unwrap_err();
+        assert_eq!(error.code, "E_HERMES_PASTE");
+        assert!(error.message.contains("25 MB"));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn only_composer_owned_files_are_discarded() {
+        let root = tempfile::tempdir().unwrap();
+        let pastes = root.path().join(COMPOSER_PASTES_DIR);
+        let images = root.path().join(COMPOSER_IMAGES_DIR);
+        std::fs::create_dir_all(&pastes).unwrap();
+        std::fs::create_dir_all(&images).unwrap();
+        let paste = pastes.join("pasted_content_1.txt");
+        std::fs::write(&paste, "x").unwrap();
+        let image = images.join("shot.png");
+        std::fs::write(&image, "x").unwrap();
+        let picked = root.path().join("picked.txt");
+        std::fs::write(&picked, "x").unwrap();
+
+        assert!(is_managed_composer_path(&paste, &pastes, &images));
+        assert!(is_managed_composer_path(&image, &pastes, &images));
+        assert!(!is_managed_composer_path(&picked, &pastes, &images));
+
+        discard_managed_file(&paste, &pastes, &images).unwrap();
+        assert!(!paste.exists());
+
+        // A picker/drag attachment is never deleted, even when the chip is removed.
+        let refused = discard_managed_file(&picked, &pastes, &images).unwrap_err();
+        assert_eq!(refused.code, "E_HERMES_PASTE");
+        assert!(picked.exists());
+
+        // Removing an already-gone paste is harmless.
+        discard_managed_file(&picked.with_extension("missing"), &pastes, &images).unwrap();
+    }
+
+    #[test]
+    fn saves_a_png_data_url_with_its_mime_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC5sAAAAASUVORK5CYII=";
+        let info =
+            save_pasted_image_in(dir.path(), data_url, Some("Screenshot 2026-11-24.png")).unwrap();
+
+        assert!(info.name.starts_with("Screenshot_2026-11-24_"));
+        assert!(info.name.ends_with(".png"));
+        assert!(info.is_image);
+        assert!(info.size > 0);
+        assert!(std::path::Path::new(&info.path).is_file());
+    }
+
+    #[test]
+    fn pasted_image_payloads_must_be_a_supported_data_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let not_an_image =
+            save_pasted_image_in(dir.path(), "data:text/plain;base64,AAAA", None).unwrap_err();
+        assert_eq!(not_an_image.code, "E_HERMES_PASTE");
+
+        let not_data_url = save_pasted_image_in(dir.path(), "iVBORw0KGgo=", None).unwrap_err();
+        assert_eq!(not_data_url.code, "E_HERMES_PASTE");
+
+        let bad_base64 =
+            save_pasted_image_in(dir.path(), "data:image/png;base64,***", None).unwrap_err();
+        assert_eq!(bad_base64.code, "E_HERMES_PASTE");
     }
 
     #[test]

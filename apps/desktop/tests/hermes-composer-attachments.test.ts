@@ -5,7 +5,7 @@ import AssistantPage from '@/pages/AssistantPage.vue';
 import { i18n } from '@/i18n';
 import { commands } from '@/ipc/client';
 import { useHermesStore } from '@/stores/hermes';
-import { setup } from './helpers';
+import { setComposerText, setup } from './helpers';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(async () => ['/tmp/photo.png'])
@@ -46,7 +46,7 @@ async function composer() {
   await flushPromises();
   const store = useHermesStore();
   const send = vi.spyOn(store, 'send').mockResolvedValue(undefined);
-  const textarea = wrapper.get<HTMLTextAreaElement>('#hermes-composer');
+  const textarea = wrapper.get<HTMLElement>('#hermes-composer');
   return { wrapper, store, send, textarea };
 }
 
@@ -59,7 +59,7 @@ async function attachPhoto(wrapper: VueWrapper) {
   expect(wrapper.text()).toContain('photo.png');
 }
 
-function pressEnter(target: HTMLTextAreaElement) {
+function pressEnter(target: HTMLElement) {
   const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
   Object.defineProperty(event, 'keyCode', { value: 13 });
   target.dispatchEvent(event);
@@ -69,7 +69,7 @@ describe('Hermes composer attachments', () => {
   it('Keeps the text and files when the store cannot take an attachment send', async () => {
     const { wrapper, store, send, textarea } = await composer();
     await attachPhoto(wrapper);
-    await textarea.setValue('look at this');
+    await setComposerText(wrapper, 'look at this');
     // Another turn owns the slot, or queued rows keep this chat waiting: the store rejects a
     // file send without writing a row, so the composer must keep everything the user selected.
     vi.spyOn(store, 'attachmentsBlocked').mockReturnValue(true);
@@ -78,21 +78,21 @@ describe('Hermes composer attachments', () => {
     await flushPromises();
 
     expect(send).not.toHaveBeenCalled();
-    expect(textarea.element.value).toBe('look at this');
+    expect(textarea.element.textContent).toBe('look at this');
     expect(wrapper.text()).toContain('photo.png');
   });
 
   it('Clears the composer once the attachment send is accepted', async () => {
     const { wrapper, store, send, textarea } = await composer();
     await attachPhoto(wrapper);
-    await textarea.setValue('look at this');
+    await setComposerText(wrapper, 'look at this');
     vi.spyOn(store, 'attachmentsBlocked').mockReturnValue(false);
 
     pressEnter(textarea.element);
     await flushPromises();
 
     expect(send).toHaveBeenCalledWith('look at this', ['/tmp/photo.png']);
-    expect(textarea.element.value).toBe('');
+    expect(textarea.element.textContent).toBe('');
     expect(wrapper.text()).not.toContain('photo.png');
   });
 });

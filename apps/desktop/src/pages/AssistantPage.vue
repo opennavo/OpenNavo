@@ -17,8 +17,11 @@ import { commands, unwrap } from '@/ipc/client';
 import { useHermesUiStore } from '@/stores/hermesUi';
 import { useHermesContent } from '@/composables/useHermesContent';
 import { useToasts } from '@/composables/useToasts';
+import { useHermesComposerEditor } from '@/composables/useHermesComposerEditor';
+import type { PastedTextOutcome } from '@/composables/useHermesComposerEditor';
 import { mediaKind } from '@/hermes/media';
 import { deriveComposerSubmitState } from '@/hermes/composer';
+import { blobToDataUrl, pasteSizeLabel, pastedTextBytes } from '@/hermes/composerClipboard';
 import {
   queueHermesNotificationOpen,
   takeHermesNotificationOpen,
@@ -63,22 +66,32 @@ const headerRef = ref<HTMLElement | null>(null);
 const compactHeader = ref(false);
 let headerObserver: ResizeObserver | undefined;
 const contextOpen = ref(false);
-const attachments = ref<{ path: string; name: string; isImage: boolean; size?: number }[]>([]);
+const attachments = ref<{ path: string; name: string; isImage: boolean; size?: number; label?: string }[]>([]);
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const REMOTE_ATTACHMENT_BYTES = 16 * 1024 * 1024;
 const attachmentPreviews = ref<Record<string, string>>({});
 const fileInput = ref<HTMLInputElement>();
 const scroll = ref<HTMLElement>();
-const composer = ref<HTMLTextAreaElement>();
+const composer = ref<HTMLElement | null>(null);
+const IME_ENTER_GRACE_MS = 50;
+const compositionActive = ref(false);
+let compositionEndedAt = 0;
+/** One send at a time: a second Enter while a paste save is awaited must not send twice. */
+let sendInFlight = false;
+const composerEditor = useHermesComposerEditor({
+  editor: composer,
+  value: input,
+  attachImages: attachPastedImages,
+  attachPastedText,
+  attachClipboardImage,
+  isComposing: () => compositionActive.value
+});
 let composerObserver: ResizeObserver | undefined;
 let composerWidth = 0;
 const dragging = ref(false);
 let unlistenDrop: (() => void) | undefined;
 let stopNotificationWatch: (() => void) | undefined;
 const SUGGESTIONS = ['rectangle', 'cleanup', 'updates', 'explain'] as const;
-const IME_ENTER_GRACE_MS = 50;
-const compositionActive = ref(false);
-let compositionEndedAt = 0;
 
 const modelLabel = computed(
   () => `${content.value.header.model} · ${store.modelShort} · ${content.value.effort[store.model.effort]}`
@@ -188,8 +201,13 @@ const COMPOSER_MAX_HEIGHT_PX = 110;
 /**
  * Fit the composer to its draft, the way chat composers do it: reset the height so `scrollHeight`
  * reports the content rather than the previous frame, then write that height back and only let the
- * textarea scroll once the cap is reached.
+ * field scroll once the cap is reached.
  */
+function onComposerInput() {
+  composerEditor.onInput();
+  resizeComposer();
+}
+
 function resizeComposer() {
   const element = composer.value;
   if (!element) return;
@@ -203,9 +221,8 @@ function resizeComposer() {
   if (followTail.value && element.style.height !== previousHeight) scrollToBottom();
 }
 
-// `post` runs after v-model has painted the draft, so the measurement includes the newest line.
-// v-model drops input events while an IME composition is open, so the textarea also resizes from
-// the native input event; this watcher covers the programmatic changes made by Send and New Chat.
+// The input handler measures during typing and IME. This watcher covers Send and New Chat, which
+// change the draft without an input event.
 watch(input, resizeComposer, { flush: 'post' });
 
 // Re-wrapping changes the line count without an input event (window resizes, layout changes).
@@ -232,22 +249,30 @@ const directoryLabel = computed(() => {
   return dir.split('/').filter(Boolean).at(-1) ?? dir;
 });
 
-function addAttachment(path: string, name?: string, size?: number, image?: boolean) {
+function attachmentLimitBytes() {
+  return store.remoteActive ? REMOTE_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
+}
+
+/** The one oversize toast shared by the picker, pasted text and pasted images. */
+function rejectOversizedAttachment(name: string) {
+  toasts.push({
+    tone: 'warning',
+    title: content.value.composer.attach,
+    description: `${name} > ${store.remoteActive ? '16' : '50'} MB`
+  });
+}
+
+function addAttachment(path: string, name?: string, size?: number, image?: boolean, label?: string): boolean {
   const displayName = name || path.split('/').filter(Boolean).at(-1) || path;
-  const limit = store.remoteActive ? REMOTE_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
-  if (size && size > limit) {
-    toasts.push({
-      tone: 'warning',
-      title: content.value.composer.attach,
-      description: `${displayName} > ${store.remoteActive ? '16' : '50'} MB`
-    });
-    return;
+  if (attachments.value.some(item => item.path === path)) return true;
+  if (size && size > attachmentLimitBytes()) {
+    rejectOversizedAttachment(displayName);
+    return false;
   }
   const isImage = image ?? mediaKind(displayName) === 'image';
-  if (!attachments.value.some(item => item.path === path)) {
-    attachments.value.push({ path, name: displayName, isImage, size });
-    if (isImage) void loadAttachmentPreview(path);
-  }
+  attachments.value.push({ path, name: displayName, isImage, size, label });
+  if (isImage) void loadAttachmentPreview(path);
+  return true;
 }
 
 function attachmentIcon(path: string): string {
@@ -265,6 +290,101 @@ async function addAttachmentPaths(paths: string[]) {
     info.forEach(item => addAttachment(item.path, item.name, item.size, item.isImage));
   } catch {
     paths.forEach(path => addAttachment(path));
+  }
+}
+
+function desktopAvailable() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** Only files this feature wrote may be deleted: never a picker/drag attachment. */
+function isManagedComposerPath(path: string) {
+  return /(^|[\\/])(composer-pastes|composer-images)[\\/]/.test(path);
+}
+
+/** Best effort: a leftover temp file must never keep a removed chip on screen. */
+async function discardManagedAttachment(path: string) {
+  if (!desktopAvailable() || !isManagedComposerPath(path)) return;
+  try {
+    await unwrap(commands.hermesDiscardAttachment(path));
+  } catch {
+    // The file is already gone, or the host refused it; the chip still goes away either way.
+  }
+}
+
+/** Images from a paste hit the same attachment path as the picker, after a data-URL round trip. */
+async function attachPastedImages(blobs: Blob[]) {
+  if (!desktopAvailable()) return;
+  const limit = attachmentLimitBytes();
+  for (const blob of blobs) {
+    const displayName = blob instanceof File && blob.name ? blob.name : content.value.composer.pastedContent;
+    // Refuse before the IPC round trip; a remote attachment would be rejected host-side anyway.
+    if (blob.size > limit) {
+      rejectOversizedAttachment(displayName);
+      continue;
+    }
+    try {
+      const dataUrl = await blobToDataUrl(blob);
+      const info = await unwrap(commands.hermesSaveAttachmentImage(dataUrl, blob instanceof File ? blob.name : null));
+      if (!addAttachment(info.path, info.name, info.size, info.isImage)) {
+        await discardManagedAttachment(info.path);
+      }
+    } catch {
+      toasts.push({
+        tone: 'warning',
+        title: content.value.composer.attach,
+        description: content.value.composer.imageAttachFailed
+      });
+    }
+  }
+}
+
+/**
+ * A long paste becomes a `.txt` attachment. `rejected` (too large for either form) is not a
+ * write failure and must never fall back to inline text.
+ */
+async function attachPastedText(text: string): Promise<PastedTextOutcome> {
+  // The size gate comes before the IPC availability check: the inline fallback has the same
+  // limit, so an oversized paste must be refused even when there is no host to save it.
+  if (pastedTextBytes(text) > attachmentLimitBytes()) {
+    rejectOversizedAttachment(content.value.composer.pastedContent);
+    return 'rejected';
+  }
+  if (!desktopAvailable()) return 'failed';
+  try {
+    const info = await unwrap(commands.hermesSavePastedText(text));
+    const attached = addAttachment(
+      info.path,
+      info.name,
+      info.size,
+      false,
+      `${content.value.composer.pastedContent} (${pasteSizeLabel(text)})`
+    );
+    if (!attached) {
+      await discardManagedAttachment(info.path);
+      return 'rejected';
+    }
+    return 'attached';
+  } catch {
+    toasts.push({
+      tone: 'warning',
+      title: content.value.composer.attach,
+      description: content.value.composer.pasteFailed
+    });
+    return 'failed';
+  }
+}
+
+/** WKWebView can deliver a screenshot as an empty paste; the native reader is the fallback. */
+async function attachClipboardImage() {
+  if (!desktopAvailable()) return false;
+  try {
+    const path = await unwrap(commands.hermesClipboardImage());
+    if (!path) return false;
+    await addAttachmentPaths([path]);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -307,19 +427,25 @@ async function pickFiles() {
   fileInput.value?.click();
 }
 
-async function onPaste(event: ClipboardEvent) {
-  if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) return;
-  if (!event.clipboardData?.getData('text/plain')) {
-    try {
-      const path = await unwrap(commands.hermesClipboardImage());
-      if (path) {
-        event.preventDefault();
-        await addAttachmentPaths([path]);
-      }
-    } catch {
-      // Clipboard images are optional.
-    }
-  }
+function isEditablePasteTarget(target: EventTarget | null) {
+  const element = target instanceof HTMLElement ? target : null;
+  return Boolean(element?.closest('input, textarea, [contenteditable="true"]'));
+}
+
+/**
+ * Paste-to-focus: a ⌘V on non-editable chrome routes the clipboard into the composer instead of
+ * dying on the window body. The editor's own paste handler runs first and marks the event handled.
+ */
+function onPaste(event: ClipboardEvent) {
+  if (!event.clipboardData || event.defaultPrevented) return;
+  const target = event.target instanceof Node ? event.target : null;
+  const editor = composer.value;
+  if (editor && target && (target === editor || editor.contains(target))) return;
+  if (isEditablePasteTarget(event.target) || ui.settingsOpen) return;
+  if (target instanceof HTMLElement && target.closest('[role="dialog"]')) return;
+  if (!composerEditor.handleClipboard(event.clipboardData)) return;
+  event.preventDefault();
+  composer.value?.focus();
 }
 
 function onFileInput(event: Event) {
@@ -334,7 +460,15 @@ function onFileInput(event: Event) {
 }
 
 function removeAttachment(index: number) {
-  attachments.value.splice(index, 1);
+  const [removed] = attachments.value.splice(index, 1);
+  if (removed) void discardManagedAttachment(removed.path);
+}
+
+/** Leaving this draft drops its chips; managed paste files go with them, sent files stay. */
+function clearAttachments() {
+  const dropped = attachments.value;
+  attachments.value = [];
+  for (const item of dropped) void discardManagedAttachment(item.path);
 }
 
 async function pickDirectory() {
@@ -417,26 +551,40 @@ const composerHint = computed(() => {
   return `↵ ${composerActionLabel.value}`;
 });
 
-function send() {
-  const value = input.value.trim();
-  const files = attachments.value.map(item => item.path);
-  if (!value && !files.length) return;
-  if (store.stopping) return;
-  if (files.length && store.attachmentsBlocked()) {
-    toasts.push({
-      tone: 'warning',
-      title: content.value.composer.attach,
-      description: content.value.composer.attachmentsBusy
-    });
-    return;
+async function send() {
+  if (sendInFlight) return;
+  sendInFlight = true;
+  try {
+    // A paste may still be saving its attachment. Wait for it so the message carries everything
+    // the paste produced instead of clearing the composer under a late save (and the next draft
+    // inheriting it).
+    await composerEditor.whenPasteSettled();
+    // Trim decides whether there is a message; it must not rewrite the prompt (a pasted block
+    // keeps its leading indentation and an explicit trailing newline).
+    const raw = composerEditor.getPlainText();
+    const value = raw.trim();
+    const files = attachments.value.map(item => item.path);
+    if (!value && !files.length) return;
+    if (store.stopping) return;
+    if (files.length && store.attachmentsBlocked()) {
+      toasts.push({
+        tone: 'warning',
+        title: content.value.composer.attach,
+        description: content.value.composer.attachmentsBusy
+      });
+      return;
+    }
+    // The turn's busy policy has not arrived yet (or the payload cannot ride a correction); the
+    // button is disabled for the same window, so Enter must not pin a guess either.
+    if (!composerSubmit.value.canSubmit) return;
+    store.send(raw, files);
+    composerEditor.clear();
+    // Sent files are the gateway's to read; only the chips go.
+    attachments.value = [];
+    scrollToBottom();
+  } finally {
+    sendInFlight = false;
   }
-  // The turn's busy policy has not arrived yet (or the payload cannot ride a correction); the
-  // button is disabled for the same window, so Enter must not pin a guess either.
-  if (!composerSubmit.value.canSubmit) return;
-  store.send(value, files);
-  input.value = '';
-  attachments.value = [];
-  scrollToBottom();
 }
 
 /** The primary button submits the form, except with an empty composer, where it stops the turn. */
@@ -446,26 +594,27 @@ function onComposerPrimary() {
 
 function onEnter(event: KeyboardEvent) {
   if (event.key !== 'Enter' || event.shiftKey) return;
-  if (
-    event.isComposing ||
-    event.keyCode === 229 ||
-    compositionActive.value ||
-    Date.now() - compositionEndedAt < IME_ENTER_GRACE_MS
-  ) {
-    return;
-  }
+  // A composing Enter belongs to the IME, not the composer: let it commit the candidate.
+  if (event.isComposing || event.keyCode === 229 || compositionActive.value) return;
+  // The confirming Enter after compositionend must not insert a newline while the grace window
+  // is open; outside it, this same preventDefault keeps the contenteditable from adding one too.
   event.preventDefault();
-  send();
+  if (Date.now() - compositionEndedAt < IME_ENTER_GRACE_MS) return;
+  void send();
 }
 
 function onCompositionStart() {
   compositionActive.value = true;
+  // Preedit text is not committed content: keep the placeholder from painting behind it.
+  composer.value?.removeAttribute('data-empty');
 }
 
 function onCompositionEnd() {
   compositionActive.value = false;
   // Safari/WKWebView can dispatch the confirming Enter after compositionend, sometimes with keyCode 13.
   compositionEndedAt = Date.now();
+  // The placeholder was held back while composing; now sync it with the committed text.
+  composerEditor.syncFromDom();
 }
 
 function suggestion(prompt: string) {
@@ -477,8 +626,8 @@ function newChat() {
   // Switching views never stops a running turn; it keeps streaming into its own conversation.
   store.newChat();
   historyOpen.value = false;
-  input.value = '';
-  attachments.value = [];
+  composerEditor.clear();
+  clearAttachments();
   scrollToBottom();
   void nextTick(() => composer.value?.focus());
 }
@@ -486,7 +635,7 @@ function newChat() {
 function selectConversation(id: string) {
   // A background turn in another conversation is not interrupted by opening this one.
   store.select(id);
-  attachments.value = [];
+  clearAttachments();
   historyOpen.value = false;
   // Opening a conversation is navigation, not reading: start at its newest row and follow it.
   scrollToBottom();
@@ -500,7 +649,7 @@ async function openBackgroundTurn(conversationId: string) {
 
 async function openNotificationConversation(open: HermesNotificationOpen) {
   if (!(await store.revealConversation(open.conversationId))) return;
-  attachments.value = [];
+  clearAttachments();
   historyOpen.value = false;
   scrollToBottom();
 }
@@ -889,8 +1038,8 @@ onBeforeUnmount(() => {
                   class="h-22px w-22px shrink-0 rounded-3px object-cover"
                 />
                 <OnIcon v-else :name="attachmentIcon(file.path)" :size="12" class="shrink-0 text-ink-tertiary" />
-                <span class="min-w-0 truncate">{{ file.name }}</span>
-                <span v-if="file.size" class="shrink-0 text-10px text-ink-tertiary"
+                <span class="min-w-0 truncate">{{ file.label || file.name }}</span>
+                <span v-if="file.size && !file.label" class="shrink-0 text-10px text-ink-tertiary"
                   >{{ Math.ceil(file.size / 1024) }} KB</span
                 >
                 <button
@@ -903,19 +1052,23 @@ onBeforeUnmount(() => {
                 </button>
               </span>
             </div>
-            <textarea
+            <div
               id="hermes-composer"
               ref="composer"
-              v-model="input"
-              rows="1"
-              class="block max-h-110px min-h-42px w-full resize-none overflow-y-hidden border-none bg-transparent px-4px pb-8px pt-4px font-sans text-13.5px leading-[1.55] text-ink-primary outline-none placeholder:text-ink-tertiary"
-              :placeholder="content.composer.placeholder"
+              role="textbox"
+              aria-multiline="true"
+              contenteditable="true"
+              data-empty
+              class="hermes-composer block max-h-110px min-h-42px w-full resize-none overflow-y-hidden whitespace-pre-wrap break-words border-none bg-transparent px-4px pb-8px pt-4px font-sans text-13.5px leading-[1.55] text-ink-primary outline-none"
+              :data-placeholder="content.composer.placeholder"
               :aria-label="content.composer.placeholder"
+              @input="onComposerInput"
+              @paste="composerEditor.onPaste"
+              @keydown="composerEditor.onKeydown"
               @compositionstart="onCompositionStart"
               @compositionend="onCompositionEnd"
-              @input="resizeComposer"
               @keydown.enter="onEnter"
-            ></textarea>
+            ></div>
             <div class="flex items-center gap-8px">
               <button
                 type="button"
@@ -1181,3 +1334,33 @@ onBeforeUnmount(() => {
     </OnModal>
   </div>
 </template>
+
+<style>
+#hermes-composer[data-empty]::before {
+  content: attr(data-placeholder);
+  color: inherit;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.hermes-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 0.92em;
+  line-height: 1.45;
+  vertical-align: baseline;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.hermes-ref-chip-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+</style>
