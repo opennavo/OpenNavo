@@ -321,6 +321,42 @@ describe('Hermes panel history', () => {
     expect(store.panelSliceState('recents').hasMore).toBe(false);
   });
 
+  it('waits for an in-flight append before re-reading the first page', async () => {
+    type PanelResult = Awaited<ReturnType<typeof commands.hermesPanelHistory>>;
+    const firstPage = Array.from({ length: 40 }, (_, index) => row({ id: `s-${index}` }));
+    let releaseAppend!: (value: PanelResult) => void;
+    vi.spyOn(commands, 'hermesPanelHistory')
+      .mockResolvedValueOnce(panelSessions(firstPage, 41))
+      .mockImplementationOnce(
+        () =>
+          new Promise<PanelResult>(resolve => {
+            releaseAppend = resolve;
+          })
+      )
+      .mockResolvedValueOnce(panelSessions([row({ id: 's-new' }), row({ id: 's-0' })], 42));
+    const store = await mountPanelStore();
+    await store.loadPanelHistory();
+    expect(store.panelSliceState('recents').offset).toBe(40);
+    expect(store.panelSliceState('recents').hasMore).toBe(true);
+
+    const append = store.loadMorePanelHistory();
+    await vi.waitFor(() => expect(commands.hermesPanelHistory).toHaveBeenCalledTimes(2));
+
+    const refresh = store.refreshPanelHistory('recents');
+    // The append still owns the cursor: refresh must not issue its reread until that page lands.
+    expect(commands.hermesPanelHistory).toHaveBeenCalledTimes(2);
+
+    releaseAppend(panelSessions([row({ id: 's-40' })], 42, { hasMore: true }));
+    await append;
+    await refresh;
+
+    // The append accounted for its own offset, then the refresh truly read page one again.
+    expect(commands.hermesPanelHistory).toHaveBeenCalledTimes(3);
+    expect(commands.hermesPanelHistory).toHaveBeenLastCalledWith('panel-1', null, false, 'recents', 41, 0);
+    expect(store.conversations.map(item => item.id)).toContain('s-new');
+    expect(store.panelSliceState('recents').offset).toBe(2);
+  });
+
   it('reads a transcript only when its conversation is opened', async () => {
     vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValue(panelSessions([row({ id: 'sess-1' })]));
     vi.spyOn(commands, 'hermesPanelSessionMessages').mockResolvedValue(
@@ -599,6 +635,22 @@ describe('Hermes panel history', () => {
     expect(store.activeId).toBe('sess-2');
   });
 
+  it('keeps a new chat unselected when the list refreshes', async () => {
+    vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValue(
+      panelSessions([row({ id: 'sess-1' }), row({ id: 'sess-2' })])
+    );
+    const store = await mountPanelStore();
+    await store.loadPanelHistory();
+
+    store.newChat();
+    expect(store.activeId).toBeNull();
+
+    await store.refreshPanelHistory('recents');
+
+    // Null is the "new conversation" state; the refresh must not select a cached row for it.
+    expect(store.activeId).toBeNull();
+  });
+
   it('does not drop a turn that was sent while the transcript was loading', async () => {
     vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValue(panelSessions([row({ id: 'sess-1' })]));
     let release: (value: unknown) => void = () => {};
@@ -756,6 +808,39 @@ describe('Hermes panel history', () => {
     await store.refreshPanelHistory('recents');
 
     expect(store.conversations.map(item => item.id)).toEqual(['a']);
+  });
+
+  it('keeps the conversation pushed out of a page that still has rows behind it', async () => {
+    const firstPage = Array.from({ length: 40 }, (_, index) => row({ id: `s-${index}` }));
+    vi.spyOn(commands, 'hermesPanelHistory')
+      .mockResolvedValueOnce(panelSessions(firstPage, 41))
+      .mockResolvedValueOnce(panelSessions([row({ id: 's-new' }), ...firstPage.slice(0, 39)], 41));
+    const store = await mountPanelStore();
+    await store.loadPanelHistory();
+    store.select('s-39');
+    expect(store.activeId).toBe('s-39');
+
+    await store.refreshPanelHistory('recents');
+
+    // The newest row arriving only pushed the oldest one outside the window; it was not deleted.
+    expect(store.activeId).toBe('s-39');
+    expect(store.conversations.map(item => item.id)).toContain('s-39');
+    expect(store.conversations.map(item => item.id)).toContain('s-new');
+  });
+
+  it('switches away from the active row when the host returns a short complete list', async () => {
+    vi.spyOn(commands, 'hermesPanelHistory')
+      .mockResolvedValueOnce(panelSessions([row({ id: 'sess-1' }), row({ id: 'sess-2' })]))
+      .mockResolvedValueOnce(panelSessions([row({ id: 'sess-1' })]));
+    const store = await mountPanelStore();
+    await store.loadPanelHistory();
+    store.select('sess-2');
+
+    await store.refreshPanelHistory('recents');
+
+    // No rows behind this window: the host's omission means the row is really gone.
+    expect(store.conversations.map(item => item.id)).toEqual(['sess-1']);
+    expect(store.activeId).toBe('sess-1');
   });
 
   it('aggregates every profile on the host and tags the rows', async () => {
@@ -953,6 +1038,48 @@ describe('Hermes panel history', () => {
     await store.setConversationArchived('sess-1', false);
 
     expect(commands.hermesPanelSessionArchive).toHaveBeenLastCalledWith('panel-1', 'sess-1', false, 3, 1, null);
+  });
+
+  it('re-reads the list each time the switcher opens so new host sessions appear', async () => {
+    vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValueOnce(panelSessions([row({ id: 'sess-1' })], 1));
+    await mountPanelStore();
+
+    const wrapper = mount(AssistantHistory, {
+      props: { open: false },
+      global: { plugins: [i18n] },
+      attachTo: document.body
+    });
+    // The page keeps the popover mounted and toggles it, so the first open is a prop change.
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+    expect(wrapper.text()).toContain('Panel ok confirmation');
+
+    // The host created a session after the first read (another client, a gateway, a job).
+    // Reusing the cached page would hide it until the whole window was reloaded.
+    vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValueOnce(
+      panelSessions([row({ id: 'sess-2', title: '刚创建的会话' }), row({ id: 'sess-1' })], 2)
+    );
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+
+    expect(commands.hermesPanelHistory).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('刚创建的会话');
+    wrapper.unmount();
+  });
+
+  it('finds a session created after the cached pages were read when a notification opens it', async () => {
+    vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValue(panelSessions([row({ id: 'sess-1' })], 1));
+    const store = await mountPanelStore();
+    // Every slice is cached now, so a plain lookup would answer "this row does not exist".
+    for (const slice of ['recents', 'messaging', 'cron', 'archived'] as const) await store.loadPanelHistory(slice);
+
+    vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValue(
+      panelSessions([row({ id: 'sess-new', title: '刚创建的会话' }), row({ id: 'sess-1' })], 2)
+    );
+
+    await expect(store.revealConversation('sess-new')).resolves.toBe(true);
+    expect(store.activeId).toBe('sess-new');
   });
 });
 

@@ -2527,7 +2527,8 @@ export const useHermesStore = defineStore('hermes', () => {
     loaded: HermesConversation[],
     append: boolean,
     owner: string,
-    allProfiles: boolean
+    allProfiles: boolean,
+    hasMore: boolean
   ) {
     const byId = new Map(loaded.map(item => [item.id, item] as const));
     const next: HermesConversation[] = [];
@@ -2560,9 +2561,12 @@ export const useHermesStore = defineStore('hermes', () => {
         next.push(fresh);
         continue;
       }
-      // Keep rows from other slices, and (on an append) the pages already loaded here.
+      // Keep rows from other slices, and (on an append) the pages already loaded here. A replace
+      // that still has rows behind its window may have pushed out the conversation the user is
+      // reading instead of deleting it, so keep that row rather than switching away from it.
       const owned = allProfiles || ownsPanelRow(conversation, owner);
-      if ((sliceOf(conversation) !== slice || append) && owned) next.push(conversation);
+      const keepActive = !append && hasMore && conversation.id === activeId.value;
+      if ((sliceOf(conversation) !== slice || append || keepActive) && owned) next.push(conversation);
     }
     next.push(...byId.values());
     // Conversations this window owns locally (an in-flight turn, or a chat started here that
@@ -2632,21 +2636,23 @@ export const useHermesStore = defineStore('hermes', () => {
         degraded?: unknown;
       };
       const rows = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+      const hasMore = parsed.hasMore === true;
       const loaded = rows
         .map(row =>
           row && typeof row === 'object' ? panelConversationFromRow(row as Record<string, unknown>, slice) : null
         )
         .filter(Boolean) as HermesConversation[];
-      mergePanelPage(slice, loaded, append, owner, allProfiles);
+      mergePanelPage(slice, loaded, append, owner, allProfiles, hasMore);
       const total = typeof parsed.total === 'number' ? parsed.total : rows.length;
       state.offset = append ? state.offset + rows.length : rows.length;
       state.total = total;
-      state.hasMore = parsed.hasMore === true;
+      state.hasMore = hasMore;
       state.degraded = parsed.degraded === true;
       // An empty first page is a real answer (this profile has no rows), so it is cached too.
       state.loaded = true;
       // Keep the conversation the user is reading; only fall back when it is gone from the list.
-      if (!append && !conversations.value.some(item => item.id === activeId.value)) {
+      // A null selection is the valid "new conversation" state, never a missing row.
+      if (!append && activeId.value && !conversations.value.some(item => item.id === activeId.value)) {
         activeId.value = conversations.value[0]?.id ?? null;
       }
       persist();
@@ -2678,9 +2684,20 @@ export const useHermesStore = defineStore('hermes', () => {
   /** Re-read a slice after the host refused a fenced write or a row changed. */
   async function refreshPanelHistory(slice: PanelHistorySlice = 'recents') {
     if (!panelActive.value) return;
+    const key = stateKey();
     const state = sliceState(slice);
+    // An in-flight page owns the cursor it started from. Resetting it here would both drop this
+    // refresh (the load joins the request as a waiter) and make the running append account its
+    // rows against zero, so wait for that page to finish first.
+    if (state.loading) {
+      await loadPanelHistory(slice);
+      // A profile switch or a dropped connection made this slice someone else's while we waited.
+      if (!panelActive.value || key !== stateKey()) return;
+    }
     state.loaded = false;
     state.offset = 0;
+    // Reset and reread without yielding: `loadPanelHistory` marks the slice loading before its
+    // first await, so no append can slip in and start from the cursor we just cleared.
     await loadPanelHistory(slice);
   }
 
@@ -3184,8 +3201,9 @@ export const useHermesStore = defineStore('hermes', () => {
     if (!conversations.value.some(item => item.id === conversationId) && panelActive.value) {
       for (const slice of PANEL_HISTORY_SLICES) {
         if (conversations.value.some(item => item.id === conversationId)) break;
-        const state = sliceState(slice);
-        if (state.loading || !state.loaded) await loadPanelHistory(slice);
+        // The notification names a session the host created after the cached page was read, so
+        // `loaded` is not evidence that the row is missing. Re-read each slice instead.
+        await refreshPanelHistory(slice);
       }
     }
     if (!conversations.value.some(item => item.id === conversationId)) return false;

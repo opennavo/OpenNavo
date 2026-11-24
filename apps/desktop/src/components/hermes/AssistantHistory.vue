@@ -270,7 +270,10 @@ function openView(next: PanelHistorySlice) {
   view.value = next;
   search.value = '';
   revealed.value = {};
-  void store.loadPanelHistory(next);
+  // A slice cached by an earlier visit is host state that may have moved on — other clients,
+  // gateways and scheduled jobs create sessions while this popover is closed. Re-read the list
+  // the user just opened instead of rendering the page read the first time.
+  void store.refreshPanelHistory(next);
 }
 
 function toggleAllProfiles() {
@@ -338,9 +341,11 @@ watch(
   () => props.open,
   async open => {
     if (!open) return;
-    // Opening the panel is the moment the list is worth reading: each slice is host state and is
-    // cached per connection+profile+slice, so this only fetches a slice it has not read yet.
-    void store.loadPanelHistory(view.value);
+    // Opening the popover is the moment the switcher has to be current: sessions are created
+    // outside this window (another client, a gateway thread, a scheduled run), so a page cached
+    // from the previous open can hide the very conversation the user came to switch to. Re-read
+    // the slice on screen; the cached rows stay visible until the host answers.
+    void store.refreshPanelHistory(view.value);
     search.value = '';
     revealed.value = {};
     await nextTick();
