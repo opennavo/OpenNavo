@@ -314,7 +314,7 @@ export interface paths {
         };
         /**
          * Intraday active trend
-         * @description Distribution of each device/browser's first activity today in Asia/Shanghai, from midnight through asOf. This is not an online-user count. Uses the same usage_daily day and platform filters as the overview's today-active cards. Returns 24 ordered hourly buckets; future hours have null counts, while elapsed hours without activity have zero counts. Cumulative series end at today's active counts for the sampled data. Devices on different platforms are counted separately. Historical rows use last_active_at at migration time because their original first activity cannot be recovered.
+         * @description Distribution of each device/browser's first activity on a calendar date in Asia/Shanghai, from midnight through asOf. Defaults to today. This is not an online-user count. Uses the same usage_daily day and platform filters as the overview's active cards. Returns 24 ordered hourly buckets; on today, future hours have null counts, while elapsed hours without activity have zero counts. Past dates include all 24 hours. Cumulative series end at the selected day's active counts for the sampled data. Devices on different platforms are counted separately. Historical rows use last_active_at at migration time because their original first activity cannot be recovered.
          */
         get: operations["getDashboardUsageIntraday"];
         put?: never;
@@ -8759,22 +8759,22 @@ export interface components {
             hour: number;
             /**
              * Format: int64
-             * @description Browsers whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour.
+             * @description Browsers whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour when the date is today.
              */
             web: number | null;
             /**
              * Format: int64
-             * @description Desktop installations whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour.
+             * @description Desktop installations whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour when the date is today.
              */
             desktop: number | null;
             /**
              * Format: int64
-             * @description Total active browsers from midnight through this hour; null for a future hour.
+             * @description Total active browsers from midnight through this hour; null for a future hour when the date is today.
              */
             cumulativeWeb: number | null;
             /**
              * Format: int64
-             * @description Total active desktop installations from midnight through this hour; null for a future hour.
+             * @description Total active desktop installations from midnight through this hour; null for a future hour when the date is today.
              */
             cumulativeDesktop: number | null;
         };
@@ -8958,7 +8958,7 @@ export interface components {
         UsageIntraday: {
             /**
              * Format: date
-             * @description Today's calendar date in Asia/Shanghai.
+             * @description Selected calendar date in Asia/Shanghai; defaults to today.
              */
             date: string;
             /** @enum {string} */
@@ -25509,7 +25509,10 @@ export interface operations {
     };
     getDashboardUsageIntraday: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Calendar date to report in Asia/Shanghai. Defaults to today; a future date is rejected. */
+                date?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { NAlert, NButton, NEmpty, NRadioButton, NRadioGroup, NSkeleton, NTable, NText } from 'naive-ui';
+import { NAlert, NButton, NDatePicker, NEmpty, NRadioButton, NRadioGroup, NSkeleton, NTable, NText } from 'naive-ui';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createI18n } from 'vue-i18n';
 import enPages from '../src/locales/langs/pages/en-us';
@@ -24,7 +24,7 @@ vi.mock('@/locales', () => ({
 }));
 vi.mock('@/store/modules/app', () => ({ useAppStore: () => appState }));
 vi.mock('@/store/modules/theme', () => ({ useThemeStore: () => ({ darkMode: false }) }));
-const components = { NAlert, NButton, NEmpty, NRadioButton, NRadioGroup, NSkeleton, NTable, NText };
+const components = { NAlert, NButton, NDatePicker, NEmpty, NRadioButton, NRadioGroup, NSkeleton, NTable, NText };
 
 function report(date = '2026-10-29', lastHour = 2): Schemas['UsageIntraday'] {
   let desktop = 0;
@@ -84,6 +84,23 @@ it('shows first activity by platform, leaves future hours blank, and exposes hou
   wrapper.unmount();
 });
 
+it('loads the selected day and shows every past hour as complete', async () => {
+  const wrapper = mountTrend();
+  await flushPromises();
+  const past = report('2026-10-28', 23);
+  past.asOf = '2026-10-29T02:30:00+08:00';
+  fetchIntraday.mockResolvedValueOnce({ data: past, error: null });
+  wrapper.findComponent(NDatePicker).vm.$emit('update:formattedValue', '2026-10-28');
+  await flushPromises();
+  expect(fetchIntraday).toHaveBeenLastCalledWith({ date: '2026-10-28' });
+  expect(wrapper.find('[data-testid="intraday-as-of"]').exists()).toBe(false);
+  expect(wrapper.get('[data-testid="intraday-day"]').text()).toContain('2026-10-28');
+  expect(wrapper.findAll('rect[data-series="desktop"]')).toHaveLength(24);
+  expect(wrapper.findAll('rect[data-series="web"]')).toHaveLength(24);
+  expect(wrapper.get('[data-table-hour="23"]').text()).not.toContain('—');
+  wrapper.unmount();
+});
+
 it.each([
   ['zh-CN', '数据截至 2026-10-29 02:07 (北京时间)'],
   ['en-US', 'As of 2026-10-29 02:07 (Beijing time)']
@@ -106,7 +123,7 @@ it('plots exactly 24 hourly samples per cumulative series using straight, unstep
   await wrapper.findAllComponents(NRadioButton)[1]!.get('input').setValue(true);
   const lines = wrapper.findAll('polyline[data-series]');
   expect(lines).toHaveLength(2);
-  expect(wrapper.find('path[d]').exists()).toBe(false);
+  expect(wrapper.find('svg[role="img"] path[d]').exists()).toBe(false);
   for (const line of lines) {
     const points = line
       .attributes('points')!
@@ -145,7 +162,7 @@ it('supports pointer and keyboard inspection, preserves the hour on refresh, and
   await flushPromises();
   await wrapper.get('[data-hover-hour="0"]').trigger('pointerenter');
   expect(wrapper.get('[role="status"]').text()).toContain('00:00');
-  const frame = wrapper.get('[tabindex="0"]');
+  const frame = wrapper.get('[data-testid="intraday-frame"]');
   await frame.trigger('keydown', { key: 'ArrowRight' });
   expect(wrapper.get('[role="status"]').text()).toContain('01:00');
   fetchIntraday.mockResolvedValueOnce({ data: report('2026-10-29', 3), error: null });
@@ -159,7 +176,7 @@ it('supports pointer and keyboard inspection, preserves the hour on refresh, and
   expect(wrapper.get('[role="status"]').text()).toContain('03:00');
   await frame.trigger('keydown', { key: 'Home' });
   expect(wrapper.get('[role="status"]').text()).toContain('00:00');
-  await wrapper.get('svg').trigger('pointerleave');
+  await wrapper.get('svg[role="img"]').trigger('pointerleave');
   expect(wrapper.find('[role="status"]').exists()).toBe(false);
   await frame.trigger('focus');
   expect(wrapper.get('[role="status"]').text()).toContain('03:00');
@@ -177,7 +194,7 @@ it('shows a load error and retries without inventing data', async () => {
   await flushPromises();
   expect(wrapper.get('[role="alert"]').text()).toContain('page.dashboard.intraday.loadFailed');
   expect(wrapper.find('svg[role="img"]').exists()).toBe(false);
-  await wrapper.get('button').trigger('click');
+  await wrapper.get('[role="alert"] button').trigger('click');
   await flushPromises();
   expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   expect(wrapper.find('svg[role="img"]').exists()).toBe(true);

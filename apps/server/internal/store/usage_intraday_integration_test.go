@@ -24,7 +24,7 @@ func TestUsageIntradayFirstActivityAndDailyTotals(t *testing.T) {
 		require.NoError(t, st.RecordUsage(ctx, activity, at))
 	}
 	check := func(now time.Time) store.UsageIntraday {
-		report, err := st.UsageIntraday(ctx, now)
+		report, err := st.UsageIntraday(ctx, now, "")
 		require.NoError(t, err)
 		overview, err := st.UsageOverview(ctx, now)
 		require.NoError(t, err)
@@ -75,6 +75,21 @@ func TestUsageIntradayFirstActivityAndDailyTotals(t *testing.T) {
 	report = check(midnight.Add(24 * time.Hour))
 	require.Zero(t, *report.Hours[0].CumulativeWeb)
 	require.Zero(t, *report.Hours[0].CumulativeDesktop)
+	// A past day is complete: every hour is known and the last hour carries the day's totals.
+	previous, err := st.UsageIntraday(ctx, midnight.Add(24*time.Hour), "2026-10-29")
+	require.NoError(t, err)
+	require.Equal(t, "2026-10-29", previous.Date)
+	for hour, entry := range previous.Hours {
+		require.NotNil(t, entry.Web, "hour %d", hour)
+		require.NotNil(t, entry.Desktop, "hour %d", hour)
+	}
+	require.EqualValues(t, 2, *previous.Hours[23].CumulativeWeb)
+	require.EqualValues(t, 1, *previous.Hours[23].CumulativeDesktop)
+	// Future and malformed dates are rejected instead of reporting empty days.
+	_, err = st.UsageIntraday(ctx, midnight, "2026-10-30")
+	require.ErrorContains(t, err, "parameter_invalid:date")
+	_, err = st.UsageIntraday(ctx, midnight, "not-a-date")
+	require.ErrorContains(t, err, "parameter_invalid:date")
 }
 
 func TestUsageIntradayOfflineOutOfOrderActivityMovesFirstHourEarlier(t *testing.T) {
@@ -89,7 +104,7 @@ func TestUsageIntradayOfflineOutOfOrderActivityMovesFirstHourEarlier(t *testing.
 		t.Run(platform, func(t *testing.T) {
 			activity := store.UsageActivity{AnonymousID: uuid.NewString(), Platform: platform, OccurredAt: later, Version: "1.1.0", Locale: "en-US", Country: "US"}
 			require.NoError(t, st.RecordUsage(ctx, activity, now))
-			before, err := st.UsageIntraday(ctx, now)
+			before, err := st.UsageIntraday(ctx, now, "")
 			require.NoError(t, err)
 			if platform == "desktop" {
 				require.EqualValues(t, 1, *before.Hours[9].Desktop)
@@ -122,7 +137,7 @@ func TestUsageIntradayOfflineOutOfOrderActivityMovesFirstHourEarlier(t *testing.
 			require.Equal(t, "1.2.0", row.Version)
 			require.Equal(t, "en-GB", row.Locale)
 			require.Equal(t, "GB", row.Country)
-			report, err := st.UsageIntraday(ctx, now)
+			report, err := st.UsageIntraday(ctx, now, "")
 			require.NoError(t, err)
 			overview, err := st.UsageOverview(ctx, now)
 			require.NoError(t, err)

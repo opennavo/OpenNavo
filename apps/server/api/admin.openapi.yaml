@@ -1671,16 +1671,28 @@ paths:
       operationId: getDashboardUsageIntraday
       summary: Intraday active trend
       description: >-
-        Distribution of each device/browser's first activity today in Asia/Shanghai,
-        from midnight through asOf. This is not an online-user count. Uses the same
-        usage_daily day and platform filters as the overview's today-active cards.
-        Returns 24 ordered hourly buckets; future hours have null counts, while
-        elapsed hours without activity have zero counts. Cumulative series end at
-        today's active counts for the sampled data. Devices on different platforms
-        are counted separately. Historical rows use last_active_at at migration
-        time because their original first activity cannot be recovered.
+        Distribution of each device/browser's first activity on a calendar date in
+        Asia/Shanghai, from midnight through asOf. Defaults to today. This is not an
+        online-user count. Uses the same usage_daily day and platform filters as the
+        overview's active cards. Returns 24 ordered hourly buckets; on today, future
+        hours have null counts, while elapsed hours without activity have zero
+        counts. Past dates include all 24 hours. Cumulative series end at the
+        selected day's active counts for the sampled data. Devices on different
+        platforms are counted separately. Historical rows use last_active_at at
+        migration time because their original first activity cannot be recovered.
       x-permissions: [dashboard:view]
       x-agent-access: false
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: >-
+            Calendar date to report in Asia/Shanghai. Defaults to today; a future date
+            is rejected.
+          schema:
+            type: string
+            format: date
+            example: '2026-10-29'
       responses:
         '200':
           description: OK
@@ -20787,25 +20799,25 @@ components:
           format: int64
           minimum: 0
           nullable: true
-          description: Browsers whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour.
+          description: Browsers whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour when the date is today.
         desktop:
           type: integer
           format: int64
           minimum: 0
           nullable: true
-          description: Desktop installations whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour.
+          description: Desktop installations whose earliest first_active_at falls in this hour; an out-of-order event may move it earlier. Null for a future hour when the date is today.
         cumulativeWeb:
           type: integer
           format: int64
           minimum: 0
           nullable: true
-          description: Total active browsers from midnight through this hour; null for a future hour.
+          description: Total active browsers from midnight through this hour; null for a future hour when the date is today.
         cumulativeDesktop:
           type: integer
           format: int64
           minimum: 0
           nullable: true
-          description: Total active desktop installations from midnight through this hour; null for a future hour.
+          description: Total active desktop installations from midnight through this hour; null for a future hour when the date is today.
     UsageIntraday:
       example: &usageIntradayExample
         date: '2026-10-29'
@@ -20842,7 +20854,7 @@ components:
         date:
           type: string
           format: date
-          description: Today's calendar date in Asia/Shanghai.
+          description: Selected calendar date in Asia/Shanghai; defaults to today.
         timeZone:
           type: string
           enum: [Asia/Shanghai]
