@@ -18,6 +18,7 @@ import { useHermesUiStore } from '@/stores/hermesUi';
 import { useHermesContent } from '@/composables/useHermesContent';
 import { useToasts } from '@/composables/useToasts';
 import { mediaKind } from '@/hermes/media';
+import { deriveComposerSubmitState } from '@/hermes/composer';
 import {
   queueHermesNotificationOpen,
   takeHermesNotificationOpen,
@@ -274,6 +275,64 @@ async function pickDirectory() {
   }
 }
 
+/** A card parked the turn; text can only queue behind it until the user answers. */
+const hasBlockingPrompt = computed(() =>
+  Boolean(
+    store.approvalRequest ||
+    store.clarifyRequest ||
+    store.secretRequest ||
+    store.sudoRequest ||
+    store.vaultUnlockRequest ||
+    store.vaultSaveLoginRequest ||
+    store.vaultCodeRequest
+  )
+);
+/**
+ * The composer's primary action mirrors the official desktop: busy input follows the runtime's
+ * busy policy instead of starting a second turn, and an empty composer turns the button into Stop.
+ */
+const composerSubmit = computed(() =>
+  deriveComposerSubmitState({
+    attachmentCount: attachments.value.length,
+    blockingPrompt: hasBlockingPrompt.value,
+    busy: store.thinking,
+    busyInputMode: store.active?.busyMode ?? null,
+    hasPayload: Boolean(input.value.trim()) || attachments.value.length > 0
+  })
+);
+const composerActionLabel = computed(() => {
+  switch (composerSubmit.value.action) {
+    case 'interrupt':
+      return content.value.composer.redirect;
+    case 'steer':
+      return content.value.composer.steer;
+    case 'queue':
+      return content.value.composer.queueMessage;
+    case 'stop':
+      return store.stopping ? content.value.composer.stopping : content.value.composer.stop;
+    default:
+      return content.value.composer.send;
+  }
+});
+/** Attachments cannot join a correction, so the disabled primary must not claim it will queue. */
+const composerPrimaryLabel = computed(() =>
+  store.thinking && attachments.value.length ? content.value.composer.attachmentsBusy : composerActionLabel.value
+);
+/**
+ * A busy turn the primary cannot submit (policy still unknown, or files held for the next turn)
+ * still has to be stoppable without throwing away the draft.
+ */
+const showSecondaryStop = computed(
+  () => store.thinking && composerSubmit.value.action !== 'stop' && !composerSubmit.value.canSubmit
+);
+const composerHint = computed(() => {
+  if (store.thinking && attachments.value.length) return content.value.composer.attachmentsBusy;
+  if (composerSubmit.value.action === 'stop') return composerActionLabel.value;
+  // Enter does nothing while the primary is disabled, so the hint must not promise a submit.
+  if (!composerSubmit.value.canSubmit) return composerActionLabel.value;
+  return `↵ ${composerActionLabel.value}`;
+});
+
 function send() {
   const value = input.value.trim();
   const files = attachments.value.map(item => item.path);
@@ -287,10 +346,18 @@ function send() {
     });
     return;
   }
+  // The turn's busy policy has not arrived yet (or the payload cannot ride a correction); the
+  // button is disabled for the same window, so Enter must not pin a guess either.
+  if (!composerSubmit.value.canSubmit) return;
   store.send(value, files);
   input.value = '';
   attachments.value = [];
   scrollToBottom();
+}
+
+/** The primary button submits the form, except with an empty composer, where it stops the turn. */
+function onComposerPrimary() {
+  if (composerSubmit.value.action === 'stop') store.stop();
 }
 
 function onEnter(event: KeyboardEvent) {
@@ -840,7 +907,7 @@ onBeforeUnmount(() => {
                   {{ modelLabel }}
                 </button>
                 <OnButton
-                  v-if="store.thinking"
+                  v-if="showSecondaryStop"
                   variant="ghost"
                   size="sm"
                   icon="lucide:square"
@@ -849,21 +916,24 @@ onBeforeUnmount(() => {
                   :disabled="store.stopping"
                   @click="store.stop"
                 />
-                <OnButton
-                  type="submit"
-                  variant="accent"
-                  size="sm"
-                  icon="lucide:arrow-up"
-                  icon-only
-                  :aria-label="content.composer.send"
-                  :disabled="store.stopping || (!input.trim() && !attachments.length)"
-                />
+                <span data-hermes-composer-primary class="flex">
+                  <OnButton
+                    :type="composerSubmit.action === 'stop' ? 'button' : 'submit'"
+                    variant="accent"
+                    size="sm"
+                    :icon="composerSubmit.action === 'stop' ? 'lucide:square' : 'lucide:arrow-up'"
+                    icon-only
+                    :aria-label="composerPrimaryLabel"
+                    :disabled="store.stopping || (composerSubmit.action !== 'stop' && !composerSubmit.canSubmit)"
+                    @click="onComposerPrimary"
+                  />
+                </span>
               </div>
             </div>
           </form>
           <div class="mt-7px flex items-center justify-between gap-12px text-11px text-ink-tertiary">
             <span>{{ content.composer.hint }}</span>
-            <span>↵ {{ content.composer.send }}</span>
+            <span>{{ composerHint }}</span>
           </div>
         </div>
       </div>
