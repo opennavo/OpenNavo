@@ -7,7 +7,7 @@ import { queueHermesNotificationOpen } from '@/hermes/notificationOpen';
 import { i18n } from '@/i18n';
 import { useHermesStore } from '@/stores/hermes';
 import type { HermesConversation } from '@/stores/hermes';
-import { setup } from './helpers';
+import { setComposerText, setup } from './helpers';
 
 const wrappers: VueWrapper[] = [];
 const VIEWPORT = 300;
@@ -168,7 +168,7 @@ describe('Hermes transcript auto-scroll', () => {
     const send = vi.spyOn(store, 'send').mockResolvedValue(undefined);
     box.scrollTo(120);
 
-    await wrapper.get<HTMLTextAreaElement>('#hermes-composer').setValue('hello');
+    await setComposerText(wrapper, 'hello');
     await wrapper.get('form').trigger('submit');
     await flushPromises();
 
