@@ -12,10 +12,32 @@ export function packageSitemapName(group: PackageSitemapGroup, token: string) {
 }
 
 /**
- * The approved one-page versions-sitemap pilot (#215, approved 2026-11-04). While the global
- * versions sitemap is off, only this app's source-language release history is listed, with no
- * localized alternates. Keep this list at one entry until the pilot is reviewed.
+ * The approved versions-sitemap pilot (#215, approved 2026-11-04), extended to the pages Bing's
+ * 2026-11-24 SEO report marked as important. While the global versions sitemap is off, only these
+ * apps' source-language release histories are listed, with no localized alternates. Keep this list
+ * explicit and review the Bing recommendation before adding entries.
  */
+export const VERSIONS_SITEMAP_PILOT_TOKENS: ReadonlySet<string> = new Set([
+  'dotnet-sdk',
+  'google-chrome',
+  'microsoft-openjdk@17',
+  'zulu@25',
+  'chitubox',
+  'obs',
+  'microsoft-outlook',
+  'roblox',
+  'vuescan',
+  'zulu@11',
+  'anydesk',
+  'corretto@17',
+  'omnissa-horizon-client',
+  'zen@twilight',
+  'temurin@11'
+]);
+export const VERSIONS_SITEMAP_PILOT_BUCKETS: ReadonlySet<string> = new Set(
+  [...VERSIONS_SITEMAP_PILOT_TOKENS].map(token => packageSitemapName('versions', token))
+);
+/** The original single-page pilot, kept for tests that assert one bucket. */
 export const VERSIONS_SITEMAP_PILOT_TOKEN = 'dotnet-sdk';
 export const VERSIONS_SITEMAP_PILOT_BUCKET = packageSitemapName('versions', VERSIONS_SITEMAP_PILOT_TOKEN);
 

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { redisFixture } from './fixtures/redis.mjs';
-import { packageSitemapName } from '../shared/utils/sitemapBuckets.ts';
+import {
+  packageSitemapName,
+  SITEMAP_BUCKET_COUNT,
+  VERSIONS_SITEMAP_PILOT_BUCKETS
+} from '../shared/utils/sitemapBuckets.ts';
 import { labelPath } from '../shared/utils/backgroundLabels.ts';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -2692,21 +2696,29 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       await response.text();
       assert.equal(response.status, 200, `${loc} answers without a redirect\n${logs}`);
     }
-    const versionsBucket = `/__sitemap__/${packageSitemapName('versions', 'ordinary-app')}.xml`;
+    const ordinaryBucket = packageSitemapName('versions', 'ordinary-app');
+    const closedBucket = Array.from({ length: SITEMAP_BUCKET_COUNT }, (_, bucket) => `versions-bucket-${bucket}`).find(
+      name => !VERSIONS_SITEMAP_PILOT_BUCKETS.has(name)
+    );
+    assert.ok(closedBucket, 'a non-pilot versions bucket exists');
     try {
       siteSettings.pages.versionsSitemap = false;
       await invalidatePaths(['/'], true);
-      const closedVersions = await fetch(`${origin}${versionsBucket}`);
+      const closedVersions = await fetch(`${origin}/__sitemap__/${closedBucket}.xml`);
       assert.equal(closedVersions.status, 410);
       for (const header of ['cache-control', 'cdn-cache-control', 'cloudflare-cdn-cache-control'])
         assert.equal(closedVersions.headers.get(header), 'no-store', header);
       assert.ok(!(await closedVersions.text()).includes('<urlset'));
+      // ordinary-app shares a bucket with a pilot token. That path stays up, but it does not list the app.
+      const pilotOnly = await fetch(`${origin}/__sitemap__/${ordinaryBucket}.xml`);
+      assert.equal(pilotOnly.status, 200);
+      assert.ok(!(await pilotOnly.text()).includes('/apps/ordinary-app/versions'));
       const closedIndex = await (await fetch(`${origin}/sitemap_index.xml`)).text();
-      assert.ok(!closedIndex.includes('/__sitemap__/versions-bucket-'));
+      assert.ok(!closedIndex.includes(`/__sitemap__/${closedBucket}.xml`));
 
       siteSettings.pages.versionsSitemap = true;
       await invalidatePaths(['/'], true);
-      const reopenedVersions = await fetch(`${origin}${versionsBucket}`);
+      const reopenedVersions = await fetch(`${origin}/__sitemap__/${ordinaryBucket}.xml`);
       assert.equal(reopenedVersions.status, 200);
       assert.ok((await reopenedVersions.text()).includes('/apps/ordinary-app/versions'));
       for (const group of ['apps', 'versions']) {

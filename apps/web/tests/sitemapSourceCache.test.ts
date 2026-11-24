@@ -168,25 +168,41 @@ describe('sitemap source snapshot cache', () => {
     const pilot = {
       kind: 'cask',
       token: VERSIONS_SITEMAP_PILOT_TOKEN,
-      notesCount: 1,
+      notesCount: 5,
       locales: [
         { locale: 'en-US', pages: { versions: { inSitemap: false } } },
         { locale: 'ja-JP', pages: { versions: { inSitemap: false } } }
       ]
     };
-    const other = { kind: 'cask', token: 'other-app', notesCount: 5, locales: [{ locale: 'en-US' }] };
-    const { index, bucket, settings } = await setup([pilot, other]);
+    const secondPilot = {
+      kind: 'cask',
+      token: 'google-chrome',
+      notesCount: 5,
+      locales: [{ locale: 'en-US', pages: { versions: { inSitemap: false } } }]
+    };
+    const other = { kind: 'cask', token: 'other-app-0', notesCount: 5, locales: [{ locale: 'en-US' }] };
+    const { index, bucket, settings } = await setup([pilot, secondPilot, other]);
 
     settings.pages.versionsSitemap = false;
     settings.revision += 1;
 
     const entries = await index();
-    expect(entries.filter(({ _sitemapName: name }) => name.startsWith('versions-'))).toEqual([
-      { _sitemapName: VERSIONS_SITEMAP_PILOT_BUCKET }
-    ]);
+    const secondPilotBucket = packageSitemapName('versions', secondPilot.token);
+    expect(
+      entries
+        .filter(({ _sitemapName: name }) => name.startsWith('versions-'))
+        .map(({ _sitemapName: name }) => name)
+        .sort()
+    ).toEqual([VERSIONS_SITEMAP_PILOT_BUCKET, secondPilotBucket].sort());
     const [pilotEntry] = await bucket(VERSIONS_SITEMAP_PILOT_BUCKET);
     expect(pilotEntry).toMatchObject({ loc: `/apps/${pilot.token}/versions`, _sitemap: VERSIONS_SITEMAP_PILOT_BUCKET });
     expect(pilotEntry).not.toHaveProperty('alternatives');
+    const [secondEntry] = await bucket(secondPilotBucket);
+    expect(secondEntry).toMatchObject({
+      loc: `/apps/${secondPilot.token}/versions`,
+      _sitemap: secondPilotBucket
+    });
+    expect(secondEntry).not.toHaveProperty('alternatives');
     await expect(bucket(packageSitemapName('versions', other.token))).rejects.toMatchObject({ statusCode: 410 });
   });
 

@@ -424,8 +424,8 @@
       "descriptionUnavailableNoSummary": "Homebrew has disabled {name}; see its release history and similar apps.",
       "versionsTitle": "{name} Release Notes · OpenNavo",
       "versionsTitleLatest": "{name} Release Notes (Latest {version}) · OpenNavo",
-      "versionsDescriptionNoDate": "{name} latest version {version}. See what changed in every release.",
-      "versionsDescriptionNoVersion": "See what changed in every {name} release."
+      "versionsDescriptionNoDate": "{name} latest version {version}: see what changed in every release, with supported macOS versions, download links and install and uninstall steps on OpenNavo.",
+      "versionsDescriptionNoVersion": "See what changed in every {name} release, with supported macOS versions, download links and install and uninstall steps on OpenNavo."
     },
     "removed": {
       "metaTitle": "{name} Was Removed from Homebrew · OpenNavo",
