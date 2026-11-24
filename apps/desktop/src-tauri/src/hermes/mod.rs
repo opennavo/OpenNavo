@@ -836,11 +836,7 @@ fn is_managed_composer_path(path: &Path, pastes_dir: &Path, images_dir: &Path) -
     })
 }
 
-fn discard_managed_file(
-    path: &Path,
-    pastes_dir: &Path,
-    images_dir: &Path,
-) -> Result<(), AppError> {
+fn discard_managed_file(path: &Path, pastes_dir: &Path, images_dir: &Path) -> Result<(), AppError> {
     // Idempotent: a chip removed twice, or a file already cleaned up, is not an error.
     if !path.exists() {
         return Ok(());
@@ -869,7 +865,8 @@ fn append_audit(
     outcome: &str,
     session: Option<&str>,
     detail: Option<&str>,
-) {    let entry = serde_json::json!({
+) {
+    let entry = serde_json::json!({
         "at": chrono::Utc::now().to_rfc3339(),
         "provider": input.provider,
         "model": input.model,

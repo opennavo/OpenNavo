@@ -110,6 +110,20 @@ const macTone = computed<'success' | 'neutral'>(() =>
 const connectionReady = computed(() =>
   store.remoteActive ? store.activeProfile.status === 'connected' : store.runtimeReady
 );
+/**
+ * A rejected panel session needs the sign-in gate. A panel that is merely unreachable does not:
+ * the cached transcript stays usable and the probe keeps retrying behind it.
+ */
+const panelSignedOut = computed(() => store.remoteActive && store.activeProfile.status === 'error');
+
+function retryPanelConnection() {
+  void store.retryConnections();
+}
+
+/** Waking the Mac or returning to the app is the moment a probe is most likely to matter. */
+function probeWhenVisible() {
+  if (document.visibilityState === 'visible') void store.probeConnections();
+}
 /** A panel's own state, not the local runtime's: "Not installed" is meaningless for one. */
 const connectionLabel = computed(() => {
   if (!store.remoteActive) {
@@ -547,7 +561,7 @@ const composerHint = computed(() => {
   if (store.thinking && attachments.value.length) return content.value.composer.attachmentsBusy;
   if (composerSubmit.value.action === 'stop') return composerActionLabel.value;
   // Enter does nothing while the primary is disabled, so the hint must not promise a submit.
-  if (!composerSubmit.value.canSubmit) return composerActionLabel.value;
+  if (!composerSubmit.value.canSubmit || !connectionReady.value) return composerActionLabel.value;
   return `↵ ${composerActionLabel.value}`;
 });
 
@@ -577,6 +591,8 @@ async function send() {
     // The turn's busy policy has not arrived yet (or the payload cannot ride a correction); the
     // button is disabled for the same window, so Enter must not pin a guess either.
     if (!composerSubmit.value.canSubmit) return;
+    // A panel that is unreachable shows the reconnect banner; a send would only fail opaquely.
+    if (!connectionReady.value) return;
     store.send(raw, files);
     composerEditor.clear();
     // Sent files are the gateway's to read; only the chips go.
@@ -618,6 +634,9 @@ function onCompositionEnd() {
 }
 
 function suggestion(prompt: string) {
+  // The offline banner already explains the panel cannot take a message; a suggestion must not
+  // bypass the composer's own guard and fail opaquely.
+  if (!connectionReady.value) return;
   store.send(prompt);
   scrollToBottom();
 }
@@ -751,6 +770,8 @@ onMounted(async () => {
   // Panel history lives on the host, so it is read once here instead of only after a switch.
   void store.loadPanelHistory();
   connectionProbeTimer = window.setInterval(() => void store.probeConnections(), 60_000);
+  window.addEventListener('focus', probeWhenVisible);
+  document.addEventListener('visibilitychange', probeWhenVisible);
   if (requestedProfile) store.switchAgentProfile(requestedProfile);
   const history = store.loadHistory();
   await store.loadRuntime();
@@ -783,6 +804,8 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   if (connectionProbeTimer) window.clearInterval(connectionProbeTimer);
+  window.removeEventListener('focus', probeWhenVisible);
+  document.removeEventListener('visibilitychange', probeWhenVisible);
   headerObserver?.disconnect();
   composerObserver?.disconnect();
   window.removeEventListener('keydown', onKeydown);
@@ -866,10 +889,11 @@ onBeforeUnmount(() => {
 
     <!--
       A panel that is signed out is not a Mac missing its local runtime: say so and offer the
-      panel sign-in instead of the local install gate.
+      panel sign-in instead of the local install gate. A panel that is merely unreachable keeps
+      the conversation below; only a rejected session takes the whole page.
     -->
     <div
-      v-else-if="!connectionReady"
+      v-else-if="panelSignedOut"
       class="flex min-h-0 flex-1 flex-col items-center justify-center px-24px pb-40px text-center"
     >
       <HermesMark :size="54" />
@@ -891,6 +915,31 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
+      <!--
+        A panel that cannot be reached right now is usually a tailnet hiccup or a waking Mac: keep
+        the cached conversation on screen and retry instead of replacing it with a full gate.
+      -->
+      <div
+        v-if="store.remoteActive && !connectionReady"
+        class="flex shrink-0 items-center gap-8px border-b border-b-solid border-line-subtle bg-surface-raised px-18px py-8px text-11px text-ink-secondary"
+        role="status"
+        data-hermes-panel-offline
+      >
+        <OnIcon name="lucide:wifi-off" :size="13" class="shrink-0 text-status-warning" />
+        <span class="min-w-0 flex-1">
+          {{ content.profiles.offlineNotice }}
+          <span v-if="store.activeProfile.error" class="text-ink-tertiary">· {{ store.activeProfile.error }}</span>
+        </span>
+        <OnButton
+          variant="ghost"
+          size="xs"
+          icon="lucide:refresh-cw"
+          data-hermes-panel-retry
+          @click="retryPanelConnection"
+        >
+          {{ content.profiles.retryConnection }}
+        </OnButton>
+      </div>
       <div
         ref="scroll"
         data-hermes-transcript
@@ -945,7 +994,9 @@ onBeforeUnmount(() => {
                 v-for="item in SUGGESTIONS"
                 :key="item"
                 type="button"
-                class="flex min-w-0 items-start gap-10px rounded-default border border-solid border-line-subtle bg-surface-card p-12px text-left outline-none transition-colors hover:border-line-strong hover:bg-surface-raised focus-visible:shadow-focus-ring"
+                :data-hermes-suggestion="item"
+                :disabled="!connectionReady"
+                class="flex min-w-0 items-start gap-10px rounded-default border border-solid border-line-subtle bg-surface-card p-12px text-left outline-none transition-colors enabled:hover:border-line-strong enabled:hover:bg-surface-raised focus-visible:shadow-focus-ring disabled:cursor-default disabled:opacity-60"
                 @click="suggestion(content.welcome.suggestions[item].prompt)"
               >
                 <span
@@ -1166,7 +1217,10 @@ onBeforeUnmount(() => {
                     :icon="composerSubmit.action === 'stop' ? 'lucide:square' : 'lucide:arrow-up'"
                     icon-only
                     :aria-label="composerPrimaryLabel"
-                    :disabled="store.stopping || (composerSubmit.action !== 'stop' && !composerSubmit.canSubmit)"
+                    :disabled="
+                      store.stopping ||
+                      (composerSubmit.action !== 'stop' && (!composerSubmit.canSubmit || !connectionReady))
+                    "
                     @click="onComposerPrimary"
                   />
                 </span>

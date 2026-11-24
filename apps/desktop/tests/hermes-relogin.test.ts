@@ -12,6 +12,40 @@ import { setup } from './helpers';
 const PROFILES_KEY = 'ONV_HERMES_PROFILES_V1';
 const wrappers: VueWrapper[] = [];
 
+function seedOfflinePanel() {
+  localStorage.setItem(
+    PROFILES_KEY,
+    JSON.stringify({
+      version: 1,
+      activeProfileId: 'panel-1',
+      profiles: [
+        {
+          id: 'local',
+          name: 'Local Mac',
+          kind: 'local',
+          endpoint: '',
+          status: 'connected',
+          version: '0.23.3',
+          latency: null,
+          models: 0
+        },
+        {
+          id: 'panel-1',
+          name: 'ubHermes',
+          kind: 'panel',
+          endpoint: 'http://100.64.0.9:9119',
+          status: 'offline',
+          version: '0.23.3',
+          latency: 121,
+          models: 1,
+          error: 'Could not reach the gateway.'
+        }
+      ],
+      states: {}
+    })
+  );
+}
+
 function seedExpiredPanel() {
   localStorage.setItem(
     PROFILES_KEY,
@@ -115,5 +149,52 @@ describe('Hermes panel re-login', () => {
     expect(wrapper.text()).toContain('Hermes Panel 连接不可用');
     expect(wrapper.text()).toContain('Unauthorized');
     expect(wrapper.text()).not.toContain('本机 Hermes 尚未安装');
+  });
+
+  it('Keeps the conversation and offers a retry while the panel is unreachable', async () => {
+    seedOfflinePanel();
+    const { pinia, router } = await setup('/assistant');
+    const unreachable = new IpcError({
+      code: 'E_HERMES_PROBE',
+      message: 'Could not reach the gateway.',
+      detail: 'operation timed out'
+    });
+    vi.spyOn(commands, 'hermesAgentProfiles').mockRejectedValue(unreachable);
+    vi.spyOn(commands, 'hermesConnectionProbe').mockRejectedValue(unreachable);
+    const wrapper = shallowMount(AssistantPage, {
+      global: { plugins: [pinia, router, i18n] },
+      attachTo: document.body
+    });
+    wrappers.push(wrapper);
+    await flushPromises();
+
+    // A transient drop keeps the transcript: only a rejected session takes the whole page.
+    expect(wrapper.text()).not.toContain('Hermes Panel 连接不可用');
+    expect(wrapper.text()).toContain('Hermes Panel 暂时无法连接');
+    expect(wrapper.find('[data-hermes-panel-offline]').exists()).toBe(true);
+    // `shallowMount` drops the button's slot, so the retry affordance is found by attribute.
+    expect(wrapper.find('[data-hermes-panel-retry]').exists()).toBe(true);
+
+    // The welcome suggestions sit under the offline banner; they must not bypass its guard.
+    const store = useHermesStore();
+    const send = vi.spyOn(store, 'send');
+    const suggestions = wrapper.findAll('[data-hermes-suggestion]');
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions.every(button => (button.element as HTMLButtonElement).disabled)).toBe(true);
+    await suggestions[0]!.trigger('click');
+    expect(send).not.toHaveBeenCalled();
+
+    // A disabled primary must not advertise Enter; the hint drops the ↵ prefix while offline.
+    const editor = wrapper.get('#hermes-composer');
+    editor.element.textContent = 'hello';
+    await editor.trigger('input');
+    expect(wrapper.text()).not.toContain('↵');
+
+    // Clear the store's retry timer so it cannot fire after this test restores the mocks.
+    vi.mocked(commands.hermesConnectionProbe).mockResolvedValue({
+      status: 'ok',
+      data: { ok: true, latencyMs: 4, version: '0.23.3', profiles: 1 }
+    } as never);
+    await store.retryConnections();
   });
 });

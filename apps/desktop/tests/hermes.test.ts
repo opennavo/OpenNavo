@@ -780,6 +780,102 @@ describe('Hermes conversation store', () => {
     expect(saved?.error).toBeUndefined();
   });
 
+  it('Retries a transient probe failure instead of leaving the panel offline', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.useFakeTimers();
+    const probe = vi
+      .spyOn(commands, 'hermesConnectionProbe')
+      .mockRejectedValueOnce(
+        new IpcError({
+          code: 'E_HERMES_PROBE',
+          message: 'Could not reach the gateway.',
+          detail: 'operation timed out'
+        })
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { ok: true, latencyMs: 7, version: '0.23.4', profiles: 1 }
+      } as never);
+    const store = useHermesStore();
+
+    await store.probeConnections();
+    let panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    // The real reason is kept for the rail; "Connection probe failed" could not be acted on.
+    expect(panel.status).toBe('offline');
+    expect(panel.error).toBe('Could not reach the gateway.');
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(panel.status).toBe('connected');
+    expect(panel.version).toBe('0.23.4');
+    expect(panel.error).toBeUndefined();
+  });
+
+  it('Runs a manual retry after the probe that was already in flight', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.useFakeTimers();
+    let rejectFirst: (reason: unknown) => void = () => undefined;
+    const probe = vi
+      .spyOn(commands, 'hermesConnectionProbe')
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          }) as never
+      )
+      .mockResolvedValue({
+        status: 'ok',
+        data: { ok: true, latencyMs: 6, version: '0.23.4', profiles: 1 }
+      } as never);
+    const store = useHermesStore();
+
+    const first = store.probeConnections();
+    expect(probe).toHaveBeenCalledTimes(1);
+
+    // The click must not start a second concurrent request while the slow one is still waiting.
+    const retried = store.retryConnections();
+    await Promise.resolve();
+    expect(probe).toHaveBeenCalledTimes(1);
+
+    rejectFirst(
+      new IpcError({
+        code: 'E_HERMES_PROBE',
+        message: 'Could not reach the gateway.',
+        detail: 'operation timed out'
+      })
+    );
+    await first;
+    // Its teardown scheduled the 5 s backoff; the follow-up replaces it instead of waiting.
+    await retried;
+    expect(probe).toHaveBeenCalledTimes(2);
+    const panel = store.profiles.find(profile => profile.id === 'panel-1')!;
+    expect(panel.status).toBe('connected');
+    expect(panel.error).toBeUndefined();
+    // A successful follow-up leaves no backoff behind: nothing probes again on its own.
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('Does not rewrite the stored profiles when a probe only changes latency', async () => {
+    seedPanelProfile();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesConnectionProbe').mockResolvedValue({
+      status: 'ok',
+      data: { ok: true, latencyMs: 999, version: '0.23.0', profiles: 1 }
+    } as never);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const store = useHermesStore();
+    setItem.mockClear();
+
+    await store.probeConnections();
+
+    // Latency is live telemetry: persisting it rewrote ~2 MB of JSON every minute.
+    expect(setItem.mock.calls.filter(([key]) => key === PROFILES_KEY)).toHaveLength(0);
+  });
+
   it('Ignores a profile list that answers after the panel signed in again', async () => {
     seedPanelProfile();
     Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
