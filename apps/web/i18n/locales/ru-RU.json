@@ -397,7 +397,7 @@
       "aliases": "Прежние токены"
     },
     "versionsMetaTitle": "История версий и обновления {name} · OpenNavo",
-    "versionsMetaDescription": "Последняя версия {name}: {version} ({date}). Узнайте об изменениях в каждом выпуске.",
+    "versionsMetaDescription": "Последняя версия {name}: {version} ({date}). Узнайте об изменениях в каждом выпуске, поддерживаемых версиях macOS, ссылках для загрузки и шагах установки и удаления в OpenNavo.",
     "metaTitleCask": "{name}: {summary} — установка через Homebrew · OpenNavo",
     "metaDescription": "{summary}. Установка: {command}. Последняя версия {version}, {installs} установка за последние 30 дней. | {summary}. Установка: {command}. Последняя версия {version}, {installs} установки за последние 30 дней. | {summary}. Установка: {command}. Последняя версия {version}, {installs} установок за последние 30 дней. | {summary}. Установка: {command}. Последняя версия {version}, {installs} установки за последние 30 дней.",
     "seo": {
@@ -424,8 +424,8 @@
       "descriptionUnavailableNoSummary": "Homebrew отключил {name}; посмотрите историю версий и похожие приложения.",
       "versionsTitle": "История обновлений {name} · OpenNavo",
       "versionsTitleLatest": "История обновлений {name} (последняя версия {version}) · OpenNavo",
-      "versionsDescriptionNoDate": "Последняя версия {name}: {version}. Узнайте об изменениях в каждом выпуске.",
-      "versionsDescriptionNoVersion": "Узнайте об изменениях в каждом выпуске {name}."
+      "versionsDescriptionNoDate": "Последняя версия {name}: {version}. Узнайте об изменениях в каждом выпуске, поддерживаемых версиях macOS, ссылках для загрузки и шагах установки и удаления в OpenNavo.",
+      "versionsDescriptionNoVersion": "Узнайте об изменениях в каждом выпуске {name}, поддерживаемых версиях macOS, ссылках для загрузки и шагах установки и удаления в OpenNavo."
     },
     "removed": {
       "metaTitle": "{name} удалён из Homebrew · OpenNavo",

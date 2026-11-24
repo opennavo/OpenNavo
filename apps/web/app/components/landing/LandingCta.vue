@@ -27,7 +27,7 @@ function onCopied(command: string) {
           src="/icon-512.png"
           width="112"
           height="112"
-          alt=""
+          alt="OpenNavo"
           aria-hidden="true"
           loading="lazy"
           decoding="async"

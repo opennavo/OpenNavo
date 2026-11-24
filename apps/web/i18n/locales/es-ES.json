@@ -424,8 +424,8 @@
       "descriptionUnavailableNoSummary": "Homebrew ha desactivado {name}; consulta su historial de versiones y apps similares.",
       "versionsTitle": "Novedades de {name} · OpenNavo",
       "versionsTitleLatest": "Novedades de {name} (última versión: {version}) · OpenNavo",
-      "versionsDescriptionNoDate": "Última versión de {name}: {version}. Consulta los cambios de cada versión.",
-      "versionsDescriptionNoVersion": "Consulta los cambios de cada versión de {name}."
+      "versionsDescriptionNoDate": "Última versión de {name}: {version}. Consulta los cambios de cada versión, las versiones de macOS compatibles, los enlaces de descarga y los pasos de instalación y desinstalación en OpenNavo.",
+      "versionsDescriptionNoVersion": "Consulta los cambios de cada versión de {name}, las versiones de macOS compatibles, los enlaces de descarga y los pasos de instalación y desinstalación en OpenNavo."
     },
     "removed": {
       "metaTitle": "{name} se retiró de Homebrew · OpenNavo",

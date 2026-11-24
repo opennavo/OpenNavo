@@ -58,7 +58,8 @@ const linkAttrs = computed(() => (props.linkAs === 'a' ? { href: props.href } : 
         <img
           v-else-if="icon.src"
           :src="icon.src"
-          alt=""
+          :alt="icon.name"
+          aria-hidden="true"
           width="30"
           height="30"
           loading="lazy"

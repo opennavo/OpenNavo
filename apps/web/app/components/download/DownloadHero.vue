@@ -92,7 +92,7 @@ const orbit = computed(() =>
         src="/icon-512.png"
         width="128"
         height="128"
-        alt=""
+        alt="OpenNavo"
         aria-hidden="true"
         decoding="async"
         fetchpriority="high"

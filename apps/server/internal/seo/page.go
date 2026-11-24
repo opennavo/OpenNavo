@@ -70,9 +70,12 @@ func TranslationReady(f Facts, locale string) bool {
 }
 
 // DecidePage is the single policy for a concrete URL. Hreflang is filtered using the same page
-// number and notes threshold for every language, making the links reciprocal. A language closed for
-// indexing is noindex on every page and appears in no page's hreflang; pages noindexed by their shape
-// (install details, dependencies, filtered views) keep that reason in every language.
+// number and notes threshold for every language, making the links reciprocal. A versions page is
+// indexed in a language only when its notes on that page are in that language and meet the threshold.
+// The source-language page does not vouch for a translation, and a translation does not point at a
+// source page whose own notes are thin; every language that does qualify is listed on every such page.
+// A language closed for indexing is noindex on every page and appears in no page's hreflang; pages
+// noindexed by their shape (install details, dependencies, filtered views) keep that reason in every language.
 func DecidePage(f Facts, ref PageRef, p Policy) PageDecision {
 	d := PageDecision{Robots: "noindex, follow", Hreflang: []string{}}
 	if !i18n.Valid(ref.Locale) || ref.Page < 0 {
@@ -122,10 +125,6 @@ func DecidePage(f Facts, ref PageRef, p Policy) PageDecision {
 		d.Reason = "font_page"
 		return d
 	}
-	if ref.Kind == PageVersions && ref.Locale != f.SourceLocale {
-		d.Reason = "versions_source_only"
-		return d
-	}
 	entity := Decide(f, p)
 	if f.Hidden || f.Unavailable() || !entity.Indexable {
 		d.Reason = entity.Reason
@@ -149,9 +148,6 @@ func DecidePage(f Facts, ref PageRef, p Policy) PageDecision {
 			continue
 		}
 		if ref.Kind == PageVersions {
-			if locale != f.SourceLocale {
-				continue
-			}
 			notes := f.NotesPages[page][locale]
 			if notes.Chars < minimum || notes.Entries < VersionsMinNoteEntries {
 				continue

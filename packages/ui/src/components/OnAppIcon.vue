@@ -23,7 +23,10 @@ export interface OnAppIconProps {
   sizes?: string;
   /** Package accent for letter-tile background. */
   accent?: string | null;
-  /** Provide for standalone icons without adjacent names; read as an image, otherwise decorative. */
+  /**
+   * Provide for standalone icons without adjacent names; the image keeps an alt for search engines
+   * even when the wrapper is decorative (aria-hidden) beside its visible name.
+   */
   label?: string;
   /** Critical first-screen icon (detail/hero): eager loading and higher priority (05 §8). */
   priority?: boolean;
@@ -79,7 +82,7 @@ const barColor = computed(() => iconColor(props.token));
       :src="src ?? undefined"
       :srcset="srcset"
       :sizes="srcset ? (sizes ?? `${size}px`) : undefined"
-      alt=""
+      :alt="label ?? name"
       :loading="priority ? 'eager' : 'lazy'"
       :fetchpriority="priority ? 'high' : undefined"
       decoding="async"

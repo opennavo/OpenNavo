@@ -397,7 +397,7 @@
       "aliases": "Tokens anteriores"
     },
     "versionsMetaTitle": "Histórico de versões e novidades de {name} · OpenNavo",
-    "versionsMetaDescription": "Última versão de {name}: {version} ({date}). Veja o que mudou em cada versão.",
+    "versionsMetaDescription": "Última versão de {name}: {version} ({date}). Veja o que mudou em cada versão, as versões do macOS suportadas, os links de download e as etapas de instalação e desinstalação no OpenNavo.",
     "metaTitleCask": "{name}: {summary} — Instalação pelo Homebrew · OpenNavo",
     "metaDescription": "{summary}. Instalação: {command}. Versão mais recente {version}, {installs} instalação nos últimos 30 dias. | {summary}. Instalação: {command}. Versão mais recente {version}, {installs} instalações nos últimos 30 dias.",
     "seo": {
@@ -424,8 +424,8 @@
       "descriptionUnavailableNoSummary": "O Homebrew desativou o {name}; veja o histórico de versões e apps semelhantes.",
       "versionsTitle": "Novidades de {name} · OpenNavo",
       "versionsTitleLatest": "Novidades de {name} (versão mais recente: {version}) · OpenNavo",
-      "versionsDescriptionNoDate": "Última versão de {name}: {version}. Veja o que mudou em cada versão.",
-      "versionsDescriptionNoVersion": "Veja o que mudou em cada versão de {name}."
+      "versionsDescriptionNoDate": "Última versão de {name}: {version}. Veja o que mudou em cada versão, as versões do macOS suportadas, os links de download e as etapas de instalação e desinstalação no OpenNavo.",
+      "versionsDescriptionNoVersion": "Veja o que mudou em cada versão de {name}, as versões do macOS suportadas, os links de download e as etapas de instalação e desinstalação no OpenNavo."
     },
     "removed": {
       "metaTitle": "{name} foi removido do Homebrew · OpenNavo",
