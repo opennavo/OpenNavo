@@ -1426,11 +1426,13 @@ describe('Hermes conversation store', () => {
     vi.advanceTimersByTime(10_000);
     expect(store.thinking).toBe(false);
     expect(store.stopping).toBe(false);
-    expect(store.messages.at(-1)?.text).toBe('已停止。');
+    expect(store.messages.at(-1)?.interrupted).toBe(true);
+    expect(store.messages.at(-1)?.text).toBe('');
     pending[0]!({ status: 'error', error: { code: 'E_HERMES_STOPPED', message: 'stopped', detail: null } });
     await Promise.resolve();
     await Promise.resolve();
-    expect(store.messages.at(-1)?.text).toBe('已停止。');
+    expect(store.messages.at(-1)?.interrupted).toBe(true);
+    expect(store.messages.at(-1)?.text).toBe('');
     expect(toasts.items.value.some(item => item.tone === 'danger')).toBe(false);
   });
 
@@ -2845,10 +2847,10 @@ describe('Hermes conversation store', () => {
     });
 
     // Nothing reached the screen before Stop, so the late completion must not paste the answer
-    // under an "interrupted" label.
+    // under an "interrupted" label; the stop marker is all that bubble should show.
     await vi.waitFor(() => expect(store.messages.at(-1)?.streaming).toBe(false));
     expect(store.messages.at(-1)?.interrupted).toBe(true);
-    expect(store.messages.at(-1)?.text).toBe('已停止。');
+    expect(store.messages.at(-1)?.text).toBe('');
   });
 
   it('Stops a background turn when its conversation is deleted and does not resurrect it', async () => {

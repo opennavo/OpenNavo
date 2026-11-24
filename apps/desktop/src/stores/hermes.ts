@@ -1399,24 +1399,23 @@ export const useHermesStore = defineStore('hermes', () => {
     }
   }
 
-  /** Stamp every open assistant bubble in the conversation as stopped. */
+  /**
+   * Stamp every open assistant bubble in the conversation as stopped. A bubble with no text
+   * stays empty: the transcript renders the localized stop marker instead of hardcoded copy.
+   */
   function markConversationStopped(conversation: HermesConversation) {
     const current = streamingAssistant(conversation);
     if (current) {
       current.streaming = false;
       current.interrupted = true;
-      if (!current.text) current.text = '已停止。';
     }
     for (const entry of conversation.messages) {
       if (entry.role === 'assistant' && entry.streaming) {
         entry.streaming = false;
         entry.interrupted = true;
-        if (!entry.text) entry.text = '已停止。';
       }
     }
     streamingAssistantIds.delete(conversation.id);
-    const last = [...conversation.messages].reverse().find(entry => entry.role === 'assistant');
-    if (last && !last.text) last.text = '已停止。';
     conversation.liveSessionId = undefined;
     conversation.executionGeneration = undefined;
     conversation.updatedAt = Date.now();
@@ -3420,7 +3419,7 @@ export const useHermesStore = defineStore('hermes', () => {
     if (index < 0) return;
     const entry = conversation.messages[index]!;
     entry.streaming = false;
-    if (!entry.text && !entry.tools?.length && !entry.reasoning && !entry.decisions?.length) {
+    if (!entry.interrupted && !entry.text && !entry.tools?.length && !entry.reasoning && !entry.decisions?.length) {
       conversation.messages.splice(index, 1);
     }
     conversation.updatedAt = Date.now();
@@ -4353,10 +4352,9 @@ export const useHermesStore = defineStore('hermes', () => {
             entry.interrupted = true;
             const shown = (entry.text ?? '').trim();
             // A stopped completion may only extend text that already reached the screen. With
-            // nothing streamed there is nothing to extend, so keep the stop marker instead of
-            // pasting the full answer the user cancelled.
-            entry.text =
-              shown && visible.startsWith(shown) && visible.length > shown.length ? visible : shown || '已停止。';
+            // nothing streamed there is nothing to extend, so keep the bubble empty: the
+            // transcript shows the localized stop marker, not the answer the user cancelled.
+            entry.text = shown && visible.startsWith(shown) && visible.length > shown.length ? visible : shown;
           } else {
             entry.text = visible || entry.text || 'Hermes returned an empty response.';
           }
@@ -4386,7 +4384,6 @@ export const useHermesStore = defineStore('hermes', () => {
           const entry = streamingAssistant(target) ?? lastAssistantFrom(target, turnStartIndex);
           if (entry) {
             entry.interrupted = true;
-            entry.text = entry.text || '已停止。';
             entry.streaming = false;
             streamingAssistantIds.delete(conversation.id);
             target.updatedAt = Date.now();
