@@ -460,10 +460,44 @@ async fn verify_session(
     Ok(())
 }
 
+/// A probe is a reachability check plus a session check. One stalled request on a tailnet, or a
+/// Mac that has just woken up, is not proof that the panel is gone: a quick transient failure gets
+/// one more try before the caller is told the connection is offline. A rejected session or a local
+/// configuration error is deterministic and is not retried.
+const PROBE_ATTEMPTS: usize = 2;
+const PROBE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(350);
+/// A request that burned the whole 12 s timeout is not a blip a second attempt can fix in time.
+/// Retrying it would only delay the offline verdict; the store has its own backoff retry for that.
+const PROBE_RETRY_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+fn probe_should_retry(error: &AppError, elapsed: std::time::Duration) -> bool {
+    error.code == "E_HERMES_PROBE" && elapsed < PROBE_RETRY_WINDOW
+}
+
 pub async fn probe(
     connection_id: &str,
     _gateway_url: &str,
 ) -> Result<HermesConnectionProbe, AppError> {
+    let mut last: Option<AppError> = None;
+    for attempt in 0..PROBE_ATTEMPTS {
+        let started = std::time::Instant::now();
+        match probe_once(connection_id).await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                let retry =
+                    attempt + 1 < PROBE_ATTEMPTS && probe_should_retry(&error, started.elapsed());
+                last = Some(error);
+                if !retry {
+                    break;
+                }
+                tokio::time::sleep(PROBE_RETRY_DELAY).await;
+            }
+        }
+    }
+    Err(last.expect("a probe runs at least one attempt"))
+}
+
+async fn probe_once(connection_id: &str) -> Result<HermesConnectionProbe, AppError> {
     let started = std::time::Instant::now();
     if !super::panel::has_session(connection_id) {
         return Err(super::panel::session_missing());
@@ -1075,6 +1109,38 @@ mod tests {
         assert_eq!(failed.code, "E_HERMES_PROBE");
         assert_eq!(failed.message, "Gateway status returned 502 Bad Gateway.");
         assert!(failed.detail.is_none());
+    }
+
+    #[test]
+    fn retries_only_a_quick_transient_probe_failure() {
+        let transient = AppError::new("E_HERMES_PROBE", "Could not reach the gateway.");
+        let rejected = crate::hermes::panel::session_expired("Unauthorized");
+        let bad_url = AppError::new("E_HERMES_PROFILE_URL", "Invalid Hermes Panel URL.");
+        let missing = crate::hermes::panel::session_missing();
+
+        // A quick reset or a 5xx is worth asking again; a dead session or a local URL problem
+        // would answer the same way, and a request that used its whole timeout already delayed
+        // the verdict enough to stop retrying.
+        assert!(probe_should_retry(
+            &transient,
+            std::time::Duration::from_millis(40)
+        ));
+        assert!(!probe_should_retry(
+            &transient,
+            std::time::Duration::from_secs(12)
+        ));
+        assert!(!probe_should_retry(
+            &rejected,
+            std::time::Duration::from_millis(40)
+        ));
+        assert!(!probe_should_retry(
+            &missing,
+            std::time::Duration::from_millis(40)
+        ));
+        assert!(!probe_should_retry(
+            &bad_url,
+            std::time::Duration::from_millis(40)
+        ));
     }
 
     #[test]

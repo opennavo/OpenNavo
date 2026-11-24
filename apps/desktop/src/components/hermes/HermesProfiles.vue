@@ -207,7 +207,7 @@ async function remove(id: string) {
             </span>
             <span class="flex shrink-0 flex-col items-end gap-5px">
               <OnButton
-                v-if="profile.kind === 'panel' && profile.status !== 'connected'"
+                v-if="profile.kind === 'panel' && profile.status === 'error'"
                 variant="ghost"
                 size="xs"
                 @click.stop="emit('relogin', profile)"

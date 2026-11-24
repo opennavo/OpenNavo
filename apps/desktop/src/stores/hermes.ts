@@ -2198,49 +2198,126 @@ export const useHermesStore = defineStore('hermes', () => {
     await loadAgentProfiles();
     await loadModelOptions(true);
     panelAuthExpired.value = null;
+    // A fresh sign-in resets the backoff: the next probe should be the normal minute tick, not a
+    // retry scheduled for the session that was just replaced.
+    clearProbeRetry();
     // Nothing watches the connection records: persist the new endpoint/status here. A probe
     // still in flight when the generation changed above skips its own persist, so without this
     // the next launch would restore the old sign-in state until a probe succeeds.
     persist();
   }
 
+  /**
+   * A probe can fail because the panel is gone or because one request stalled — a tailnet relay
+   * hiccup, or a Mac that just woke up before its network did. The second case is common and
+   * transient, so a transient failure schedules a short retry instead of leaving the connection
+   * offline until the next minute tick.
+   */
+  const PROBE_RETRY_DELAYS = [5_000, 10_000, 20_000, 30_000] as const;
+  let probeInFlight: Promise<void> | null = null;
+  let probeRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let probeRetryAttempt = 0;
+  /** A manual retry arrived while a probe was already in flight: run exactly one more after it. */
+  let probeFollowUp = false;
+
+  function clearProbeRetry() {
+    if (probeRetryTimer) clearTimeout(probeRetryTimer);
+    probeRetryTimer = undefined;
+    probeRetryAttempt = 0;
+  }
+
+  function scheduleProbeRetry() {
+    if (typeof window === 'undefined') return;
+    const delay = PROBE_RETRY_DELAYS[Math.min(probeRetryAttempt, PROBE_RETRY_DELAYS.length - 1)]!;
+    probeRetryAttempt += 1;
+    if (probeRetryTimer) clearTimeout(probeRetryTimer);
+    probeRetryTimer = setTimeout(() => {
+      probeRetryTimer = undefined;
+      void probeConnections();
+    }, delay);
+  }
+
+  type ProbeOutcome = 'ok' | 'auth' | 'transient';
+
+  async function probeConnection(profile: HermesProfile, generation: number): Promise<ProbeOutcome> {
+    try {
+      const result = await unwrap(commands.hermesConnectionProbe(profile.id, profile.endpoint));
+      if (generation !== panelAuthGeneration) return 'ok';
+      profile.status = result.ok ? 'connected' : 'error';
+      profile.latency = result.latencyMs;
+      profile.version = /(\d+\.\d+\.\d+)/.exec(result.version ?? '')?.[1] ?? profile.version;
+      profile.error = undefined;
+      return 'ok';
+    } catch (error) {
+      if (generation !== panelAuthGeneration) return 'ok';
+      const code = error instanceof IpcError ? error.code : '';
+      const reason = error instanceof IpcError ? error.message : String(error);
+      const detail = error instanceof IpcError ? (error.detail ?? error.message) : reason;
+      // A panel that answers its public status route but rejects the session is not a
+      // connection drop: keep 认证失败 + the auth detail instead of flipping to "connected"
+      // on the next probe.
+      if (code === 'E_HERMES_PANEL_AUTH') {
+        profile.status = 'error';
+        profile.error = detail;
+        if (profile.id === activeProfile.value.id) notePanelAuthError(error);
+        return 'auth';
+      }
+      // Reachability failed: keep the real reason instead of a string the user cannot act on.
+      profile.status = 'offline';
+      profile.error = reason;
+      return 'transient';
+    }
+  }
+
   async function probeConnections() {
     const tauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!tauri) return;
+    // The page timer, a focus event and a retry timer can fire together; one probe is enough.
+    if (probeInFlight) return probeInFlight;
     // A sign-in can finish while a probe is still waiting on a slow panel. Its late answer
     // belongs to the session that was replaced, so it must not mark the new one failed or
     // clear the error the new session's own probe is reporting.
     const generation = panelAuthGeneration;
-    await Promise.all(
-      profiles.value
-        .filter(profile => profile.kind !== 'local')
-        .map(async profile => {
-          try {
-            const result = await unwrap(commands.hermesConnectionProbe(profile.id, profile.endpoint));
-            if (generation !== panelAuthGeneration) return;
-            profile.status = result.ok ? 'connected' : 'error';
-            profile.latency = result.latencyMs;
-            profile.version = /(\d+\.\d+\.\d+)/.exec(result.version ?? '')?.[1] ?? profile.version;
-            profile.error = undefined;
-          } catch (error) {
-            if (generation !== panelAuthGeneration) return;
-            const code = error instanceof IpcError ? error.code : '';
-            const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-            // A panel that answers its public status route but rejects the session is not a
-            // connection drop: keep 认证失败 + the auth detail instead of flipping to "connected"
-            // on the next probe.
-            if (code === 'E_HERMES_PANEL_AUTH') {
-              profile.status = 'error';
-              profile.error = detail;
-            } else {
-              profile.status = 'offline';
-              profile.error = 'Connection probe failed';
-            }
-            if (profile.id === activeProfile.value.id) notePanelAuthError(error);
-          }
-        })
-    );
-    if (generation === panelAuthGeneration) persist();
+    const remotes = profiles.value.filter(profile => profile.kind !== 'local');
+    if (!remotes.length) {
+      clearProbeRetry();
+      return;
+    }
+    // Only fields that must survive a relaunch. Latency changes on every probe and is live
+    // telemetry, not state: persisting it rewrote the whole profile store every minute.
+    const signature = () =>
+      remotes.map(profile => [profile.status, profile.error ?? '', profile.version].join('\u0000')).join('\n');
+    const before = signature();
+    probeInFlight = (async () => {
+      const outcomes = await Promise.all(remotes.map(profile => probeConnection(profile, generation)));
+      if (generation !== panelAuthGeneration) return;
+      if (signature() !== before) persist();
+      // Retry only a connection drop. A rejected session needs a sign-in, and a probe that ran
+      // under a replaced session was already ignored above.
+      if (outcomes.includes('transient')) scheduleProbeRetry();
+      else clearProbeRetry();
+    })()
+      .catch(() => undefined)
+      .finally(() => {
+        probeInFlight = null;
+      });
+    return probeInFlight;
+  }
+
+  /** Manual reconnect: drop the backoff and ask the panel now. */
+  function retryConnections() {
+    clearProbeRetry();
+    if (!probeInFlight) return probeConnections();
+    // A slow probe (a tailnet stall or a Mac that just woke up) already owns the connection.
+    // The user asked for another answer now, so queue one more for when it settles: the
+    // in-flight teardown may schedule the 5 s backoff, which must not swallow the manual retry.
+    probeFollowUp = true;
+    return probeInFlight.then(() => {
+      if (!probeFollowUp) return;
+      probeFollowUp = false;
+      clearProbeRetry();
+      return probeConnections();
+    });
   }
 
   async function removeProfile(profileId: string) {
@@ -2413,8 +2490,13 @@ export const useHermesStore = defineStore('hermes', () => {
       if (stale()) return fallback;
       const code = error instanceof IpcError ? error.code : '';
       const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-      connection.status = 'error';
-      connection.error = detail;
+      // Only a rejected session owns the connection status here. A slow or unsupported profile
+      // route is not proof that the panel is gone: the probe decides reachability, and flipping
+      // this row to "offline" on a list failure would disable a chat that still works.
+      if (code === 'E_HERMES_PANEL_AUTH') {
+        connection.status = 'error';
+        connection.error = detail;
+      }
       if (connection.kind === 'panel' && code === 'E_HERMES_PANEL_AUTH') {
         panelAuthExpired.value = connection.id;
         toasts.push({
@@ -4783,6 +4865,7 @@ OpenCode Go 的 API Key 已过期。请在 [OpenCode Console](https://opencode.a
     fleetProfiles,
     loadAllAgentProfiles,
     probeConnections,
+    retryConnections,
     switchToAgentProfile,
     profileColors,
     profileOrder,
