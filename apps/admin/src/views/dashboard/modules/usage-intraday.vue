@@ -28,31 +28,66 @@ const data = ref<DataOf<'getDashboardUsageIntraday'> | null>(null);
 const loading = ref(false);
 const failed = ref(false);
 
+// Calendar days are Beijing days; build the label without depending on the browser time zone.
+const BEIJING_OFFSET = 8 * 60 * 60 * 1000;
+const DAY = 24 * 60 * 60 * 1000;
+const HISTORY_DAYS = 90; // usage_daily detail is pruned after 90 days
+const beijingDay = (time = Date.now()) => new Date(time + BEIJING_OFFSET).toISOString().slice(0, 10);
+const localDay = (timestamp: number) => {
+  const value = new Date(timestamp);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+};
+const date = ref<string | null>(null);
+// Until the user picks a date, keep following Beijing "today" across midnight.
+let followingToday = true;
+
+// Keep requests ordered: a slow response for a previously selected date must not overwrite the latest selection.
+let sequence = 0;
 async function load() {
-  if (loading.value) return;
+  const requested = followingToday ? null : date.value;
+  const id = ++sequence;
   loading.value = true;
   failed.value = false;
   try {
-    const result = await fetchDashboardUsageIntraday();
+    const result = await fetchDashboardUsageIntraday(requested ? { date: requested } : undefined);
+    if (id !== sequence) return;
     if (result.error || !result.data) {
       failed.value = true;
       return;
     }
     data.value = result.data;
+    // The first response establishes today; later responses keep the user's selected date.
+    if (followingToday) date.value = result.data.date;
   } catch {
-    failed.value = true;
+    if (id === sequence) failed.value = true;
   } finally {
-    loading.value = false;
+    if (id === sequence) loading.value = false;
   }
 }
 
 // Use the Dashboard's successful 60-second refresh rather than another timer.
 watch(() => props.refreshAt, load, { immediate: true });
+watch(date, (next, previous) => {
+  if (!next || next === previous || next === data.value?.date) return;
+  followingToday = false;
+  data.value = null;
+  load();
+});
+
+const disableDate = (timestamp: number) => {
+  const day = localDay(timestamp);
+  return day < beijingDay(Date.now() - HISTORY_DAYS * DAY) || day > beijingDay();
+};
 
 const mode = ref<'hourly' | 'cumulative'>('hourly');
 const elapsed = computed(() => data.value?.hours.filter(entry => entry.web !== null) ?? []);
 const latest = computed(() => elapsed.value.at(-1));
 const hasActivity = computed(() => Boolean(latest.value?.cumulativeDesktop || latest.value?.cumulativeWeb));
+// The sample timestamp belongs to today only when the selected date is today; past days are final.
+const isToday = computed(() => {
+  const parsed = data.value ? Date.parse(data.value.asOf) : Number.NaN;
+  return Number.isFinite(parsed) && data.value?.date === beijingDay(parsed);
+});
 const asOf = computed(() =>
   data.value
     ? text('asOf', {
@@ -126,9 +161,22 @@ const tooltipStyle = computed(() => {
   <section aria-labelledby="usage-intraday-title" data-testid="usage-intraday" class="min-w-0">
     <div class="mb-8px flex flex-wrap items-center justify-between gap-8px">
       <h3 id="usage-intraday-title" class="m-0 text-14px font-600">{{ text('title') }}</h3>
-      <NText v-if="data" depth="3" class="text-12px">
-        <time :datetime="data.asOf" data-testid="intraday-as-of">{{ asOf }}</time>
-      </NText>
+      <div class="flex flex-wrap items-center gap-8px">
+        <NDatePicker
+          v-model:formatted-value="date"
+          type="date"
+          size="small"
+          value-format="yyyy-MM-dd"
+          :clearable="false"
+          :is-date-disabled="disableDate"
+          :placeholder="text('date')"
+          class="w-136px"
+        />
+        <NText v-if="data" depth="3" class="text-12px">
+          <time v-if="isToday" :datetime="data.asOf" data-testid="intraday-as-of">{{ asOf }}</time>
+          <span v-else data-testid="intraday-day">{{ data.date }} · {{ text('timeZone') }}</span>
+        </NText>
+      </div>
     </div>
     <p class="mb-12px mt-0 text-12px" :style="{ color: theme.textColor3 }">{{ text('description') }}</p>
     <NAlert v-if="failed" type="error" role="alert" :title="text('loadFailed')" class="mb-12px">
@@ -159,6 +207,7 @@ const tooltipStyle = computed(() => {
         <figcaption class="sr-only">{{ text(mode) }}</figcaption>
         <div
           ref="frame"
+          data-testid="intraday-frame"
           class="relative rounded-4px outline-none focus-visible:outline-solid"
           tabindex="0"
           :aria-label="text('keyboardHint')"

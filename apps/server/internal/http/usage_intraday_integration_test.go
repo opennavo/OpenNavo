@@ -78,4 +78,15 @@ func TestUsageIntradayDashboardContract(t *testing.T) {
 	today := overview.Data.Usage.Days[len(overview.Data.Usage.Days)-1]
 	require.Equal(t, today.Desktop, *intraday.Data.Hours[1].CumulativeDesktop)
 	require.Equal(t, today.Web, *intraday.Data.Hours[1].CumulativeWeb)
+	var previous struct {
+		Code string
+		Data store.UsageIntraday
+	}
+	require.NoError(t, json.Unmarshal(call("/dashboard/usage/intraday?date=2026-10-28").Body.Bytes(), &previous))
+	require.Equal(t, "0000", previous.Code)
+	require.Equal(t, "2026-10-28", previous.Data.Date)
+	for hour, entry := range previous.Data.Hours {
+		require.NotNil(t, entry.Web, "hour %d", hour)
+		require.NotNil(t, entry.Desktop, "hour %d", hour)
+	}
 }
