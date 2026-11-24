@@ -1382,6 +1382,19 @@ export function installMockIpc(
     hermes_agent_profiles: () => mockAgentProfiles.map(profile => ({ ...profile })),
     hermes_history_load: () => null,
     hermes_history_save: () => null,
+    hermes_save_pasted_text: args => ({
+      path: '/tmp/mock-pasted-content.txt',
+      name: 'pasted_content.txt',
+      size: String(args.text ?? '').length,
+      isImage: false
+    }),
+    hermes_save_attachment_image: () => ({
+      path: '/tmp/mock-pasted-image.png',
+      name: 'pasted-image.png',
+      size: 1,
+      isImage: true
+    }),
+    hermes_discard_attachment: () => null,
     hermes_panel_sessions: args => {
       const profile = typeof args.profile === 'string' ? args.profile : 'default';
       const limit = Number(args.limit ?? 20);

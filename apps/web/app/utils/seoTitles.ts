@@ -3,6 +3,7 @@
 // when Homebrew can still install the package. Descriptions say what the page answers instead of
 // stacking summary, command, version and install counts.
 import { disabledByHomebrew, formatVersion, type HomebrewLifecycle } from '@opennavo/shared';
+import { plainText } from './backgroundItems';
 import {
   capabilities,
   shownRequirements,
@@ -300,10 +301,39 @@ export function fitSummary(summary: string, room: number): string {
   return head ? `${head}…` : '';
 }
 
+/**
+ * The start of a CJK description that fits `room` characters. Bing counts meta-description length in
+ * characters, while the site's display budget counts CJK letters twice; this keeps a long Chinese or
+ * Japanese version page inside the search-result limit without shortening a page that already fits.
+ * A sentence or clause that fills at least 60% of the room is kept whole, including its punctuation.
+ */
+export function fitSummaryChars(summary: string, room: number): string {
+  const chars = Array.from(summary);
+  if (room < 1) return '';
+  if (chars.length <= room) return summary;
+  const head = chars.slice(0, room).join('');
+  let cut = 0;
+  for (const end of [SENTENCE_END, CLAUSE_END]) {
+    for (const match of head.matchAll(end)) {
+      if (match.index === undefined) continue;
+      const at = Array.from(head.slice(0, match.index + match[0].length)).length;
+      if (at <= room) cut = Math.max(cut, at);
+    }
+  }
+  if (cut >= room * 0.6) return chars.slice(0, cut).join('').trimEnd();
+  const clipped = chars
+    .slice(0, room - 1)
+    .join('')
+    .replace(/[\s。！？；：，、]+$/u, '');
+  return clipped ? `${clipped}…` : '';
+}
+
 export interface OverviewFacts {
   kind: PackagePage['kind'];
   displayName: string;
   summary?: string | null;
+  /** Localized long introduction (Markdown); its lead fills a short catalog summary for the snippet. */
+  description?: string | null;
   isFont: boolean;
   /** The catalog flag, which also covers apps paused by the 90-day rule that Homebrew still installs. */
   disabled: boolean;
@@ -431,11 +461,20 @@ function overviewSentence(
 export function overviewDescription(pkg: OverviewFacts, t: Translate, list: ListFormat): string {
   // Preserve the existing distribution/lifecycle branches.
   if (disabledByHomebrew(pkg)) return overviewSentence(pkg, t, 'package.seo.descriptionUnavailable');
-  if (!usableSummary(pkg.summary, pkg.displayName)) return sectionDescription(pkg, t, list);
-  const whole = sectionDescription(pkg, t, list, true);
-  if (whole) return whole;
-  if (variantLabel(pkg.token ?? '')) return sectionDescription(pkg, t, list);
-  return fitSummary(pkg.summary!.trim(), DESCRIPTION_WIDTH);
+  let base: string;
+  if (!usableSummary(pkg.summary, pkg.displayName)) base = sectionDescription(pkg, t, list);
+  else {
+    const whole = sectionDescription(pkg, t, list, true);
+    if (whole) base = whole;
+    else if (variantLabel(pkg.token ?? '')) base = sectionDescription(pkg, t, list);
+    else base = fitSummary(pkg.summary!.trim(), DESCRIPTION_WIDTH);
+  }
+  // A short catalog summary leaves the snippet below Bing's length guidance. The editor-written,
+  // already localized introduction says more; use its lead only when it is longer than the summary.
+  // A variant keeps its own branch because the main app's introduction does not name it.
+  if (textWidth(base) >= 150 || variantLabel(pkg.token ?? '')) return base;
+  const lead = pkg.description ? fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH) : '';
+  return textWidth(lead) > textWidth(base) ? lead : base;
 }
 
 function sectionDescription(pkg: OverviewFacts, t: Translate, list: ListFormat, whole = false): string {
@@ -488,14 +527,27 @@ export function currentReleaseDate(pkg: VersionFacts): string | undefined {
   return latest.publishedAt ?? latest.brewCommittedAt ?? undefined;
 }
 
-export function versionsDescription(pkg: VersionFacts, t: Translate, formatDate: (iso: string) => string): string {
+export function versionsDescription(
+  pkg: VersionFacts,
+  t: Translate,
+  formatDate: (iso: string) => string,
+  locale?: string
+): string {
   const name = pkg.displayName;
   const version = reliableVersion(pkg.version);
-  if (!version) return withName(t, 'package.seo.versionsDescriptionNoVersion', name);
   const date = currentReleaseDate(pkg);
-  return date
-    ? withName(t, 'package.versionsMetaDescription', name, { version, date: formatDate(date) })
-    : withName(t, 'package.seo.versionsDescriptionNoDate', name, { version });
+  let text: string;
+  if (!version) text = withName(t, 'package.seo.versionsDescriptionNoVersion', name);
+  else if (date) text = withName(t, 'package.versionsMetaDescription', name, { version, date: formatDate(date) });
+  else text = withName(t, 'package.seo.versionsDescriptionNoDate', name, { version });
+  // Long app names and versions push the Latin templates past the snippet limit; keep the version and
+  // date, which lead the sentence, and trim the trailing explanation at a sentence or clause boundary.
+  // CJK templates are counted in display columns here but in characters by Bing: keep short pages
+  // whole and trim only the ones that would exceed the character limit. The page locale has to be passed
+  // in: vue-i18n's t function has no locale property, unlike the test translator.
+  return /^(?:zh|ja)/i.test(titleLocale(t, locale) ?? '')
+    ? fitSummaryChars(text, DESCRIPTION_WIDTH)
+    : fitSummary(text, DESCRIPTION_WIDTH);
 }
 
 /** Joins phrases the way the page's language lists them ("a, b and c", "a、b和c"). */

@@ -143,7 +143,9 @@ usePageSeo({
   },
   page,
   description: () =>
-    pkg.value ? versionsDescription(pkg.value, t, iso => formatDate(iso, { locale: appLocale.value })) : undefined
+    pkg.value
+      ? versionsDescription(pkg.value, t, iso => formatDate(iso, { locale: appLocale.value }), locale.value)
+      : undefined
 });
 </script>
 

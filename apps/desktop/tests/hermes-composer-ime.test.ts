@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AssistantPage from '@/pages/AssistantPage.vue';
 import { i18n } from '@/i18n';
 import { useHermesStore } from '@/stores/hermes';
-import { setup } from './helpers';
+import { setComposerText, setup } from './helpers';
 
 const wrappers: VueWrapper[] = [];
 
@@ -41,12 +41,11 @@ async function composer() {
   await flushPromises();
   const store = useHermesStore();
   const send = vi.spyOn(store, 'send').mockResolvedValue(undefined);
-  const textarea = wrapper.get<HTMLTextAreaElement>('#hermes-composer');
-  await textarea.setValue("w'd's'd");
+  const textarea = await setComposerText(wrapper, "w'd's'd");
   return { send, textarea };
 }
 
-function press(target: HTMLTextAreaElement, init: KeyboardEventInit = {}, keyCode = 13) {
+function press(target: HTMLElement, init: KeyboardEventInit = {}, keyCode = 13) {
   const event = new KeyboardEvent('keydown', {
     key: 'Enter',
     bubbles: true,
@@ -67,7 +66,7 @@ describe('Hermes composer Enter handling', () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(send).not.toHaveBeenCalled();
-    expect(textarea.element.value).toBe("w'd's'd");
+    expect(textarea.element.textContent).toBe("w'd's'd");
   });
 
   it('Does not send while isComposing is still set', async () => {
@@ -92,7 +91,7 @@ describe('Hermes composer Enter handling', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
 
     element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
-    element.value = '我的时代';
+    element.textContent = '我的时代';
     element.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: '我的时代' }));
     element.dispatchEvent(
       new InputEvent('input', {
@@ -106,7 +105,7 @@ describe('Hermes composer Enter handling', () => {
     await flushPromises();
 
     expect(send).not.toHaveBeenCalled();
-    expect(element.value).toBe('我的时代');
+    expect(element.textContent).toBe('我的时代');
 
     element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '我的时代' }));
     element.dispatchEvent(
@@ -138,5 +137,35 @@ describe('Hermes composer Enter handling', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith("w'd's'd", []);
+  });
+
+  it('Does not restore the placeholder while composition is still open', async () => {
+    const { textarea } = await composer();
+    const element = textarea.element;
+
+    // Empty the committed draft: the placeholder marker comes back.
+    element.textContent = '';
+    await textarea.trigger('input');
+    expect(element.hasAttribute('data-empty')).toBe(true);
+
+    element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+    expect(element.hasAttribute('data-empty')).toBe(false);
+
+    // Preedit text may still serialize as empty; that must not paint the placeholder mid-composition.
+    element.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        data: '你',
+        inputType: 'insertCompositionText',
+        isComposing: true
+      })
+    );
+    await flushPromises();
+    expect(element.hasAttribute('data-empty')).toBe(false);
+
+    element.textContent = '你';
+    element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '你' }));
+    await flushPromises();
+    expect(element.hasAttribute('data-empty')).toBe(false);
   });
 });

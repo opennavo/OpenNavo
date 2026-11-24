@@ -75,6 +75,18 @@ func TestSiteIndexEndpointsFollowTheContract(t *testing.T) {
 	app := ids["lookup-app"]
 	exec(`INSERT INTO package_i18n(package_id,locale,display_name,summary,description,status,source,source_locale,source_hash) VALUES
  (?,'zh-CN','查找应用','编辑代码','更长的介绍','machine','llm','en-US',repeat('a',64))`, app)
+	// Three translated notes make the versions page readable in English and Chinese, so both language
+	// versions are indexed as themselves and list each other's URL.
+	englishNotes := strings.Repeat("Improved sync reliability for large libraries. ", 5)
+	chineseNotes := strings.Repeat("改进了大型资料库的同步可靠性。", 10)
+	for i, version := range []string{"1.0", "1.1", "1.2"} {
+		releaseID := 9701 + i
+		exec(`INSERT INTO package_versions(id,package_id,version,version_base,first_seen_at) VALUES(?,?,?,?,'2026-01-01')`, releaseID, app, version, version)
+		exec(`INSERT INTO releases(id,package_id,package_version_id,source,source_key,version,source_locale,body_markdown,source_url)
+ VALUES(?,?,?,'manual',?,?,'en-US',?,'https://lookup.example/releases')`, releaseID, app, releaseID, "lookup:"+version, version, englishNotes)
+		exec(`INSERT INTO release_i18n(release_id,locale,source_locale,status,source_hash,body_markdown)
+ VALUES(?,'zh-CN','en-US','machine',repeat('c',64),?)`, releaseID, chineseNotes)
+	}
 	for i, token := range []string{"alt-one", "alt-two", "alt-three"} {
 		exec(`INSERT INTO package_alternatives(package_id,alternative_id,sort,reasons,source) VALUES(?,?,?,ARRAY['open_source'],'admin')`, app, ids[token], i)
 		exec(`INSERT INTO package_fact_records(package_id,kind,key,value,evidence) VALUES(?,'attribute','open-source','{"name":"open_source","booleanValue":true}',
@@ -190,11 +202,23 @@ func TestSiteIndexEndpointsFollowTheContract(t *testing.T) {
 	require.Equal(t, base+"/apps/lookup-app", overview["canonical"])
 	require.Equal(t, []any{map[string]any{"locale": "en-US", "url": base + "/apps/lookup-app"}, map[string]any{"locale": "zh-CN", "url": base + "/zh/apps/lookup-app"}}, overview["hreflang"])
 	require.Equal(t, map[string]any{"type": "package", "id": float64(app), "key": "lookup-app", "packageKind": "cask"}, overview["entity"])
+	englishVersions := decision(base + "/apps/lookup-app/versions")
+	require.Equal(t, "app_versions", englishVersions["kind"])
+	require.Equal(t, true, englishVersions["indexable"])
+	require.Equal(t, base+"/apps/lookup-app/versions", englishVersions["canonical"])
+	require.Equal(t, []any{
+		map[string]any{"locale": "en-US", "url": base + "/apps/lookup-app/versions"},
+		map[string]any{"locale": "zh-CN", "url": base + "/zh/apps/lookup-app/versions"},
+	}, englishVersions["hreflang"])
+	require.Equal(t, false, englishVersions["inSitemap"])
+	chineseVersions := decision(base + "/zh/apps/lookup-app/versions")
+	require.Equal(t, true, chineseVersions["indexable"])
+	require.Equal(t, base+"/zh/apps/lookup-app/versions", chineseVersions["canonical"])
+	require.Equal(t, englishVersions["hreflang"], chineseVersions["hreflang"], "alternates are reciprocal and name each language's own versions page")
 	for _, tc := range []struct{ path, kind, reason, canonical string }{
 		{"/apps/lookup-app/versions?page=2", "app_versions", "thin_notes_page", "/apps/lookup-app/versions?page=2"},
-		// 72a38e4 noindexes non-source versions regardless of notes or page number.
-		{"/zh/apps/lookup-app/versions", "app_versions", "versions_source_only", "/zh/apps/lookup-app/versions"},
-		{"/zh/apps/lookup-app/versions?page=2", "app_versions", "versions_source_only", "/zh/apps/lookup-app/versions?page=2"},
+		// Page 2 has no notes in either language: each versions page needs its own notes.
+		{"/zh/apps/lookup-app/versions?page=2", "app_versions", "thin_notes_page", "/zh/apps/lookup-app/versions?page=2"},
 		{"/apps/lookup-app/versions?notes=1", "app_versions", "filtered_view", "/apps/lookup-app/versions?notes=1"},
 		{"/apps/lookup-app/details", "app_details", "consolidated", "/apps/lookup-app"},
 		{"/apps/lookup-app/alternatives", "app_alternatives", "intent_not_eligible", "/apps/lookup-app"},

@@ -185,7 +185,9 @@ describe('Hermes panel re-login', () => {
     expect(send).not.toHaveBeenCalled();
 
     // A disabled primary must not advertise Enter; the hint drops the ↵ prefix while offline.
-    await wrapper.find('textarea').setValue('hello');
+    const editor = wrapper.get('#hermes-composer');
+    editor.element.textContent = 'hello';
+    await editor.trigger('input');
     expect(wrapper.text()).not.toContain('↵');
 
     // Clear the store's retry timer so it cannot fire after this test restores the mocks.

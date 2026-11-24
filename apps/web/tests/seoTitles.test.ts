@@ -174,12 +174,12 @@ describe('WP1 titles and descriptions', () => {
       latestRelease: { ...pkg.latestRelease, version: '4.3.8' }
     };
     expect(currentReleaseDate(stale)).toBeUndefined();
-    expect(versionsDescription(stale, t, format)).toBe(
-      'The Unarchiver latest version 4.3.9. See what changed in every release.'
-    );
-    expect(versionsDescription({ displayName: 'Nightly', version: 'latest' }, t, format)).toBe(
-      'See what changed in every Nightly release.'
-    );
+    const staleDescription = versionsDescription(stale, t, format);
+    expect(staleDescription).toContain('The Unarchiver latest version 4.3.9');
+    expect(textWidth(staleDescription)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    const noVersion = versionsDescription({ displayName: 'Nightly', version: 'latest' }, t, format);
+    expect(noVersion).toContain('every Nightly release');
+    expect(textWidth(noVersion)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
     expect(reliableVersion('latest')).toBe('');
     expect(reliableVersion('2.0,1234')).toBe('2.0');
   });
@@ -654,6 +654,25 @@ describe('Descriptions that fit search results', () => {
     }
   });
 
+  it('fills a short catalog summary from the localized introduction', () => {
+    const t = translator('en-US');
+    const intro =
+      'Visual Studio Code is a free code editor from Microsoft for macOS, with debugging, Git integration, extensions and an integrated terminal for everyday development.';
+    const base = overviewDescription(app, t);
+    const description = overviewDescription({ ...app, description: intro }, t);
+    expect(description.startsWith('Visual Studio Code is')).toBe(true);
+    expect(textWidth(description)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    expect(textWidth(description)).toBeGreaterThan(textWidth(base));
+    // A variant keeps its own sentence: the main app's introduction does not name it.
+    const beta = {
+      ...app,
+      token: 'visual-studio-code@beta',
+      displayName: 'Visual Studio Code Beta',
+      description: intro
+    };
+    expect(overviewDescription(beta, t)).toContain('Visual Studio Code Beta');
+  });
+
   it('Cuts where the summary reads complete, else between words with an ellipsis', () => {
     const t = translator('en-US');
     expect(overviewDescription({ ...app, displayName: 'WeChat for Mac', summary: wechat['en-US'][1] }, t)).toBe(
@@ -709,9 +728,24 @@ describe('Descriptions that fit search results', () => {
     expect(versionsTitle({ displayName: '网易云音乐', version: '3.1.2' }, zh)).toBe(
       '网易云音乐更新日志（最新 3.1.2）· OpenNavo'
     );
-    expect(versionsDescription({ displayName: '网易云音乐', version: 'latest' }, zh, iso => iso)).toBe(
-      '查看网易云音乐每个版本更新了什么。'
+    expect(versionsDescription({ displayName: '网易云音乐', version: 'latest' }, zh, iso => iso)).toMatch(
+      /^查看网易云音乐每个版本/
     );
+    // Bing counts CJK descriptions in characters: a long name still fits the search-result limit.
+    // Production t has no locale property, so the page locale has to be passed explicitly.
+    const traditional = translator('zh-Hant');
+    const bare: Translate = (key, named, plural) => traditional(key, named, plural);
+    const versionFacts = {
+      displayName: '一個非常長的應用程式名稱用於測試版本描述長度',
+      version: '1.2.3',
+      latestRelease: { version: '1.2.3', publishedAt: '2026-11-20', brewCommittedAt: null }
+    };
+    const longCjk = versionsDescription(versionFacts, bare, iso => iso, 'zh-Hant');
+    expect([...longCjk].length).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    expect(longCjk.endsWith('。')).toBe(true);
+    expect(longCjk).not.toMatch(/[。！？；：，]\s*…$/u);
+    const byWidth = versionsDescription(versionFacts, bare, iso => iso);
+    expect([...byWidth].length).toBeLessThan([...longCjk].length);
     expect(versionsTitle({ displayName: 'QQ音乐', version: '10.0' }, zh)).toBe('QQ音乐更新日志（最新 10.0）· OpenNavo');
     expect(versionsTitle({ displayName: 'Visual Studio Code', version: '1.95.3' }, zh)).toBe(
       'Visual Studio Code 更新日志（最新 1.95.3）· OpenNavo'

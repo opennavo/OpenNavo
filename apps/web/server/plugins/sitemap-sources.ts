@@ -6,8 +6,8 @@ import { BRAND, LOCALES, VERSION_PAGE_MIN_NOTES } from '@opennavo/shared';
 import {
   packageSitemapName,
   packageSitemaps,
-  VERSIONS_SITEMAP_PILOT_BUCKET,
-  VERSIONS_SITEMAP_PILOT_TOKEN,
+  VERSIONS_SITEMAP_PILOT_BUCKETS,
+  VERSIONS_SITEMAP_PILOT_TOKENS,
   type PackageSitemapGroup
 } from '../../shared/utils/sitemapBuckets';
 import { MAX_CACHE_ENTRY_BYTES, PAGE_CACHE_TTL_SECONDS } from '../utils/boundedCache';
@@ -81,7 +81,7 @@ export default defineNitroPlugin(nitroApp => {
           if (
             sitemapName.startsWith('versions-') &&
             !settings.pages.versionsSitemap &&
-            sitemapName !== VERSIONS_SITEMAP_PILOT_BUCKET
+            !VERSIONS_SITEMAP_PILOT_BUCKETS.has(sitemapName)
           )
             return false;
           return populated.has(sitemapName);
@@ -116,7 +116,7 @@ export default defineNitroPlugin(nitroApp => {
       const group = ctx.sitemapName.split('-')[0] as PackageSitemapGroup;
       const settings = await getSiteSettings();
       const pilotOnly =
-        group === 'versions' && !settings.pages.versionsSitemap && ctx.sitemapName === VERSIONS_SITEMAP_PILOT_BUCKET;
+        group === 'versions' && !settings.pages.versionsSitemap && VERSIONS_SITEMAP_PILOT_BUCKETS.has(ctx.sitemapName);
       if (group === 'fonts' && !settings.pages.fontsSitemap)
         throw createError({ statusCode: 410, statusMessage: 'Sitemap gone' });
       if (group === 'versions' && !settings.pages.versionsSitemap && !pilotOnly)
@@ -132,7 +132,7 @@ export default defineNitroPlugin(nitroApp => {
               ])
             ).flat()
           : await cachedPackages(group, settings.revision)
-      ).filter(record => !pilotOnly || record.token === VERSIONS_SITEMAP_PILOT_TOKEN);
+      ).filter(record => !pilotOnly || VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token));
       const page = group === 'versions' ? 'versions' : 'overview';
       const urls = records
         .filter(record => packageSitemapName(group, record.token) === ctx.sitemapName)
@@ -223,9 +223,11 @@ async function populatedPackageSitemaps(): Promise<Set<string>> {
         for (const record of fonts) add('fonts', record, 'overview');
         if (settings.pages.versionsSitemap)
           for (const record of [...apps, ...fonts]) add('versions', record, 'versions');
-        // The approved one-page pilot is listed even while the global versions sitemap is off.
-        else if (apps.some(record => record.token === VERSIONS_SITEMAP_PILOT_TOKEN))
-          buckets.add(VERSIONS_SITEMAP_PILOT_BUCKET);
+        // The approved pilot pages are listed even while the global versions sitemap is off.
+        else
+          for (const record of apps)
+            if (VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token) && (record.notesCount ?? 0) >= VERSION_PAGE_MIN_NOTES)
+              buckets.add(packageSitemapName('versions', record.token));
         return buckets;
       },
       {
@@ -517,15 +519,19 @@ function packageEntries(
 }
 
 /**
- * The one-page versions pilot stays source-language only with no alternates, because the localized
- * versions pages remain noindex. Its approval overrides the older per-page sitemap decision.
+ * The versions pilot stays source-language only with no sitemap alternates: only the approved
+ * source-language URLs are listed. Localized versions pages are indexed when their own notes
+ * qualify and advertise themselves through the page's hreflang, not through these entries.
  */
 function pilotVersionEntries(record: SitemapRecord, sitemap: string) {
-  if (record.token !== VERSIONS_SITEMAP_PILOT_TOKEN) return [];
+  if (!VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token)) return [];
+  // A pilot entry is a promise to search engines: skip an app whose notes can no longer qualify,
+  // so the sitemap never advertises a page the server marks thin.
+  if ((record.notesCount ?? 0) < VERSION_PAGE_MIN_NOTES) return [];
   const lastmod = record.locales?.find(entry => entry.locale === 'en-US')?.pageLastmod?.versions;
   const [entry] = localizedEntries(`/apps/${record.token}/versions`, sitemap, ['en-US'], () => lastmod);
   if (!entry) return [];
-  // No alternates: localized versions pages stay noindex.
+  // No alternates: the pilot lists one URL per app, not the localized pages.
   const { alternatives: _alternatives, ...plain } = entry;
   return [plain];
 }

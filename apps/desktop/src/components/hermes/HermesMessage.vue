@@ -7,6 +7,7 @@ import { formatCount } from '@opennavo/shared';
 import HermesMark from './HermesMark.vue';
 import HermesMediaCard from './HermesMediaCard.vue';
 import HermesCopyButton from './HermesCopyButton.vue';
+import HermesUserText from './HermesUserText.vue';
 import { useHermesContent } from '@/composables/useHermesContent';
 import { useAppLocale } from '@/composables/useAppLocale';
 import { usePackageState } from '@/composables/usePackageState';
@@ -53,7 +54,14 @@ const text = computed(() => messageText(props.message.textKey) || props.message.
 const attachments = computed<MessageAttachment[]>(() =>
   (props.message.attachments ?? []).map(path => {
     const kind = mediaKind(path);
-    return { path, name: mediaName(path), kind, image: kind === 'image' };
+    const name = mediaName(path);
+    return {
+      path,
+      // A large paste is a managed .txt; its chip should read like the composer's, not a temp name.
+      name: /^pasted_content_[\w-]+\.txt$/.test(name) ? content.value.composer.pastedContent : name,
+      kind,
+      image: kind === 'image'
+    };
   })
 );
 const contentParts = computed<HermesContentPart[]>(() =>
@@ -230,7 +238,7 @@ watch(() => props.message.attachments, loadAttachmentPreviews, { immediate: true
             </span>
           </button>
         </div>
-        <div v-if="text" class="whitespace-pre-wrap">{{ text }}</div>
+        <HermesUserText v-if="text" :text="text" />
         <div v-if="message.queued" class="mt-6px flex items-center gap-5px text-10.5px text-ink-tertiary">
           <OnIcon name="lucide:clock" :size="11" />
           {{ content.composer.queued }}
