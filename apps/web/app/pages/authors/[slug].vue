@@ -115,7 +115,7 @@ if (author.value)
         <img
           v-if="author.avatarUrl"
           :src="author.avatarUrl"
-          :alt="author.name"
+          alt=""
           aria-hidden="true"
           width="72"
           height="72"

@@ -237,7 +237,7 @@ function featureLinkAttrs(feature: OnDiscoverFeature) {
             <img
               v-else-if="feature.icons[0]?.src"
               :src="feature.icons[0].src"
-              :alt="feature.icons[0].name"
+              alt=""
               aria-hidden="true"
               width="40"
               height="40"
