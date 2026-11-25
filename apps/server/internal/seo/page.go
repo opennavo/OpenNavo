@@ -163,7 +163,15 @@ func DecidePage(f Facts, ref PageRef, p Policy) PageDecision {
 		return d
 	}
 	d.Robots, d.Hreflang, d.Announce = IndexableRobots, locales, true
-	d.InSitemap = page == 1 && p.SitemapAppAllowed(f, ref.Locale) && (ref.Kind != PageVersions || p.VersionsSitemap)
+	// A later versions page is a page of its own: once its notes qualify it is listed even when page 1 is thin.
+	// Every other kind is listed only as the first page.
+	listed := page == 1 || ref.Kind == PageVersions
+	// The versions pilot is an approved list that outlives the global switch: its English pages stay listed
+	// while the sitemap is off. The public settings carry the same list, so the XML cannot list a pilot URL
+	// this decision leaves out.
+	pilot := ref.Kind == PageVersions && !p.VersionsSitemap &&
+		ref.Locale == VersionsSitemapPilotLocale && IsVersionsSitemapPilot(f.Token)
+	d.InSitemap = listed && p.SitemapAppAllowed(f, ref.Locale) && (ref.Kind != PageVersions || p.VersionsSitemap || pilot)
 	return d
 }
 

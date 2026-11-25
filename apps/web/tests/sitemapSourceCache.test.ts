@@ -12,7 +12,8 @@ import {
   packageSitemapName,
   packageSitemaps,
   VERSIONS_SITEMAP_PILOT_BUCKET,
-  VERSIONS_SITEMAP_PILOT_TOKEN
+  VERSIONS_SITEMAP_PILOT_TOKEN,
+  VERSIONS_SITEMAP_PILOT_TOKENS
 } from '../shared/utils/sitemapBuckets';
 
 afterEach(() => {
@@ -71,7 +72,13 @@ async function setup(records: Record<string, unknown>[], fontsSitemap = true, fo
       })
   );
   vi.stubGlobal('useRuntimeConfig', () => ({ apiBaseInternal: 'https://example.test', public: {} }));
-  const settings = { revision: 1, pages: { versionsSitemap: true, fontsSitemap } };
+  const settings: {
+    revision: number;
+    pages: { versionsSitemap: boolean; fontsSitemap: boolean; versionsSitemapPilot?: string[] };
+  } = {
+    revision: 1,
+    pages: { versionsSitemap: true, fontsSitemap, versionsSitemapPilot: [...VERSIONS_SITEMAP_PILOT_TOKENS] }
+  };
   vi.stubGlobal('getSiteSettings', async () => settings);
   vi.stubGlobal('$fetch', fetch);
   const plugin = await import('../server/plugins/sitemap-sources');
@@ -172,7 +179,7 @@ describe('sitemap source snapshot cache', () => {
       locales: [
         {
           locale: 'en-US',
-          pages: { versions: { inSitemap: false } },
+          pages: { versions: { inSitemap: true } },
           pageLastmod: { versions: '2026-11-01T00:00:00Z', 'versions:2': '2026-11-02T00:00:00Z' },
           versionsPages: [2]
         },
@@ -183,7 +190,7 @@ describe('sitemap source snapshot cache', () => {
       kind: 'cask',
       token: 'google-chrome',
       notesCount: 5,
-      locales: [{ locale: 'en-US', pages: { versions: { inSitemap: false } } }]
+      locales: [{ locale: 'en-US', pages: { versions: { inSitemap: true } } }]
     };
     const other = { kind: 'cask', token: 'other-app-0', notesCount: 5, locales: [{ locale: 'en-US' }] };
     const { index, bucket, settings } = await setup([pilot, secondPilot, other]);
@@ -201,7 +208,11 @@ describe('sitemap source snapshot cache', () => {
     ).toEqual([VERSIONS_SITEMAP_PILOT_BUCKET, secondPilotBucket].sort());
     const pilotEntries = await bucket(VERSIONS_SITEMAP_PILOT_BUCKET);
     const pilotEntry = pilotEntries.find(entry => entry.loc === `/apps/${pilot.token}/versions`);
-    expect(pilotEntry).toMatchObject({ loc: `/apps/${pilot.token}/versions`, _sitemap: VERSIONS_SITEMAP_PILOT_BUCKET });
+    expect(pilotEntry).toMatchObject({
+      loc: `/apps/${pilot.token}/versions`,
+      lastmod: '2026-11-01T00:00:00Z',
+      _sitemap: VERSIONS_SITEMAP_PILOT_BUCKET
+    });
     expect(pilotEntry).not.toHaveProperty('alternatives');
     const laterEntry = pilotEntries.find(entry => entry.loc === `/apps/${pilot.token}/versions?page=2`);
     expect(laterEntry).toMatchObject({
@@ -217,6 +228,85 @@ describe('sitemap source snapshot cache', () => {
     });
     expect(secondEntry).not.toHaveProperty('alternatives');
     await expect(bucket(packageSitemapName('versions', other.token))).rejects.toMatchObject({ statusCode: 410 });
+  });
+
+  it('keeps a pilot bucket whose only listed URL is a later page', async () => {
+    const app = {
+      kind: 'cask',
+      token: VERSIONS_SITEMAP_PILOT_TOKEN,
+      notesCount: 5,
+      locales: [
+        {
+          locale: 'en-US',
+          pages: { versions: { inSitemap: false } },
+          pageLastmod: { versions: '2026-11-01T00:00:00Z', 'versions:2': '2026-11-02T00:00:00Z' },
+          versionsPages: [2]
+        }
+      ]
+    };
+    const { index, bucket, settings } = await setup([app]);
+    settings.pages.versionsSitemap = false;
+    settings.revision += 1;
+
+    // The pilot sub-sitemap lists page 2, so the index must name the bucket even without page 1.
+    const name = packageSitemapName('versions', app.token);
+    expect(await index()).toContainEqual({ _sitemapName: name });
+    expect(await bucket(name)).toEqual([
+      expect.objectContaining({ loc: `/apps/${app.token}/versions?page=2`, lastmod: '2026-11-02T00:00:00Z' })
+    ]);
+  });
+
+  it('keeps the legacy pilot page 1 while the API does not apply pilot decisions', async () => {
+    const app = {
+      kind: 'cask',
+      token: VERSIONS_SITEMAP_PILOT_TOKEN,
+      notesCount: 5,
+      locales: [
+        {
+          locale: 'en-US',
+          pages: { versions: { inSitemap: false } },
+          pageLastmod: { versions: '2026-11-01T00:00:00Z' }
+        }
+      ]
+    };
+    const { index, bucket, settings } = await setup([app]);
+    settings.pages.versionsSitemap = false;
+    // An API before the pilot decision omits the list from its settings and keeps page 1 out.
+    delete settings.pages.versionsSitemapPilot;
+    settings.revision += 1;
+
+    const name = packageSitemapName('versions', app.token);
+    expect(await index()).toContainEqual({ _sitemapName: name });
+    expect((await bucket(name)).map(url => url.loc)).toEqual([`/apps/${app.token}/versions`]);
+  });
+
+  it('follows the pilot list the API serves instead of the shared fallback', async () => {
+    const listed = { versions: { inSitemap: true } };
+    const custom = {
+      kind: 'cask',
+      token: 'custom-pilot',
+      notesCount: 5,
+      locales: [{ locale: 'en-US', pages: listed }]
+    };
+    const removed = {
+      kind: 'cask',
+      token: VERSIONS_SITEMAP_PILOT_TOKEN,
+      notesCount: 5,
+      locales: [{ locale: 'en-US', pages: listed }]
+    };
+    const { index, bucket, settings } = await setup([custom, removed]);
+
+    settings.pages.versionsSitemap = false;
+    settings.pages.versionsSitemapPilot = [custom.token];
+    settings.revision += 1;
+
+    const versions = (await index()).map(({ _sitemapName: name }) => name).filter(name => name.startsWith('versions-'));
+    expect(versions).toContain(packageSitemapName('versions', custom.token));
+    expect(versions).not.toContain(packageSitemapName('versions', removed.token));
+    expect(await bucket(packageSitemapName('versions', custom.token))).toEqual([
+      expect.objectContaining({ loc: '/apps/custom-pilot/versions' })
+    ]);
+    await expect(bucket(packageSitemapName('versions', removed.token))).rejects.toMatchObject({ statusCode: 410 });
   });
 
   it('lists later versions pages when the global versions sitemap is on', async () => {
@@ -239,6 +329,75 @@ describe('sitemap source snapshot cache', () => {
     });
     expect(urls.find(url => url.loc === '/apps/later-app/versions?page=2')).toMatchObject({
       lastmod: '2026-11-02T00:00:00Z'
+    });
+  });
+
+  it('keeps a versions bucket whose only URL is a later page', async () => {
+    const app = {
+      kind: 'cask',
+      token: 'later-only',
+      notesCount: 5,
+      locales: [
+        {
+          locale: 'en-US',
+          pages: { overview: { inSitemap: true }, versions: { inSitemap: false } },
+          pageLastmod: { versions: '2026-11-01T00:00:00Z', 'versions:2': '2026-11-02T00:00:00Z' },
+          versionsPages: [2]
+        }
+      ]
+    };
+    const { index, bucket } = await setup([app]);
+    const name = packageSitemapName('versions', app.token);
+    expect(await index()).toContainEqual({ _sitemapName: name });
+    expect(await bucket(name)).toEqual([
+      expect.objectContaining({ loc: '/apps/later-only/versions?page=2', lastmod: '2026-11-02T00:00:00Z' })
+    ]);
+  });
+
+  it('lists a qualifying later versions page without page 1 and names only its own languages', async () => {
+    const app = {
+      kind: 'cask',
+      token: 'thin-first-page',
+      notesCount: 5,
+      locales: [
+        {
+          locale: 'en-US',
+          pages: { overview: { inSitemap: true }, versions: { inSitemap: false } },
+          pageLastmod: { versions: '2026-11-01T00:00:00Z', 'versions:2': '2026-11-02T00:00:00Z' },
+          versionsPages: [2]
+        },
+        {
+          locale: 'zh-CN',
+          pages: { overview: { inSitemap: true }, versions: { inSitemap: true } },
+          pageLastmod: { versions: '2026-11-03T00:00:00Z', 'versions:2': '2026-11-04T00:00:00Z' },
+          versionsPages: [2]
+        },
+        {
+          locale: 'ja-JP',
+          pages: { overview: { inSitemap: true }, versions: { inSitemap: true } },
+          pageLastmod: { versions: '2026-11-05T00:00:00Z' }
+        }
+      ]
+    };
+    const { index, bucket } = await setup([app]);
+    const name = packageSitemapName('versions', app.token);
+    expect(await index()).toContainEqual({ _sitemapName: name });
+    const urls = await bucket(name);
+    expect(urls.map(url => url.loc)).toEqual([
+      '/zh/apps/thin-first-page/versions',
+      '/ja/apps/thin-first-page/versions',
+      '/apps/thin-first-page/versions?page=2',
+      '/zh/apps/thin-first-page/versions?page=2'
+    ]);
+    // Page 2 alternates name only the languages whose own page 2 qualifies, never page-1-only ja-JP.
+    const english = urls.find(url => url.loc === '/apps/thin-first-page/versions?page=2');
+    expect(english).toMatchObject({ lastmod: '2026-11-02T00:00:00Z' });
+    const hreflang = english!.alternatives!.map(alternative => alternative.hreflang);
+    expect(hreflang).toContain('zh-Hans');
+    expect(hreflang).not.toContain('ja-JP');
+    expect(hreflang).not.toContain('ja');
+    expect(urls.find(url => url.loc === '/zh/apps/thin-first-page/versions?page=2')).toMatchObject({
+      lastmod: '2026-11-04T00:00:00Z'
     });
   });
 

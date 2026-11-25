@@ -1,12 +1,11 @@
 import { createError } from 'h3';
 import { labelPath } from '../../shared/utils/backgroundLabels';
 import { randomUUID } from 'node:crypto';
-import type { PublicComponents } from '@opennavo/api';
+import type { PublicComponents, SiteSettings } from '@opennavo/api';
 import { BRAND, LOCALES, VERSION_PAGE_MIN_NOTES } from '@opennavo/shared';
 import {
   packageSitemapName,
   packageSitemaps,
-  VERSIONS_SITEMAP_PILOT_BUCKETS,
   VERSIONS_SITEMAP_PILOT_TOKENS,
   type PackageSitemapGroup
 } from '../../shared/utils/sitemapBuckets';
@@ -54,6 +53,46 @@ export const SNAPSHOT_RETRY_MS = 30_000;
 /** Snapshots stay readable as long as the cache storage keeps anything, so stale ones answer at once. */
 const SNAPSHOT_TTL_SECONDS = PAGE_CACHE_TTL_SECONDS;
 
+/** The approved pilot tokens the API serves; the shared copy answers before the API does or without the field. */
+function pilotTokenSet(settings: SiteSettings): ReadonlySet<string> {
+  return new Set(settings.pages.versionsSitemapPilot ?? VERSIONS_SITEMAP_PILOT_TOKENS);
+}
+
+/** Versions buckets that hold approved pilot URLs while the global versions sitemap is off. */
+function pilotBucketSet(settings: SiteSettings): ReadonlySet<string> {
+  return new Set([...pilotTokenSet(settings)].map(token => packageSitemapName('versions', token)));
+}
+
+/**
+ * Whether the API applies the pilot in its page decisions. The public settings carry the pilot list only
+ * after the API does; an older API reports the pilot's pages as not listed, so the web keeps its legacy
+ * release-note fallback for page 1 until the API catches up.
+ */
+function pilotDecisions(settings: SiteSettings): boolean {
+  return settings.pages.versionsSitemapPilot !== undefined;
+}
+
+/**
+ * Cache identity of the page-decision contract: the settings revision plus whether the API applies the
+ * pilot. A snapshot built under one contract is never read under the other, so an API upgrade rebuilds
+ * instead of serving the old pilot verdict from a snapshot for up to half an hour.
+ */
+function policyKey(settings: SiteSettings): string {
+  return `${settings.revision}:${pilotDecisions(settings) ? 'pilot' : 'legacy'}`;
+}
+
+/**
+ * The English versions pages the pilot lists for one app. The index and the pilot sub-sitemap read this
+ * one list, so a bucket whose only qualifying URL is a later page is still discoverable.
+ */
+function pilotPages(record: SitemapRecord, decisions: boolean): (number | undefined)[] {
+  const source = record.locales?.find(entry => entry.locale === 'en-US');
+  if (!source) return [];
+  const firstListed =
+    decisions && source.pages ? isListed(source.pages, 'versions') : (record.notesCount ?? 0) >= VERSION_PAGE_MIN_NOTES;
+  return [...(firstListed ? [undefined] : []), ...(source.versionsPages ?? [])];
+}
+
 // Dynamic sitemap groups (WP3) are injected through @nuxtjs/sitemap's sitemap:input hook rather than
 // HTTP sources: the module turns a failed source into a shorter 200 response, which crawlers read
 // as removed URLs. An API error here fails the request instead, so crawlers retry later.
@@ -73,16 +112,13 @@ export default defineNitroPlugin(nitroApp => {
     // The label list takes hundreds of API pages to load after a restart, so the index reads it without waiting
     // and leaves the group out until it is known.
     const backgroundItems = backgroundItemEntries.peek();
+    const pilotBuckets = pilotBucketSet(settings);
     ctx.sitemaps = ctx.sitemaps
       .filter(({ _sitemapName: sitemapName }) => {
         if (sitemapName && Object.hasOwn(packageSitemaps, sitemapName)) {
           // A cached catalog may still contain a bucket whose source was just switched off.
           if (sitemapName.startsWith('fonts-') && !settings.pages.fontsSitemap) return false;
-          if (
-            sitemapName.startsWith('versions-') &&
-            !settings.pages.versionsSitemap &&
-            !VERSIONS_SITEMAP_PILOT_BUCKETS.has(sitemapName)
-          )
+          if (sitemapName.startsWith('versions-') && !settings.pages.versionsSitemap && !pilotBuckets.has(sitemapName))
             return false;
           return populated.has(sitemapName);
         }
@@ -116,30 +152,30 @@ export default defineNitroPlugin(nitroApp => {
       const group = ctx.sitemapName.split('-')[0] as PackageSitemapGroup;
       const settings = await getSiteSettings();
       const pilotOnly =
-        group === 'versions' && !settings.pages.versionsSitemap && VERSIONS_SITEMAP_PILOT_BUCKETS.has(ctx.sitemapName);
+        group === 'versions' && !settings.pages.versionsSitemap && pilotBucketSet(settings).has(ctx.sitemapName);
       if (group === 'fonts' && !settings.pages.fontsSitemap)
         throw createError({ statusCode: 410, statusMessage: 'Sitemap gone' });
       if (group === 'versions' && !settings.pages.versionsSitemap && !pilotOnly)
         throw createError({ statusCode: 410, statusMessage: 'Sitemap gone' });
+      const pilot = pilotTokenSet(settings);
+      const policy = policyKey(settings);
       const records = (
         group === 'versions'
           ? (
               await Promise.all([
-                cachedPackages('apps', settings.revision),
-                settings.pages.fontsSitemap
-                  ? cachedPackages('fonts', settings.revision)
-                  : Promise.resolve([] as SitemapRecord[])
+                cachedPackages('apps', policy),
+                settings.pages.fontsSitemap ? cachedPackages('fonts', policy) : Promise.resolve([] as SitemapRecord[])
               ])
             ).flat()
-          : await cachedPackages(group, settings.revision)
-      ).filter(record => !pilotOnly || VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token));
+          : await cachedPackages(group, policy)
+      ).filter(record => !pilotOnly || pilot.has(record.token));
       const page = group === 'versions' ? 'versions' : 'overview';
       const urls = records
         .filter(record => packageSitemapName(group, record.token) === ctx.sitemapName)
         .flatMap(record =>
           page === 'versions'
             ? pilotOnly
-              ? pilotVersionEntries(record, ctx.sitemapName)
+              ? pilotVersionEntries(record, ctx.sitemapName, pilotDecisions(settings))
               : packageEntries(record, `/apps/${record.token}/versions`, ctx.sitemapName, page)
             : [
                 ...packageEntries(record, `/apps/${record.token}`, ctx.sitemapName, page),
@@ -197,27 +233,28 @@ interface PackageSnapshot {
 }
 
 /** Populated buckets are cached to avoid reading the entire catalog on every index request. */
-let populatedPackageSitemapsRevision: number | undefined;
+let populatedPackageSitemapsPolicy: string | undefined;
 let populatedPackageSitemapsCache: StaleCache<Set<string>> | undefined;
 const populatedPackageSitemapsCaches = new Set<StaleCache<Set<string>>>();
 
 async function populatedPackageSitemaps(): Promise<Set<string>> {
   const settings = await getSiteSettings();
-  if (!populatedPackageSitemapsCache || populatedPackageSitemapsRevision !== settings.revision) {
+  const policy = policyKey(settings);
+  if (!populatedPackageSitemapsCache || populatedPackageSitemapsPolicy !== policy) {
     const previous = populatedPackageSitemapsCache;
-    populatedPackageSitemapsRevision = settings.revision;
+    populatedPackageSitemapsPolicy = policy;
     populatedPackageSitemapsCache = createStaleCache(
       async () => {
         const [apps, fonts] = await Promise.all([
-          cachedPackages('apps', settings.revision),
-          settings.pages.fontsSitemap
-            ? cachedPackages('fonts', settings.revision)
-            : Promise.resolve([] as SitemapRecord[])
+          cachedPackages('apps', policy),
+          settings.pages.fontsSitemap ? cachedPackages('fonts', policy) : Promise.resolve([] as SitemapRecord[])
         ]);
         const buckets = new Set<string>();
         const add = (group: PackageSitemapGroup, record: SitemapRecord, page: SitemapPage) => {
           const entries = listedLocales(record, page);
-          if (entries?.length === 0) return;
+          // A later versions page can populate the bucket on its own when no language lists page 1.
+          const later = page === 'versions' && record.locales?.some(entry => entry.versionsPages?.length);
+          if (entries?.length === 0 && !later) return;
           const name = packageSitemapName(group, record.token);
           buckets.add(name);
         };
@@ -225,11 +262,15 @@ async function populatedPackageSitemaps(): Promise<Set<string>> {
         for (const record of fonts) add('fonts', record, 'overview');
         if (settings.pages.versionsSitemap)
           for (const record of [...apps, ...fonts]) add('versions', record, 'versions');
-        // The approved pilot pages are listed even while the global versions sitemap is off.
-        else
+        // The approved pilot pages are listed even while the global versions sitemap is off. Decisions
+        // name the pages; the shared token list and release-note floor cover an older API.
+        else {
+          const pilot = pilotTokenSet(settings);
+          const decisions = pilotDecisions(settings);
           for (const record of apps)
-            if (VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token) && (record.notesCount ?? 0) >= VERSION_PAGE_MIN_NOTES)
+            if (pilot.has(record.token) && pilotPages(record, decisions).length)
               buckets.add(packageSitemapName('versions', record.token));
+        }
         return buckets;
       },
       {
@@ -248,7 +289,7 @@ async function populatedPackageSitemaps(): Promise<Set<string>> {
 
 // Coalesce reads and rebuilds, including callers that observed missing chunks. Each server has
 // its own in-flight maps; shared Redis snapshots remain immutable.
-type PackageCacheKey = `${PackageGroup}:${number}`;
+type PackageCacheKey = `${PackageGroup}:${string}`;
 const packageReads = new Map<PackageCacheKey, Promise<SitemapRecord[]>>();
 const packageRebuilds = new Map<PackageCacheKey, Promise<SitemapRecord[]>>();
 const rebuildFailedAt = new Map<PackageCacheKey, number>();
@@ -265,27 +306,29 @@ export async function sitemapSourcesIdle(): Promise<void> {
   while (packageRebuilds.size) await Promise.allSettled(packageRebuilds.values());
 }
 
-function manifestKey(group: PackageGroup, revision: number) {
-  // A settings revision forces a fresh catalog read, so page-level sitemap decisions cannot survive a switch.
-  return `sitemap-package-manifest-v3-${PAGE_SIZE}:${revision}:${group}`;
+function manifestKey(group: PackageGroup, policy: string) {
+  // The key names the page-decision contract: a settings revision forces a fresh catalog read, and the
+  // pilot flag separates snapshots an old API filled with its own pilot verdict from the ones the new
+  // API decides. v4 retires snapshots built before the contract change.
+  return `sitemap-package-manifest-v4-${PAGE_SIZE}:${policy}:${group}`;
 }
 
-function cachedPackages(group: PackageGroup, revision: number): Promise<SitemapRecord[]> {
-  const cacheKey: PackageCacheKey = `${group}:${revision}`;
+function cachedPackages(group: PackageGroup, policy: string): Promise<SitemapRecord[]> {
+  const cacheKey: PackageCacheKey = `${group}:${policy}`;
   const pending = packageReads.get(cacheKey);
   if (pending) return pending;
-  const read = readPackages(group, revision).finally(() => packageReads.delete(cacheKey));
+  const read = readPackages(group, policy).finally(() => packageReads.delete(cacheKey));
   packageReads.set(cacheKey, read);
   return read;
 }
 
-async function readPackages(group: PackageGroup, revision: number): Promise<SitemapRecord[]> {
+async function readPackages(group: PackageGroup, policy: string): Promise<SitemapRecord[]> {
   // A live rebuild reads every catalog page. Do not amplify a Redis outage with that work.
   // Missing/evicted snapshots still use the existing live rebuild below.
-  const snapshot = await retrySnapshotRead(() => readSnapshot(group, revision), group);
+  const snapshot = await retrySnapshotRead(() => readSnapshot(group, policy), group);
   // Without a complete snapshot the request waits for the catalog and fails if the API does.
-  if (!snapshot) return rebuildPackages(group, revision);
-  if (snapshot.expires <= Date.now()) refreshPackages(group, revision);
+  if (!snapshot) return rebuildPackages(group, policy);
+  if (snapshot.expires <= Date.now()) refreshPackages(group, policy);
   return snapshot.records;
 }
 
@@ -305,13 +348,13 @@ async function retrySnapshotRead<T>(read: () => Promise<T>, group: PackageGroup)
   }
 }
 
-async function readSnapshot(group: PackageGroup, revision: number) {
+async function readSnapshot(group: PackageGroup, policy: string) {
   const storage = useStorage('cache');
   // A rebuild that publishes between reading the manifest and its chunks reclaims those chunks:
   // read the manifest once more before treating the snapshot as lost (evicted).
   let seen: string | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const manifest = await storage.getItem<PackageSnapshot>(manifestKey(group, revision));
+    const manifest = await storage.getItem<PackageSnapshot>(manifestKey(group, policy));
     if (!manifest || manifest.keys.join() === seen) return undefined;
     // Read sequentially so only one chunk is live beside the assembled snapshot. Promise.all + flat()
     // briefly retained every chunk and then copied every record a second time during crawler bursts.
@@ -333,21 +376,21 @@ async function readSnapshot(group: PackageGroup, revision: number) {
   return undefined;
 }
 
-function rebuildPackages(group: PackageGroup, revision: number): Promise<SitemapRecord[]> {
-  const cacheKey: PackageCacheKey = `${group}:${revision}`;
+function rebuildPackages(group: PackageGroup, policy: string): Promise<SitemapRecord[]> {
+  const cacheKey: PackageCacheKey = `${group}:${policy}`;
   const pending = packageRebuilds.get(cacheKey);
   if (pending) return pending;
-  const rebuild = writeSnapshot(group, revision).finally(() => packageRebuilds.delete(cacheKey));
+  const rebuild = writeSnapshot(group, policy).finally(() => packageRebuilds.delete(cacheKey));
   packageRebuilds.set(cacheKey, rebuild);
   return rebuild;
 }
 
 /** Rebuilds a stale snapshot behind the response; a failure keeps the stale one for a while. */
-function refreshPackages(group: PackageGroup, revision: number) {
-  const cacheKey: PackageCacheKey = `${group}:${revision}`;
+function refreshPackages(group: PackageGroup, policy: string) {
+  const cacheKey: PackageCacheKey = `${group}:${policy}`;
   const failedAt = rebuildFailedAt.get(cacheKey);
   if (packageRebuilds.has(cacheKey) || (failedAt !== undefined && Date.now() - failedAt < SNAPSHOT_RETRY_MS)) return;
-  rebuildPackages(group, revision).then(
+  rebuildPackages(group, policy).then(
     () => rebuildFailedAt.delete(cacheKey),
     error => {
       rebuildFailedAt.set(cacheKey, Date.now());
@@ -356,7 +399,7 @@ function refreshPackages(group: PackageGroup, revision: number) {
   );
 }
 
-async function writeSnapshot(group: PackageGroup, revision: number): Promise<SitemapRecord[]> {
+async function writeSnapshot(group: PackageGroup, policy: string): Promise<SitemapRecord[]> {
   const storage = useStorage('cache');
   const version = randomUUID();
   const keys: string[] = [];
@@ -378,9 +421,9 @@ async function writeSnapshot(group: PackageGroup, revision: number): Promise<Sit
     });
     // Read the manifest being replaced right before replacing it, so a snapshot another server
     // published in the meantime is reclaimed as well.
-    previous = await storage.getItem<PackageSnapshot>(manifestKey(group, revision));
+    previous = await storage.getItem<PackageSnapshot>(manifestKey(group, policy));
     await storage.setItem(
-      manifestKey(group, revision),
+      manifestKey(group, policy),
       { keys, expires: Date.now() + SNAPSHOT_FRESH_MS },
       { ttl: SNAPSHOT_TTL_SECONDS }
     );
@@ -421,24 +464,22 @@ async function loadPackagePages(
  * order are kept, so listedLocales answers exactly as it would for the full record.
  */
 export function slimRecord(record: SitemapEntry): SitemapRecord {
-  const pilot = VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token);
   return {
     kind: record.kind,
     token: record.token,
     ...(record.notesCount === undefined ? {} : { notesCount: record.notesCount }),
-    ...(record.locales ? { locales: record.locales.map(entry => slimLocale(entry, pilot)) } : {})
+    ...(record.locales ? { locales: record.locales.map(slimLocale) } : {})
   };
 }
 
-function slimLocale(entry: SitemapLocale, keepVersionsDates = false): ListedLocale {
+function slimLocale(entry: SitemapLocale): ListedLocale {
   const decided = entry.pages;
   // A language without decisions (an older record) keeps every page date, as listedLocales may still list them.
-  // Pilot tokens keep versions dates even when the decision says not listed: their approval overrides it.
   const listed = decided ? SITEMAP_PAGES.filter(page => isListed(decided, page)) : SITEMAP_PAGES;
+  // A later page is listed on its own decision, so its date survives even when page 1 is not listed.
+  const laterDates = new Set((entry.versionsPages ?? []).map(page => `versions:${page}`));
   const pageLastmod = Object.entries(entry.pageLastmod ?? {}).filter(
-    ([key]) =>
-      (keepVersionsDates && (key === 'versions' || key.startsWith('versions:'))) ||
-      listed.some(page => key === page || key.startsWith(`${page}:`))
+    ([key]) => laterDates.has(key) || listed.some(page => key === page || key.startsWith(`${page}:`))
   );
   return {
     locale: entry.locale,
@@ -523,24 +564,27 @@ function packageEntries(
     ])
   );
   const first = localizedEntries(path, sitemap, locales, locale => lastmods.get(locale));
-  if (page !== 'versions' || !entries) return first;
-  // Later versions pages that passed the server's own notes threshold; page 1 stays in `first`.
-  const laterPages = new Map<number, Set<Locale>>();
-  for (const entry of entries)
+  if (page !== 'versions' || !record.locales) return first;
+  // Later versions pages are listed per language on their own notes. This must not start from the page-1
+  // languages: a language whose page 1 is thin can still qualify for page 2, and it is the only one listed.
+  const laterPages = new Map<number, ListedLocale[]>();
+  for (const entry of record.locales)
     for (const pageNumber of entry.versionsPages ?? []) {
-      const pageLocales = laterPages.get(pageNumber) ?? new Set<Locale>();
-      pageLocales.add(entry.locale);
-      laterPages.set(pageNumber, pageLocales);
+      const pageEntries = laterPages.get(pageNumber) ?? [];
+      if (!pageEntries.some(candidate => candidate.locale === entry.locale)) pageEntries.push(entry);
+      laterPages.set(pageNumber, pageEntries);
     }
   if (!laterPages.size) return first;
   const later = [];
-  for (const [pageNumber, pageLocales] of laterPages) {
-    const pageLastmods = new Map(entries.map(entry => [entry.locale, entry.pageLastmod?.[`versions:${pageNumber}`]]));
+  for (const [pageNumber, pageEntries] of laterPages) {
+    const pageLastmods = new Map(
+      pageEntries.map(entry => [entry.locale, entry.pageLastmod?.[`versions:${pageNumber}`]])
+    );
     later.push(
       ...localizedEntries(
         `${path}?page=${pageNumber}`,
         sitemap,
-        locales.filter(code => pageLocales.has(code)),
+        pageEntries.map(entry => entry.locale),
         code => pageLastmods.get(code)
       )
     );
@@ -550,18 +594,18 @@ function packageEntries(
 
 /**
  * The versions pilot stays source-language only with no sitemap alternates: only the approved
- * source-language URLs are listed. Localized versions pages are indexed when their own notes
- * qualify and advertise themselves through the page's hreflang, not through these entries.
+ * source-language URLs are listed. Pages come from pilotPages, the same list the index reads: the
+ * server's decision while the API applies the pilot, and the legacy release-note floor before it does.
+ * Localized versions pages are indexed when their own notes qualify and advertise themselves through
+ * the page's hreflang, not through these entries.
  */
-function pilotVersionEntries(record: SitemapRecord, sitemap: string) {
-  if (!VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token)) return [];
-  // A pilot entry is a promise to search engines: skip an app whose notes can no longer qualify,
-  // so the sitemap never advertises a page the server marks thin.
-  if ((record.notesCount ?? 0) < VERSION_PAGE_MIN_NOTES) return [];
+function pilotVersionEntries(record: SitemapRecord, sitemap: string, decisions: boolean) {
   const source = record.locales?.find(entry => entry.locale === 'en-US');
-  return [undefined, ...(source?.versionsPages ?? [])].flatMap(pageNumber => {
+  if (!source) return [];
+  const pageNumbers = pilotPages(record, decisions);
+  return pageNumbers.flatMap(pageNumber => {
     const path = `/apps/${record.token}/versions${pageNumber ? `?page=${pageNumber}` : ''}`;
-    const lastmod = pageNumber ? source?.pageLastmod?.[`versions:${pageNumber}`] : source?.pageLastmod?.versions;
+    const lastmod = pageNumber ? source.pageLastmod?.[`versions:${pageNumber}`] : source.pageLastmod?.versions;
     const [entry] = localizedEntries(path, sitemap, ['en-US'], () => lastmod);
     if (!entry) return [];
     // No alternates: the pilot lists one URL per app, not the localized pages.

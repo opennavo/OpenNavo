@@ -37,6 +37,8 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     intentPagesEnabled: false,
     detailsRedirect: false,
     versionsSitemap: false,
+    // No versionsSitemapPilot: without an answer the API's pilot decisions are unknown, so the web keeps
+    // its legacy pilot fallback (server/utils/sitemapBuckets) until the API answers.
     fontsSitemap: false
   }
 };

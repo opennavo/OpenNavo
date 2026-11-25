@@ -46,7 +46,8 @@ func TestPageDecisionMatrix(t *testing.T) {
 					// A versions page shares the overview's set because every language has enough translated
 					// notes on this page: one policy, one reciprocal set.
 					require.Equal(t, Locales, d.Hreflang)
-					require.Equal(t, page == 1, d.InSitemap)
+					// Each versions page is listed on its own notes; other kinds only as the first page.
+					require.Equal(t, page == 1 || kind == PageVersions, d.InSitemap)
 					require.True(t, d.Announce)
 					require.Empty(t, d.Reason)
 				})
@@ -79,6 +80,42 @@ func TestPageDecisionMatrix(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestLaterVersionsPagesAreListedOnTheirOwnNotes(t *testing.T) {
+	f := eligible()
+	f.NotesPages = map[int]map[string]NotesFacts{
+		1: {"en-US": {Chars: 120, Entries: 1}},
+		2: {"en-US": {Chars: 600, Entries: VersionsMinNoteEntries}},
+	}
+	p := Policy{Mode: "shadow", VersionsSitemap: true}
+	first := DecidePage(f, PageRef{Kind: PageVersions, Locale: "en-US", Page: 1}, p)
+	require.Equal(t, "thin_notes_page", first.Reason)
+	require.False(t, first.InSitemap)
+	second := DecidePage(f, PageRef{Kind: PageVersions, Locale: "en-US", Page: 2}, p)
+	require.Equal(t, IndexableRobots, second.Robots)
+	require.True(t, second.Announce)
+	require.True(t, second.InSitemap)
+	// Switching the versions sitemap off removes both pages without changing their indexability.
+	p.VersionsSitemap = false
+	require.False(t, DecidePage(f, PageRef{Kind: PageVersions, Locale: "en-US", Page: 2}, p).InSitemap)
+	require.True(t, DecidePage(f, PageRef{Kind: PageVersions, Locale: "en-US", Page: 2}, p).Announce)
+}
+
+func TestVersionsPilotStaysListedWhileTheGlobalSitemapIsOff(t *testing.T) {
+	f := eligible()
+	f.Token = VersionsSitemapPilotTokens[0]
+	f.NotesPages = map[int]map[string]NotesFacts{1: {"en-US": {Chars: 600, Entries: VersionsMinNoteEntries}}}
+	p := Policy{Mode: "shadow"}
+	require.True(t, DecidePage(f, PageRef{Kind: PageVersions, Locale: VersionsSitemapPilotLocale, Page: 1}, p).InSitemap)
+	// The pilot is English-only, and only approved tokens bypass the global switch.
+	require.False(t, DecidePage(f, PageRef{Kind: PageVersions, Locale: "zh-CN", Page: 1}, p).InSitemap)
+	other := f
+	other.Token = "visual-studio-code"
+	require.False(t, DecidePage(other, PageRef{Kind: PageVersions, Locale: VersionsSitemapPilotLocale, Page: 1}, p).InSitemap)
+	// The pilot still needs the app-level sitemap gate: without a record the sitemap cannot list it.
+	p.SitemapMinInstalls = f.Installs30d + 1
+	require.False(t, DecidePage(f, PageRef{Kind: PageVersions, Locale: VersionsSitemapPilotLocale, Page: 1}, p).InSitemap)
 }
 
 func TestTroubleshootingRequiresLocalVerifiedIssuesAndOverview(t *testing.T) {

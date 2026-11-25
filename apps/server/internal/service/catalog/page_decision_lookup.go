@@ -194,6 +194,29 @@ func decided(out *PageLookup, by string, d seo.PageDecision) {
 	}
 }
 
+// versionsPageNumber reads ?page= the way the web's list contract does: a number from 1 to 999999
+// written without a leading zero, not repeated and not empty. Anything else is a URL the page answers
+// with 404, so the check must never report it as indexable or listed.
+func versionsPageNumber(values []string) (int, bool) {
+	if len(values) == 0 {
+		return 1, true
+	}
+	if len(values) > 1 {
+		return 0, false
+	}
+	value := values[0]
+	if len(value) < 1 || len(value) > 6 || value[0] == '0' {
+		return 0, false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return 0, false
+		}
+	}
+	number, err := strconv.Atoi(value)
+	return number, err == nil
+}
+
 func (s *PublicService) appPage(ctx context.Context, out PageLookup, site, token string, kind seo.PageKind, query url.Values, policy seo.Policy) (PageLookup, error) {
 	out.Kind = PageKindApp
 	if kind != seo.PageOverview {
@@ -215,16 +238,14 @@ func (s *PublicService) appPage(ctx context.Context, out PageLookup, site, token
 	}
 	canonicalQuery := url.Values{}
 	if kind == seo.PageVersions {
-		if value := query.Get("page"); value != "" {
-			number, err := strconv.Atoi(value)
-			if err != nil || number < 1 || number > 999999 || len(query["page"]) > 1 {
-				decided(&out, "server", seo.PageDecision{Robots: "noindex, follow", Reason: "invalid_page"})
-				return out, nil
-			}
-			ref.Page = number
-			if number > 1 {
-				canonicalQuery.Set("page", value)
-			}
+		number, ok := versionsPageNumber(query["page"])
+		if !ok {
+			decided(&out, "server", seo.PageDecision{Robots: "noindex, follow", Reason: "invalid_page"})
+			return out, nil
+		}
+		ref.Page = number
+		if number > 1 {
+			canonicalQuery.Set("page", strconv.Itoa(number))
 		}
 		// Flags are on only as 1, like the web's query contract.
 		for _, flag := range []string{"notes", "original"} {
