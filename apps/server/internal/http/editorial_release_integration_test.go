@@ -197,6 +197,10 @@ func TestEditorialReleaseLocaleIsolationAndPageDecision(t *testing.T) {
 					wantHreflang = []publicapi.Locale{"zh-CN", "ja-JP"}
 				}
 			}
+			decisionHreflang := make([]string, len(wantHreflang))
+			for i, locale := range wantHreflang {
+				decisionHreflang[i] = string(locale)
+			}
 			require.Equal(t, wantIndex, seo.DecisionRobots(string(page.Data.Indexing.Robots)).Index)
 			require.Equal(t, wantIndex, page.Data.Indexing.Announce)
 			require.Equal(t, wantHreflang, page.Data.Indexing.Hreflang)
@@ -231,7 +235,7 @@ func TestEditorialReleaseLocaleIsolationAndPageDecision(t *testing.T) {
 				decision := seo.DecidePage(rows[0].Facts(), seo.PageRef{Kind: seo.PageVersions, Locale: tc.locale, Page: 1}, policy)
 				require.Equal(t, wantIndex, seo.DecisionRobots(string(decision.Robots)).Index, mode)
 				require.Equal(t, wantIndex, decision.Announce, mode)
-				require.Equal(t, wantHreflang, decision.Hreflang, mode)
+				require.Equal(t, decisionHreflang, decision.Hreflang, mode)
 				if wantIndex {
 					require.Empty(t, decision.Reason, mode)
 				} else {

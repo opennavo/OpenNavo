@@ -8,7 +8,7 @@ test('connects a Hermes Panel and shows its profiles', async ({ page }) => {
     );
   });
   await page.goto('/?mock=hermes-ready&mock-system-locale=zh-CN#/assistant');
-  await expect(page.getByPlaceholder(/问问 Hermes/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /问问 Hermes/ })).toBeVisible();
   await page
     .getByRole('button', { name: /管理连接/ })
     .first()

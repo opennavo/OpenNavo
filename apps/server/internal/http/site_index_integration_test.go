@@ -82,8 +82,10 @@ func TestSiteIndexEndpointsFollowTheContract(t *testing.T) {
 	for i, version := range []string{"1.0", "1.1", "1.2"} {
 		releaseID := 9701 + i
 		exec(`INSERT INTO package_versions(id,package_id,version,version_base,first_seen_at) VALUES(?,?,?,?,'2026-01-01')`, releaseID, app, version, version)
-		exec(`INSERT INTO releases(id,package_id,package_version_id,source,source_key,version,source_locale,body_markdown,source_url)
- VALUES(?,?,?,'manual',?,?,'en-US',?,'https://lookup.example/releases')`, releaseID, app, releaseID, "lookup:"+version, version, englishNotes)
+		// Manual notes carry their own per-language bodies. Only editorial releases may bind a
+		// package_version_id (releases_build_notes_editorial), so these stay shared version notes.
+		exec(`INSERT INTO releases(id,package_id,source,source_key,version,source_locale,body_markdown,source_url)
+ VALUES(?,?,'manual',?,?,'en-US',?,'https://lookup.example/releases')`, releaseID, app, "lookup:"+version, version, englishNotes)
 		exec(`INSERT INTO release_i18n(release_id,locale,source_locale,status,source_hash,body_markdown)
  VALUES(?,'zh-CN','en-US','machine',repeat('c',64),?)`, releaseID, chineseNotes)
 	}
