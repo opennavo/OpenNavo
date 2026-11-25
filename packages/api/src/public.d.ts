@@ -6928,6 +6928,8 @@ export interface components {
                 [key: string]: string;
             };
             pages?: components["schemas"]["PackagePageDecisions"];
+            /** @description Later versions pages whose own notes meet the sitemap threshold. Page 1 stays in pages.versions. */
+            versionsPages?: number[];
         };
         /**
          * @example {

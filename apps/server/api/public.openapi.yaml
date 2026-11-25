@@ -17608,6 +17608,12 @@ components:
           description: Content hash dates by page kind; versions:N identifies later pages.
         pages:
           $ref: "#/components/schemas/PackagePageDecisions"
+        versionsPages:
+          type: array
+          items:
+            type: integer
+            minimum: 2
+          description: "Later versions pages whose own notes meet the sitemap threshold. Page 1 stays in pages.versions."
       example:
         locale: en-US
         lastmod: 2026-09-30T08:00:00Z
