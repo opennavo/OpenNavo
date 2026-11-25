@@ -3106,7 +3106,7 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       ],
       [
         '/zh',
-        '按用途浏览 Homebrew 收录的 Mac App，从 AI 工具、开发工具到浏览器、设计和效率软件，每个分类都列出 App 数量和子分类。'
+        '按用途浏览 Homebrew 收录的 Mac App，从 AI 工具、开发工具到浏览器、设计和效率软件，每个分类都列出 App 数量、子分类和代表应用，并提供详细介绍、版本记录、系统要求与安装方式，帮助你快速找到适合 macOS 的工具；也可以按榜单、更新或名称继续探索。支持搜索和收藏，全部免费浏览。'
       ],
       [
         '/ru',
