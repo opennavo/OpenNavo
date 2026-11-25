@@ -9,7 +9,7 @@ async function connectPanel(page: Page) {
     );
   });
   await page.goto('/?mock=hermes-ready&mock-system-locale=zh-CN#/assistant');
-  await expect(page.getByPlaceholder(/问问 Hermes/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /问问 Hermes/ })).toBeVisible();
   await page
     .getByRole('button', { name: /管理连接/ })
     .first()
@@ -171,7 +171,7 @@ test('explains an older panel that cannot merge profiles', async ({ page }) => {
     );
   });
   await page.goto('/?mock=hermes-ready,panel-no-aggregate&mock-system-locale=zh-CN#/assistant');
-  await expect(page.getByPlaceholder(/问问 Hermes/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /问问 Hermes/ })).toBeVisible();
   await page
     .getByRole('button', { name: /管理连接/ })
     .first()
@@ -203,7 +203,7 @@ test('surfaces a failed history read and retries instead of showing an empty lis
     );
   });
   await page.goto('/?mock=hermes-ready,panel-history-fails&mock-system-locale=zh-CN#/assistant');
-  await expect(page.getByPlaceholder(/问问 Hermes/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /问问 Hermes/ })).toBeVisible();
   await page
     .getByRole('button', { name: /管理连接/ })
     .first()
