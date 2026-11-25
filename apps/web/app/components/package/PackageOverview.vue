@@ -149,7 +149,12 @@ usePageSeo({
     if (custom) return custom;
     // The legacy template embeds the install command, which a Homebrew-disabled package no longer has.
     if (!legacyTitles.value || packageInstallState(value) === 'disabled')
-      return overviewDescription(value, t, values => formatList(values, { locale: formattingLocale.value }));
+      return overviewDescription(
+        value,
+        t,
+        values => formatList(values, { locale: formattingLocale.value }),
+        locale.value
+      );
     return t(
       'package.metaDescription',
       {

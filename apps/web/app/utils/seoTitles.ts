@@ -306,8 +306,9 @@ export function fitSummary(summary: string, room: number): string {
  * characters, while the site's display budget counts CJK letters twice; this keeps a long Chinese or
  * Japanese version page inside the search-result limit without shortening a page that already fits.
  * A sentence or clause that fills at least 60% of the room is kept whole, including its punctuation.
+ * `minimum` lets callers that measure Bing's guidance reject a whole sentence just below it and clip.
  */
-export function fitSummaryChars(summary: string, room: number): string {
+export function fitSummaryChars(summary: string, room: number, minimum = 0): string {
   const chars = Array.from(summary);
   if (room < 1) return '';
   if (chars.length <= room) return summary;
@@ -320,7 +321,7 @@ export function fitSummaryChars(summary: string, room: number): string {
       if (at <= room) cut = Math.max(cut, at);
     }
   }
-  if (cut >= room * 0.6) return chars.slice(0, cut).join('').trimEnd();
+  if (cut >= Math.max(room * 0.6, minimum)) return chars.slice(0, cut).join('').trimEnd();
   const clipped = chars
     .slice(0, room - 1)
     .join('')
@@ -458,9 +459,13 @@ function overviewSentence(
  * items when needed. A variant cask often has its main app's summary as well, so its
  * description keeps the sentence with its name and shortens the summary instead.
  */
-export function overviewDescription(pkg: OverviewFacts, t: Translate, list: ListFormat): string {
+export function overviewDescription(pkg: OverviewFacts, t: Translate, list: ListFormat, locale?: string): string {
   // Preserve the existing distribution/lifecycle branches.
   if (disabledByHomebrew(pkg)) return overviewSentence(pkg, t, 'package.seo.descriptionUnavailable');
+  const cjk = /^(?:zh|ja)/i.test(titleLocale(t, locale) ?? '');
+  // Bing measures the snippet in characters, while the display budget counts CJK letters twice.
+  // A CJK description that fills 150 columns is still short at ~75 characters.
+  const longEnough = (text: string) => (cjk ? Array.from(text).length >= 150 : textWidth(text) >= 150);
   let base: string;
   if (!usableSummary(pkg.summary, pkg.displayName)) base = sectionDescription(pkg, t, list);
   else {
@@ -472,9 +477,14 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
   // A short catalog summary leaves the snippet below Bing's length guidance. The editor-written,
   // already localized introduction says more; use its lead only when it is longer than the summary.
   // A variant keeps its own branch because the main app's introduction does not name it.
-  if (textWidth(base) >= 150 || variantLabel(pkg.token ?? '')) return base;
-  const lead = pkg.description ? fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH) : '';
-  return textWidth(lead) > textWidth(base) ? lead : base;
+  if (longEnough(base) || variantLabel(pkg.token ?? '')) return base;
+  const lead = pkg.description
+    ? cjk
+      ? fitSummaryChars(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
+      : fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH)
+    : '';
+  const leadWins = cjk ? Array.from(lead).length > Array.from(base).length : textWidth(lead) > textWidth(base);
+  return leadWins ? lead : base;
 }
 
 function sectionDescription(pkg: OverviewFacts, t: Translate, list: ListFormat, whole = false): string {
