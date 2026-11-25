@@ -483,9 +483,7 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
       ? fitSummaryChars(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
       : fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH)
     : '';
-  const leadWins = cjk
-    ? Array.from(lead).length > Array.from(base).length
-    : textWidth(lead) > textWidth(base);
+  const leadWins = cjk ? Array.from(lead).length > Array.from(base).length : textWidth(lead) > textWidth(base);
   return leadWins ? lead : base;
 }
 
