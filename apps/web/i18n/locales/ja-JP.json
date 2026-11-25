@@ -127,7 +127,7 @@
     "title": "カテゴリ",
     "metaTitle": "Mac ソフトウェアカテゴリ · OpenNavo",
     "description": "用途別に Homebrew 収録の App を閲覧できます。",
-    "metaDescription": "Homebrew 収録の Mac アプリを用途別に探せます。AI ツールや開発ツールからブラウザー、デザイン、生産性まで、各カテゴリのアプリ数とサブカテゴリを確認できます。",
+    "metaDescription": "Homebrew 収録の Mac アプリを用途別に探せます。AI ツールや開発ツールからブラウザー、デザイン、生産性まで、各カテゴリのアプリ数、サブカテゴリ、代表的なアプリを確認でき、紹介、バージョン履歴、システム要件、インストール方法も掲載しています。ランキングや更新、名前からも探せます。無料で閲覧できます。",
     "count": "{count} 件",
     "itemMetaTitle": "{name} ソフトウェアのおすすめ · OpenNavo",
     "seo": {
@@ -928,7 +928,7 @@
   "browse": {
     "title": "Mac アプリ A–Z 一覧",
     "metaTitle": "Mac アプリ A–Z 一覧 · OpenNavo",
-    "description": "カタログにある {count} 個の Mac アプリを名前順に一覧できます。それぞれに紹介、バージョン履歴、インストール方法を掲載しています。",
+    "description": "カタログにある {count} 個の Mac アプリを名前順に一覧できます。それぞれに紹介、バージョン履歴、システム要件、インストール方法を掲載し、Homebrew のインストールコマンドもコピーできます。カテゴリ、ランキング、最近の更新、特集からも探せます。検索やお気に入り、更新通知にも対応しています。",
     "fontsTitle": "Mac フォント A–Z 一覧",
     "fontsMetaTitle": "Mac フォント A–Z 一覧 · OpenNavo",
     "fontsDescription": "カタログにある {count} 種類のフォントを名前順に一覧できます。どれも Homebrew でインストールできます。",
@@ -1042,7 +1042,7 @@
   "download": {
     "title": "MacのHomebrewアプリストア、ウイルススキャンとApp ファイアウォールも搭載",
     "metaTitle": "OpenNavo for Mac をダウンロード：ウイルススキャン付きの Homebrew アプリストア",
-    "description": "アプリのインストール・更新・削除をワンクリックで。事前にウイルスをチェックし、クリーンアップと監視も可能。MacのHomebrewを使い、アカウントは不要です。",
+    "description": "アプリのインストール・更新・削除をワンクリックで。事前にウイルスをチェックし、クリーンアップ、ハードウェア監視、起動項目の確認も行えます。Mac の Homebrew をそのまま使い、アカウントは不要で、アプリ一覧をアップロードしません。macOS 13 以降の Apple シリコンと Intel Mac に対応。",
     "button": "macOS版をダウンロード",
     "meta": "バージョン{version} · {size} · macOS {macos}以降 · 公開日：{date}",
     "copySha": "SHA-256チェックサムをコピー",

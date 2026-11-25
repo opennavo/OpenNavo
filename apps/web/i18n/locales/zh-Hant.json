@@ -127,7 +127,7 @@
     "title": "分類",
     "metaTitle": "Mac 軟體分類 · OpenNavo",
     "description": "按用途瀏覽 Homebrew 收錄的 App。",
-    "metaDescription": "按用途瀏覽 Homebrew 收錄的 Mac App，從 AI 工具、開發工具到瀏覽器、設計和效率軟體，每個分類都列出 App 數量和子分類。",
+    "metaDescription": "按用途瀏覽 Homebrew 收錄的 Mac App，從 AI 工具、開發工具到瀏覽器、設計和效率軟體，每個分類都列出 App 數量、子分類和代表應用，並提供詳細介紹、版本記錄、系統要求與安裝方式，幫助你快速找到適合 macOS 的工具；也可以按榜單、更新或名稱繼續探索。支援搜尋和收藏，全部免費瀏覽。",
     "count": "{count} 個",
     "itemMetaTitle": "{name}軟體推薦 · OpenNavo",
     "seo": {
@@ -928,7 +928,7 @@
   "browse": {
     "title": "Mac 應用 A–Z 索引",
     "metaTitle": "Mac 應用 A–Z 索引 · OpenNavo",
-    "description": "按名稱瀏覽目錄裡的 Mac 應用，共 {count} 個，每個都有介紹、版本記錄和安裝方式。",
+    "description": "按名稱瀏覽目錄裡的 {count} 個 Mac 應用。每個應用都有詳細介紹、版本記錄、系統要求和安裝方式，可直接複製 Homebrew 安裝命令；也可以按分類、榜單、最近更新或專題繼續瀏覽，找到適合 macOS 的工具。條目來自 Homebrew 官方目錄，由 OpenNavo 整理翻譯，並支援搜尋、收藏和更新提醒。",
     "fontsTitle": "Mac 字型 A–Z 索引",
     "fontsMetaTitle": "Mac 字型 A–Z 索引 · OpenNavo",
     "fontsDescription": "按名稱瀏覽目錄裡的字型，共 {count} 款，都可以用 Homebrew 安裝，並按字母或數字快速篩選。",
@@ -1042,7 +1042,7 @@
   "download": {
     "title": "Mac 上的 Homebrew 應用商店，病毒掃描與應用防火牆",
     "metaTitle": "下載 OpenNavo Mac 客戶端：帶病毒掃描的 Homebrew 應用商店",
-    "description": "一鍵安裝、更新和解除安裝 App，裝之前先掃描病毒；還能清理磁碟、監控硬體。客戶端呼叫你電腦上的 Homebrew，不需要帳號。",
+    "description": "一鍵安裝、更新和解除安裝 App，裝之前先掃描病毒；還能清理磁碟、監控硬體和檢查啟動項。客戶端呼叫你電腦上的 Homebrew，不需要帳號，也不會上傳你的應用列表；支援 macOS 13 及以上的 Apple 晶片與 Intel Mac，免費且開源。安裝前會展示版本、大小和下載來源，所有操作都在本機完成。",
     "button": "下載 macOS 版",
     "meta": "版本 {version} · {size} · macOS {macos} 及以上 · {date} 釋出",
     "copySha": "複製 SHA-256 校驗值",
