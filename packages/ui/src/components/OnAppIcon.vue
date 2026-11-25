@@ -79,7 +79,7 @@ const barColor = computed(() => iconColor(props.token));
       :src="src ?? undefined"
       :srcset="srcset"
       :sizes="srcset ? (sizes ?? `${size}px`) : undefined"
-      alt=""
+      :alt="label ?? name"
       :loading="priority ? 'eager' : 'lazy'"
       :fetchpriority="priority ? 'high' : undefined"
       decoding="async"
