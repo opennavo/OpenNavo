@@ -24,6 +24,7 @@ var bingReportURLs = []struct{ Path, Locale string }{
 // AnnounceBingReportURLs submits the report's missing URLs once, directly through IndexNow. It is
 // called on the notifier tick until its marker row commits, so a transient startup error retries.
 func (n *Notifier) AnnounceBingReportURLs(ctx context.Context) error {
+	n.defaults()
 	var done bool
 	if err := n.Store.DB.WithContext(ctx).Raw("SELECT EXISTS(SELECT 1 FROM indexnow_backfill WHERE name=?)", bingReportBackfill).Scan(&done).Error; err != nil || done {
 		return err

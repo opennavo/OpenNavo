@@ -35,7 +35,7 @@ func TestBingReportBackfillSubmitsMissingURLsOnce(t *testing.T) {
 	}))
 	defer server.Close()
 
-	n := &Notifier{Store: st, Config: cfg, IndexNowEndpoint: server.URL, HTTP: server.Client(), Sleep: func(time.Duration) {}}
+	n := &Notifier{Store: st, Config: cfg, IndexNowEndpoint: server.URL, Sleep: func(time.Duration) {}}
 	require.NoError(t, n.AnnounceBingReportURLs(ctx))
 	require.NotEmpty(t, batches)
 	submitted := 0
