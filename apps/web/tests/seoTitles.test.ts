@@ -153,6 +153,15 @@ describe('WP1 titles and descriptions', () => {
     );
   });
 
+  it('Uses the character budget Bing measures for CJK introductions', () => {
+    const description = '这是一个用于 macOS 的示例应用，提供文件管理、批量重命名、格式转换和自动化任务。'.repeat(5);
+    const text = overviewDescription({ ...app, summary: '示例应用。', description }, translator('zh-CN'));
+    const chars = Array.from(text).length;
+    expect(chars).toBeGreaterThanOrEqual(150);
+    expect(chars).toBeLessThanOrEqual(160);
+    expect(text.startsWith('这是一个用于 macOS 的示例应用')).toBe(true);
+  });
+
   it('Dates versions only from release data for the current version', () => {
     const t = translator('en-US');
     const format = (iso: string) => iso.slice(0, 10);
