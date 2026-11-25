@@ -170,7 +170,12 @@ describe('sitemap source snapshot cache', () => {
       token: VERSIONS_SITEMAP_PILOT_TOKEN,
       notesCount: 5,
       locales: [
-        { locale: 'en-US', pages: { versions: { inSitemap: false } } },
+        {
+          locale: 'en-US',
+          pages: { versions: { inSitemap: false } },
+          pageLastmod: { versions: '2026-11-01T00:00:00Z', 'versions:2': '2026-11-02T00:00:00Z' },
+          versionsPages: [2]
+        },
         { locale: 'ja-JP', pages: { versions: { inSitemap: false } } }
       ]
     };
@@ -194,9 +199,17 @@ describe('sitemap source snapshot cache', () => {
         .map(({ _sitemapName: name }) => name)
         .sort()
     ).toEqual([VERSIONS_SITEMAP_PILOT_BUCKET, secondPilotBucket].sort());
-    const [pilotEntry] = await bucket(VERSIONS_SITEMAP_PILOT_BUCKET);
+    const pilotEntries = await bucket(VERSIONS_SITEMAP_PILOT_BUCKET);
+    const pilotEntry = pilotEntries.find(entry => entry.loc === `/apps/${pilot.token}/versions`);
     expect(pilotEntry).toMatchObject({ loc: `/apps/${pilot.token}/versions`, _sitemap: VERSIONS_SITEMAP_PILOT_BUCKET });
     expect(pilotEntry).not.toHaveProperty('alternatives');
+    const laterEntry = pilotEntries.find(entry => entry.loc === `/apps/${pilot.token}/versions?page=2`);
+    expect(laterEntry).toMatchObject({
+      loc: `/apps/${pilot.token}/versions?page=2`,
+      lastmod: '2026-11-02T00:00:00Z',
+      _sitemap: VERSIONS_SITEMAP_PILOT_BUCKET
+    });
+    expect(laterEntry).not.toHaveProperty('alternatives');
     const [secondEntry] = await bucket(secondPilotBucket);
     expect(secondEntry).toMatchObject({
       loc: `/apps/${secondPilot.token}/versions`,
@@ -204,6 +217,29 @@ describe('sitemap source snapshot cache', () => {
     });
     expect(secondEntry).not.toHaveProperty('alternatives');
     await expect(bucket(packageSitemapName('versions', other.token))).rejects.toMatchObject({ statusCode: 410 });
+  });
+
+  it('lists later versions pages when the global versions sitemap is on', async () => {
+    const app = {
+      kind: 'cask',
+      token: 'later-app',
+      notesCount: 5,
+      locales: [
+        {
+          locale: 'en-US',
+          pageLastmod: { versions: '2026-11-01T00:00:00Z', 'versions:2': '2026-11-02T00:00:00Z' },
+          versionsPages: [2]
+        }
+      ]
+    };
+    const { bucket } = await setup([app]);
+    const urls = await bucket(packageSitemapName('versions', app.token));
+    expect(urls.find(url => url.loc === '/apps/later-app/versions')).toMatchObject({
+      lastmod: '2026-11-01T00:00:00Z'
+    });
+    expect(urls.find(url => url.loc === '/apps/later-app/versions?page=2')).toMatchObject({
+      lastmod: '2026-11-02T00:00:00Z'
+    });
   });
 
   it('checks source switches even with a warm populated index and restores enabled buckets', async () => {

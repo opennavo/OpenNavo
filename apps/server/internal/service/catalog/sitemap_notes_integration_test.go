@@ -4,6 +4,7 @@ package catalog_test
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -82,6 +83,46 @@ func TestSitemapRejectsPagesAboveTheLimit(t *testing.T) {
 	svc := &catalog.PublicService{}
 	_, err := svc.Sitemap(context.Background(), "apps", 1, catalog.SitemapPageSize+1)
 	require.Error(t, err)
+}
+
+// A later versions page is listed once its own notes pass the same threshold, so the sitemap can
+// name paginated release histories without advertising a thin page.
+func TestSitemapListsLaterVersionsPagesWithEnoughNotes(t *testing.T) {
+	st := testutil.NewSEOStore(t)
+	ctx := context.Background()
+	require.NoError(t, st.DB.Exec(`INSERT INTO packages(id,kind,token,full_token,tap,name,version,version_base,raw,raw_hash,desc_en,installs_30d,rank_30d)
+ VALUES(904,'cask','later-versions','later-versions','homebrew/cask','Later Versions','27','27','{}','fixture','Useful fixture application',50,1)`).Error)
+	require.NoError(t, st.DB.Exec(`INSERT INTO package_i18n(package_id,locale,source_locale,summary,description,status,source_hash,source)
+ VALUES(904,'en-US','en-US','Useful fixture application','Complete fixture description','source',repeat('a',64),'rule')`).Error)
+	notes := strings.Repeat("Improved sync reliability for large libraries. ", 4)
+	for i := 1; i <= 27; i++ {
+		version := strconv.Itoa(i)
+		require.NoError(t, st.DB.Exec(`INSERT INTO package_versions(package_id,version,version_base) VALUES(904,?,?)`, version, version).Error)
+		require.NoError(t, st.DB.Exec(`INSERT INTO releases(package_id,source,source_key,version,body_markdown,source_url,source_locale)
+ VALUES(904,'manual',?,?,?,'https://vendor.example/notes','en-US')`, version, version, notes).Error)
+	}
+	svc := &catalog.PublicService{Store: st}
+	laterPages := func() []int {
+		t.Helper()
+		page, err := svc.Sitemap(ctx, "apps", 1, 100)
+		require.NoError(t, err)
+		for _, record := range page.Records {
+			if record.Token != "later-versions" {
+				continue
+			}
+			for _, locale := range *record.Locales {
+				if locale.Locale == "en-US" && locale.VersionsPages != nil {
+					return *locale.VersionsPages
+				}
+			}
+		}
+		return nil
+	}
+	require.Empty(t, laterPages(), "no later page decision before the page-state job runs")
+	count, err := st.RefreshPackagePageStates(ctx, 100)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, []int{2}, laterPages())
 }
 
 func TestSitemapCacheFollowsFontSwitchOffOnOff(t *testing.T) {

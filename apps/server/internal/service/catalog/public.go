@@ -865,6 +865,25 @@ func (s *PublicService) sitemap(ctx context.Context, group string, current, size
 		}
 		dates[state.PackageID][state.Locale][key] = state.ContentModifiedAt.UTC()
 	}
+	// Later versions pages carry their own notes facts in the page state. List the ones that meet the
+	// same threshold as page 1, so the sitemap can name them without advertising a thin page.
+	minimumNotes := policy.VersionsMinNotesChars
+	if minimumNotes <= 0 {
+		minimumNotes = 300
+	}
+	laterVersions := map[int64]map[string][]int{}
+	for _, state := range states {
+		if state.PageKind != "versions" || state.PageNumber < 2 || state.NotesChars == nil || state.NotesEntries == nil {
+			continue
+		}
+		if *state.NotesChars < minimumNotes || *state.NotesEntries < seo.VersionsMinNoteEntries {
+			continue
+		}
+		if laterVersions[state.PackageID] == nil {
+			laterVersions[state.PackageID] = map[string][]int{}
+		}
+		laterVersions[state.PackageID][state.Locale] = append(laterVersions[state.PackageID][state.Locale], state.PageNumber)
+	}
 	for _, row := range rows {
 		locales := []publicapi.SitemapLocale{}
 		for _, locale := range seo.Locales {
@@ -889,7 +908,11 @@ func (s *PublicService) sitemap(ctx context.Context, group string, current, size
 					out.Lastmod = &date
 				}
 			}
-			locales = append(locales, publicapi.SitemapLocale{Locale: publicapi.Locale(locale), Lastmod: lastmod, Pages: &pages, PageLastmod: &pageDates})
+			entry := publicapi.SitemapLocale{Locale: publicapi.Locale(locale), Lastmod: lastmod, Pages: &pages, PageLastmod: &pageDates}
+			if later := laterVersions[row.ID][locale]; len(later) > 0 {
+				entry.VersionsPages = &later
+			}
+			locales = append(locales, entry)
 		}
 		if len(locales) == 0 {
 			continue

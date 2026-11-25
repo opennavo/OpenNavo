@@ -180,6 +180,8 @@ interface ListedLocale {
   lastmod: string | null;
   pageLastmod?: Record<string, string>;
   pages?: Partial<Record<SitemapPage, { inSitemap?: boolean }>>;
+  /** Later versions pages whose own notes meet the sitemap threshold; page 1 is pages.versions. */
+  versionsPages?: number[];
 }
 /** A catalog record as snapshots store it: the API's record without decision details sitemaps never read. */
 interface SitemapRecord {
@@ -419,25 +421,30 @@ async function loadPackagePages(
  * order are kept, so listedLocales answers exactly as it would for the full record.
  */
 export function slimRecord(record: SitemapEntry): SitemapRecord {
+  const pilot = VERSIONS_SITEMAP_PILOT_TOKENS.has(record.token);
   return {
     kind: record.kind,
     token: record.token,
     ...(record.notesCount === undefined ? {} : { notesCount: record.notesCount }),
-    ...(record.locales ? { locales: record.locales.map(slimLocale) } : {})
+    ...(record.locales ? { locales: record.locales.map(entry => slimLocale(entry, pilot)) } : {})
   };
 }
 
-function slimLocale(entry: SitemapLocale): ListedLocale {
+function slimLocale(entry: SitemapLocale, keepVersionsDates = false): ListedLocale {
   const decided = entry.pages;
   // A language without decisions (an older record) keeps every page date, as listedLocales may still list them.
+  // Pilot tokens keep versions dates even when the decision says not listed: their approval overrides it.
   const listed = decided ? SITEMAP_PAGES.filter(page => isListed(decided, page)) : SITEMAP_PAGES;
-  const pageLastmod = Object.entries(entry.pageLastmod ?? {}).filter(([key]) =>
-    listed.some(page => key === page || key.startsWith(`${page}:`))
+  const pageLastmod = Object.entries(entry.pageLastmod ?? {}).filter(
+    ([key]) =>
+      (keepVersionsDates && (key === 'versions' || key.startsWith('versions:'))) ||
+      listed.some(page => key === page || key.startsWith(`${page}:`))
   );
   return {
     locale: entry.locale,
     lastmod: entry.lastmod,
     ...(pageLastmod.length ? { pageLastmod: Object.fromEntries(pageLastmod) } : {}),
+    ...(entry.versionsPages?.length ? { versionsPages: entry.versionsPages } : {}),
     ...(decided
       ? {
           pages: Object.fromEntries(
@@ -515,7 +522,30 @@ function packageEntries(
       entry.pageLastmod?.[page] ?? (page === 'versions' ? undefined : entry.lastmod)
     ])
   );
-  return localizedEntries(path, sitemap, locales, locale => lastmods.get(locale));
+  const first = localizedEntries(path, sitemap, locales, locale => lastmods.get(locale));
+  if (page !== 'versions' || !entries) return first;
+  // Later versions pages that passed the server's own notes threshold; page 1 stays in `first`.
+  const laterPages = new Map<number, Set<Locale>>();
+  for (const entry of entries)
+    for (const pageNumber of entry.versionsPages ?? []) {
+      const pageLocales = laterPages.get(pageNumber) ?? new Set<Locale>();
+      pageLocales.add(entry.locale);
+      laterPages.set(pageNumber, pageLocales);
+    }
+  if (!laterPages.size) return first;
+  const later = [];
+  for (const [pageNumber, pageLocales] of laterPages) {
+    const pageLastmods = new Map(entries.map(entry => [entry.locale, entry.pageLastmod?.[`versions:${pageNumber}`]]));
+    later.push(
+      ...localizedEntries(
+        `${path}?page=${pageNumber}`,
+        sitemap,
+        locales.filter(code => pageLocales.has(code)),
+        code => pageLastmods.get(code)
+      )
+    );
+  }
+  return [...first, ...later];
 }
 
 /**
@@ -528,12 +558,16 @@ function pilotVersionEntries(record: SitemapRecord, sitemap: string) {
   // A pilot entry is a promise to search engines: skip an app whose notes can no longer qualify,
   // so the sitemap never advertises a page the server marks thin.
   if ((record.notesCount ?? 0) < VERSION_PAGE_MIN_NOTES) return [];
-  const lastmod = record.locales?.find(entry => entry.locale === 'en-US')?.pageLastmod?.versions;
-  const [entry] = localizedEntries(`/apps/${record.token}/versions`, sitemap, ['en-US'], () => lastmod);
-  if (!entry) return [];
-  // No alternates: the pilot lists one URL per app, not the localized pages.
-  const { alternatives: _alternatives, ...plain } = entry;
-  return [plain];
+  const source = record.locales?.find(entry => entry.locale === 'en-US');
+  return [undefined, ...(source?.versionsPages ?? [])].flatMap(pageNumber => {
+    const path = `/apps/${record.token}/versions${pageNumber ? `?page=${pageNumber}` : ''}`;
+    const lastmod = pageNumber ? source?.pageLastmod?.[`versions:${pageNumber}`] : source?.pageLastmod?.versions;
+    const [entry] = localizedEntries(path, sitemap, ['en-US'], () => lastmod);
+    if (!entry) return [];
+    // No alternates: the pilot lists one URL per app, not the localized pages.
+    const { alternatives: _alternatives, ...plain } = entry;
+    return [plain];
+  });
 }
 
 type ArticleSitemap = PublicComponents['schemas']['ArticleSitemap'];

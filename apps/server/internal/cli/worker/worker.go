@@ -161,10 +161,10 @@ func run(ctx context.Context) error {
 			case <-dispatchCtx.Done():
 				return
 			case <-ticker.C:
-				// Queue the one-time IndexNow announcement for the pages a search-engine report
-				// listed as missing; the outbox probes and submits them with the stored key.
-				// Retry each tick until its marker row commits, so a transient startup error does
-				// not skip the announcement for the life of the process.
+				// Submit the one-time IndexNow announcement for the pages a search-engine report
+				// listed as missing, using the stored key. Retry each tick until its marker row
+				// commits, so a transient startup error does not skip the announcement for the
+				// life of the process.
 				if err := notifier.AnnounceBingReportURLs(dispatchCtx); err != nil && dispatchCtx.Err() == nil {
 					logger.Error("indexnow report backfill failed", "error", err)
 				}
