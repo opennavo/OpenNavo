@@ -154,11 +154,6 @@ func run(ctx context.Context) error {
 	notifyDone := make(chan struct{})
 	go func() {
 		defer close(notifyDone)
-		// Queue the one-time IndexNow announcement for the pages a search-engine report listed as
-		// missing; the outbox probes and submits them with the stored key.
-		if err := notifier.AnnounceBingReportURLs(dispatchCtx); err != nil && dispatchCtx.Err() == nil {
-			logger.Error("indexnow report backfill failed", "error", err)
-		}
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -166,6 +161,13 @@ func run(ctx context.Context) error {
 			case <-dispatchCtx.Done():
 				return
 			case <-ticker.C:
+				// Queue the one-time IndexNow announcement for the pages a search-engine report
+				// listed as missing; the outbox probes and submits them with the stored key.
+				// Retry each tick until its marker row commits, so a transient startup error does
+				// not skip the announcement for the life of the process.
+				if err := notifier.AnnounceBingReportURLs(dispatchCtx); err != nil && dispatchCtx.Err() == nil {
+					logger.Error("indexnow report backfill failed", "error", err)
+				}
 				if result, err := notifier.Run(dispatchCtx); err != nil && dispatchCtx.Err() == nil {
 					logger.Error("url change feed failed", "error", err)
 				} else if result.Changes > 0 {
