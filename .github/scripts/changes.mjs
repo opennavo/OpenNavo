@@ -1,5 +1,7 @@
 // Which CI areas a change touches, written to GITHUB_OUTPUT for job conditions.
-// Pull requests run fast checks for the areas they touch. Pushes to main add
+// Pull requests run fast checks for the areas they touch; server pull requests
+// also run the integration suite, because a test-only change can pass lint and
+// unit tests and still fail against real PostgreSQL/Redis. Pushes to main add
 // full depth (integration tests with -race, full-stack E2E, Lighthouse) for the
 // areas they touch; scheduled and dispatched runs cover every area at full
 // depth, and a pull request labelled full-ci runs full depth too. Jobs are

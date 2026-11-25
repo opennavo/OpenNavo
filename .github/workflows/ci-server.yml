@@ -2,8 +2,11 @@ name: Backend CI
 
 # Every event runs this workflow; .github/scripts/changes.mjs decides which jobs
 # run. Pull requests get fast checks (lint, unit tests, build, contract) for the
-# areas they touch; main, the nightly run, dispatched runs and pull requests
-# labelled full-ci add the integration suite with -race.
+# areas they touch. Server pull requests also run the integration suite: a
+# test-only change can pass lint and unit tests and still fail against real
+# PostgreSQL/Redis, which is how main went red. Main, the nightly run and
+# dispatched runs keep full depth; the full-ci label still adds frontend
+# full-stack E2E and Lighthouse.
 on:
   push:
     branches: [main]
@@ -41,6 +44,31 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mcp == 'true'
     uses: ./.github/workflows/ci-mcp.yml
+
+  # The reusable workflow reports "mcp / check" when it runs and the caller
+  # reports "mcp" when skipped, so a required branch check cannot name either.
+  # This gate carries one stable result for both cases.
+  mcp-gate:
+    needs: [changes, mcp]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require the MCP check to pass when it ran
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          MCP: ${{ needs.mcp.result }}
+        run: |
+          echo "changes: $CHANGES; mcp: $MCP"
+          if [ "$CHANGES" != "success" ]; then
+            echo "change detection did not pass"
+            exit 1
+          fi
+          if [ "$MCP" = "success" ] || [ "$MCP" = "skipped" ]; then
+            exit 0
+          fi
+          echo "mcp did not pass"
+          exit 1
 
   contract:
     runs-on: ubuntu-latest
@@ -159,7 +187,7 @@ jobs:
   # (.github/scripts/go-shard.mjs); without recordings they are dealt in turn.
   integration-plan:
     needs: changes
-    if: needs.changes.outputs.server == 'true' && needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -189,7 +217,7 @@ jobs:
 
   server-integration:
     needs: [changes, integration-plan]
-    if: needs.changes.outputs.server == 'true' && needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -238,6 +266,37 @@ jobs:
         uses: ./.github/actions/go-cache-save
         with:
           name: integration
+
+  # Matrix shards report checks named with their shard number, so a required
+  # branch check cannot name one of them. This job carries the aggregate result
+  # under one stable name. A change that does not touch the server skips
+  # integration; this gate then reports success, which a required check accepts.
+  integration-gate:
+    needs: [changes, integration-plan, server-integration]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every integration shard to pass
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          PLAN: ${{ needs.integration-plan.result }}
+          SHARDS: ${{ needs.server-integration.result }}
+        run: |
+          echo "changes: $CHANGES; integration-plan: $PLAN; server-integration: $SHARDS"
+          if [ "$CHANGES" != "success" ]; then
+            echo "change detection did not pass"
+            exit 1
+          fi
+          if [ "$SHARDS" = "success" ]; then
+            exit 0
+          fi
+          if [ "$SHARDS" = "skipped" ] && [ "$PLAN" = "skipped" ]; then
+            echo "integration did not run for this change"
+            exit 0
+          fi
+          echo "integration did not pass"
+          exit 1
 
   deployment-config:
     runs-on: ubuntu-latest
