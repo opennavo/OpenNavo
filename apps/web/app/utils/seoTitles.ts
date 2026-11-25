@@ -272,9 +272,10 @@ const DANGLING_END =
 /**
  * The start of a summary that fits `room` columns. A whole sentence or clause wins when it fills at
  * least half the room; otherwise the cut falls between words (anywhere in CJK text) and ends in an
- * ellipsis. Empty when the room is too small to say anything useful.
+ * ellipsis. Empty when the room is too small to say anything useful. `minimum` lets callers that
+ * measure Bing's guidance reject a whole sentence just below it and clip.
  */
-export function fitSummary(summary: string, room: number): string {
+export function fitSummary(summary: string, room: number, minimum = 0): string {
   if (textWidth(summary) <= room) return summary;
   if (room < MIN_SUMMARY_WIDTH) return '';
   for (const end of [SENTENCE_END, CLAUSE_END]) {
@@ -284,7 +285,7 @@ export function fitSummary(summary: string, room: number): string {
       if (textWidth(candidate) > room) break;
       head = candidate;
     }
-    if (textWidth(head) * 2 >= room) return head;
+    if (textWidth(head) * 2 >= room && textWidth(head) >= minimum) return head;
   }
   let head = '';
   for (const char of summary) {
@@ -472,7 +473,7 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
     const whole = sectionDescription(pkg, t, list, true);
     if (whole) base = whole;
     else if (variantLabel(pkg.token ?? '')) base = sectionDescription(pkg, t, list);
-    else base = fitSummary(pkg.summary!.trim(), DESCRIPTION_WIDTH);
+    else base = fitSummary(pkg.summary!.trim(), DESCRIPTION_WIDTH, 150);
   }
   // A short catalog summary leaves the snippet below Bing's length guidance. The editor-written,
   // already localized introduction says more; use its lead only when it is longer than the summary.
@@ -481,7 +482,7 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
   const lead = pkg.description
     ? cjk
       ? fitSummaryChars(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
-      : fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH)
+      : fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
     : '';
   const leadWins = cjk ? Array.from(lead).length > Array.from(base).length : textWidth(lead) > textWidth(base);
   return leadWins ? lead : base;

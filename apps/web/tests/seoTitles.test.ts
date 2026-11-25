@@ -162,6 +162,18 @@ describe('WP1 titles and descriptions', () => {
     expect(text.startsWith('这是一个用于 macOS 的示例应用')).toBe(true);
   });
 
+  it('Fills a short opening sentence to the snippet budget', () => {
+    const description =
+      'A macOS app for managing products. It installs, updates and removes every product the vendor ships, keeps a local inventory, verifies checksums, and shows release notes in the app.';
+    const text = overviewDescription(
+      { ...app, summary: 'A macOS app for managing products.', description },
+      translator('en-US')
+    );
+    const chars = Array.from(text).length;
+    expect(chars).toBeGreaterThanOrEqual(150);
+    expect(chars).toBeLessThanOrEqual(160);
+  });
+
   it('Dates versions only from release data for the current version', () => {
     const t = translator('en-US');
     const format = (iso: string) => iso.slice(0, 10);
