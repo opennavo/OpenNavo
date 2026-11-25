@@ -32,7 +32,17 @@ export const VERSIONS_SITEMAP_PILOT_TOKENS: ReadonlySet<string> = new Set([
   'corretto@17',
   'omnissa-horizon-client',
   'zen@twilight',
-  'temurin@11'
+  'temurin@11',
+  'microsoft-edge',
+  'burp-suite',
+  'gimp',
+  'mendeley-reference-manager',
+  'opera-air',
+  'qgis',
+  'android-platform-tools',
+  'pdf-expert@beta',
+  'bitwarden',
+  'sketchup'
 ]);
 export const VERSIONS_SITEMAP_PILOT_BUCKETS: ReadonlySet<string> = new Set(
   [...VERSIONS_SITEMAP_PILOT_TOKENS].map(token => packageSitemapName('versions', token))
