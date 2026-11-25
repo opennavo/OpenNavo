@@ -154,6 +154,11 @@ func run(ctx context.Context) error {
 	notifyDone := make(chan struct{})
 	go func() {
 		defer close(notifyDone)
+		// Queue the one-time IndexNow announcement for the pages a search-engine report listed as
+		// missing; the outbox probes and submits them with the stored key.
+		if err := notifier.AnnounceBingReportURLs(dispatchCtx); err != nil && dispatchCtx.Err() == nil {
+			logger.Error("indexnow report backfill failed", "error", err)
+		}
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
