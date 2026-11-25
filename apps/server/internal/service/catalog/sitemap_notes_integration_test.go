@@ -125,6 +125,108 @@ func TestSitemapListsLaterVersionsPagesWithEnoughNotes(t *testing.T) {
 	require.Equal(t, []int{2}, laterPages())
 }
 
+// Page 1 and page 2 are judged separately: when page 1's notes are thin, a qualifying page 2 is still
+// listed, and the release page the app requests reports the same inclusion as the sitemap.
+func TestSitemapListsLaterVersionsPagesWhenPageOneIsThin(t *testing.T) {
+	st := testutil.NewSEOStore(t)
+	ctx := context.Background()
+	require.NoError(t, st.DB.Exec(`INSERT INTO packages(id,kind,token,full_token,tap,name,version,version_base,raw,raw_hash,desc_en,installs_30d,rank_30d)
+ VALUES(905,'cask','thin-first-versions','thin-first-versions','homebrew/cask','Thin First Versions','27','27','{}','fixture','Useful fixture application',50,1)`).Error)
+	require.NoError(t, st.DB.Exec(`INSERT INTO package_i18n(package_id,locale,source_locale,summary,description,status,source_hash,source)
+ VALUES(905,'en-US','en-US','Useful fixture application','Complete fixture description','source',repeat('a',64),'rule')`).Error)
+	require.NoError(t, st.DB.Exec(`UPDATE seo_settings SET settings=jsonb_set(settings,'{pages}','{"versionsSitemap":true}')`).Error)
+	notes := strings.Repeat("Improved sync reliability for large libraries. ", 4)
+	for i := 1; i <= 27; i++ {
+		version := strconv.Itoa(i)
+		// Only the three oldest releases sit on page 2, so page 1 counts no notes while page 2 qualifies.
+		body := ""
+		if i <= 3 {
+			body = notes
+		}
+		require.NoError(t, st.DB.Exec(`INSERT INTO package_versions(package_id,version,version_base) VALUES(905,?,?)`, version, version).Error)
+		require.NoError(t, st.DB.Exec(`INSERT INTO releases(package_id,source,source_key,version,body_markdown,source_url,source_locale)
+ VALUES(905,'manual',?,?,?,'https://vendor.example/notes','en-US')`, version, version, body).Error)
+	}
+	svc := &catalog.PublicService{Store: st}
+	count, err := st.RefreshPackagePageStates(ctx, 100)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+
+	page, err := svc.Sitemap(ctx, "apps", 1, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Records, 1)
+	var english publicapi.SitemapLocale
+	for _, locale := range *page.Records[0].Locales {
+		if locale.Locale == "en-US" {
+			english = locale
+		}
+	}
+	require.False(t, english.Pages.Versions.InSitemap, "page 1's notes are thin")
+	require.NotNil(t, english.VersionsPages, "page 2 qualifies on its own notes")
+	require.Equal(t, []int{2}, *english.VersionsPages)
+
+	first, err := svc.ReleasePage(ctx, "cask", "thin-first-versions", "en-US", 1, seo.VersionsPageSize, false)
+	require.NoError(t, err)
+	require.Equal(t, "noindex, follow", string(first.Indexing.Robots))
+	require.False(t, first.Indexing.InSitemap)
+	require.Equal(t, "thin_notes_page", string(first.Indexing.Reason))
+	second, err := svc.ReleasePage(ctx, "cask", "thin-first-versions", "en-US", 2, seo.VersionsPageSize, false)
+	require.NoError(t, err)
+	require.Equal(t, seo.IndexableRobots, string(second.Indexing.Robots))
+	require.True(t, second.Indexing.InSitemap, "the release page reports the URL the sitemap lists")
+}
+
+// While the global versions sitemap is off, the approved pilot's English pages stay listed in both the
+// sitemap snapshot and the release page the app requests; every other app keeps the global switch off.
+func TestVersionsPilotDecisionMatchesTheSitemap(t *testing.T) {
+	st := testutil.NewSEOStore(t)
+	ctx := context.Background()
+	for id, token := range map[int]string{906: "dotnet-sdk", 907: "visual-studio-code"} {
+		require.NoError(t, st.DB.Exec(`INSERT INTO packages(id,kind,token,full_token,tap,name,version,version_base,raw,raw_hash,desc_en,installs_30d,rank_30d)
+ VALUES(?,'cask',?,?,'homebrew/cask',?,'3','3','{}','fixture','Useful fixture application',50,1)`, id, token, token, token).Error)
+		require.NoError(t, st.DB.Exec(`INSERT INTO package_i18n(package_id,locale,source_locale,summary,description,status,source_hash,source)
+ VALUES(?,'en-US','en-US','Useful fixture application','Complete fixture description','source',repeat('a',64),'rule')`, id).Error)
+		notes := strings.Repeat("Improved sync reliability for large libraries. ", 4)
+		for _, version := range []string{"1", "2", "3"} {
+			require.NoError(t, st.DB.Exec(`INSERT INTO package_versions(package_id,version,version_base) VALUES(?,?,?)`, id, version, version).Error)
+			require.NoError(t, st.DB.Exec(`INSERT INTO releases(package_id,source,source_key,version,body_markdown,source_url,source_locale)
+ VALUES(?,'manual',?,?,?,'https://vendor.example/notes','en-US')`, id, version, version, notes).Error)
+		}
+	}
+	count, err := st.RefreshPackagePageStates(ctx, 100)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+
+	svc := &catalog.PublicService{Store: st}
+	page, err := svc.Sitemap(ctx, "apps", 1, 100)
+	require.NoError(t, err)
+	versionsListed := func(token, locale string) bool {
+		t.Helper()
+		for _, record := range page.Records {
+			if record.Token != token {
+				continue
+			}
+			for _, entry := range *record.Locales {
+				if string(entry.Locale) == locale {
+					return entry.Pages.Versions.InSitemap
+				}
+			}
+		}
+		t.Fatalf("%s/%s is missing from the sitemap", token, locale)
+		return false
+	}
+	require.True(t, versionsListed("dotnet-sdk", "en-US"), "the pilot lists its English versions page")
+	require.False(t, versionsListed("dotnet-sdk", "zh-CN"), "the pilot is English-only")
+	require.False(t, versionsListed("visual-studio-code", "en-US"), "the global switch stays off for other apps")
+
+	pilot, err := svc.ReleasePage(ctx, "cask", "dotnet-sdk", "en-US", 1, seo.VersionsPageSize, false)
+	require.NoError(t, err)
+	require.True(t, pilot.Indexing.InSitemap, "the release page reports the URL the sitemap lists")
+	other, err := svc.ReleasePage(ctx, "cask", "visual-studio-code", "en-US", 1, seo.VersionsPageSize, false)
+	require.NoError(t, err)
+	require.False(t, other.Indexing.InSitemap)
+}
+
 func TestSitemapCacheFollowsFontSwitchOffOnOff(t *testing.T) {
 	st := testutil.NewFactsStore(t)
 	ctx := context.Background()

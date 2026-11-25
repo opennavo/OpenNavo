@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 
 	"github.com/opennavo/opennavo/server/internal/domain"
+	"github.com/opennavo/opennavo/server/internal/seo"
 	"github.com/opennavo/opennavo/server/internal/store"
 )
 
@@ -20,6 +21,13 @@ type SiteSettings struct {
 	Pages        any   `json:"pages"`
 }
 
+// publicSitePages is the stored pages policy plus the code-approved versions pilot. The pilot list is
+// not stored or editable: exposing it keeps the web sitemap generator and DecidePage on one rule.
+type publicSitePages struct {
+	store.SEOPagesSettings
+	VersionsSitemapPilot []string `json:"versionsSitemapPilot"`
+}
+
 func publicSiteSettings(row store.SEOSettingsRow) SiteSettings {
 	settings := row.Settings
 	return SiteSettings{
@@ -29,7 +37,7 @@ func publicSiteSettings(row store.SEOSettingsRow) SiteSettings {
 		Analytics:    settings.Analytics,
 		EdgeCache:    settings.EdgeCache,
 		Crawlers:     settings.Crawlers,
-		Pages:        settings.Pages,
+		Pages:        publicSitePages{SEOPagesSettings: settings.Pages, VersionsSitemapPilot: seo.VersionsSitemapPilotTokens},
 	}
 }
 

@@ -16401,6 +16401,11 @@ components:
               description: Enable details redirects after migrated overview content has been verified.
             versionsSitemap:
               type: boolean
+            versionsSitemapPilot:
+              type: array
+              description: Server-approved apps whose English versions pages stay in the versions sitemap while versionsSitemap is off. The sitemap generator lists only the URLs page decisions mark inSitemap; the list is not editable.
+              items:
+                type: string
             fontsSitemap:
               type: boolean
               default: false

@@ -106,7 +106,7 @@ func TestMCPPackageVisibilityUsesAdminWritePath(t *testing.T) {
 				require.EqualValues(t, 1, revisions)
 				var patterns []string
 				require.NoError(t, st.DB.Raw("SELECT jsonb_array_elements_text(payload) FROM job_outbox WHERE unique_key=?", "cache:invalidate:agent-write:"+op.RequestID).Scan(&patterns).Error)
-				for _, key := range []string{"c:pkg:sitemap:apps:1:100", "c:home:en-US", "c:pkg:detail:cask:pearcleaner:en-US"} {
+				for _, key := range []string{"c:pkg:sitemap:v2:apps:1:100", "c:home:en-US", "c:pkg:detail:cask:pearcleaner:en-US"} {
 					covered := false
 					for _, pattern := range patterns {
 						matches, err := path.Match(pattern, key)

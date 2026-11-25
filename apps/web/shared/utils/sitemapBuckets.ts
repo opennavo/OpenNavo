@@ -14,8 +14,12 @@ export function packageSitemapName(group: PackageSitemapGroup, token: string) {
 /**
  * The approved versions-sitemap pilot (#215, approved 2026-11-04), extended to the pages Bing's
  * 2026-11-24 SEO report marked as important. While the global versions sitemap is off, only these
- * apps' source-language release histories are listed, with no localized alternates. Keep this list
- * explicit and review the Bing recommendation before adding entries.
+ * apps' source-language release histories are listed, with no localized alternates.
+ *
+ * The API owns the rule: seo.VersionsSitemapPilotTokens feeds page decisions and the public site
+ * settings (pages.versionsSitemapPilot). This copy is the default used before the API answers and
+ * the shared fixture for tests; keep it matching the server list. Review the Bing recommendation
+ * before adding entries.
  */
 export const VERSIONS_SITEMAP_PILOT_TOKENS: ReadonlySet<string> = new Set([
   'dotnet-sdk',

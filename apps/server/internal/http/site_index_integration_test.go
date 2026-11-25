@@ -238,6 +238,20 @@ func TestSiteIndexEndpointsFollowTheContract(t *testing.T) {
 		require.Equal(t, tc.reason, got["reason"], tc.path)
 		require.Equal(t, base+tc.canonical, got["canonical"], tc.path)
 	}
+	// Page numbers the web answers with 404 (leading zero, zero, empty, repeat, out of range) are never
+	// reported as listed, even when the number they would parse to is a qualified page.
+	for _, path := range []string{
+		"/apps/lookup-app/versions?page=02",
+		"/apps/lookup-app/versions?page=0",
+		"/apps/lookup-app/versions?page=",
+		"/apps/lookup-app/versions?page=2&page=2",
+		"/apps/lookup-app/versions?page=1000000",
+	} {
+		got := decision(base + path)
+		require.Equal(t, "invalid_page", got["reason"], path)
+		require.Equal(t, false, got["indexable"], path)
+		require.Equal(t, false, got["inSitemap"], path)
+	}
 	for _, tc := range []struct{ path, reason string }{{"/apps/lookup-gone", "removed"}, {"/apps/no-such-app", "not_found"}, {"/articles/no-such-article", "not_found"}, {"/background-items/com.nothing.here", "not_found"}} {
 		got := decision(tc.path)
 		require.Equal(t, tc.reason, got["reason"], tc.path)

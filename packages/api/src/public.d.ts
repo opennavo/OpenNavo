@@ -5939,6 +5939,8 @@ export interface components {
                  */
                 detailsRedirect: boolean;
                 versionsSitemap: boolean;
+                /** @description Server-approved apps whose English versions pages stay in the versions sitemap while versionsSitemap is off. The sitemap generator lists only the URLs page decisions mark inSitemap; the list is not editable. */
+                versionsSitemapPilot?: string[];
                 /** @default false */
                 fontsSitemap: boolean;
             };

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -810,7 +811,10 @@ func (s *PublicService) Sitemap(ctx context.Context, group string, current, size
 	if !ValidPage(current, size, SitemapPageSize) || (group != "" && group != "apps" && group != "fonts") {
 		return SitemapPage{}, domain.Validation()
 	}
-	key := fmt.Sprintf("c:pkg:sitemap:%s:%d:%d", group, current, size)
+	// The key names the page-decision contract. Bump its version whenever a decision changes meaning, so a
+	// deployed API never serves pages cached under the previous rule (the web copies these rows into its own
+	// catalog snapshot for up to half an hour). Invalidations still match c:pkg:sitemap:*.
+	key := fmt.Sprintf("c:pkg:sitemap:v2:%s:%d:%d", group, current, size)
 	backend := cache.Scope(ctx, s.Cache)
 	// The computation outlives a caller that disconnects, so the page still reaches the cache for the next one.
 	result, err, _ := sitemapLoads.Do(fmt.Sprintf("%p|%s|%s", s.Store, key, cache.Namespace(backend)), func() (any, error) {
@@ -847,8 +851,8 @@ func (s *PublicService) sitemap(ctx context.Context, group string, current, size
 	if err != nil {
 		return out, err
 	}
-	// The page-state job stores the first versions page's notes facts. An app it has not reached yet keeps its
-	// versions page out until it does: counting here reads every release in every language, and after a migration
+	// The page-state job stores every versions page's notes facts. An app it has not reached yet keeps its
+	// versions pages out until it does: counting here reads every release in every language, and after a migration
 	// resets the facts of every app, whole sitemap pages outlast their load timeout and never reach the cache.
 	fillStoredNotes(rows, states)
 	dates := map[int64]map[string]map[string]time.Time{}
@@ -865,26 +869,22 @@ func (s *PublicService) sitemap(ctx context.Context, group string, current, size
 		}
 		dates[state.PackageID][state.Locale][key] = state.ContentModifiedAt.UTC()
 	}
-	// Later versions pages carry their own notes facts in the page state. List the ones that meet the
-	// same threshold as page 1, so the sitemap can name them without advertising a thin page.
-	minimumNotes := policy.VersionsMinNotesChars
-	if minimumNotes <= 0 {
-		minimumNotes = 300
-	}
-	laterVersions := map[int64]map[string][]int{}
+	// Later versions pages are judged page by page with the same rule the release page reports, so a thin
+	// page 1 cannot hide a page 2 that qualifies and the sitemap never names a page the server marks thin.
+	laterPageNumbers := map[int64][]int{}
 	for _, state := range states {
-		if state.PageKind != "versions" || state.PageNumber < 2 || state.NotesChars == nil || state.NotesEntries == nil {
+		if state.PageKind != "versions" || state.PageNumber < 2 || slices.Contains(laterPageNumbers[state.PackageID], state.PageNumber) {
 			continue
 		}
-		if *state.NotesChars < minimumNotes || *state.NotesEntries < seo.VersionsMinNoteEntries {
-			continue
-		}
-		if laterVersions[state.PackageID] == nil {
-			laterVersions[state.PackageID] = map[string][]int{}
-		}
-		laterVersions[state.PackageID][state.Locale] = append(laterVersions[state.PackageID][state.Locale], state.PageNumber)
+		laterPageNumbers[state.PackageID] = append(laterPageNumbers[state.PackageID], state.PageNumber)
+	}
+	// States arrive grouped by language, so a page number first seen in a language with gaps can precede
+	// a lower one found later. Keep the advertised pages ascending.
+	for _, pages := range laterPageNumbers {
+		slices.Sort(pages)
 	}
 	for _, row := range rows {
+		facts := row.Facts()
 		locales := []publicapi.SitemapLocale{}
 		for _, locale := range seo.Locales {
 			pages := packagePages(row, locale, policy)
@@ -909,7 +909,14 @@ func (s *PublicService) sitemap(ctx context.Context, group string, current, size
 				}
 			}
 			entry := publicapi.SitemapLocale{Locale: publicapi.Locale(locale), Lastmod: lastmod, Pages: &pages, PageLastmod: &pageDates}
-			if later := laterVersions[row.ID][locale]; len(later) > 0 {
+			later := []int{}
+			for _, pageNumber := range laterPageNumbers[row.ID] {
+				ref := seo.PageRef{Kind: seo.PageVersions, Locale: locale, Page: pageNumber}
+				if seo.DecisionRobots(seo.DecidePage(facts, ref, policy).Robots).Index {
+					later = append(later, pageNumber)
+				}
+			}
+			if len(later) > 0 {
 				entry.VersionsPages = &later
 			}
 			locales = append(locales, entry)
@@ -926,18 +933,21 @@ func (s *PublicService) sitemap(ctx context.Context, group string, current, size
 	return out, err
 }
 
-// fillStoredNotes copies the first versions page's stored notes facts into rows. A language without stored facts
-// stays empty, so its versions page counts as thin until the page-state job stores them.
+// fillStoredNotes copies every versions page's stored notes facts into rows. A language without stored facts
+// stays empty, so its versions pages count as thin until the page-state job stores them.
 func fillStoredNotes(rows []store.IndexRow, states []store.PageState) {
-	stored := map[int64]map[string]seo.NotesFacts{}
+	stored := map[int64]map[int]map[string]seo.NotesFacts{}
 	for _, state := range states {
-		if state.PageKind != "versions" || state.PageNumber != 1 || state.NotesChars == nil || state.NotesEntries == nil {
+		if state.PageKind != "versions" || state.NotesChars == nil || state.NotesEntries == nil {
 			continue
 		}
 		if stored[state.PackageID] == nil {
-			stored[state.PackageID] = map[string]seo.NotesFacts{}
+			stored[state.PackageID] = map[int]map[string]seo.NotesFacts{}
 		}
-		stored[state.PackageID][state.Locale] = seo.NotesFacts{Chars: *state.NotesChars, Entries: *state.NotesEntries}
+		if stored[state.PackageID][state.PageNumber] == nil {
+			stored[state.PackageID][state.PageNumber] = map[string]seo.NotesFacts{}
+		}
+		stored[state.PackageID][state.PageNumber][state.Locale] = seo.NotesFacts{Chars: *state.NotesChars, Entries: *state.NotesEntries}
 	}
 	for i := range rows {
 		facts := stored[rows[i].ID]
@@ -947,7 +957,9 @@ func fillStoredNotes(rows []store.IndexRow, states []store.PageState) {
 		if rows[i].NotesPages == nil {
 			rows[i].NotesPages = map[int]map[string]seo.NotesFacts{}
 		}
-		rows[i].NotesPages[1] = facts
+		for page, locales := range facts {
+			rows[i].NotesPages[page] = locales
+		}
 	}
 }
 

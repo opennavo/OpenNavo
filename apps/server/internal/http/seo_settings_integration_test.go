@@ -19,6 +19,7 @@ import (
 	httpserver "github.com/opennavo/opennavo/server/internal/http"
 	"github.com/opennavo/opennavo/server/internal/http/admin"
 	"github.com/opennavo/opennavo/server/internal/http/public"
+	"github.com/opennavo/opennavo/server/internal/seo"
 	"github.com/opennavo/opennavo/server/internal/service/auth"
 	"github.com/opennavo/opennavo/server/internal/service/catalog"
 	"github.com/opennavo/opennavo/server/internal/service/management"
@@ -109,6 +110,11 @@ func TestSEOSettingsSecretsPublicSubsetAndIndexNowKeyFile(t *testing.T) {
 	require.Equal(t, "public, max-age=60", cacheControl)
 	require.NotContains(t, site, "indexNow")
 	require.NotContains(t, site, "cloudflare")
+	// The public pages carry the server-approved pilot list the web sitemap reads; the admin editor does not.
+	require.NotContains(t, settings["pages"].(map[string]any), "versionsSitemapPilot")
+	pilot := site["pages"].(map[string]any)["versionsSitemapPilot"].([]any)
+	require.Len(t, pilot, len(seo.VersionsSitemapPilotTokens))
+	require.Equal(t, seo.VersionsSitemapPilotTokens[0], pilot[0])
 	get("/api/v1/site/indexnow-keys/"+indexNowKey, 404)
 
 	// Switches that act on credentials are rejected until the credential exists.

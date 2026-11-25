@@ -25,6 +25,26 @@ type SEOCrawlerRule struct {
 	Bots         []string `json:"bots"`
 }
 
+type SEOPagesSettings struct {
+	TitleTemplate string `json:"titleTemplate"`
+	IndexPolicy   struct {
+		Mode  string `json:"mode"`
+		Scope string `json:"scope"`
+		// Since is set by the server when enforcement first covers new apps (RFC 3339).
+		Since string `json:"since"`
+	} `json:"indexPolicy"`
+	SitemapMinInstalls    int      `json:"sitemapMinInstalls"`
+	SitemapNonEnglishTopN int      `json:"sitemapNonEnglishTopN"`
+	VersionsSitemap       bool     `json:"versionsSitemap"`
+	FontsSitemap          bool     `json:"fontsSitemap"`
+	TranslationMode       string   `json:"translationMode"`
+	TranslationLocales    []string `json:"translationLocales"`
+	VersionsMinNotesChars int      `json:"versionsMinNotesChars"`
+	OpenLocales           []string `json:"openLocales"`
+	IntentPagesEnabled    bool     `json:"intentPagesEnabled"`
+	DetailsRedirect       bool     `json:"detailsRedirect"`
+}
+
 type SEOSettings struct {
 	Identity struct {
 		Name           string   `json:"name"`
@@ -56,25 +76,7 @@ type SEOSettings struct {
 		Training SEOCrawlerRule `json:"training"`
 		SEOTools SEOCrawlerRule `json:"seoTools"`
 	} `json:"crawlers"`
-	Pages struct {
-		TitleTemplate string `json:"titleTemplate"`
-		IndexPolicy   struct {
-			Mode  string `json:"mode"`
-			Scope string `json:"scope"`
-			// Since is set by the server when enforcement first covers new apps (RFC 3339).
-			Since string `json:"since"`
-		} `json:"indexPolicy"`
-		SitemapMinInstalls    int      `json:"sitemapMinInstalls"`
-		SitemapNonEnglishTopN int      `json:"sitemapNonEnglishTopN"`
-		VersionsSitemap       bool     `json:"versionsSitemap"`
-		FontsSitemap          bool     `json:"fontsSitemap"`
-		TranslationMode       string   `json:"translationMode"`
-		TranslationLocales    []string `json:"translationLocales"`
-		VersionsMinNotesChars int      `json:"versionsMinNotesChars"`
-		OpenLocales           []string `json:"openLocales"`
-		IntentPagesEnabled    bool     `json:"intentPagesEnabled"`
-		DetailsRedirect       bool     `json:"detailsRedirect"`
-	} `json:"pages"`
+	Pages SEOPagesSettings `json:"pages"`
 }
 
 // ConsentRegionsDefault lists EU/EEA members plus the UK and Switzerland, where
