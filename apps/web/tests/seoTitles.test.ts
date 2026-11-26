@@ -1055,6 +1055,19 @@ describe('C2 factual overview descriptions', () => {
     );
   });
 
+  it('names pricing for a free usage without an amount', () => {
+    const t = translator('en-US');
+    const noAmount = { ...free, amount: undefined, currency: undefined };
+    expect(overviewDescription(changeFacts({ prices: [noAmount] }), t)).toContain(t('package.seo.overviewParts.price'));
+    // A paid usage still needs an amount, and an unknown usage with nothing to measure is not a price.
+    const paid = { ...noAmount, usage: 'subscription' as const, period: 'monthly' as const, downloadFree: false };
+    expect(overviewDescription(changeFacts({ prices: [paid] }), t)).not.toContain(t('package.seo.overviewParts.price'));
+    const unknown = { ...noAmount, usage: 'unknown' as const, downloadFree: false };
+    expect(overviewDescription(changeFacts({ prices: [unknown] }), t)).not.toContain(
+      t('package.seo.overviewParts.price')
+    );
+  });
+
   it.each(LOCALES)('%s keeps the summary ahead of template lists and long product names', code => {
     const t = translator(code);
     const summary = 'A code editor with extensions, themes and useful tools for every project. '.repeat(5);

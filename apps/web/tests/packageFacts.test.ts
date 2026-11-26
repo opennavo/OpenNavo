@@ -17,6 +17,7 @@ import {
   priceEdition,
   priceUsage,
   quickFacts,
+  shownPrices,
   slimPackage,
   verifiedPrices
 } from '../app/utils/packageFacts';
@@ -237,6 +238,21 @@ describe('F2 prices', () => {
     expect(priceEdition(fact({ edition: 'unspecified' }))).toBe('');
     expect(priceEdition(fact({ edition: 'App Store', channel: 'app_store' }))).toBe('');
     expect(priceEdition(fact())).toBe('Pro');
+  });
+
+  it('Shows a free usage without an amount and keeps amount-less paid and unknown facts out', () => {
+    const free = fact({ usage: 'free', period: 'free', downloadFree: true, amount: undefined, currency: undefined });
+    const unknown = fact({ usage: 'unknown', downloadFree: false, amount: undefined, currency: undefined });
+    // A paid amount is still required: a subscription with no amount names no price.
+    const subscription = fact({ amount: undefined, currency: undefined });
+    expect(shownPrices(pageOf(app(), { prices: [free, unknown, subscription] }))).toEqual([free]);
+    // The free-only page keeps its price block and the quick facts link to it.
+    const page = pageOf(app(), { prices: [free] });
+    expect(quickFacts(page, t, 'en-US').rows.find(row => row.key === 'price')).toMatchObject({
+      value: 'Free',
+      anchor: 'price'
+    });
+    expect(factSources(page).map(source => source.kind)).toContain('price');
   });
 
   it('Shows stale prices with their date but states only verified ones', () => {

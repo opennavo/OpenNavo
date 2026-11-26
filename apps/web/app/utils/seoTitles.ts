@@ -7,6 +7,7 @@ import { plainText } from './backgroundItems';
 import {
   capabilities,
   shownRequirements,
+  statesPrice,
   uninstallFacts,
   verifiedAlternatives,
   verifiedPrices,
@@ -531,7 +532,7 @@ function sectionDescription(pkg: OverviewFacts, t: Translate, list: ListFormat, 
   const can = capabilities(pkg);
   const available = {
     installation: can.homebrew,
-    price: verifiedPrices(pkg).some(price => price.amount != null && Boolean(price.currency)),
+    price: verifiedPrices(pkg).some(statesPrice),
     requirements: shownRequirements(pkg).length > 0,
     uninstall: can.uninstall && (can.homebrew || hasUninstallFacts(pkg)),
     alternatives: verifiedAlternatives(pkg).length > 0,
