@@ -3023,16 +3023,24 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
       ['/ru', 'WeChat для Mac — скачать · OpenNavo']
     ])
       assert.equal(title(await page(`${prefix}/apps/wechat`)), expected, prefix || '/');
-    // Keep the complete summary instead of shortening it for a generic closing sentence.
-    assert.equal(
-      description(await page('/apps/wechat')),
-      'Tencent’s Mac messaging client for text, files, voice and video calls with your WeChat contacts.'
+    // Keep the complete summary and fill the snippet to the length guidance.
+    const wechatEnglish = description(await page('/apps/wechat'));
+    assert.ok(
+      wechatEnglish.startsWith(
+        'Tencent’s Mac messaging client for text, files, voice and video calls with your WeChat contacts.'
+      ),
+      wechatEnglish
     );
+    assert.ok(wechatEnglish.length >= 150 && wechatEnglish.length <= 160, wechatEnglish);
     // Chinese names join the Chinese text around them; this one fits whole.
-    assert.equal(
-      description(await page('/zh/apps/wechat')),
-      '腾讯的 Mac 即时通信客户端，可与 WeChat 联系人收发文字消息和文件，以及进行语音和视频通话。查看微信 Mac 版在 Mac 上的安装方法和卸载方法。'
+    const wechatChinese = description(await page('/zh/apps/wechat'));
+    assert.ok(
+      wechatChinese.startsWith(
+        '腾讯的 Mac 即时通信客户端，可与 WeChat 联系人收发文字消息和文件，以及进行语音和视频通话。查看微信 Mac 版在 Mac 上的安装方法和卸载方法。'
+      ),
+      wechatChinese
     );
+    assert.ok(wechatChinese.length >= 150 && wechatChinese.length <= 160, wechatChinese);
   });
   await t.test('overview overrides replace the title and description where set, on the overview only', async () => {
     const page = async path => {

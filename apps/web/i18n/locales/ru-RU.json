@@ -410,6 +410,7 @@
       "descriptionFactsNoSummary": "Узнайте про {parts} для {name} на Mac.",
       "descriptionOverview": "{summary}. Узнайте о {name} для Mac.",
       "descriptionOverviewNoSummary": "Узнайте о {name} для Mac.",
+      "descriptionTail": "Посмотрите совместимость, список изменений, команду установки и похожие приложения на OpenNavo или найдите другие приложения для Mac по категории, рейтингу или недавним обновлениям.",
       "overviewParts": {
         "installation": "способы установки",
         "price": "цену",

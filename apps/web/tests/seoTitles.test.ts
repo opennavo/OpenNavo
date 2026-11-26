@@ -123,9 +123,14 @@ describe('WP1 titles and descriptions', () => {
       'FiraCode Nerd Font for Mac – Download & Install · OpenNavo'
     );
     // Link apps promise the developer's own download, not an install method (store/security plan §4).
-    expect(overviewDescription({ ...app, kind: 'link' }, t)).toBe(
-      'Open-source code editor. Find the official download for Visual Studio Code and its release history.'
-    );
+    const link = overviewDescription({ ...app, kind: 'link' }, t);
+    expect(
+      link.startsWith(
+        'Open-source code editor. Find the official download for Visual Studio Code and its release history.'
+      )
+    ).toBe(true);
+    expect(textWidth(link)).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect(textWidth(link)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
     expect(overviewDescription({ ...app, disabled: true }, t)).toBe(
       'Open-source code editor. Homebrew has disabled Visual Studio Code; see its release history and similar apps.'
     );
@@ -149,9 +154,10 @@ describe('WP1 titles and descriptions', () => {
     expect(usableSummary('Visual Studio Code', 'visual studio code')).toBe('');
     expect(usableSummary('代码编辑器。', 'VS Code')).toBe('代码编辑器');
     expect(usableSummary(null, 'VS Code')).toBe('');
-    expect(overviewDescription({ ...app, summary: 'Visual Studio Code' }, translator('zh-CN'))).toBe(
-      '查看 Visual Studio Code 在 Mac 上的安装方法和卸载方法。'
-    );
+    const chinese = overviewDescription({ ...app, summary: 'Visual Studio Code' }, translator('zh-CN'));
+    expect(chinese.startsWith('查看 Visual Studio Code 在 Mac 上的安装方法和卸载方法。')).toBe(true);
+    expect([...chinese].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect([...chinese].length).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
   });
 
   it('Uses the character budget Bing measures for CJK introductions', () => {
@@ -586,7 +592,9 @@ describe('Variant casks', () => {
       token: 'aerial@beta',
       displayName: named('aerial@beta', 'Aerial')
     };
-    expect(overviewDescription(main, t)).toBe(summary);
+    const mainText = overviewDescription(main, t);
+    expect(mainText.startsWith(summary)).toBe(true);
+    expect(textWidth(mainText)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
     const description = overviewDescription(beta, t);
     expect(description).toContain('Aerial Beta');
     expect(description.startsWith('Screensaver that plays')).toBe(true);
@@ -660,17 +668,17 @@ describe('Descriptions that fit search results', () => {
     ]) {
       const description = overviewDescription(pkg, t);
       const closing = overviewDescription({ ...pkg, summary: null }, t);
-      expect(textWidth(description), description).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+      const length = /^(?:zh|ja)/i.test(code) ? [...description].length : textWidth(description);
+      expect(length, description).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
       if (pkg.disabled) {
         expect(description.endsWith(closing), description).toBe(true);
       } else {
         // Never shortened for the section sentence: either the summary alone, or the
         // whole summary followed by a complete sentence that names the app.
         const alone = fitSummary(summary, DESCRIPTION_WIDTH);
-        if (description !== alone) {
+        if (description !== alone)
           expect(description.startsWith(usableSummary(summary, displayName)), description).toBe(true);
-          expect(description).toContain(displayName);
-        }
+        expect(length, description).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
       }
       expect(description).not.toMatch(/…\.|\p{Co}|[{}]/u);
     }
@@ -680,11 +688,10 @@ describe('Descriptions that fit search results', () => {
     const t = translator('en-US');
     const intro =
       'Visual Studio Code is a free code editor from Microsoft for macOS, with debugging, Git integration, extensions and an integrated terminal for everyday development.';
-    const base = overviewDescription(app, t);
     const description = overviewDescription({ ...app, description: intro }, t);
     expect(description.startsWith('Visual Studio Code is')).toBe(true);
     expect(textWidth(description)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
-    expect(textWidth(description)).toBeGreaterThan(textWidth(base));
+    expect(textWidth(description)).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
     // A variant keeps its own sentence: the main app's introduction does not name it.
     const beta = {
       ...app,
@@ -697,16 +704,31 @@ describe('Descriptions that fit search results', () => {
 
   it('Cuts where the summary reads complete, else between words with an ellipsis', () => {
     const t = translator('en-US');
-    expect(overviewDescription({ ...app, displayName: 'WeChat for Mac', summary: wechat['en-US'][1] }, t)).toBe(
-      'Tencent’s Mac messaging client for text, files, voice and video calls with your WeChat contacts.'
+    const englishWechat = overviewDescription(
+      { ...app, displayName: 'WeChat for Mac', summary: wechat['en-US'][1] },
+      t
     );
     expect(
-      overviewDescription({ ...app, displayName: 'WeChat for Mac', summary: wechat['ja-JP'][1] }, translator('ja-JP'))
-    ).toBe(fitSummary(wechat['ja-JP'][1], DESCRIPTION_WIDTH));
-    // A short summary keeps the section sentence when both fit completely.
-    expect(overviewDescription(app, t)).toBe(
-      'Open-source code editor. Explore installation and uninstallation for Visual Studio Code on Mac.'
+      englishWechat.startsWith(
+        'Tencent’s Mac messaging client for text, files, voice and video calls with your WeChat contacts.'
+      )
+    ).toBe(true);
+    expect(textWidth(englishWechat)).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    const japaneseWechat = overviewDescription(
+      { ...app, displayName: 'WeChat for Mac', summary: wechat['ja-JP'][1] },
+      translator('ja-JP')
     );
+    expect(japaneseWechat.startsWith(fitSummary(wechat['ja-JP'][1], DESCRIPTION_WIDTH))).toBe(true);
+    expect([...japaneseWechat].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    // A short summary keeps the section sentence when both fit completely.
+    const basic = overviewDescription(app, t);
+    expect(
+      basic.startsWith(
+        'Open-source code editor. Explore installation and uninstallation for Visual Studio Code on Mac.'
+      )
+    ).toBe(true);
+    expect(textWidth(basic)).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect(textWidth(basic)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
     const english = 'Tencent’s Mac messaging client for text, files, voice and video calls with your WeChat contacts';
     expect(fitSummary(english, 200)).toBe(english);
     // Latin commas separate list items, so no clause ends at them; a dangling "with" goes too.
@@ -743,7 +765,10 @@ describe('Descriptions that fit search results', () => {
   it('Joins Chinese names to the Chinese text beside them and spaces Latin ones', () => {
     const zh = translator('zh-CN');
     const chinese = { ...app, displayName: '微信 Mac 版', summary: null };
-    expect(overviewDescription(chinese, zh)).toBe('查看微信 Mac 版在 Mac 上的安装方法和卸载方法。');
+    const chineseText = overviewDescription(chinese, zh);
+    expect(chineseText.startsWith('查看微信 Mac 版在 Mac 上的安装方法和卸载方法。')).toBe(true);
+    expect([...chineseText].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect([...chineseText].length).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
     expect(overviewDescription({ ...chinese, disabled: true }, zh)).toBe(
       '微信 Mac 版已被 Homebrew 停用，可以查看版本记录和同类软件。'
     );
@@ -774,12 +799,14 @@ describe('Descriptions that fit search results', () => {
     );
     // Japanese joins Chinese names too, and keeps the space before a Latin one.
     const ja = translator('ja-JP');
-    expect(overviewDescription({ ...app, displayName: 'WeChat for Mac', summary: null }, ja)).toBe(
-      'Mac 版 WeChat for Mac のインストール方法、アンインストール方法をご確認ください。'
+    const jaLatin = overviewDescription({ ...app, displayName: 'WeChat for Mac', summary: null }, ja);
+    expect(jaLatin.startsWith('Mac 版 WeChat for Mac のインストール方法、アンインストール方法をご確認ください。')).toBe(
+      true
     );
-    expect(overviewDescription({ ...app, displayName: '微信', summary: null }, ja)).toBe(
-      'Mac 版微信のインストール方法、アンインストール方法をご確認ください。'
-    );
+    expect([...jaLatin].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    const jaChinese = overviewDescription({ ...app, displayName: '微信', summary: null }, ja);
+    expect(jaChinese.startsWith('Mac 版微信のインストール方法、アンインストール方法をご確認ください。')).toBe(true);
+    expect([...jaChinese].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
   });
 });
 
@@ -1036,7 +1063,8 @@ describe('C2 factual overview descriptions', () => {
     // Longer languages have no room for all six sections, so the last ones go first.
     const all = overviewDescription(complete, t);
     expectListed(all, t, ['installation', 'price', 'requirements', 'uninstall', 'alternatives', 'versions'], 4);
-    expect(textWidth(all)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    const allLength = /^(?:zh|ja)/i.test(code) ? [...all].length : textWidth(all);
+    expect(allLength).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
     const fewer = overviewDescription(changeFacts({ prices: [], requirements: [] }), t);
     expectListed(fewer, t, ['installation', 'uninstall', 'alternatives', 'versions'], 4);
     expect(all).not.toMatch(/[{}]|undefined|package\.seo/);

@@ -410,6 +410,7 @@
       "descriptionFactsNoSummary": "查看 {name} 在 Mac 上的{parts}。",
       "descriptionOverview": "{summary}。了解 {name} Mac 版。",
       "descriptionOverviewNoSummary": "了解 {name} Mac 版。",
+      "descriptionTail": "在 OpenNavo 查看兼容性信息、更新内容、安装命令与相似应用，也可以按分类、榜单和最近更新浏览更多 Mac 应用，全部内容免费阅读，无需登录，帮助你判断它是否适合自己，并在更新前核对系统版本与兼容性，避免升级后出现不兼容的问题，并查看安装后的设置与权限。",
       "overviewParts": {
         "installation": "安装方法",
         "price": "价格",

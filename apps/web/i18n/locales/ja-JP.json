@@ -410,6 +410,7 @@
       "descriptionFactsNoSummary": "Mac 版 {name} の{parts}をご確認ください。",
       "descriptionOverview": "{summary}。Mac 版 {name} についてご紹介します。",
       "descriptionOverviewNoSummary": "Mac 版 {name} についてご紹介します。",
+      "descriptionTail": "OpenNavo では、対応環境、更新内容、導入方法、似たアプリを確認できます。カテゴリやランキング、最近の更新から他の Mac アプリも探せます。すべて無料で閲覧でき、更新前に macOS の対応バージョンも確認できます。導入後の設定や権限も各ページで確認できます。",
       "overviewParts": {
         "installation": "インストール方法",
         "price": "価格",

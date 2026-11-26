@@ -410,6 +410,7 @@
       "descriptionFactsNoSummary": "Explore {parts} for {name} on Mac.",
       "descriptionOverview": "{summary}. Learn about {name} for Mac.",
       "descriptionOverviewNoSummary": "Learn about {name} for Mac.",
+      "descriptionTail": "See release notes, compatibility details, the install command and similar Mac apps on OpenNavo, or browse more by category, ranking or recent updates.",
       "overviewParts": {
         "installation": "installation",
         "price": "pricing",

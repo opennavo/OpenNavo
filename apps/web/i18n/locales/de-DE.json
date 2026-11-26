@@ -410,6 +410,7 @@
       "descriptionFactsNoSummary": "Sehen Sie sich {parts} für {name} auf dem Mac an.",
       "descriptionOverview": "{summary}. Erfahren Sie mehr über {name} für Mac.",
       "descriptionOverviewNoSummary": "Erfahren Sie mehr über {name} für Mac.",
+      "descriptionTail": "Sehen Sie sich Kompatibilität, Änderungen je Version, den Installationsbefehl und ähnliche Mac-Apps auf OpenNavo an oder entdecken Sie weitere Apps nach Kategorie, Ranking oder letzten Updates.",
       "overviewParts": {
         "installation": "die Installationsmethoden",
         "price": "die Preise",

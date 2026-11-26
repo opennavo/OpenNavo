@@ -187,6 +187,8 @@ export const BING_DESCRIPTION_MIN = 150;
 const MIN_SUMMARY_WIDTH = 24;
 /** Room the catalog description keeps before the counted sentence on a category page. */
 const CATEGORY_INTRO_WIDTH = 80;
+/** A sentence that already ends in its own punctuation. */
+const SENTENCE_CLOSE = /[.!?。！？…]$/u;
 
 const WIDE =
   /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua960-\ua97f\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{20000}-\u{3fffd}]/u;
@@ -350,6 +352,30 @@ export function fitSummaryChars(summary: string, room: number, minimum = 0): str
   return clipped ? `${clipped}…` : '';
 }
 
+/** A word-safe tail for the few columns left when a text is just below the length guidance. */
+function clipTail(text: string, room: number, cjk: boolean): string {
+  if (room < 4) return '';
+  if (cjk) {
+    const head = Array.from(text)
+      .slice(0, room - 1)
+      .join('')
+      .replace(/[\s。！？；：，、]+$/u, '');
+    return head ? `${head}…` : '';
+  }
+  let head = '';
+  for (const char of text) {
+    if (textWidth(head) + textWidth(char) > room - 1) break;
+    head += char;
+  }
+  const next = text.slice(head.length);
+  if (/^[\p{L}\p{N}]/u.test(next) && /[\p{L}\p{N}]$/u.test(head)) {
+    const space = head.lastIndexOf(' ');
+    if (space > 0) head = head.slice(0, space);
+  }
+  head = head.replace(/[\s,.;:!?–—-]+$/u, '');
+  return head ? `${head}…` : '';
+}
+
 export interface OverviewFacts {
   kind: PackagePage['kind'];
   displayName: string;
@@ -505,6 +531,31 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
   // Bing measures the snippet in characters, while the display budget counts CJK letters twice.
   // A CJK description that fills 150 columns is still short at ~75 characters.
   const longEnough = (text: string) => longEnoughDescription(text, titleLocale(t, locale));
+  const length = (text: string) => (cjk ? Array.from(text).length : textWidth(text));
+  // A short summary or override leaves the snippet below Bing's guidance. The page-offer sentence
+  // fills the remaining 150-160 characters without changing what the overview itself says.
+  const finish = (text: string) => {
+    if (longEnough(text)) return finishDescription(text);
+    const tail = t('package.seo.descriptionTail');
+    // Count the separator and the full stop a text without closing punctuation will get.
+    const joiner = cjk ? 0 : 1;
+    const close = SENTENCE_CLOSE.test(text) ? 0 : 1;
+    const room = DESCRIPTION_WIDTH - length(text) - joiner - close;
+    const minimum = BING_DESCRIPTION_MIN - length(text) - joiner - close;
+    if (room < 4 || minimum < 1) return finishDescription(text);
+    let fitted =
+      room >= MIN_SUMMARY_WIDTH
+        ? cjk
+          ? fitSummaryChars(tail, room, minimum)
+          : fitSummary(tail, room, minimum)
+        : clipTail(tail, room, cjk);
+    // A punctuation cut can land one character below the minimum; fill the room instead.
+    if (fitted && length(text) + joiner + close + length(fitted) < BING_DESCRIPTION_MIN)
+      fitted = clipTail(tail, room, cjk);
+    if (!fitted) return finishDescription(text);
+    const closed = SENTENCE_CLOSE.test(text) ? text : `${text}${cjk ? '。' : '.'}`;
+    return finishDescription(cjk ? `${closed}${fitted}` : `${closed} ${fitted}`);
+  };
   let base: string;
   if (!usableSummary(pkg.summary, pkg.displayName)) base = sectionDescription(pkg, t, list);
   else {
@@ -516,14 +567,14 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
   // A short catalog summary leaves the snippet below Bing's length guidance. The editor-written,
   // already localized introduction says more; use its lead only when it is longer than the summary.
   // A variant keeps its own branch because the main app's introduction does not name it.
-  if (longEnough(base) || variantLabel(pkg.token ?? '')) return finishDescription(base);
+  if (longEnough(base) || variantLabel(pkg.token ?? '')) return finish(base);
   const lead = pkg.description
     ? cjk
       ? fitSummaryChars(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
       : fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
     : '';
   const leadWins = cjk ? Array.from(lead).length > Array.from(base).length : textWidth(lead) > textWidth(base);
-  return finishDescription(leadWins ? lead : base);
+  return finish(leadWins ? lead : base);
 }
 
 function sectionDescription(pkg: OverviewFacts, t: Translate, list: ListFormat, whole = false): string {
@@ -612,8 +663,6 @@ export interface CategoryFacts {
   /** Names of the first apps on this page, in list order. */
   apps: readonly string[];
 }
-
-const SENTENCE_CLOSE = /[.!?。！？…]$/u;
 
 /**
  * The category's own description, then how many Mac apps it lists, the first three of them, and what the
