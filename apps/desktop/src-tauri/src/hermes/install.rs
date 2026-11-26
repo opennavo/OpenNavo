@@ -208,6 +208,20 @@ async fn install_inner(
         let _ = std::fs::remove_file(&archive);
     }
 
+    // A runtime copied from a legacy archive/Finder round-trip can carry `._*` AppleDouble
+    // stubs. Python's tool discovery globs `tools/*.py` and decodes every match, so those
+    // stubs make the CLI (and agent turns) fail before the runtime ever runs. The tree is
+    // ours: strip them once, here, whichever source produced it.
+    let repair_root = temp.clone();
+    match tokio::task::spawn_blocking(move || super::hygiene::strip_apple_double(&repair_root))
+        .await
+    {
+        Ok(Ok(0)) => {}
+        Ok(Ok(removed)) => log::warn!("Hermes install: removed {removed} AppleDouble entries"),
+        Ok(Err(error)) => log::warn!("Hermes install: AppleDouble cleanup failed: {error}"),
+        Err(error) => log::warn!("Hermes install: AppleDouble cleanup task failed: {error}"),
+    }
+
     if state.install_cancel.load(Ordering::SeqCst) {
         let _ = std::fs::remove_dir_all(&temp);
         return Err(AppError::new(
@@ -289,6 +303,10 @@ async fn install_inner(
 
     activation.commit();
     finish_plugin_sync(&root);
+    // The previous runtime's `serve` kept the old Python code in memory and still owns
+    // this host. Hermes refuses to bind a second backend for the same home (#exit 78),
+    // so the app would never reach the freshly installed runtime until it is stopped.
+    super::hygiene::stop_stale_backends_for_all_profiles(app).await;
     emit(app, "done", 0, None, 100);
     let _ = state;
     status(app.clone()).await

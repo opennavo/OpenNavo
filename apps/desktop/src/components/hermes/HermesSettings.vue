@@ -689,6 +689,16 @@ async function uninstallHermes() {
   if (ok) emit('close');
 }
 
+/** Toast copy stays short: a raw stderr traceback belongs in the diagnostics output pane. */
+function failureCopy(error: unknown): string {
+  return error instanceof IpcError ? error.message : String(error);
+}
+
+/** Pane copy keeps the runtime's own reason (stderr tail), even when the toast is generic. */
+function failureDetail(error: unknown): string {
+  return error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+}
+
 async function loadCli(kind: string) {
   cliKind.value = kind;
   // A connection/profile switch starts a new read; the older one must not paint its result
@@ -702,9 +712,8 @@ async function loadCli(kind: string) {
     cliOutput.value = output;
   } catch (error) {
     if (seq !== cliRequestSeq) return;
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    cliOutput.value = detail;
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.title, description: detail });
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.title, description: failureCopy(error) });
   } finally {
     if (seq === cliRequestSeq) cliLoading.value = false;
   }
@@ -714,6 +723,8 @@ async function runCronAction(action: 'pause' | 'resume' | 'remove') {
   if (!cronJobId.value.trim() || cronBusy.value) return;
   if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.cronConfirm)) return;
   cronBusy.value = true;
+  // Writing a failure into the pane must not paint it over a newer profile/read.
+  const seq = ++cliRequestSeq;
   try {
     const scope = diagnosticsScope();
     await unwrap(
@@ -721,8 +732,9 @@ async function runCronAction(action: 'pause' | 'resume' | 'remove') {
     );
     await loadCli('cron');
   } catch (error) {
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.cron, description: detail });
+    if (seq !== cliRequestSeq) return;
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.cron, description: failureCopy(error) });
   } finally {
     cronBusy.value = false;
   }
@@ -762,8 +774,8 @@ async function runMcp(action: 'list' | 'add' | 'remove') {
     if (seq !== cliRequestSeq) return;
     // The invalidated loadCli cannot clear the spinner; this request owns it now.
     cliLoading.value = false;
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: 'MCP', description: detail });
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: 'MCP', description: failureCopy(error) });
   } finally {
     mcpBusy.value = false;
   }
@@ -774,6 +786,8 @@ async function runSkillAction(action: 'install' | 'uninstall') {
   if (action === 'install' && !window.confirm(content.value.settings.diagnostics.installConfirm)) return;
   if (action === 'uninstall' && !window.confirm(content.value.settings.diagnostics.uninstallConfirm)) return;
   actionBusy.value = true;
+  // Writing a failure into the pane must not paint it over a newer profile/read.
+  const seq = ++cliRequestSeq;
   try {
     const scope = diagnosticsScope();
     const output = await unwrap(
@@ -786,8 +800,9 @@ async function runSkillAction(action: 'install' | 'uninstall') {
     }
     await loadCli('skills');
   } catch (error) {
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.skills, description: detail });
+    if (seq !== cliRequestSeq) return;
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.skills, description: failureCopy(error) });
   } finally {
     actionBusy.value = false;
   }
@@ -797,6 +812,8 @@ async function runToolAction(action: 'enable' | 'disable') {
   if (!toolName.value.trim() || actionBusy.value) return;
   if (action === 'disable' && !window.confirm(content.value.settings.diagnostics.disableConfirm)) return;
   actionBusy.value = true;
+  // Writing a failure into the pane must not paint it over a newer profile/read.
+  const seq = ++cliRequestSeq;
   try {
     const scope = diagnosticsScope();
     await unwrap(
@@ -804,8 +821,9 @@ async function runToolAction(action: 'enable' | 'disable') {
     );
     await loadCli('tools');
   } catch (error) {
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.tools, description: detail });
+    if (seq !== cliRequestSeq) return;
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.tools, description: failureCopy(error) });
   } finally {
     actionBusy.value = false;
   }

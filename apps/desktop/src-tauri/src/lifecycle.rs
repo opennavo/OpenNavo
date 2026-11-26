@@ -242,28 +242,54 @@ pub async fn prepare_restart(queue: Arc<TaskQueue>) -> Result<bool, AppError> {
     Ok(counts.running == 0 && counts.queued == 0)
 }
 
+/// `hermes::stop` itself only signals PIDs, but it takes the gateway mutex, which
+/// `ensure_server` may hold while sweeping a stale backend (up to 30 s) and waiting for
+/// readiness (up to 25 s). A Quit during a stuck start must not spend the whole quit
+/// budget on that wait and skip fan, task and notification cleanup.
+const HERMES_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Return fans to automatic control, stop notifications and the task queue, then mark the process ready to exit.
 async fn release<R: tauri::Runtime>(app: &tauri::AppHandle<R>, core: &Arc<DesktopCore>) {
     if let Some(firewall) = app.try_state::<Arc<crate::firewall::Service>>() {
         firewall.shutdown();
     }
-    crate::monitor::fan::client::shutdown(app).await;
-    let native = app
-        .try_state::<Arc<crate::notifications::NativeNotifications>>()
-        .map(|n| n.inner().clone());
-    let _ = tokio::time::timeout(Duration::from_secs(10), async {
-        let queue = interrupt_and_wait(core.queue.clone(), Duration::from_secs(10));
-        let notices = async {
-            if let Some(native) = native {
-                native.shutdown().await;
-            }
-        };
-        let (result, ()) = tokio::join!(queue, notices);
-        if !matches!(result, Ok(true)) {
-            log::warn!("Failed to interrupt tasks during quit");
+    // A normal Quit hands over to a hidden successor. The `hermes serve` child is not
+    // reaped by process exit and would keep the old runtime code bound to this host, so
+    // the next session could neither start a second backend (exit 78) nor serve the new
+    // runtime's sessions API. Stop it here; the successor starts its own on demand.
+    let hermes_shutdown = async {
+        if let Some(state) = app.try_state::<Arc<crate::hermes::HermesRuntimeState>>()
+            && let Err(error) = crate::hermes::stop(state.inner()).await
+        {
+            log::warn!("Hermes shutdown failed: {}", error.message);
         }
-    })
-    .await;
+    };
+    let other_shutdown = async {
+        crate::monitor::fan::client::shutdown(app).await;
+        let native = app
+            .try_state::<Arc<crate::notifications::NativeNotifications>>()
+            .map(|n| n.inner().clone());
+        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+            let queue = interrupt_and_wait(core.queue.clone(), Duration::from_secs(10));
+            let notices = async {
+                if let Some(native) = native {
+                    native.shutdown().await;
+                }
+            };
+            let (result, ()) = tokio::join!(queue, notices);
+            if !matches!(result, Ok(true)) {
+                log::warn!("Failed to interrupt tasks during quit");
+            }
+        })
+        .await;
+    };
+    let (hermes, ()) = tokio::join!(
+        tokio::time::timeout(HERMES_SHUTDOWN_TIMEOUT, hermes_shutdown),
+        other_shutdown
+    );
+    if hermes.is_err() {
+        log::warn!("Hermes shutdown timed out");
+    }
     if let Some(lifecycle) = app.try_state::<Arc<Lifecycle>>() {
         lifecycle.ready();
     }

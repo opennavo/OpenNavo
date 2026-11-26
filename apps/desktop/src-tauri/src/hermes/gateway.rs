@@ -154,6 +154,18 @@ async fn ensure_server(
         return Ok(server.clone());
     }
     *guard = None;
+    // A backend left behind by a previous app session still owns this host, and Hermes
+    // refuses to bind a second one for the same home (exit 78). The official
+    // `serve --stop` is scoped to this HERMES_HOME, so another install or profile is
+    // never a target; without it the app would keep talking to old runtime code, or to
+    // nothing at all. `false` means the stop outlived its deadline and is still running:
+    // binding now would race a backend that has not released the home yet.
+    if !super::hygiene::stop_stale_backends(bin, home, input.profile.as_deref()).await {
+        return Err(AppError::new(
+            "E_HERMES_GATEWAY",
+            "The previous Hermes gateway is still stopping. Try again in a moment.",
+        ));
+    }
     let port = free_port()?;
     let token = uuid::Uuid::new_v4().to_string();
     let mut command = super::runtime_command(bin)?;

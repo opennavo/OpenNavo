@@ -24,6 +24,7 @@ use crate::AppError;
 pub(crate) mod diagnostics;
 pub(crate) mod env_store;
 pub(crate) mod gateway;
+pub(crate) mod hygiene;
 pub(crate) mod install;
 pub(crate) mod legacy_migration;
 pub(crate) mod login;
@@ -996,10 +997,7 @@ pub async fn mcp_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes MCP action failed.").with_detail(detail),
         );
@@ -1056,10 +1054,7 @@ pub async fn skill_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes skill action failed.").with_detail(detail),
         );
@@ -1115,10 +1110,7 @@ pub async fn tool_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes tool action failed.").with_detail(detail),
         );
@@ -1174,15 +1166,27 @@ pub async fn cron_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes cron action failed.").with_detail(detail),
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Keep the tail of a failed CLI's stderr for the diagnostics pane. Python prints the
+/// exception last, and the toast carries the short `message`, so truncating from the
+/// front (as the action errors do) would drop the one line the pane exists to show.
+fn diagnostics_failure_detail(stderr: &[u8]) -> String {
+    const MAX_CHARS: usize = 4000;
+    let text = String::from_utf8_lossy(stderr);
+    let text = text.trim();
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= MAX_CHARS {
+        return text.to_owned();
+    }
+    let tail: String = chars[chars.len() - MAX_CHARS..].iter().collect();
+    format!("…{tail}")
 }
 
 pub async fn cli_read(
@@ -1233,10 +1237,7 @@ pub async fn cli_read(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes diagnostics failed.").with_detail(detail),
         );
@@ -2147,6 +2148,7 @@ async fn verify_runtime_bin(bin: &Path, expected: &str) -> Result<(), AppError> 
 
 pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
     migrate_legacy_credentials(&app);
+    hygiene::repair_runtime_tree_once(&app).await;
     let expected_version = expected_runtime_version()?;
     let Some(bin) = runtime_bin(&app) else {
         log::warn!("Hermes runtime status: no runtime binary found");
@@ -2554,6 +2556,20 @@ mod tests {
         assert!(!info[1].is_image);
         assert!(info[2].is_image);
         assert!(!info[3].is_image);
+    }
+
+    #[test]
+    fn diagnostics_detail_keeps_the_tail_of_a_traceback() {
+        let stderr = format!("{}\nUnicodeDecodeError: boom", "x".repeat(5000));
+        let detail = diagnostics_failure_detail(stderr.as_bytes());
+        assert!(detail.starts_with('…'));
+        assert!(detail.ends_with("UnicodeDecodeError: boom"));
+        assert_eq!(detail.chars().count(), 4001);
+    }
+
+    #[test]
+    fn diagnostics_detail_keeps_short_stderr_verbatim() {
+        assert_eq!(diagnostics_failure_detail(b"  boom \n"), "boom");
     }
 
     #[test]

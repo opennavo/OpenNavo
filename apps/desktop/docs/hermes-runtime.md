@@ -67,13 +67,21 @@ Users on an older Hermes runtime keep it until they explicitly update it:
 3. The Hermes settings pane and the assistant rail show the pinned target and
    an **Update runtime** button. Nothing is replaced in the background.
 4. The installer downloads to `runtime.tmp`, verifies SHA-256, verifies that
-   the staged runtime reports `0.23.3`, then swaps `runtime/hermes`.
-5. Pinned plugin copies already owned by OpenNavo are staged from the new
+   the staged runtime reports `0.23.3`, then swaps `runtime/hermes`. Staged
+   trees are stripped of macOS AppleDouble `._*` entries first: Python's tool
+   discovery globs `tools/*.py` and decodes every match, so a copied-in
+   `._foo.py` would abort `hermes tools list` and agent turns with a
+   `UnicodeDecodeError`.
+5. After activation the installer runs the new runtime's scoped
+   `serve --stop`. A `serve` process left in memory by the previous version
+   keeps the old Python code bound to this host, and Hermes refuses to bind a
+   second backend for the same `HERMES_HOME` (exit 78).
+6. Pinned plugin copies already owned by OpenNavo are staged from the new
    runtime and swapped in the same operation. A copy is considered managed
    only when its `.hermes-catalog.json` names the same `catalog_name` and
    repository as the pin. A plugin the user installed from another repository
    is left untouched.
-6. If activation, version verification or plugin activation fails, the
+7. If activation, version verification or plugin activation fails, the
    previous runtime and plugin copies are restored automatically.
 
 The update replaces `OpenNavoData/runtime/hermes` and refreshes only the
@@ -190,6 +198,9 @@ WebKit's own WebsiteData remains under
 - `hermes_chat` starts a local `hermes serve` gateway and streams
   `message.delta` frames from `/api/ws` as `hermes-chunk` Tauri events. The
   final `message.complete` frame becomes the persisted assistant message.
+  Before binding, the app runs the runtime's scoped `serve --stop` so a backend
+  left by a previous session (or a crashed app) cannot keep this host, and a
+  normal Quit stops the managed gateway instead of orphaning it.
 - The desktop uses the gateway only. CLI fallback is intentionally disabled so
   steering, approvals and tool events always share one transport contract.
 - A send while a turn is running follows the runtime's `display.busy_input_mode`
