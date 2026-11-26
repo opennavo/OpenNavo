@@ -132,8 +132,8 @@
     "itemMetaTitle": "App consigliate per Mac: {name} · OpenNavo",
     "seo": {
       "itemTitle": "{name} – app per Mac · OpenNavo",
-      "itemDescription": "{count} app per Mac in {name}: {apps}. | {count} app per Mac in {name}, tra cui {apps}.",
-      "itemDescriptionCount": "{count} app per Mac in {name}. | {count} app per Mac in {name}."
+      "itemDescription": "{count} app per Mac in {name}: {apps}. Confronta i requisiti di sistema, la cronologia delle versioni e le alternative con app simili per Mac, poi ordina per popolarità o nome. | {count} app per Mac in {name}, tra cui {apps}. Confronta i requisiti di sistema, la cronologia delle versioni e le alternative con app simili per Mac, poi ordina per popolarità o nome.",
+      "itemDescriptionCount": "{count} app per Mac in {name}. Confronta i requisiti di sistema, la cronologia delle versioni e le alternative con app simili per Mac, poi ordina per popolarità o nome. | {count} app per Mac in {name}. Confronta i requisiti di sistema, la cronologia delle versioni e le alternative con app simili per Mac, poi ordina per popolarità o nome."
     },
     "allIn": "Tutto in {name}",
     "subcategories": "Sottocategorie",

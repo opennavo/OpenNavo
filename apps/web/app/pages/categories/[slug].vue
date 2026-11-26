@@ -155,7 +155,8 @@ usePageSeo({
           apps: (data.value?.records ?? []).map(pkg => pkg.displayName)
         },
         t,
-        values => formatList(values, { locale: formattingLocale.value })
+        values => formatList(values, { locale: formattingLocale.value }),
+        locale.value
       ) ?? t('categories.description')
     );
   }

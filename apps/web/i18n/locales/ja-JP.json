@@ -132,8 +132,8 @@
     "itemMetaTitle": "{name} ソフトウェアのおすすめ · OpenNavo",
     "seo": {
       "itemTitle": "Mac 向け{name}アプリ · OpenNavo",
-      "itemDescription": "「{name}」カテゴリには {count} 本の Mac アプリがあります。{apps} など。",
-      "itemDescriptionCount": "「{name}」カテゴリには {count} 本の Mac アプリがあります。"
+      "itemDescription": "「{name}」カテゴリには {count} 本の Mac アプリがあります。{apps} など。各アプリの詳細、システム要件、バージョン履歴、Homebrew でのインストール方法、類似アプリを確認でき、人気順や名前で並べ替え、無効化済みのアプリを表示するか選べます。すべて無料で閲覧でき、macOS に合うツールをすばやく見つけられます。ランキングやコレクション、最近の更新から探すこともできます。",
+      "itemDescriptionCount": "「{name}」カテゴリには {count} 本の Mac アプリがあります。各アプリの詳細、システム要件、バージョン履歴、Homebrew でのインストール方法、類似アプリを確認でき、人気順や名前で並べ替え、無効化済みのアプリを表示するか選べます。すべて無料で閲覧でき、macOS に合うツールをすばやく見つけられます。ランキングやコレクション、最近の更新から探すこともできます。"
     },
     "allIn": "すべての{name}",
     "subcategories": "サブカテゴリ",

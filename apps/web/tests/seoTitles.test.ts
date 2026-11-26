@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { SITE_LOCALES, formatList, selectPlural } from '@opennavo/shared';
 import {
+  BING_DESCRIPTION_MIN,
+  brandlessTitle,
   categoryDescription,
   currentReleaseDate,
   dependenciesDescription,
@@ -15,7 +17,6 @@ import {
   type OverviewFacts,
   overviewPageTitle,
   overviewTitle,
-  brandlessTitle,
   pagedDescription,
   pagedTitle,
   reliableVersion,
@@ -793,33 +794,66 @@ describe('C2 page descriptions', () => {
     ...overrides
   });
 
-  it('Describes a category by its size and first apps, so pages of one category differ', () => {
+  it('Describes a category by its size, first apps and what the page offers', () => {
     const t = translator('en-US');
-    expect(categoryDescription(browsers(), t, list('en-US'))).toBe(
-      'Web browsers. 42 Mac apps in Browsers, including Google Chrome, Firefox, and Arc.'
-    );
-    expect(categoryDescription(browsers({ apps: ['Vivaldi', 'Opera'] }), t, list('en-US'))).toBe(
-      'Web browsers. 42 Mac apps in Browsers, including Vivaldi and Opera.'
-    );
+    const description = categoryDescription(browsers(), t, list('en-US'))!;
     expect(
-      categoryDescription(
-        browsers({
-          total: 1,
-          totalLabel: '1',
-          apps: ['Arc'],
-          description: null
-        }),
-        t,
-        list('en-US')
-      )
-    ).toBe('1 Mac app in Browsers: Arc.');
+      description.startsWith('Web browsers. 42 Mac apps in Browsers, including Google Chrome, Firefox, and Arc.')
+    ).toBe(true);
+    expect(textWidth(description)).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect(textWidth(description)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    const fewer = categoryDescription(browsers({ apps: ['Vivaldi', 'Opera'] }), t, list('en-US'))!;
+    expect(fewer).toContain('Vivaldi and Opera');
+    expect(fewer).not.toBe(description);
+    expect(textWidth(fewer)).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect(fewer).not.toMatch(/[，；：、,;:]$/u);
+    const single = categoryDescription(
+      browsers({
+        total: 1,
+        totalLabel: '1',
+        apps: ['Arc'],
+        description: null
+      }),
+      t,
+      list('en-US')
+    )!;
+    expect(single.startsWith('1 Mac app in Browsers: Arc.')).toBe(true);
+    expect(textWidth(single)).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
     // An empty category keeps its own description; without one the page falls back to the generic copy.
     expect(categoryDescription(browsers({ total: 0, apps: [] }), t, list('en-US'))).toBe('Web browsers');
     expect(categoryDescription(browsers({ total: 0, apps: [], description: '' }), t, list('en-US'))).toBeUndefined();
     const zh = translator('zh-CN');
-    expect(categoryDescription(browsers({ name: '浏览器', description: '网页浏览器' }), zh, list('zh-CN'))).toBe(
-      '网页浏览器。「浏览器」分类共有 42 款 Mac App，包括 Google Chrome、Firefox和Arc。'
+    const chinese = categoryDescription(browsers({ name: '浏览器', description: '网页浏览器' }), zh, list('zh-CN'))!;
+    expect(chinese.startsWith('网页浏览器。「浏览器」分类共有 42 款 Mac App，包括 Google Chrome、Firefox和Arc。')).toBe(
+      true
     );
+    // Bing counts CJK descriptions in characters, not in display columns.
+    expect([...chinese].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect([...chinese].length).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    // Realistic short names and a short catalog description are the common case, not the long names above.
+    const ja = translator('ja-JP');
+    const japanese = categoryDescription(
+      {
+        name: 'ブラウザ',
+        description: 'ウェブブラウザ',
+        total: 42,
+        totalLabel: '42',
+        apps: ['Chrome', 'Firefox', 'Arc']
+      },
+      ja,
+      list('ja-JP'),
+      'ja-JP'
+    )!;
+    expect([...japanese].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect([...japanese].length).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    const oneApp = categoryDescription(
+      { name: '效率', description: '快捷启动工具。', total: 1, totalLabel: '1', apps: ['Raycast'] },
+      zh,
+      list('zh-CN'),
+      'zh-CN'
+    )!;
+    expect([...oneApp].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect([...oneApp].length).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
   });
 
   it.each(LOCALES)('%s fits category descriptions into search-result width', code => {
@@ -829,7 +863,10 @@ describe('C2 page descriptions', () => {
       apps: ['Microsoft Edge Dev Channel Preview', 'Google Chrome Canary for Developers', 'Firefox Developer Edition']
     });
     const text = categoryDescription(long, t, list(code))!;
-    expect(textWidth(text)).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    // A CJK character counts once for Bing and twice in display columns.
+    const length = /^(?:zh|ja)/i.test(code) ? [...text].length : textWidth(text);
+    expect(length).toBeLessThanOrEqual(DESCRIPTION_WIDTH);
+    expect(length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
     expect(text).not.toMatch(/[{}|]|undefined/);
     expect(text).toContain('42');
   });
@@ -1035,19 +1072,56 @@ describe('C2 factual overview descriptions', () => {
 });
 
 describe('Overview search overrides', () => {
+  const editorDescription =
+    'Arc is a fast, private browser for Mac with tracker blocking, split view, spaces and profiles, built for everyday browsing, focused work and research.';
+
   it('use each field that is set, trimmed, and brand the title once', () => {
     const both = {
       seoOverride: {
         title: '  Arc for Mac, picked by editors ',
-        description: ' Fast, private browsing. '
+        description: ` ${editorDescription} `
       }
     };
     expect(overrideTitle(both)).toBe('Arc for Mac, picked by editors · OpenNavo');
-    expect(overrideDescription(both)).toBe('Fast, private browsing.');
+    expect(overrideDescription(both)).toBe(editorDescription);
     expect(overrideTitle({ seoOverride: { title: 'Arc · OpenNavo' } })).toBe('Arc · OpenNavo');
     // One field alone: the other stays with the template.
     expect(overrideTitle({ seoOverride: { description: 'Only a description' } })).toBeUndefined();
     expect(overrideDescription({ seoOverride: { title: 'Only a title' } })).toBeUndefined();
+  });
+
+  it('ignore a description below the search engines length guidance', () => {
+    // Lulu's and Antigravity CLI's overrides were 41 and 53 characters, and both stayed on Bing's report.
+    expect(overrideDescription({ seoOverride: { description: 'Fast, private browsing.' } })).toBeUndefined();
+    expect(overrideDescription({ seoOverride: { description: editorDescription } })).toBe(editorDescription);
+    // CJK is counted in characters: 150 Chinese characters are enough even though they exceed the column budget.
+    const chinese =
+      'Arc 是一款快速、注重隐私的 Mac 浏览器，内置跟踪拦截、分屏浏览、空间和配置文件，适合日常上网、资料整理和专注工作。它把标签页、书签和笔记集中在侧边栏，支持自定义主题、快捷键和多个工作空间，并可在不同设备之间同步浏览进度；编辑器式的界面让网页整理更直观，帮助你在 Mac 上更高效地查找、比较和保存资料。';
+    expect(overrideDescription({ seoOverride: { description: chinese } }, 'zh-CN')).toBe(chinese);
+    expect(
+      overrideDescription(
+        { seoOverride: { description: '免费的 macOS 开源出站防火墙：遇到未知连接时弹窗提醒，用规则放行或拦截程序。' } },
+        'zh-CN'
+      )
+    ).toBeUndefined();
+  });
+
+  it('falls back to the generated introduction when the override is short', () => {
+    const zh = translator('zh-CN');
+    const summary = '免费的 macOS 开源出站防火墙：遇到未知连接时弹窗提醒，用规则放行或拦截程序。';
+    const description =
+      'LuLu 是面向 macOS 的免费开源出站防火墙，会在程序尝试建立未经授权的连接时提醒，并允许用户通过规则放行或阻止。它显示进程、目标地址和签名信息，帮助判断连接是否可信；它是 macOS 内置入站防火墙的补充，不是杀毒软件或 VPN，也不能保证阻止所有连接。安装后需要在系统设置中批准网络扩展，复制应用到应用程序文件夹并按照开发者指南完成配置。';
+    const pkg = {
+      ...app,
+      displayName: 'LuLu',
+      summary,
+      description,
+      seoOverride: { title: 'LuLu：免费的开源 macOS 出站防火墙', description: summary }
+    };
+    expect(overrideDescription(pkg, 'zh-CN')).toBeUndefined();
+    const generated = overviewDescription(pkg, zh);
+    expect([...generated].length).toBeGreaterThanOrEqual(BING_DESCRIPTION_MIN);
+    expect(generated.startsWith('LuLu 是面向 macOS')).toBe(true);
   });
 
   it('leave the templates in charge without an override', () => {
@@ -1068,7 +1142,7 @@ describe('Overview search overrides', () => {
     const t = translator(code);
     const seoOverride = {
       title: 'Arc for Mac – Free Download',
-      description: 'Download Arc for free on your Mac.'
+      description: editorDescription
     };
     for (const pkg of [
       { ...app, disabled: true, seoOverride },
@@ -1083,7 +1157,7 @@ describe('Overview search overrides', () => {
       expect(overrideDescription(pkg)).toBeUndefined();
       // What the overview shows instead: the unavailable templates.
       expect(overviewTitle(pkg, t)).toBe(overviewTitle({ ...app, disabled: true }, t));
-      expect(overviewDescription(pkg, t)).not.toContain('Download Arc');
+      expect(overviewDescription(pkg, t)).not.toContain('Arc is a fast');
     }
     // Paused only by the catalog's 90-day rule, Homebrew still installs it, so the override stays.
     const paused = {
@@ -1093,7 +1167,7 @@ describe('Overview search overrides', () => {
       seoOverride
     };
     expect(overrideTitle(paused)).toBe('Arc for Mac – Free Download · OpenNavo');
-    expect(overrideDescription(paused)).toBe('Download Arc for free on your Mac.');
+    expect(overrideDescription(paused)).toBe(editorDescription);
   });
 });
 
