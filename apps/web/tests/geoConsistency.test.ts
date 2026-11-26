@@ -185,8 +185,9 @@ describe('G5 cross-export normalized facts', () => {
         break;
       case 'G5-12':
         expect(schema).not.toHaveProperty('offers');
-        expect(md).not.toContain(t('package.facts.types.free_with_iap'));
-        expect(html.price).not.toContain('<table');
+        // The usage alone states the price: the fact carries no amount to show.
+        expect(md).toContain(t('package.facts.types.free_with_iap'));
+        expect(html.price).toContain('<table');
         expect(answers.price).toContain(t('package.faq.priceA.free_with_iap', { name: page.displayName }));
         break;
       case 'G5-15':

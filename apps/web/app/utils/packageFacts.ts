@@ -246,11 +246,21 @@ export function uninstallFacts(pkg: Pick<PackagePage, 'facts'>, phase: 'uninstal
   return pkg.facts.uninstall.filter(item => item.phase === phase && isDated(item.evidence));
 }
 
+/** Usages that say what using the app costs without naming an amount. */
+const USAGES_WITHOUT_AMOUNT = new Set<PriceFact['usage']>(['free', 'free_with_iap', 'trial']);
+
+/**
+ * Whether a price fact says something the page can state: a free, in-app-purchase or trial usage stands
+ * on its own, while every other usage needs an amount with its currency (a store listing may keep its
+ * usage unknown and still show what the download costs).
+ */
+export function statesPrice(price: Pick<PriceFact, 'usage' | 'amount' | 'currency'>): boolean {
+  return USAGES_WITHOUT_AMOUNT.has(price.usage) || (price.amount != null && Boolean(price.currency));
+}
+
 /** Prices the page shows: verified ones as current, stale ones with their date. */
 export function shownPrices(pkg: Pick<PackagePage, 'facts'>): PriceFact[] {
-  return (pkg.facts.prices ?? []).filter(
-    price => isDated(price.evidence) && price.amount != null && Boolean(price.currency)
-  );
+  return (pkg.facts.prices ?? []).filter(price => isDated(price.evidence) && statesPrice(price));
 }
 
 /** Prices the page may state as current: verified. */
