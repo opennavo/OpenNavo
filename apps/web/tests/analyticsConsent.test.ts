@@ -199,12 +199,17 @@ it('starts GA4 when idle, tracks navigations and honors opt-out in another tab',
   expect(consent.active.value).toBe(true);
 
   window.history.replaceState({}, '', '/download?source=private');
+  document.title = 'Old page';
   hooks.get('page:finish')!();
+  // The page's own title arrives after page:finish; the page view must wait for it.
+  document.title = 'Download · OpenNavo';
+  await new Promise(resolve => setTimeout(resolve, 60));
   expect(calls().at(-1)).toEqual([
     'event',
     'page_view',
     expect.objectContaining({
       page_location: `${location.origin}/download`,
+      page_title: 'Download · OpenNavo',
       page_type: 'download'
     })
   ]);
@@ -215,6 +220,7 @@ it('starts GA4 when idle, tracks navigations and honors opt-out in another tab',
   const stopped = calls();
   window.history.replaceState({}, '', '/apps');
   hooks.get('page:finish')!();
+  await new Promise(resolve => setTimeout(resolve, 60));
   expect(calls()).toEqual(stopped);
 
   unmount.mock.calls[0]![0]();
