@@ -132,8 +132,8 @@
     "itemMetaTitle": "{name}软件推荐 · OpenNavo",
     "seo": {
       "itemTitle": "Mac {name}软件 · OpenNavo",
-      "itemDescription": "「{name}」分类共有 {count} 款 Mac App，包括 {apps}。",
-      "itemDescriptionCount": "「{name}」分类共有 {count} 款 Mac App。"
+      "itemDescription": "「{name}」分类共有 {count} 款 Mac App，包括 {apps}。查看每款应用的详细介绍、系统要求、版本记录、Homebrew 安装命令与同类替代品，按热度或名称排序，也可选择是否显示已停用；全部内容免费浏览，无需注册，条目来自 Homebrew 官方目录，帮助你快速找到适合 macOS 的工具，也可以按排行榜、合集和最近更新继续探索。",
+      "itemDescriptionCount": "「{name}」分类共有 {count} 款 Mac App。查看每款应用的详细介绍、系统要求、版本记录、Homebrew 安装命令与同类替代品，按热度或名称排序，也可选择是否显示已停用；全部内容免费浏览，无需注册，条目来自 Homebrew 官方目录，帮助你快速找到适合 macOS 的工具，也可以按排行榜、合集和最近更新继续探索。"
     },
     "allIn": "全部{name}",
     "subcategories": "子分类",

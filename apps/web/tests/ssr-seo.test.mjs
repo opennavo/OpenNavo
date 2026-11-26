@@ -315,13 +315,22 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     'seo-override': {
       'en-US': {
         title: 'SEO App for Mac, picked by editors',
-        description: 'An editor-written description of SEO App.'
+        description:
+          'Arc is a fast, private browser for Mac with tracker blocking, split view, spaces and profiles, built for everyday browsing, focused work and research.'
       },
-      'zh-CN': { title: 'SEO App 编辑精选', description: '编辑撰写的 SEO App 介绍。' }
+      'zh-CN': {
+        title: 'SEO App 编辑精选',
+        description:
+          'Arc 是一款快速、注重隐私的 Mac 浏览器，内置跟踪拦截、分屏浏览、空间和配置文件，适合日常上网、资料整理和专注工作。它把标签页、书签和笔记集中在侧边栏，支持自定义主题、快捷键和多个工作空间，并可在不同设备之间同步浏览进度；编辑器式的界面让网页整理更直观，帮助你在 Mac 上更高效地查找、比较和保存资料。'
+      }
     },
     'seo-override-title': { 'en-US': { title: 'Custom SEO App title' } },
     'seo-disabled': {
-      'en-US': { title: 'SEO App for Mac – Free Download', description: 'Download SEO App for free on your Mac.' }
+      'en-US': {
+        title: 'SEO App for Mac – Free Download',
+        description:
+          'Download SEO App for free on your Mac and start browsing with tracker blocking, split view, spaces and profiles, built for everyday work and research.'
+      }
     }
   };
   // Admin SEO settings (WP24) as served by GET /site/settings.
@@ -2954,10 +2963,14 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
         await (await fetch(`${origin}${path}`, { headers: { accept: 'text/html' } })).text()
       )?.[1];
     // C2 (seoTitles.ts / en-US.json): each page describes its own catalog data and purpose.
-    assert.equal(
-      await description('/categories/utilities'),
-      'Small tools for everyday Mac tasks. 50 Mac apps in Utilities, including Example App @11.'
+    const utilitiesDescription = await description('/categories/utilities');
+    assert.ok(
+      utilitiesDescription.startsWith(
+        'Small tools for everyday Mac tasks. 50 Mac apps in Utilities, including Example App @11.'
+      ),
+      utilitiesDescription
     );
+    assert.ok(utilitiesDescription.length >= 150 && utilitiesDescription.length <= 160, utilitiesDescription);
     assert.equal(
       await description('/apps/ordinary-app/dependencies'),
       'Example App @11 installs on Mac without any other Homebrew packages.'
@@ -3034,11 +3047,13 @@ test('SSR preserves literal @ in package routes and page-authored metadata', { t
     // Both fields come from the language's override; the title still ends with the brand, once.
     assert.deepEqual(await page('/apps/seo-override'), {
       title: 'SEO App for Mac, picked by editors · OpenNavo',
-      description: 'An editor-written description of SEO App.'
+      description:
+        'Arc is a fast, private browser for Mac with tracker blocking, split view, spaces and profiles, built for everyday browsing, focused work and research.'
     });
     assert.deepEqual(await page('/zh/apps/seo-override'), {
       title: 'SEO App 编辑精选 · OpenNavo',
-      description: '编辑撰写的 SEO App 介绍。'
+      description:
+        'Arc 是一款快速、注重隐私的 Mac 浏览器，内置跟踪拦截、分屏浏览、空间和配置文件，适合日常上网、资料整理和专注工作。它把标签页、书签和笔记集中在侧边栏，支持自定义主题、快捷键和多个工作空间，并可在不同设备之间同步浏览进度；编辑器式的界面让网页整理更直观，帮助你在 Mac 上更高效地查找、比较和保存资料。'
     });
     // Without an override in a language, the overview is exactly what the templates make for any app.
     const basic = await page('/apps/seo-basic');

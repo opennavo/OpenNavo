@@ -181,8 +181,12 @@ export function withVariantNames<T>(value: T): T {
 
 /** Search results show about this many columns of a description, a CJK character taking two. */
 export const DESCRIPTION_WIDTH = 160;
+/** Bing asks for 150-160 characters; it counts CJK letters once, while display width counts them twice. */
+export const BING_DESCRIPTION_MIN = 150;
 /** Less room than this leaves no useful part of a summary, so the description goes without one. */
 const MIN_SUMMARY_WIDTH = 24;
+/** Room the catalog description keeps before the counted sentence on a category page. */
+const CATEGORY_INTRO_WIDTH = 80;
 
 const WIDE =
   /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua960-\ua97f\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{20000}-\u{3fffd}]/u;
@@ -278,10 +282,11 @@ const DANGLING_END =
 export function fitSummary(summary: string, room: number, minimum = 0): string {
   if (textWidth(summary) <= room) return summary;
   if (room < MIN_SUMMARY_WIDTH) return '';
-  for (const end of [SENTENCE_END, CLAUSE_END]) {
+  for (const [index, end] of [SENTENCE_END, CLAUSE_END].entries()) {
     let head = '';
     for (const match of summary.matchAll(end)) {
-      const candidate = summary.slice(0, match.index).trimEnd();
+      // Keep a sentence's own full stop; clause separators stay out of the snippet.
+      const candidate = summary.slice(0, match.index).trimEnd() + (index === 0 ? match[0] : '');
       if (textWidth(candidate) > room) break;
       head = candidate;
     }
@@ -292,13 +297,18 @@ export function fitSummary(summary: string, room: number, minimum = 0): string {
     if (textWidth(head) + textWidth(char) > room - 1) break;
     head += char;
   }
-  // A cut inside a Latin word moves back to the space before it.
+  // A cut inside a Latin word moves back to the space before it, unless that would drop the
+  // snippet below a caller's minimum: the length guidance wins over the word boundary.
   const next = summary.slice(head.length);
   if (/^[\p{L}\p{N}]/u.test(next) && /[\p{L}\p{N}]$/u.test(head) && !WIDE.test(Array.from(head).at(-1) ?? '')) {
     const space = head.lastIndexOf(' ');
-    if (space > 0) head = head.slice(0, space);
+    if (space > 0 && textWidth(head.slice(0, space)) >= minimum) head = head.slice(0, space);
   }
-  while (DANGLING_END.test(head)) head = head.replace(DANGLING_END, '');
+  while (DANGLING_END.test(head)) {
+    const shorter = head.replace(DANGLING_END, '');
+    if (textWidth(shorter) < minimum) break;
+    head = shorter;
+  }
   return head ? `${head}…` : '';
 }
 
@@ -323,10 +333,20 @@ export function fitSummaryChars(summary: string, room: number, minimum = 0): str
     }
   }
   if (cut >= Math.max(room * 0.6, minimum)) return chars.slice(0, cut).join('').trimEnd();
-  const clipped = chars
-    .slice(0, room - 1)
-    .join('')
-    .replace(/[\s。！？；：，、]+$/u, '');
+  let clipped = chars.slice(0, room - 1).join('');
+  // A cut inside a Latin word (often a product name in CJK text) moves back to the space before it.
+  // CJK spaces are sparse, so the backing-off position must still satisfy the caller's minimum.
+  const next = chars[room - 1];
+  if (
+    next &&
+    /[\p{L}\p{N}]/u.test(next) &&
+    /[\p{L}\p{N}]$/u.test(clipped) &&
+    !WIDE.test(Array.from(clipped).at(-1) ?? '')
+  ) {
+    const space = clipped.lastIndexOf(' ');
+    if (space > 0 && Array.from(clipped.slice(0, space)).length >= minimum) clipped = clipped.slice(0, space);
+  }
+  clipped = clipped.replace(/[\s。！？；：，、]+$/u, '');
   return clipped ? `${clipped}…` : '';
 }
 
@@ -358,6 +378,18 @@ function withShortName(t: Translate, key: string, name: string): string {
 
 function titleLocale(t: Translate, locale?: string): string | undefined {
   return locale ?? (t as Translate & { locale?: string }).locale;
+}
+
+/** Bing's length guidance, measured in characters for CJK and in columns for Latin text. */
+function longEnoughDescription(text: string, locale?: string): boolean {
+  // An unknown locale is measured in characters: that is the stricter reading for CJK overrides.
+  const cjk = locale === undefined || /^(?:zh|ja)/i.test(locale);
+  return (cjk ? Array.from(text).length : textWidth(text)) >= BING_DESCRIPTION_MIN;
+}
+
+/** A clause cut keeps its separator; mark the cut instead of ending the snippet on a comma or semicolon. */
+function finishDescription(text: string): string {
+  return /[，；：、,;:]$/u.test(text) ? `${text.slice(0, -1)}…` : text;
 }
 
 export function overviewTitle(pkg: OverviewFacts, t: Translate, locale?: string): string {
@@ -423,10 +455,16 @@ export function overviewPageTitle(
   });
 }
 
-/** The overview description from the override; undefined leaves the template in charge, as for the title. */
-export function overrideDescription(pkg: OverrideFacts): string | undefined {
+/**
+ * The overview description from the override; undefined leaves the template in charge, as for the title.
+ * A description below Bing's length guidance is ignored for the same reason: it would hide the longer
+ * generated text and keep the page on the search-engine report.
+ */
+export function overrideDescription(pkg: OverrideFacts, locale?: string): string | undefined {
   if (disabledByHomebrew(pkg)) return undefined;
-  return pkg.seoOverride?.description?.trim() || undefined;
+  const value = pkg.seoOverride?.description?.trim();
+  if (!value || !longEnoughDescription(value, locale)) return undefined;
+  return value;
 }
 
 /**
@@ -466,7 +504,7 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
   const cjk = /^(?:zh|ja)/i.test(titleLocale(t, locale) ?? '');
   // Bing measures the snippet in characters, while the display budget counts CJK letters twice.
   // A CJK description that fills 150 columns is still short at ~75 characters.
-  const longEnough = (text: string) => (cjk ? Array.from(text).length >= 150 : textWidth(text) >= 150);
+  const longEnough = (text: string) => longEnoughDescription(text, titleLocale(t, locale));
   let base: string;
   if (!usableSummary(pkg.summary, pkg.displayName)) base = sectionDescription(pkg, t, list);
   else {
@@ -478,14 +516,14 @@ export function overviewDescription(pkg: OverviewFacts, t: Translate, list: List
   // A short catalog summary leaves the snippet below Bing's length guidance. The editor-written,
   // already localized introduction says more; use its lead only when it is longer than the summary.
   // A variant keeps its own branch because the main app's introduction does not name it.
-  if (longEnough(base) || variantLabel(pkg.token ?? '')) return base;
+  if (longEnough(base) || variantLabel(pkg.token ?? '')) return finishDescription(base);
   const lead = pkg.description
     ? cjk
       ? fitSummaryChars(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
       : fitSummary(plainText(pkg.description), DESCRIPTION_WIDTH, 150)
     : '';
   const leadWins = cjk ? Array.from(lead).length > Array.from(base).length : textWidth(lead) > textWidth(base);
-  return leadWins ? lead : base;
+  return finishDescription(leadWins ? lead : base);
 }
 
 function sectionDescription(pkg: OverviewFacts, t: Translate, list: ListFormat, whole = false): string {
@@ -578,27 +616,46 @@ export interface CategoryFacts {
 const SENTENCE_CLOSE = /[.!?。！？…]$/u;
 
 /**
- * The category's own description, then how many Mac apps it lists and the first three of them (C2).
- * The app names make every category, and every page of one, read differently; when the whole does not
- * fit the columns search results show, the list shrinks first and the catalog description is shortened.
+ * The category's own description, then how many Mac apps it lists, the first three of them, and what the
+ * page offers (C2). The app names make every category, and every page of one, read differently; the closing
+ * sentence keeps the snippet inside the 150-160 length search engines recommend. CJK is counted in
+ * characters here, because display columns count each letter twice and would leave the snippet too short.
  */
-export function categoryDescription(category: CategoryFacts, t: Translate, list: ListFormat): string | undefined {
+export function categoryDescription(
+  category: CategoryFacts,
+  t: Translate,
+  list: ListFormat,
+  locale?: string
+): string | undefined {
   const intro = (category.description ?? '').trim();
   if (!category.total) return intro || undefined;
-  let sentence = '';
-  for (let size = Math.min(3, category.apps.length); size >= 0; size--) {
-    const named = { name: category.name, count: category.totalLabel, apps: list(category.apps.slice(0, size)) };
-    const key = size ? 'categories.seo.itemDescription' : 'categories.seo.itemDescriptionCount';
-    sentence = t(key, named, category.total);
-    if (textWidth(sentence) <= DESCRIPTION_WIDTH) break;
-  }
-  const fitted = intro && fitSummary(intro, DESCRIPTION_WIDTH - textWidth(sentence) - 1);
-  if (!fitted) return sentence;
+  const cjk = /^(?:zh|ja)/i.test(titleLocale(t, locale) ?? '');
+  const size = Math.min(3, category.apps.length);
+  const sentence = t(
+    size ? 'categories.seo.itemDescription' : 'categories.seo.itemDescriptionCount',
+    { name: category.name, count: category.totalLabel, apps: list(category.apps.slice(0, size)) },
+    category.total
+  );
+  // The catalog description leads only when it fits whole; a truncated one both adds an ellipsis
+  // and takes room from the counted sentence and the page facts that follow.
+  const fitted = intro && textWidth(intro) <= CATEGORY_INTRO_WIDTH ? intro : '';
   // A catalog description without closing punctuation gets the full stop of its own script.
-  const closed = SENTENCE_CLOSE.test(fitted)
-    ? fitted
-    : `${fitted}${isCjkLetter(Array.from(fitted).at(-1)) ? '。' : '.'}`;
-  return WIDE.test(Array.from(closed).at(-1) ?? '') ? `${closed}${sentence}` : `${closed} ${sentence}`;
+  const closed = fitted
+    ? SENTENCE_CLOSE.test(fitted)
+      ? fitted
+      : `${fitted}${isCjkLetter(Array.from(fitted).at(-1)) ? '。' : '.'}`
+    : '';
+  const body = closed
+    ? WIDE.test(Array.from(closed).at(-1) ?? '')
+      ? `${closed}${sentence}`
+      : `${closed} ${sentence}`
+    : sentence;
+  if ((cjk ? Array.from(body).length : textWidth(body)) <= DESCRIPTION_WIDTH) return body;
+  const clipped =
+    (cjk
+      ? fitSummaryChars(body, DESCRIPTION_WIDTH, BING_DESCRIPTION_MIN)
+      : fitSummary(body, DESCRIPTION_WIDTH, BING_DESCRIPTION_MIN)) || body;
+  return finishDescription(clipped);
 }
 
 export interface DependencyFacts {

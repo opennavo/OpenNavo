@@ -145,7 +145,7 @@ usePageSeo({
   description: () => {
     const value = pkg.value;
     if (!value) return undefined;
-    const custom = overrideDescription(value);
+    const custom = overrideDescription(value, locale.value);
     if (custom) return custom;
     // The legacy template embeds the install command, which a Homebrew-disabled package no longer has.
     if (!legacyTitles.value || packageInstallState(value) === 'disabled')

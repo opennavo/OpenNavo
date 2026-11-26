@@ -132,8 +132,8 @@
     "itemMetaTitle": "{name}: die besten Apps für Mac · OpenNavo",
     "seo": {
       "itemTitle": "{name} – Mac-Apps · OpenNavo",
-      "itemDescription": "{count} Mac-App in {name}: {apps}. | {count} Mac-Apps in {name}, darunter {apps}.",
-      "itemDescriptionCount": "{count} Mac-App in {name}. | {count} Mac-Apps in {name}."
+      "itemDescription": "{count} Mac-App in {name}: {apps}. Vergleichen Sie Systemanforderungen, Versionsverlauf und Alternativen mit ähnlichen Mac-Apps, und sortieren Sie nach Beliebtheit oder Namen. | {count} Mac-Apps in {name}, darunter {apps}. Vergleichen Sie Systemanforderungen, Versionsverlauf und Alternativen mit ähnlichen Mac-Apps, und sortieren Sie nach Beliebtheit oder Namen.",
+      "itemDescriptionCount": "{count} Mac-App in {name}. Vergleichen Sie Systemanforderungen, Versionsverlauf und Alternativen mit ähnlichen Mac-Apps, und sortieren Sie nach Beliebtheit oder Namen. | {count} Mac-Apps in {name}. Vergleichen Sie Systemanforderungen, Versionsverlauf und Alternativen mit ähnlichen Mac-Apps, und sortieren Sie nach Beliebtheit oder Namen."
     },
     "allIn": "Alles in {name}",
     "subcategories": "Unterkategorien",
