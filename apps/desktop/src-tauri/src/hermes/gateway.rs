@@ -174,9 +174,13 @@ async fn ensure_server(
     }
     command.arg("--profile").arg(profile);
     command.arg("serve");
-    if profile != "default" {
-        command.arg("--isolated");
-    }
+    // `--isolated` marks this backend as app-owned. Without it the runtime's host singleton
+    // treats a typed `--port` as a conflict whenever any other `hermes serve`/`dashboard` owns
+    // the machine — including a gateway this app left behind in an earlier run — and exits 78
+    // instead of starting. The desktop always runs its own backend on its own free port for
+    // one home/profile, so opting out is both safe and required; otherwise every catalog and
+    // chat read waits out the startup timeout and fails.
+    command.arg("--isolated");
     command
         .arg("--skip-build")
         .arg("--port")
@@ -193,9 +197,34 @@ async fn ensure_server(
             .with_detail(error.to_string())
     })?;
     let pid = child.id().unwrap_or(0);
+    // Only the start future owns the child until the server below takes it. A dropped future
+    // must not leave an isolated `hermes serve` behind, and SIGTERM alone does not guarantee
+    // that: a child that refuses or ignores it survives. `StartingGateway` keeps the handle and
+    // sends SIGKILL on drop; the normal handoff keeps `GatewayServer`'s SIGTERM lifecycle.
+    let mut starting = StartingGateway { child: Some(child) };
     let deadline = Instant::now() + START_TIMEOUT;
     while Instant::now() < deadline {
+        // The child is checked before the port: an exited process has to be reported now, not
+        // after a wait on a socket it will never open.
+        match starting.child_mut().try_wait() {
+            Ok(Some(status)) => {
+                // Reaped already: release the guard without signaling a dead pid.
+                starting.take();
+                return Err(gateway_exit_error(status, home));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(AppError::new(
+                    "E_HERMES_GATEWAY",
+                    "Hermes gateway could not be monitored during startup.",
+                )
+                .with_detail(error.to_string()));
+            }
+        }
         if port_open(port).await {
+            let child = starting
+                .take()
+                .expect("the starting gateway already handed off");
             let server = Arc::new(GatewayServer {
                 port,
                 token,
@@ -208,11 +237,65 @@ async fn ensure_server(
         }
         sleep(Duration::from_millis(150)).await;
     }
-    kill_pid(pid);
+    // An exit during the last sleep is an exit, not a timeout.
+    if let Ok(Some(status)) = starting.child_mut().try_wait() {
+        starting.take();
+        return Err(gateway_exit_error(status, home));
+    }
     Err(AppError::new(
         "E_HERMES_GATEWAY",
         "Hermes gateway did not become ready. Restart Hermes and try again.",
     ))
+}
+
+/// Owns the spawned gateway until `GatewayServer` takes it.
+///
+/// `ensure_server` waits for the port before handing the child to the server. If that future
+/// is dropped in the meantime (app quit, a superseded request), tokio leaves the child running,
+/// so every cancelled start would leak another isolated `hermes serve`. Owning the handle lets
+/// the guard call `start_kill` (SIGKILL) on drop, which also covers a child that refuses or
+/// ignores SIGTERM. The handoff is explicit, so a running gateway keeps the server's existing
+/// SIGTERM lifecycle.
+struct StartingGateway {
+    child: Option<Child>,
+}
+
+impl StartingGateway {
+    fn child_mut(&mut self) -> &mut Child {
+        self.child
+            .as_mut()
+            .expect("the starting gateway already handed off")
+    }
+
+    /// Take the child out: for handoff, or to drop an already-reaped process without signaling.
+    fn take(&mut self) -> Option<Child> {
+        self.child.take()
+    }
+}
+
+impl Drop for StartingGateway {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.start_kill();
+        }
+    }
+}
+
+/// User-facing reason for a gateway that exited before it served its port.
+///
+/// The exit status is the only reliable evidence here: `exit 78` is the runtime's permanent
+/// configuration refusal for more than one situation, so no cause is invented. The settings
+/// sheet renders `detail`, so it must say the exit happened during startup. The gateway's own
+/// log is named only when that file exists, so the pointer is never dead. The child's stderr is
+/// deliberately not captured: it can carry the dashboard session token or provider credentials
+/// the gateway loads from the profile's `.env`, and the runtime logs are the place for detail.
+fn gateway_exit_error(status: std::process::ExitStatus, home: &Path) -> AppError {
+    let mut detail = format!("Hermes gateway exited during startup ({status}).");
+    let log = home.join("logs").join("gui.log");
+    if log.is_file() {
+        detail.push_str(&format!(" See {}", log.display()));
+    }
+    AppError::new("E_HERMES_GATEWAY", "Hermes gateway exited during startup.").with_detail(detail)
 }
 
 fn rpc_error(value: &Value) -> Option<String> {
@@ -3665,5 +3748,299 @@ mod tests {
         assert!(chunks.len() > 2, "expected gateway deltas, got {chunks:?}");
         assert!(!reply.text.trim().is_empty());
         assert!(reply.session_id.is_some());
+    }
+
+    /// A fake runtime with the layout `runtime_command` expects: the interpreter is a shell
+    /// script that records its arguments and reacts like the real `hermes serve`.
+    #[cfg(unix)]
+    fn fake_gateway_runtime(dir: &Path, script: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin = dir.join("bin").join("hermes");
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        std::fs::create_dir_all(dir.join("python").join("bin")).unwrap();
+        std::fs::create_dir_all(dir.join("site")).unwrap();
+        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").unwrap();
+        let python = dir.join("python").join("bin").join("python3");
+        std::fs::write(&python, script).unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    #[cfg(unix)]
+    fn gateway_input(profile: Option<&str>) -> HermesChatInput {
+        HermesChatInput {
+            prompt: String::new(),
+            request_id: "gateway-start-test".into(),
+            session_id: None,
+            provider: "custom".into(),
+            model: "m".into(),
+            effort: "low".into(),
+            fast: false,
+            cwd: None,
+            attachments: Vec::new(),
+            auxiliary: Vec::new(),
+            force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: profile.map(str::to_owned),
+            panel_auth: false,
+            api_key: None,
+            endpoint: None,
+            mac_enabled: false,
+            control_level: "open".into(),
+            mac_terminal: false,
+            mac_screen: false,
+            mac_files: false,
+            mac_cron: false,
+            confirm_writes: false,
+        }
+    }
+
+    /// The exit status is the only evidence the error may lean on: 78 is emitted for more than
+    /// one runtime refusal, so the detail names the status and never a guessed cause. The log
+    /// location appears only when that file exists.
+    #[cfg(unix)]
+    #[test]
+    fn startup_exit_detail_names_the_actual_status_without_a_cause() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let detail = |status| gateway_exit_error(status, dir.path()).detail.unwrap();
+        let exit = |code: i32| std::process::ExitStatus::from_raw(code << 8);
+
+        let refused = detail(exit(78));
+        assert!(refused.contains("exited during startup"), "{refused}");
+        assert!(refused.contains("exit status: 78"), "{refused}");
+        assert!(
+            !refused.contains("backend"),
+            "the detail must not name a cause the status cannot prove: {refused}"
+        );
+        assert!(
+            !refused.contains("See"),
+            "a missing log file must not be named: {refused}"
+        );
+        assert!(detail(exit(0)).contains("exit status: 0"));
+        assert!(detail(std::process::ExitStatus::from_raw(15)).contains("signal: 15"));
+
+        std::fs::create_dir_all(dir.path().join("logs")).unwrap();
+        std::fs::write(dir.path().join("logs").join("gui.log"), "").unwrap();
+        assert!(detail(exit(78)).contains("logs/gui.log"));
+    }
+
+    /// The app-owned backend must opt out of the host singleton, and the child's stderr — which
+    /// here carries the live dashboard session token — must not reach the error the UI renders.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refusing_gateway_keeps_its_token_out_of_the_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake_gateway_runtime(
+            dir.path(),
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\n\
+             printf '%s' \"$HERMES_DASHBOARD_SESSION_TOKEN\" > \"$0.token\"\n\
+             printf 'token=%s key=sk-test-DO-NOT-LEAK\\n' \"$HERMES_DASHBOARD_SESSION_TOKEN\" >&2\n\
+             exit 78\n",
+        );
+        let state = HermesRuntimeState::default();
+        let input = gateway_input(None);
+        let started = Instant::now();
+        let error = match ensure_server(&bin, dir.path(), &state, &input, None).await {
+            Ok(_) => panic!("the refusing gateway must not be reported as ready"),
+            Err(error) => error,
+        };
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "startup waited {:?} instead of failing fast",
+            started.elapsed()
+        );
+        assert_eq!(error.code, "E_HERMES_GATEWAY");
+        let detail = error.detail.clone().unwrap_or_default();
+        assert!(
+            detail.contains("exited during startup") && detail.contains("exit status: 78"),
+            "the startup exit and its status are missing from {detail:?}"
+        );
+        assert!(
+            !detail.contains("See"),
+            "no log file exists yet, so none must be named: {detail:?}"
+        );
+        let token =
+            std::fs::read_to_string(dir.path().join("python").join("bin").join("python3.token"))
+                .unwrap();
+        assert!(
+            !token.trim().is_empty(),
+            "the child never saw its dashboard session token"
+        );
+        let rendered = format!("{}{}", error.message, detail);
+        assert!(
+            !rendered.contains(token.trim()),
+            "the dashboard session token leaked into the error: {rendered}"
+        );
+        assert!(
+            !rendered.contains("sk-test-DO-NOT-LEAK"),
+            "stderr leaked: {rendered}"
+        );
+        let args =
+            std::fs::read_to_string(dir.path().join("python").join("bin").join("python3.args"))
+                .unwrap();
+        assert!(
+            args.lines().any(|line| line == "--isolated"),
+            "the default profile must also opt out of the host singleton: {args}"
+        );
+        assert!(
+            args.lines().any(|line| line == "default"),
+            "the profile flag is missing: {args}"
+        );
+    }
+
+    /// Any startup exit keeps the real status, says it happened during startup, and withholds
+    /// the stderr that may contain credentials.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_exiting_gateway_reports_the_status_without_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake_gateway_runtime(
+            dir.path(),
+            "#!/bin/sh\necho 'fatal: provider key sk-test-DO-NOT-LEAK rejected' >&2\nexit 3\n",
+        );
+        let state = HermesRuntimeState::default();
+        let input = gateway_input(None);
+        let error = match ensure_server(&bin, dir.path(), &state, &input, None).await {
+            Ok(_) => panic!("the exited gateway must not be reported as ready"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "E_HERMES_GATEWAY");
+        let detail = error.detail.unwrap_or_default();
+        assert!(
+            detail.contains("exited during startup"),
+            "the detail must say the exit happened during startup: {detail:?}"
+        );
+        assert!(
+            detail.contains("exit status: 3"),
+            "the exit status is missing from {detail:?}"
+        );
+        assert!(
+            !detail.contains("sk-test-DO-NOT-LEAK"),
+            "stderr leaked: {detail}"
+        );
+    }
+
+    #[cfg(unix)]
+    fn process_alive(pid: i32) -> bool {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            None::<nix::sys::signal::Signal>,
+        )
+        .is_ok()
+    }
+
+    #[cfg(unix)]
+    async fn wait_until_gone(pid: i32) -> bool {
+        for _ in 0..100 {
+            if !process_alive(pid) {
+                return true;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        false
+    }
+
+    /// SIGKILLs a test child on failure, so the SIGTERM-ignoring fixture cannot outlive the
+    /// test. It only signals a process that is still alive, and the caller disarms it once the
+    /// child is confirmed gone, so a recycled pid is never targeted.
+    #[cfg(unix)]
+    struct TestChildGuard(Option<i32>);
+
+    #[cfg(unix)]
+    impl Drop for TestChildGuard {
+        fn drop(&mut self) {
+            if let Some(pid) = self.0
+                && process_alive(pid)
+            {
+                let _ = nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid),
+                    nix::sys::signal::Signal::SIGKILL,
+                );
+            }
+        }
+    }
+
+    /// Aborting a start (window closed, superseded request) must stop the child the future was
+    /// waiting for, even when the child ignores SIGTERM — a SIGTERM-only guard would pass a
+    /// plain `sleep` fixture, so this one sets `SIG_IGN` before `exec`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cancelled_start_kills_a_gateway_that_ignores_sigterm() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = fake_gateway_runtime(
+            dir.path(),
+            // An ignored disposition survives `exec` (a trapped handler would reset to the
+            // default), so the long sleep itself keeps ignoring SIGTERM.
+            "#!/bin/sh\ntrap '' TERM\nprintf '%s' \"$$\" > \"$0.pid\"\nexec sleep 30\n",
+        );
+        let home = dir.path().to_path_buf();
+        let state = HermesRuntimeState::default();
+        let input = gateway_input(None);
+        let task = tokio::spawn(async move {
+            let _ = ensure_server(&bin, &home, &state, &input, None).await;
+        });
+        let pid_file = dir.path().join("python").join("bin").join("python3.pid");
+        let mut pid = None;
+        for _ in 0..150 {
+            if let Some(text) = std::fs::read_to_string(&pid_file).ok()
+                && let Ok(value) = text.trim().parse::<i32>()
+            {
+                pid = Some(value);
+                break;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        let pid = pid.expect("the fake gateway never started");
+        let mut cleanup = TestChildGuard(Some(pid));
+        // Prove the fixture's inherited SIG_IGN: the startup guard's SIGTERM could not stop
+        // this child, so only the SIGKILL cleanup can.
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            nix::sys::signal::Signal::SIGTERM,
+        );
+        sleep(Duration::from_millis(100)).await;
+        assert!(process_alive(pid), "the fixture must ignore SIGTERM");
+
+        task.abort();
+        let _ = task.await;
+        let gone = wait_until_gone(pid).await;
+        if gone {
+            cleanup.0 = None;
+        }
+        assert!(gone, "the cancelled start left gateway pid {pid} running");
+    }
+
+    /// A normal handoff must not trigger the startup kill, and the server must keep stopping a
+    /// running gateway with its existing SIGTERM lifecycle.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn handing_the_child_off_keeps_the_server_lifecycle() {
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id().unwrap() as i32;
+        let mut starting = StartingGateway { child: Some(child) };
+        let child = starting.take().expect("the child");
+        drop(starting);
+        assert!(
+            process_alive(pid),
+            "the startup guard killed a handed-off child"
+        );
+
+        let server = GatewayServer {
+            port: 0,
+            token: String::new(),
+            fingerprint: String::new(),
+            pid: pid as u32,
+            _child: child,
+        };
+        server.stop();
+        drop(server);
+        assert!(
+            wait_until_gone(pid).await,
+            "the handed-off gateway was not stopped"
+        );
     }
 }
