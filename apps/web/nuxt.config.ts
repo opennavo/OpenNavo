@@ -138,7 +138,11 @@ export default defineNuxtConfig({
       // NUXT_PUBLIC_I18N_BASE_URL overrides i18n.baseUrl (canonical, hreflang); use the same value for both in deployment (05 §9).
       site: { url: '' },
       // Generate short route codes from manifest prefixes; API requests still use full locale codes.
-      i18n: { baseUrl: 'http://localhost:3000' }
+      i18n: { baseUrl: 'http://localhost:3000' },
+      // pvuv.ai page analytics: the site id shown in the pvuv console. It rides the same consent
+      // decision as GA4 and is never loaded under `nuxt dev` (see useAnalyticsConsent).
+      // NUXT_PUBLIC_PVUV_SITE_ID overrides it; empty or malformed disables the loader.
+      pvuvSiteId: 'NqrTDmAQ'
     }
   },
   app: {

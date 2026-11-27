@@ -13,6 +13,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('computed', computed);
   vi.stubGlobal('useSiteSettings', () => settings);
+  vi.stubGlobal('useRuntimeConfig', () => ({ public: { pvuvSiteId: '' } }));
   vi.stubGlobal('useState', (key: string, initialize: () => unknown) => {
     if (!states.has(key)) states.set(key, ref(initialize()));
     return states.get(key);

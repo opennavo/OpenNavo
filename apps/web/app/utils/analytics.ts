@@ -52,6 +52,18 @@ const CAMPAIGN_QUERY_KEYS = [
 
 export const CONSENT_STORAGE_KEY = 'onv:analytics-consent';
 
+// pvuv.ai page analytics (hosted service). The loader is injected only after the same consent
+// decision as GA4 (useAnalyticsConsent), and reads its settings from its own tag's data attributes.
+// `data-spa` counts client-side navigations as page views; the excluded paths are the ones whose
+// query strings carry visitor-supplied text (search terms, feedback drafts), which the SDK would
+// otherwise store verbatim.
+export const PVUV_SCRIPT_SRC = 'https://www.pvuv.ai/f.js';
+export const PVUV_API_BASE = 'https://in.pvuv.ai';
+export const PVUV_EXCLUDE = '/search*,/feedback*';
+const PVUV_SCRIPT_ID = 'pvuv-analytics';
+const PVUV_COOKIES = ['_pv_id', '_pv_sid', '_pv_ft', '_pv_v'];
+const PVUV_STORAGE_KEYS = ['_pv_id'];
+
 declare global {
   interface Window {
     dataLayer?: unknown[];
@@ -282,14 +294,47 @@ export function stopGtag(id: string) {
   lastPageLocation = '';
   (window as unknown as Record<string, unknown>)[`ga-disable-${id}`] = true;
   window.gtag?.('consent', 'update', { analytics_storage: 'denied' });
+  clearCookies(name => name === '_ga' || name.startsWith('_ga_'));
+}
+
+/** Delete matching first-party cookies on the host and every parent domain they may have been set on. */
+function clearCookies(matches: (name: string) => boolean) {
   const names = document.cookie
     .split(';')
     .map(cookie => cookie.split('=')[0]?.trim() ?? '')
-    .filter(name => name === '_ga' || name.startsWith('_ga_'));
+    .filter(name => name !== '' && matches(name));
   for (const name of names) {
     document.cookie = `${name}=; Max-Age=0; path=/`;
     for (const domain of cookieDomains(location.hostname))
       document.cookie = `${name}=; Max-Age=0; path=/; domain=.${domain}`;
+  }
+}
+
+/** Inject the pvuv loader once; accepting consent again must not add a second tag. */
+export function loadPvuv(siteId: string) {
+  if (!siteId || document.getElementById(PVUV_SCRIPT_ID)) return;
+  const script = document.createElement('script');
+  script.id = PVUV_SCRIPT_ID;
+  script.defer = true;
+  script.src = PVUV_SCRIPT_SRC;
+  script.dataset.site = siteId;
+  script.dataset.api = PVUV_API_BASE;
+  script.dataset.spa = 'true';
+  script.dataset.exclude = PVUV_EXCLUDE;
+  document.head.append(script);
+}
+
+/**
+ * Best-effort opt-out: the loader has no runtime switch, so removing the tag keeps later page
+ * loads from re-inserting it, and deleting its identifiers makes a new visit start from nothing.
+ */
+export function stopPvuv() {
+  document.getElementById(PVUV_SCRIPT_ID)?.remove();
+  clearCookies(name => PVUV_COOKIES.includes(name));
+  try {
+    for (const key of PVUV_STORAGE_KEYS) localStorage.removeItem(key);
+  } catch {
+    // Private browsing may refuse storage; the cookies are gone either way.
   }
 }
 
