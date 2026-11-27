@@ -1,6 +1,7 @@
 ## Neu
 
 - Fügen Sie Text, Links, Dateipfade und Bilder in das Hermes-Eingabefeld ein. Links und Pfade bleiben als Referenz-Chips erhalten, lange Einfügungen und Bilder aus der Zwischenablage werden zu Anhängen, und zu große Einfügungen werden vor dem Einfügen abgelehnt.
+- Die Hermes-Modellauswahl ist jetzt durchsuchbar, und die lokale Modellerkennung läuft in einem separaten Prozess. Das Durchsuchen von Modellen schreibt daher nicht mehr in das aktive Profil und blockiert den Chat nicht.
 
 ## Korrekturen
 
@@ -10,3 +11,6 @@
 - Eine gestoppte Antwortrunde zeigt jetzt eine klare Markierung für eine gestoppte Antwortrunde, und unterbrochene Antworten bleiben leer; die englische Oberfläche zeigt keinen chinesischen Stopptext mehr.
 - Senden während einer laufenden Antwort folgt der Richtlinie für Eingaben während einer laufenden Antwort: Die Nachricht wird umgeleitet, gesteuert oder eingereiht, statt eine zweite Antwortrunde zu starten; Stopp bleibt verfügbar.
 - Streaming- und Denk-Updates ziehen den Verlauf nicht mehr nach unten, während Sie ältere Nachrichten lesen. Er folgt dem neuesten Inhalt nur, wenn Sie bereits unten sind.
+- Installation, Aktualisierung und Deinstallation der Hermes-Laufzeit nutzen jetzt einen gemeinsamen Ablauf: Jede Installation wird in einem eigenen Verzeichnis vorbereitet, eine fehlgeschlagene Aktivierung wird zurückgerollt, nur von OpenNavo gestartete Prozesse werden bereinigt, und ein Gateway, das nicht startet, schlägt sofort fehl, statt den Chat halb gestartet zurückzulassen.
+- Der Verlauf bleibt clientübergreifend konsistent und folgt Profil-Umbenennungen und -Löschungen; Panel- und Modellstatus bleiben pro Fenster getrennt, und Aktionen sind an ihre eigene Antwortrunde gebunden, sodass eine Hintergrund-Antwortrunde keinen anderen Chat stoppen oder beenden kann.
+- Ein benutzerdefinierter Anbieter fällt nicht mehr stillschweigend auf integrierte Modelle zurück, wenn sein Katalog nicht erreichbar ist.
