@@ -25,8 +25,8 @@ use yaml_rust2::Yaml;
 use super::{
     AppError, AskAnswer, HermesAskReply, HermesChatInput, HermesChatReply, HermesChunk,
     HermesModelOptions, HermesRuntimeState, HermesSteerResult, HermesSteerStatus, HermesUsage,
-    append_audit, clean_output, kill_pid, provider_id, reasoning_effort, toolsets,
-    write_catalog_config, write_config,
+    TurnConfig, append_audit, clean_output, installing_error, kill_pid, provider_id,
+    reasoning_effort, toolsets,
 };
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -48,12 +48,18 @@ pub struct GatewayServer {
     pub token: String,
     fingerprint: String,
     pid: u32,
+    /// Process start time captured even when the ledger could not record a lease.
+    pid_started: String,
+    /// `stop` and `Drop` both run; the first one signals, the second is a no-op.
+    stopped: std::sync::atomic::AtomicBool,
     _child: Child,
+    /// Removes this backend from the ownership ledger; the child is stopped by `Drop`.
+    _lease: Option<super::hygiene::BackendLease>,
 }
 
 impl Drop for GatewayServer {
     fn drop(&mut self) {
-        kill_pid(self.pid);
+        self.stop();
     }
 }
 
@@ -62,7 +68,44 @@ impl GatewayServer {
         self.fingerprint == fingerprint
     }
 
+    /// A recorded backend's pid/start-time identity is the only evidence the child we own is
+    /// still the process behind the port. A dead child whose port was reused by another
+    /// listener must not be treated as reusable.
+    fn process_alive(&self) -> bool {
+        match &self._lease {
+            Some(lease) => lease.identity_matches(),
+            None if !self.pid_started.is_empty() => {
+                super::hygiene::identity_matches_pid(self.pid, &self.pid_started)
+            }
+            // No verifiable identity at all: an open port is not proof of our child.
+            None => false,
+        }
+    }
+
+    /// Record the children before signalling the backend: once it exits they are
+    /// reparented to launchd and a later cleanup can no longer find them by tree walk.
+    ///
+    /// Idempotent: `stop` and `Drop` both call this, and only the first call signals. When
+    /// the ledger holds a verified identity that no longer matches the pid (the process
+    /// exited and its pid was reused), the conservative choice is to signal nothing.
     pub fn stop(&self) {
+        if self.stopped.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let verified = match &self._lease {
+            Some(lease) => lease.identity_matches(),
+            None if !self.pid_started.is_empty() => {
+                super::hygiene::identity_matches_pid(self.pid, &self.pid_started)
+            }
+            None => false,
+        };
+        if !verified {
+            // Never signal a bare pid we cannot verify (or a port owned by another process).
+            return;
+        }
+        if let Some(lease) = &self._lease {
+            lease.snapshot_children();
+        }
         kill_pid(self.pid);
     }
 }
@@ -138,22 +181,102 @@ async fn port_open(port: u16) -> bool {
     .unwrap_or(false)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ServerAction {
+    Reuse,
+    Busy,
+    Restart,
+}
+
+/// Decide what to do with the tracked gateway before the slot is cleared.
+///
+/// The slot holds one `Arc`; a streaming chat holds its own while using the backend.
+/// Clearing the slot stops the child only when no caller is
+/// left, and a caller holding a reference therefore wins over the port probe: a 400 ms
+/// connect can time out on a loaded host while the backend is still streaming, and
+/// restarting on that false negative would cut the reply.
+fn server_action(matches: bool, alive: bool, references: usize) -> ServerAction {
+    if matches && alive {
+        return ServerAction::Reuse;
+    }
+    if references > 1 {
+        return ServerAction::Busy;
+    }
+    ServerAction::Restart
+}
+
 async fn ensure_server(
     bin: &Path,
     home: &Path,
+    root_home: &Path,
     state: &HermesRuntimeState,
     input: &HermesChatInput,
-    api_key: Option<&str>,
+    config: &mut TurnConfig,
 ) -> Result<Arc<GatewayServer>, AppError> {
-    let fingerprint = server_fingerprint(input, api_key);
+    // Fast path: the installer holds `installing` for a whole download, so most calls
+    // should fail immediately instead of waiting for the gateway slot.
+    if state.installing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(installing_error());
+    }
     let mut guard = state.gateway.lock().await;
-    if let Some(server) = guard.as_ref()
-        && server.matches(&fingerprint)
-        && port_open(server.port).await
-    {
-        return Ok(server.clone());
+    // Re-check under the same lock the installer takes at the end of the swap: a request
+    // that read `false` above could resume after the installer set the flag and finished
+    // its initial `stop()`, and would then start a gateway the cleanup kills later.
+    if state.installing.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(installing_error());
+    }
+    // The gateway decision and the files the started process reads must use one key. The
+    // prepared snapshot may predate a save that happened while this chat waited for the lock.
+    config.refresh_api_key(home, input);
+    let fingerprint = server_fingerprint(input, config.api_key());
+    if let Some(server) = guard.as_ref() {
+        let action = server_action(
+            server.matches(&fingerprint) && server.process_alive(),
+            port_open(server.port).await,
+            Arc::strong_count(server),
+        );
+        match action {
+            ServerAction::Reuse => {
+                // Only a request the gateway accepts may touch the profile's files. The
+                // config write happens under the gateway lock so two windows cannot race
+                // each other's `.env`/`config.yaml`.
+                config.apply(home, input)?;
+                return Ok(server.clone());
+            }
+            ServerAction::Busy => {
+                return Err(AppError::new(
+                    "E_HERMES_GATEWAY_BUSY",
+                    "Hermes is still serving a request. Try again when it completes.",
+                ));
+            }
+            ServerAction::Restart => {}
+        }
     }
     *guard = None;
+    // Only backends this app recorded in its own ledger are leftovers we may stop. A
+    // `serve --stop` scoped by `HERMES_HOME` would also kill a backend the user started
+    // manually for the same profile, so the reaper verifies pid + process start time
+    // against our records and never touches an unrecorded process. The slot is empty and
+    // no caller holds the previous server here, so a current-session record is a leftover
+    // too (e.g. one that ignored SIGTERM): reap it like a previous session's.
+    let report = super::hygiene::reap_owned_backends(root_home, Some(home), true).await;
+    if !report.failed.is_empty() {
+        let failures = report
+            .failed
+            .iter()
+            .map(|(profile, pid, _)| format!("{profile} (PID {pid})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppError::new(
+            "E_HERMES_GATEWAY",
+            "A previous Hermes backend could not be stopped.",
+        )
+        .with_detail(format!("Still running: {failures}")));
+    }
+    // The backend reads these files when it starts, so the merge has to land before the
+    // spawn. This is still under the gateway lock: a second window acquiring it next sees
+    // the accepted settings and reuses or restarts from them.
+    config.apply(home, input)?;
     let port = free_port()?;
     let token = uuid::Uuid::new_v4().to_string();
     let mut command = super::runtime_command(bin)?;
@@ -189,19 +312,35 @@ async fn ensure_server(
         .env("HERMES_DASHBOARD_SESSION_TOKEN", &token)
         .env("HERMES_TUI_TOOLSETS", toolsets(input))
         .env("PYTHONUNBUFFERED", "1")
+        // The runtime's own log is the place for detail, and its stderr can carry the
+        // dashboard session token or provider credentials. `gateway_exit_error` reports the
+        // exit status and points at the log instead of capturing these pipes.
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     apply_runtime_env(&mut command, bin);
-    let child = command.spawn().map_err(|error| {
+    let mut child = command.spawn().map_err(|error| {
         AppError::new("E_HERMES_GATEWAY", "Hermes gateway could not start.")
             .with_detail(error.to_string())
     })?;
     let pid = child.id().unwrap_or(0);
+    // Record the backend before it reports ready: a crash during startup then still
+    // leaves a record the next session can verify and stop. An unrecordable child is not
+    // published: without pid+start-time identity a later stop cannot verify it.
+    let Some(lease) = super::hygiene::record_backend(root_home, home, profile, pid) else {
+        let _ = child.kill().await;
+        return Err(AppError::new(
+            "E_HERMES_GATEWAY",
+            "Hermes gateway could not be recorded for safe shutdown.",
+        ));
+    };
     // Only the start future owns the child until the server below takes it. A dropped future
     // must not leave an isolated `hermes serve` behind, and SIGTERM alone does not guarantee
     // that: a child that refuses or ignores it survives. `StartingGateway` keeps the handle and
     // sends SIGKILL on drop; the normal handoff keeps `GatewayServer`'s SIGTERM lifecycle.
-    let mut starting = StartingGateway { child: Some(child) };
+    let mut starting = StartingGateway {
+        child: Some(child),
+        lease: Some(lease),
+    };
     let deadline = Instant::now() + START_TIMEOUT;
     while Instant::now() < deadline {
         // The child is checked before the port: an exited process has to be reported now, not
@@ -209,7 +348,7 @@ async fn ensure_server(
         match starting.child_mut().try_wait() {
             Ok(Some(status)) => {
                 // Reaped already: release the guard without signaling a dead pid.
-                starting.take();
+                starting.discard();
                 return Err(gateway_exit_error(status, home));
             }
             Ok(None) => {}
@@ -222,15 +361,16 @@ async fn ensure_server(
             }
         }
         if port_open(port).await {
-            let child = starting
-                .take()
-                .expect("the starting gateway already handed off");
+            let (child, lease) = starting.take();
             let server = Arc::new(GatewayServer {
                 port,
                 token,
                 fingerprint,
                 pid,
+                pid_started: super::hygiene::process_identity(pid).unwrap_or_default(),
+                stopped: std::sync::atomic::AtomicBool::new(false),
                 _child: child,
+                _lease: lease,
             });
             *guard = Some(server.clone());
             return Ok(server);
@@ -239,7 +379,7 @@ async fn ensure_server(
     }
     // An exit during the last sleep is an exit, not a timeout.
     if let Ok(Some(status)) = starting.child_mut().try_wait() {
-        starting.take();
+        starting.discard();
         return Err(gateway_exit_error(status, home));
     }
     Err(AppError::new(
@@ -258,6 +398,7 @@ async fn ensure_server(
 /// SIGTERM lifecycle.
 struct StartingGateway {
     child: Option<Child>,
+    lease: Option<super::hygiene::BackendLease>,
 }
 
 impl StartingGateway {
@@ -267,15 +408,31 @@ impl StartingGateway {
             .expect("the starting gateway already handed off")
     }
 
-    /// Take the child out: for handoff, or to drop an already-reaped process without signaling.
-    fn take(&mut self) -> Option<Child> {
-        self.child.take()
+    /// Hand the child and its ledger lease to `GatewayServer`.
+    fn take(&mut self) -> (Child, Option<super::hygiene::BackendLease>) {
+        let child = self
+            .child
+            .take()
+            .expect("the starting gateway already handed off");
+        (child, self.lease.take())
+    }
+
+    /// Release an already-reaped process without signaling it; the lease decides whether the
+    /// record still has live children to clean up later.
+    fn discard(&mut self) {
+        self.child.take();
+        self.lease.take();
     }
 }
 
 impl Drop for StartingGateway {
     fn drop(&mut self) {
         if let Some(mut child) = self.child.take() {
+            // Snapshot before SIGKILL: after the root exits its children are reparented and a
+            // later cleanup can no longer find them by tree walk.
+            if let Some(lease) = &self.lease {
+                lease.snapshot_children();
+            }
             let _ = child.start_kill();
         }
     }
@@ -686,6 +843,9 @@ fn encode_bytes(bytes: &[u8]) -> String {
 /// Remote attachments travel inside one JSON-RPC frame. The panel raises its websocket limit
 /// for this (`_DESKTOP_ATTACHMENT_WS_MAX_BYTES`); 16 MiB matches the webapp upload cap.
 const REMOTE_ATTACHMENT_MAX_BYTES: u64 = 16 * 1024 * 1024;
+/// One turn cannot pull an unbounded number of 16 MiB files into memory (base64 expands them
+/// again). The whole remote attachment set shares this budget.
+const REMOTE_ATTACHMENT_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
 const ATTACHMENT_RPC_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn file_name(path: &Path) -> String {
@@ -699,6 +859,21 @@ async fn prepare_attachments(
     input: &HermesChatInput,
     remote: bool,
 ) -> Result<Vec<PreparedAttachment>, AppError> {
+    prepare_attachments_with_limits(
+        input,
+        remote,
+        REMOTE_ATTACHMENT_MAX_BYTES,
+        REMOTE_ATTACHMENT_TOTAL_BYTES,
+    )
+    .await
+}
+
+async fn prepare_attachments_with_limits(
+    input: &HermesChatInput,
+    remote: bool,
+    per_file_limit: u64,
+    total_limit: u64,
+) -> Result<Vec<PreparedAttachment>, AppError> {
     if remote {
         input
             .profile_id
@@ -708,6 +883,7 @@ async fn prepare_attachments(
             .ok_or_else(super::remote_auth_required)?;
     }
     let mut prepared = Vec::with_capacity(input.attachments.len());
+    let mut total = 0_u64;
     for attachment in &input.attachments {
         let path = Path::new(attachment);
         let metadata = tokio::fs::metadata(path).await.map_err(|error| {
@@ -722,20 +898,25 @@ async fn prepare_attachments(
         }
         let name = file_name(path);
         let kind = if remote {
-            if metadata.len() > REMOTE_ATTACHMENT_MAX_BYTES {
+            // Read through a cap instead of trusting stat and then buffering the whole file:
+            // a file that grows between the two used to reach memory before being rejected.
+            let bytes = read_limited(path, per_file_limit)
+                .await
+                .map_err(|error| match error {
+                    LimitedRead::TooLarge => AppError::new(
+                        "E_HERMES_ATTACHMENT",
+                        "Remote attachments are limited to 16 MB each.",
+                    ),
+                    LimitedRead::Io(detail) => {
+                        AppError::new("E_HERMES_ATTACHMENT", "Could not read the attached file.")
+                            .with_detail(detail)
+                    }
+                })?;
+            total = total.saturating_add(bytes.len() as u64);
+            if total > total_limit {
                 return Err(AppError::new(
                     "E_HERMES_ATTACHMENT",
-                    "Remote attachments are limited to 16 MB.",
-                ));
-            }
-            let bytes = tokio::fs::read(path).await.map_err(|error| {
-                AppError::new("E_HERMES_ATTACHMENT", "Could not read the attached file.")
-                    .with_detail(error.to_string())
-            })?;
-            if bytes.len() as u64 > REMOTE_ATTACHMENT_MAX_BYTES {
-                return Err(AppError::new(
-                    "E_HERMES_ATTACHMENT",
-                    "Remote attachments are limited to 16 MB.",
+                    "Remote attachments for one turn exceed the total size limit.",
                 ));
             }
             if remote_image_bytes(path) {
@@ -757,6 +938,30 @@ async fn prepare_attachments(
     Ok(prepared)
 }
 
+enum LimitedRead {
+    TooLarge,
+    Io(String),
+}
+
+/// Read at most `limit` bytes plus one byte to detect overflow. The buffer never grows past
+/// the per-file cap, even if the file keeps growing while it is read.
+async fn read_limited(path: &Path, limit: u64) -> Result<Vec<u8>, LimitedRead> {
+    use tokio::io::AsyncReadExt;
+
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| LimitedRead::Io(error.to_string()))?;
+    let mut reader = file.take(limit.saturating_add(1));
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|error| LimitedRead::Io(error.to_string()))?;
+    if bytes.len() as u64 > limit {
+        return Err(LimitedRead::TooLarge);
+    }
+    Ok(bytes)
+}
 fn attach_params(attachment: &PreparedAttachment, session_id: &str) -> (&'static str, Value) {
     match &attachment.kind {
         AttachKind::LocalImage => (
@@ -802,8 +1007,17 @@ pub async fn chat(
     // `--profile` makes the runtime re-home to `<root>/profiles/<name>` before it reads any
     // config, so the model and `.env` must be written there rather than to the shared root.
     let config_home = super::profiles::resolve_home(home, input.profile.as_deref())?;
-    let api_key = write_config(&config_home, &input)?;
-    let server = ensure_server(bin, &config_home, state, &input, api_key.as_deref()).await?;
+    // Compute the key and fingerprint first and write nothing yet: `ensure_server` rejects
+    // installing/busy requests, and those must not have altered the profile's config or
+    // credentials. It applies this plan under the gateway lock once the turn is accepted.
+    let mut config = TurnConfig::prepare(&config_home, &input);
+    // The cancellation identity exists before the gateway decision, connection, and
+    // attachment reads; a Stop during any of them is not lost.
+    let (registration, cancel, answered) = start_turn(state, &input, "", None);
+    let server = ensure_server(bin, &config_home, home, state, &input, &mut config).await?;
+    if cancel.is_cancelled() {
+        return Ok(cancelled_reply(None, None));
+    }
     let url = format!(
         "ws://127.0.0.1:{}/api/ws?token={}",
         server.port, server.token
@@ -816,7 +1030,23 @@ pub async fn chat(
         .with_detail(error.to_string())
     })?;
     let attachments = prepare_attachments(&input, false).await?;
-    chat_over_socket(socket, home, state, input, attachments, app, sink, false).await
+    if cancel.is_cancelled() {
+        return Ok(cancelled_reply(None, None));
+    }
+    chat_over_socket(
+        socket,
+        home,
+        state,
+        input,
+        attachments,
+        app,
+        sink,
+        false,
+        registration,
+        cancel,
+        answered,
+    )
+    .await
 }
 
 fn remote_ws_url_auth(url: &str, query: &str) -> Result<String, AppError> {
@@ -882,24 +1112,56 @@ pub async fn chat_remote_auth(
     app: Option<&AppHandle>,
     sink: Option<UnboundedSender<String>>,
 ) -> Result<HermesChatReply, AppError> {
-    // Read attachments before opening the socket. The panel ws ticket is single-use and lives
-    // for 30 seconds, so it is minted immediately before connect, after this local read.
+    // Bind the Panel login before reading attachments. The stop identity exists from here on;
+    // the ticket is still minted after the local read because it is short-lived and single-use.
+    let profile_id = input
+        .profile_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let session = match (query, profile_id) {
+        (None, Some(profile_id)) => Some(super::panel_session(profile_id)?),
+        _ => None,
+    };
+    let (registration, cancel, answered) = start_turn(
+        state,
+        &input,
+        "",
+        session.as_ref().map(|session| session.login_id.as_str()),
+    );
     let attachments = prepare_attachments(&input, true).await?;
-    let query = match query {
-        Some(query) => query.to_owned(),
+    if cancel.is_cancelled() {
+        return Ok(cancelled_reply(None, None));
+    }
+    let (url, query) = match query {
+        Some(query) => (url.to_owned(), query.to_owned()),
         None => {
-            let profile_id = input
-                .profile_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(super::remote_auth_required)?;
-            let ticket = super::panel::ticket_for(profile_id).await?;
-            format!("ticket={}", urlencoding::encode(&ticket))
+            let profile_id = profile_id.ok_or_else(super::remote_auth_required)?;
+            // Reuse the login captured before the attachment read. A re-login during that
+            // read makes the ticket mint fail instead of silently acting on the new session.
+            let session = session.as_ref().ok_or_else(super::remote_auth_required)?;
+            let request = super::panel::ticket_for_login(profile_id, &session.login_id).await?;
+            (
+                request.base_url,
+                format!("ticket={}", urlencoding::encode(&request.ticket)),
+            )
         }
     };
-    let socket = connect_remote_auth(url, &query).await?;
-    chat_over_socket(socket, home, state, input, attachments, app, sink, true).await
+    let socket = connect_remote_auth(&url, &query).await?;
+    chat_over_socket(
+        socket,
+        home,
+        state,
+        input,
+        attachments,
+        app,
+        sink,
+        true,
+        registration,
+        cancel,
+        answered,
+    )
+    .await
 }
 
 /// Fallback window when an approval carries no `timeout_s`. Matches the runtime's own
@@ -1455,6 +1717,9 @@ async fn chat_over_socket(
     app: Option<&AppHandle>,
     sink: Option<UnboundedSender<String>>,
     remote: bool,
+    _registration: TurnStart<'_>,
+    cancel: std::sync::Arc<super::TurnCancel>,
+    answered: tokio::sync::mpsc::UnboundedReceiver<AskAnswer>,
 ) -> Result<HermesChatReply, AppError> {
     // The runtime fails every server→client request fast for a connection that never advertised
     // handling them (`server_requests.py::advertise`). Without this the approval queue waits out its
@@ -1466,8 +1731,14 @@ async fn chat_over_socket(
         json!({"server_requests": true}),
     )
     .await;
+    if cancel.is_cancelled() {
+        // The stop landed before we even asked for a session: never create one.
+        return Ok(cancelled_reply(None, None));
+    }
     let (live_sid, stored_sid, open_requests, resumed, resumed_generation) =
         open_session(&mut socket, &input, home, remote).await?;
+    // Bind the live session now; cancellation was already possible before this point.
+    state.bind_turn_scope(&input.request_id, &cancel, &live_sid, None);
     // The runtime keeps clarify's deadline server-side, so mirror its configured value: the local
     // profile's config.yaml, or a remote host's own config. Unreadable config falls back to the
     // schema default; `None` means the runtime waits forever.
@@ -1492,6 +1763,18 @@ async fn chat_over_socket(
                 "busyInputMode": busy_mode
             }),
         );
+    }
+    // The UI received the live id above, so it can retire this turn even if the Stop landed
+    // while the session was being created. Never submit the prompt in that case.
+    if cancel.is_cancelled() {
+        let _ = rpc(
+            &mut socket,
+            99,
+            "session.interrupt",
+            json!({"session_id": live_sid}),
+        )
+        .await;
+        return Ok(cancelled_reply(Some(&live_sid), Some(&stored_sid)));
     }
     // A remote host still owns its tools, so its approval must reach the user even though this Mac's
     // capabilities are forced off.
@@ -1538,13 +1821,24 @@ async fn chat_over_socket(
             prompt.push_str(reference);
         }
     }
+    // Uploads can take a while; a Stop that landed during them must still prevent submission.
+    if cancel.is_cancelled() {
+        let _ = rpc(
+            &mut socket,
+            99,
+            "session.interrupt",
+            json!({"session_id": live_sid}),
+        )
+        .await;
+        return Ok(cancelled_reply(Some(&live_sid), Some(&stored_sid)));
+    }
     send_json(
         &mut socket,
         json!({"jsonrpc": "2.0", "id": 4, "method": "prompt.submit", "params": {"session_id": live_sid, "text": prompt}}),
     )
     .await?;
 
-    let result = stream_turn(
+    stream_turn(
         &mut socket,
         home,
         state,
@@ -1556,11 +1850,10 @@ async fn chat_over_socket(
         policy,
         open_requests,
         resumed_generation,
+        Some(cancel),
+        Some(answered),
     )
-    .await;
-    // The cards, and the sender a late answer would reach, die with the turn.
-    *state.asks.lock().await = None;
-    result
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1576,10 +1869,19 @@ async fn stream_turn(
     policy: AskPolicy,
     open_requests: Vec<Value>,
     resumed_generation: Option<i64>,
+    pre_registered: Option<std::sync::Arc<super::TurnCancel>>,
+    pre_answered: Option<tokio::sync::mpsc::UnboundedReceiver<AskAnswer>>,
 ) -> Result<HermesChatReply, AppError> {
     let mut asks: Vec<PendingAsk> = Vec::new();
-    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<AskAnswer>();
-    *state.asks.lock().await = Some(answers);
+    // Production registers before async setup. Direct test callers get the old behavior: the
+    // guard and channel are created here and live for the turn.
+    let (_fallback_registration, cancel, mut answered) = match (pre_registered, pre_answered) {
+        (Some(cancel), Some(answered)) => (None, cancel, answered),
+        _ => {
+            let (registration, cancel, answered) = start_turn(state, input, live_sid, None);
+            (Some(registration), cancel, answered)
+        }
+    };
     // A question still waiting on the previous connection is re-delivered here, as the official
     // client does with `session.resume`'s `open_requests`.
     for entry in open_requests {
@@ -1618,7 +1920,19 @@ async fn stream_turn(
     // strictly newer, so the snapshot is only a floor: publishing it would steer with a value
     // the gateway is about to retire.
     let mut execution_generation = resumed_generation;
+    let mut cancel_seen = false;
     loop {
+        // A cancellation may have fired before this loop reached its select (or while the
+        // previous frame was handled). The stored flag makes it consumable exactly once.
+        if !cancel_seen && cancel.is_cancelled() {
+            cancel_seen = true;
+            for ask in asks.drain(..) {
+                send_response(socket, &ask.target, ask.kind.refusal(), live_sid).await?;
+                emit_settled(app, &settled_note(&ask, "cancelled", None, None));
+            }
+            deadline = Instant::now() + MESSAGE_TIMEOUT;
+            continue;
+        }
         // A parked question owns the clock: the turn's stall budget does not run while the user decides.
         if asks.is_empty() && Instant::now() >= deadline {
             let _ = send_json(
@@ -1657,7 +1971,7 @@ async fn stream_turn(
                     tokio::select! {
                         frame = next_frame(socket, None) => Step::Frame(frame?),
                         answer = answered.recv() => Step::Answer(answer),
-                        _ = state.approval_cancel.notified() => Step::Cancelled,
+                        _ = cancel.cancelled() => Step::Cancelled,
                         _ = sleep(wait) => Step::Expired,
                     }
                 }
@@ -1665,7 +1979,7 @@ async fn stream_turn(
                 None => tokio::select! {
                     frame = next_frame(socket, None) => Step::Frame(frame?),
                     answer = answered.recv() => Step::Answer(answer),
-                    _ = state.approval_cancel.notified() => Step::Cancelled,
+                    _ = cancel.cancelled() => Step::Cancelled,
                 },
             };
             match step {
@@ -1687,6 +2001,7 @@ async fn stream_turn(
                 }
                 // The turn was stopped (⌘⇧.) or the channel died: fail closed on every open card.
                 Step::Answer(None) | Step::Cancelled => {
+                    cancel_seen = true;
                     for ask in asks.drain(..) {
                         send_response(socket, &ask.target, ask.kind.refusal(), live_sid).await?;
                         emit_settled(app, &settled_note(&ask, "cancelled", None, None));
@@ -1719,7 +2034,13 @@ async fn stream_turn(
         if let Some(error) = rpc_error(&value)
             && value.get("id").and_then(Value::as_u64) == Some(4)
         {
-            append_audit(home, input, "failed", Some(stored_sid), Some(&error));
+            append_audit(
+                home,
+                input,
+                "failed",
+                Some(stored_sid),
+                Some("gateway_error"),
+            );
             return Err(AppError::new("E_HERMES_GATEWAY_STREAM", error));
         }
         // A server→client request: the turn is parked on a human answer. Approvals, clarify questions
@@ -1857,7 +2178,13 @@ async fn stream_turn(
                     .and_then(Value::as_str)
                     .unwrap_or("complete");
                 if status == "error" {
-                    append_audit(home, input, "failed", Some(stored_sid), Some(&text));
+                    append_audit(
+                        home,
+                        input,
+                        "failed",
+                        Some(stored_sid),
+                        Some("provider_error"),
+                    );
                     return Err(AppError::new("E_HERMES_GATEWAY_STREAM", text));
                 }
                 // Official desktop treats `interrupted` as a stopped turn: Hermes
@@ -1894,7 +2221,13 @@ async fn stream_turn(
                     .and_then(Value::as_str)
                     .unwrap_or("Hermes gateway returned an error.")
                     .to_owned();
-                append_audit(home, input, "failed", Some(stored_sid), Some(&message));
+                append_audit(
+                    home,
+                    input,
+                    "failed",
+                    Some(stored_sid),
+                    Some("gateway_error"),
+                );
                 return Err(AppError::new("E_HERMES_GATEWAY_STREAM", message));
             }
             "request.cancel" => {
@@ -1944,6 +2277,65 @@ async fn stream_turn(
     }
 }
 
+/// Removes one turn's ask/cancel registration when the turn ends or its future is dropped.
+struct TurnStart<'a> {
+    state: &'a HermesRuntimeState,
+    turn: String,
+    cancel: std::sync::Arc<super::TurnCancel>,
+}
+
+impl Drop for TurnStart<'_> {
+    fn drop(&mut self) {
+        self.state.unregister_turn_asks(&self.turn, &self.cancel);
+    }
+}
+
+/// Register the cancellation identity before any async setup (gateway start, attachments,
+/// session creation). A stop that arrives while those run must still be visible and must
+/// prevent the prompt from being submitted.
+fn start_turn<'a>(
+    state: &'a HermesRuntimeState,
+    input: &HermesChatInput,
+    live_session_id: &str,
+    panel_login: Option<&str>,
+) -> (
+    TurnStart<'a>,
+    std::sync::Arc<super::TurnCancel>,
+    tokio::sync::mpsc::UnboundedReceiver<AskAnswer>,
+) {
+    let (answers, answered) = tokio::sync::mpsc::unbounded_channel::<AskAnswer>();
+    let remote = input
+        .gateway_url
+        .as_deref()
+        .is_some_and(|url| !url.trim().is_empty());
+    let cancel = state.register_turn_asks(&input.request_id, live_session_id, remote, answers);
+    if let Some(login) = panel_login {
+        state.bind_turn_scope(&input.request_id, &cancel, live_session_id, Some(login));
+    }
+    (
+        TurnStart {
+            state,
+            turn: input.request_id.clone(),
+            cancel: cancel.clone(),
+        },
+        cancel,
+        answered,
+    )
+}
+
+fn cancelled_reply(
+    live_session_id: Option<&str>,
+    stored_session_id: Option<&str>,
+) -> HermesChatReply {
+    HermesChatReply {
+        text: String::new(),
+        session_id: stored_session_id.map(str::to_owned),
+        live_session_id: live_session_id.map(str::to_owned),
+        usage: None,
+        interrupted: true,
+    }
+}
+
 async fn connect_running(state: &HermesRuntimeState) -> Result<Socket, AppError> {
     let server = state
         .gateway
@@ -1968,9 +2360,18 @@ async fn connect_running(state: &HermesRuntimeState) -> Result<Socket, AppError>
         })
 }
 
-pub async fn interrupt(state: &HermesRuntimeState, live_session_id: &str) -> Result<(), AppError> {
-    // Wakes the running turn's card wait, which fails closed on every open ask itself.
-    state.approval_cancel.notify_waiters();
+pub async fn interrupt(
+    state: &HermesRuntimeState,
+    live_session_id: &str,
+    turn_request_id: Option<&str>,
+) -> Result<(), AppError> {
+    // Wakes only this turn's card wait; other windows (including a Panel host that reused
+    // this session id) keep theirs. The turn then fails closed on its own open asks.
+    state.cancel_turn_asks(turn_request_id, Some(live_session_id), false);
+    if live_session_id.trim().is_empty() {
+        // The turn has no session yet: the stored cancel flag ends its initialization.
+        return Ok(());
+    }
     let mut socket = connect_running(state).await?;
     rpc(
         &mut socket,
@@ -2141,61 +2542,6 @@ fn steer_result(result: Value) -> Result<HermesSteerResult, AppError> {
     Ok(HermesSteerResult { status, delivered })
 }
 
-/// Read the official Hermes model catalog through the local gateway.
-pub async fn model_options(
-    bin: &Path,
-    home: &Path,
-    state: &HermesRuntimeState,
-    input: HermesChatInput,
-    refresh: bool,
-    include_unconfigured: bool,
-) -> Result<HermesModelOptions, AppError> {
-    let config_home = super::profiles::resolve_home(home, input.profile.as_deref())?;
-    // A catalog read must not rewrite the profile's model, agent or auxiliary settings: the
-    // settings sheet loads a profile's catalog just by selecting it, passing that profile's
-    // saved draft (or the built-in default when this window never opened it), so a full write
-    // here replaced the profile's own model with whatever the draft happened to hold.
-    let api_key = write_catalog_config(&config_home, &input)?;
-    let profile = input.profile.clone();
-    let read = |api_key: &Option<String>| {
-        let config_home = config_home.clone();
-        let input = input.clone();
-        let api_key = api_key.clone();
-        let profile = profile.clone();
-        async move {
-            let server =
-                ensure_server(bin, &config_home, state, &input, api_key.as_deref()).await?;
-            let url = format!(
-                "ws://127.0.0.1:{}/api/ws?token={}",
-                server.port, server.token
-            );
-            let (socket, _) = connect_async(url).await.map_err(|error| {
-                AppError::new(
-                    "E_HERMES_GATEWAY_STREAM",
-                    "Could not connect to the Hermes gateway.",
-                )
-                .with_detail(error.to_string())
-            })?;
-            // Hold this clone across the read. The last `GatewayServer` drops kills the child,
-            // and a non-lexical drop at `server.token` would let a concurrent restart do that
-            // while this socket is still open.
-            let options = model_options_over_socket(
-                socket,
-                refresh,
-                include_unconfigured,
-                profile.as_deref(),
-            )
-            .await;
-            drop(server);
-            options
-        }
-    };
-    match read(&api_key).await {
-        Err(error) => model_options_once_more(error, read(&api_key)).await,
-        result => result,
-    }
-}
-
 async fn model_options_over_socket(
     mut socket: Socket,
     refresh: bool,
@@ -2219,7 +2565,7 @@ async fn model_options_over_socket(
     .map_err(|_| {
         AppError::new(
             "E_HERMES_MODEL_OPTIONS_TIMEOUT",
-            "加载官方模型目录超时，请稍后重试。",
+            "Loading the model catalog timed out.",
         )
     })??;
     serde_json::from_value(result).map_err(|error| {
@@ -2262,6 +2608,488 @@ mod tests {
 
     use super::*;
     use crate::hermes::HermesClarifyAnswer;
+
+    #[test]
+    fn a_busy_managed_gateway_is_never_restarted_under_a_request() {
+        // Matching fingerprint and alive: reuse, even while a caller holds the backend.
+        assert_eq!(server_action(true, true, 2), ServerAction::Reuse);
+        // Different fingerprint but a caller still holds the Arc: do not stop its stream.
+        assert_eq!(server_action(false, true, 2), ServerAction::Busy);
+        // Different fingerprint and only the slot holds it: replace it.
+        assert_eq!(server_action(false, true, 1), ServerAction::Restart);
+        // A false-negative port probe must not discard a backend a caller still holds.
+        assert_eq!(server_action(false, false, 2), ServerAction::Busy);
+        assert_eq!(server_action(true, false, 2), ServerAction::Busy);
+        // No caller left: a dead or mismatched backend is replaced.
+        assert_eq!(server_action(false, false, 1), ServerAction::Restart);
+        assert_eq!(server_action(true, false, 1), ServerAction::Restart);
+    }
+
+    /// A request the gateway rejects must leave the profile exactly as it found it. `chat`
+    /// used to persist the supplied key and config before `ensure_server` decided whether the
+    /// turn could run, so an install-time or busy rejection still rewrote `config.yaml`/`.env`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_rejected_chat_leaves_the_profile_bytes_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = b"model:\n  provider: nous\n  default: hand-written\n";
+        let env = b"NOUS_API_KEY=nous-hand-written\n";
+        std::fs::write(dir.path().join("config.yaml"), config).unwrap();
+        std::fs::write(dir.path().join(".env"), env).unwrap();
+        let state = HermesRuntimeState::default();
+        state
+            .installing
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut input = gateway_input(None);
+        input.provider = "openai".into();
+        input.model = "gpt-rejected".into();
+        input.api_key = Some("sk-rejected-DO-NOT-WRITE".into());
+
+        let error = chat(
+            Path::new("/nonexistent/hermes"),
+            dir.path(),
+            &state,
+            input,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code, "E_HERMES_INSTALLING");
+        assert_eq!(
+            std::fs::read(dir.path().join("config.yaml")).unwrap(),
+            config
+        );
+        assert_eq!(std::fs::read(dir.path().join(".env")).unwrap(), env);
+    }
+
+    /// The busy decision is made while holding the gateway lock; it rejects the turn without
+    /// applying its plan. A second window on the same profile must not rewrite the config the
+    /// running turn is using.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_busy_gateway_rejects_a_chat_without_writing_its_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = b"model:\n  provider: nous\n  default: hand-written\n";
+        let env = b"NOUS_API_KEY=nous-hand-written\n";
+        std::fs::write(dir.path().join("config.yaml"), config).unwrap();
+        std::fs::write(dir.path().join(".env"), env).unwrap();
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap_or(0);
+        let server = Arc::new(GatewayServer {
+            port,
+            token: "test-token".into(),
+            fingerprint: "another-profile".into(),
+            pid,
+            pid_started: super::super::hygiene::process_identity(pid).unwrap_or_default(),
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            _child: child,
+            _lease: None,
+        });
+        let state = HermesRuntimeState::default();
+        // A second reference makes the mismatch `Busy` instead of `Restart`.
+        let held = server.clone();
+        *state.gateway.lock().await = Some(server);
+        let mut input = gateway_input(None);
+        input.provider = "openai".into();
+        input.model = "gpt-rejected".into();
+        input.api_key = Some("sk-rejected-DO-NOT-WRITE".into());
+
+        let error = chat(
+            Path::new("/nonexistent/hermes"),
+            dir.path(),
+            &state,
+            input,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code, "E_HERMES_GATEWAY_BUSY");
+        assert_eq!(
+            std::fs::read(dir.path().join("config.yaml")).unwrap(),
+            config
+        );
+        assert_eq!(std::fs::read(dir.path().join(".env")).unwrap(), env);
+        drop(held);
+        if let Some(server) = state.gateway.lock().await.take() {
+            server.stop();
+        }
+        drop(listener);
+    }
+
+    /// If the stored key changes after the fingerprint decision, applying the plan must
+    /// fail without touching either file; a runtime with a different key would otherwise be
+    /// treated as the accepted one.
+    #[test]
+    fn apply_refuses_a_key_that_changed_after_the_decision() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-old\n").unwrap();
+        let original = b"model:\n  provider: nous\n";
+        std::fs::write(dir.path().join("config.yaml"), original).unwrap();
+        let mut input = gateway_input(None);
+        input.provider = "openai".into();
+        input.api_key = None;
+        let config = TurnConfig::prepare(dir.path(), &input);
+        std::fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-new\n").unwrap();
+
+        let error = config.apply(dir.path(), &input).unwrap_err();
+        assert_eq!(error.code, "E_HERMES_CREDENTIAL_CHANGED");
+        assert_eq!(
+            std::fs::read(dir.path().join("config.yaml")).unwrap(),
+            original
+        );
+    }
+
+    /// A turn stopped before session creation returns interrupted without creating a session
+    /// or submitting its prompt.
+    #[tokio::test]
+    async fn a_pre_cancelled_turn_never_creates_a_session_or_submits() {
+        use std::sync::Arc;
+
+        let (client, mut server) = ws_pair().await;
+        let input = parallel_turn_input("req-pre-cancel");
+        let state = Arc::new(HermesRuntimeState::default());
+        let (registration, cancel, answered) = start_turn(&state, &input, "", None);
+        cancel.cancel();
+        let server_task = tokio::spawn(async move {
+            // capabilities is the only frame this turn may send.
+            let capabilities = next_text(&mut server).await;
+            assert_eq!(capabilities["method"], "client.capabilities");
+            server
+                .send(Message::Text(
+                    json!({"jsonrpc": "2.0", "id": 0, "result": {}})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            let mut extra = Vec::new();
+            loop {
+                match timeout(Duration::from_millis(100), server.next()).await {
+                    Ok(Some(Ok(Message::Text(text)))) => extra.push(text.to_string()),
+                    Ok(Some(Ok(_))) => continue,
+                    _ => break,
+                }
+            }
+            assert!(
+                extra
+                    .iter()
+                    .all(|text| !text.contains("session.create") && !text.contains("prompt.submit")),
+                "a cancelled turn must not create a session or submit a prompt: {extra:?}"
+            );
+        });
+        let reply = chat_over_socket(
+            client,
+            Path::new("/tmp"),
+            &state,
+            input,
+            Vec::new(),
+            None,
+            None,
+            false,
+            registration,
+            cancel,
+            answered,
+        )
+        .await
+        .unwrap();
+        assert!(reply.interrupted);
+        server_task.await.unwrap();
+    }
+
+    /// The cancel identity exists before any async setup: a stop during gateway/session
+    /// creation is visible, waitable, and bound to the real session/login afterwards.
+    #[tokio::test]
+    async fn a_stop_before_streaming_is_visible_and_scoped() {
+        use std::sync::Arc;
+
+        let state = Arc::new(HermesRuntimeState::default());
+        let input = parallel_turn_input("req-early");
+        let (_registration, cancel, _answered) = start_turn(&state, &input, "", Some("login-a"));
+        assert!(!cancel.is_cancelled());
+        state.cancel_turn_asks(Some("req-early"), None, true);
+        assert!(cancel.is_cancelled());
+        timeout(Duration::from_millis(50), cancel.cancelled())
+            .await
+            .expect("a pre-registered cancel must be consumable immediately");
+
+        state.bind_turn_scope("req-early", &cancel, "live-shared", None);
+        assert_eq!(
+            state.turn_panel_login(Some("req-early")).as_deref(),
+            Some("login-a")
+        );
+    }
+
+    /// A Panel turn id must not authorize the local hard-stop path (it could take an idle
+    /// local gateway slot even though that turn belongs to another host).
+    #[tokio::test]
+    async fn a_panel_turn_cannot_take_the_local_gateway_slot() {
+        use std::sync::Arc;
+
+        let state = Arc::new(HermesRuntimeState::default());
+        let remote = HermesChatInput {
+            gateway_url: Some("http://panel.example:9119".into()),
+            profile_id: Some("panel".into()),
+            panel_auth: true,
+            ..parallel_turn_input("req-panel")
+        };
+        let (_registration, cancel, _answered) =
+            start_turn(&state, &remote, "live-panel", Some("login-panel"));
+        // An idle local server occupies the slot; the Panel id must not take it.
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id().unwrap();
+        let pid_started = super::super::hygiene::process_identity(pid).unwrap_or_default();
+        let server = Arc::new(GatewayServer {
+            port: 0,
+            token: String::new(),
+            fingerprint: String::new(),
+            pid,
+            pid_started,
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            _child: child,
+            _lease: None,
+        });
+        *state.gateway.lock().await = Some(server.clone());
+        super::super::stop_local(&state, Some("req-panel"))
+            .await
+            .unwrap();
+        assert!(
+            !cancel.is_cancelled(),
+            "the local stop path must ignore a Panel-owned turn"
+        );
+        let slot = state
+            .gateway
+            .lock()
+            .await
+            .clone()
+            .expect("the idle local server slot must remain");
+        assert!(
+            Arc::ptr_eq(&slot, &server),
+            "a Panel turn id replaced the local server slot"
+        );
+        if let Some(server) = state.gateway.lock().await.take() {
+            server.stop();
+        }
+        drop(slot);
+        drop(server);
+        assert!(wait_until_gone(pid as i32).await, "mock server survived");
+    }
+
+    /// Install/uninstall wakes every local card wait but leaves a Panel card waiting.
+    #[tokio::test]
+    async fn an_install_stop_cancels_local_cards_but_not_panel_cards() {
+        use std::sync::Arc;
+
+        let state = Arc::new(HermesRuntimeState::default());
+        let local = parallel_turn_input("req-local");
+        let remote = HermesChatInput {
+            gateway_url: Some("http://panel.example:9119".into()),
+            profile_id: Some("panel".into()),
+            panel_auth: true,
+            ..parallel_turn_input("req-remote")
+        };
+        let (_local_registration, local_cancel, _local_answered) =
+            start_turn(&state, &local, "live-local", None);
+        let (_remote_registration, remote_cancel, _remote_answered) =
+            start_turn(&state, &remote, "live-remote", Some("login-panel"));
+        super::super::stop_local(&state, None).await.unwrap();
+        assert!(local_cancel.is_cancelled());
+        assert!(!remote_cancel.is_cancelled());
+    }
+
+    /// The gateway-slot re-check sees a turn that finished while the stop waited.
+    #[tokio::test]
+    async fn a_hard_stop_rechecks_registration_under_the_gateway_lock() {
+        use std::sync::Arc;
+
+        let state = Arc::new(HermesRuntimeState::default());
+        let first = parallel_turn_input("req-first");
+        let (_registration, cancel, _answered) = start_turn(&state, &first, "live-1", None);
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id().unwrap();
+        let pid_started = super::super::hygiene::process_identity(pid).unwrap_or_default();
+        let server = Arc::new(GatewayServer {
+            port: 0,
+            token: String::new(),
+            fingerprint: String::new(),
+            pid,
+            pid_started,
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            _child: child,
+            _lease: None,
+        });
+        *state.gateway.lock().await = Some(server);
+
+        let guard = state.gateway.lock().await;
+        let task_state = state.clone();
+        let task =
+            tokio::spawn(
+                async move { super::super::stop_local(&task_state, Some("req-first")).await },
+            );
+        // Wait until the stop passed its first registration check and is blocked on the slot.
+        timeout(Duration::from_secs(2), async {
+            while !cancel.is_cancelled() {
+                sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the stop did not reach the registered turn");
+        state.unregister_turn_asks("req-first", &cancel);
+        let second = parallel_turn_input("req-second");
+        let (_second_registration, second_cancel, _second_answered) =
+            start_turn(&state, &second, "live-2", None);
+        drop(guard);
+        task.await.unwrap().unwrap();
+        assert!(!second_cancel.is_cancelled());
+        assert!(
+            state.gateway.lock().await.is_some(),
+            "a superseded hard stop removed the live server slot"
+        );
+        assert!(
+            process_alive(pid as i32),
+            "a superseded hard stop killed the mock server"
+        );
+        if let Some(server) = state.gateway.lock().await.take() {
+            server.stop();
+        }
+    }
+
+    /// A normal successful hard stop takes the slot, so the SIGTERM'd server cannot be reused.
+    #[tokio::test]
+    async fn a_successful_hard_stop_clears_the_gateway_slot() {
+        use std::sync::Arc;
+
+        let state = Arc::new(HermesRuntimeState::default());
+        let input = parallel_turn_input("req-only");
+        let (_registration, _cancel, _answered) = start_turn(&state, &input, "live-only", None);
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id().unwrap();
+        let pid_started = super::super::hygiene::process_identity(pid).unwrap_or_default();
+        let server = Arc::new(GatewayServer {
+            port: 0,
+            token: String::new(),
+            fingerprint: String::new(),
+            pid,
+            pid_started,
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            _child: child,
+            _lease: None,
+        });
+        *state.gateway.lock().await = Some(server);
+        super::super::stop_local(&state, Some("req-only"))
+            .await
+            .unwrap();
+        assert!(
+            state.gateway.lock().await.is_none(),
+            "a successful hard stop must clear the slot"
+        );
+        assert!(
+            wait_until_gone(pid as i32).await,
+            "the mock server survived"
+        );
+    }
+
+    /// A late hard stop for one local turn cannot refuse another local or Panel turn's card
+    /// even when both reuse the same live session id.
+    #[tokio::test]
+    async fn a_turn_scoped_stop_leaves_other_local_and_panel_turns_alone() {
+        use std::sync::Arc;
+
+        let state = Arc::new(HermesRuntimeState::default());
+        let local = parallel_turn_input("req-local");
+        let remote = HermesChatInput {
+            gateway_url: Some("http://panel.example:9119".into()),
+            profile_id: Some("panel".into()),
+            panel_auth: true,
+            ..parallel_turn_input("req-remote")
+        };
+        let (_local_registration, local_cancel, _local_answered) =
+            start_turn(&state, &local, "live-shared", None);
+        let (_remote_registration, remote_cancel, _remote_answered) =
+            start_turn(&state, &remote, "live-shared", Some("login-panel"));
+
+        super::super::stop_local(&state, Some("req-local"))
+            .await
+            .unwrap();
+        assert!(local_cancel.is_cancelled());
+        assert!(!remote_cancel.is_cancelled());
+        assert_eq!(
+            state.turn_panel_login(Some("req-remote")).as_deref(),
+            Some("login-panel")
+        );
+    }
+
+    /// A chat that queued behind another writer must fingerprint the key the runtime will
+    /// actually read, not the snapshot taken before it waited.
+    #[test]
+    fn a_queued_chat_refreshes_the_stored_key_before_fingerprinting() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-old\n").unwrap();
+        let mut input = gateway_input(None);
+        input.provider = "openai".into();
+        input.api_key = None;
+        let mut config = TurnConfig::prepare(dir.path(), &input);
+        assert_eq!(config.api_key(), Some("sk-old"));
+
+        // A settings save (or another accepted chat) lands while this request waits.
+        std::fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-new\n").unwrap();
+        config.refresh_api_key(dir.path(), &input);
+        assert_eq!(config.api_key(), Some("sk-new"));
+        assert_eq!(
+            server_fingerprint(&input, config.api_key()),
+            server_fingerprint(&input, Some("sk-new"))
+        );
+
+        // A key supplied with the request remains authoritative.
+        let mut supplied = gateway_input(None);
+        supplied.provider = "openai".into();
+        supplied.api_key = Some("sk-draft".into());
+        let mut config = TurnConfig::prepare(dir.path(), &supplied);
+        config.refresh_api_key(dir.path(), &supplied);
+        assert_eq!(config.api_key(), Some("sk-draft"));
+    }
+
+    /// Reuse must depend on the owned child, not just an open port: the port may have been
+    /// taken over after our gateway exited.
+    #[tokio::test]
+    async fn a_dead_child_is_not_reused_even_when_its_port_is_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_path_buf();
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id().unwrap_or(0);
+        let lease = super::super::hygiene::record_backend(&home, &home, "default", pid);
+        child.kill().await.unwrap();
+        let _ = child.wait().await;
+        let server = GatewayServer {
+            port,
+            token: "token".into(),
+            fingerprint: "same".into(),
+            pid,
+            pid_started: super::super::hygiene::process_identity(pid).unwrap_or_default(),
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            _child: child,
+            _lease: lease,
+        };
+        assert!(!server.process_alive(), "a reaped child is not alive");
+        let action = server_action(
+            server.matches("same") && server.process_alive(),
+            true,
+            // Only the slot holds this Arc.
+            2,
+        );
+        assert_eq!(action, ServerAction::Busy);
+        drop(listener);
+    }
 
     #[test]
     fn image_attachments_match_the_gateway_allowlist() {
@@ -2375,6 +3203,81 @@ mod tests {
         let error = prepare_attachments(&too_big, true).await.unwrap_err();
         assert_eq!(error.code, "E_HERMES_ATTACHMENT");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn remote_attachments_share_a_bounded_total_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("a.bin");
+        let second = dir.path().join("b.bin");
+        std::fs::write(&first, b"123456").unwrap();
+        std::fs::write(&second, b"123456").unwrap();
+        let input = |attachments: Vec<String>| HermesChatInput {
+            prompt: "hi".into(),
+            request_id: "req".into(),
+            session_id: None,
+            provider: "custom".into(),
+            model: "m".into(),
+            effort: "low".into(),
+            fast: false,
+            api_key: None,
+            endpoint: None,
+            cwd: None,
+            attachments,
+            auxiliary: Vec::new(),
+            force_aux_vision: false,
+            gateway_url: Some("http://panel.example:9119".into()),
+            profile_id: Some("panel".into()),
+            profile: None,
+            panel_auth: true,
+            mac_enabled: false,
+            control_level: "open".into(),
+            mac_terminal: false,
+            mac_screen: false,
+            mac_files: false,
+            mac_cron: false,
+            confirm_writes: false,
+        };
+
+        // A single file above its cap is rejected without letting the buffer grow past it.
+        let error = prepare_attachments_with_limits(
+            &input(vec![first.display().to_string()]),
+            true,
+            5,
+            100,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "E_HERMES_ATTACHMENT");
+
+        // Individually valid files whose sum exceeds the turn budget are rejected.
+        let error = prepare_attachments_with_limits(
+            &input(vec![
+                first.display().to_string(),
+                second.display().to_string(),
+            ]),
+            true,
+            10,
+            10,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "E_HERMES_ATTACHMENT");
+
+        // Within both budgets the bytes are attached.
+        let prepared = prepare_attachments_with_limits(
+            &input(vec![
+                first.display().to_string(),
+                second.display().to_string(),
+            ]),
+            true,
+            10,
+            20,
+        )
+        .await
+        .unwrap();
+        assert_eq!(prepared.len(), 2);
+        assert!(matches!(&prepared[0].kind, AttachKind::RemoteFile(bytes) if bytes == b"123456"));
     }
 
     /// Connect a client to an in-process WebSocket server and return both ends.
@@ -3314,6 +4217,8 @@ mod tests {
                 policy,
                 Vec::new(),
                 None,
+                None,
+                None,
             )
             .await
         });
@@ -3339,7 +4244,7 @@ mod tests {
         // Well past the 180s stall budget, still inside the approval's 300s window.
         tokio::time::advance(Duration::from_secs(200)).await;
 
-        let answers = state.asks.lock().await.clone().expect("a live turn");
+        let answers = state.turn_ask_sender(Some("req-1")).expect("a live turn");
         answers
             .send(AskAnswer {
                 request_id: "srq-1".into(),
@@ -3369,6 +4274,265 @@ mod tests {
         assert_eq!(response["id"], "srq-1");
         assert_eq!(response["result"]["choice"], "once");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Open an approval card on a fresh turn pair. The returned tasks stay parked until the
+    /// test answers or cancels their card.
+    fn parallel_turn_input(request_id: &str) -> HermesChatInput {
+        HermesChatInput {
+            prompt: "hi".into(),
+            request_id: request_id.into(),
+            session_id: None,
+            provider: "custom".into(),
+            model: "m".into(),
+            effort: "low".into(),
+            fast: false,
+            api_key: None,
+            endpoint: None,
+            cwd: None,
+            attachments: Vec::new(),
+            auxiliary: Vec::new(),
+            force_aux_vision: false,
+            gateway_url: None,
+            profile_id: None,
+            profile: None,
+            panel_auth: false,
+            mac_enabled: true,
+            control_level: "ask".into(),
+            mac_terminal: true,
+            mac_screen: true,
+            mac_files: true,
+            mac_cron: false,
+            confirm_writes: true,
+        }
+    }
+
+    async fn open_parallel_cards(
+        server: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+        ask_id: &str,
+    ) {
+        server
+            .send(Message::Text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": ask_id,
+                    "method": "approval",
+                    "params": {"command": "rm -rf build", "choices": ["once", "deny"]}
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("ask");
+    }
+
+    /// Two windows can each run a turn on the reused gateway. Their cards share no route:
+    /// answering one must leave the other's open.
+    #[tokio::test]
+    async fn parallel_turns_route_answers_to_their_own_card() {
+        use std::sync::Arc;
+
+        let (client_a, mut server_a) = ws_pair().await;
+        let (client_b, mut server_b) = ws_pair().await;
+        let state = Arc::new(HermesRuntimeState::default());
+        let policy = || AskPolicy {
+            ask_user: true,
+            full_control: false,
+            clarify_timeout: Some(CLARIFY_TIMEOUT),
+        };
+        let spawn = |mut client,
+                     input: HermesChatInput,
+                     live: &'static str,
+                     state: Arc<HermesRuntimeState>| {
+            tokio::spawn(async move {
+                stream_turn(
+                    &mut client,
+                    Path::new("/tmp"),
+                    &state,
+                    &input,
+                    None,
+                    None,
+                    live,
+                    live,
+                    policy(),
+                    Vec::new(),
+                    None,
+                    None,
+                    None,
+                )
+                .await
+            })
+        };
+        let task_a = spawn(
+            client_a,
+            parallel_turn_input("req-a"),
+            "live-shared",
+            state.clone(),
+        );
+        let task_b = spawn(
+            client_b,
+            parallel_turn_input("req-b"),
+            "live-shared",
+            state.clone(),
+        );
+
+        let opened_a = state.ask_opened.notified();
+        let opened_b = state.ask_opened.notified();
+        tokio::pin!(opened_a, opened_b);
+        opened_a.as_mut().enable();
+        opened_b.as_mut().enable();
+        open_parallel_cards(&mut server_a, "ask-a").await;
+        open_parallel_cards(&mut server_b, "ask-b").await;
+        tokio::join!(opened_a, opened_b);
+
+        // Answer only A. Its response goes out on A's socket; B's card stays open.
+        state
+            .turn_ask_sender(Some("req-a"))
+            .expect("A is live")
+            .send(AskAnswer {
+                request_id: "ask-a".into(),
+                reply: HermesAskReply::Approval {
+                    choice: "once".into(),
+                },
+            })
+            .expect("answer A");
+        let response_a = next_text(&mut server_a).await;
+        assert_eq!(response_a["id"], "ask-a");
+        assert_eq!(response_a["result"]["choice"], "once");
+        assert!(
+            timeout(Duration::from_millis(100), next_text(&mut server_b))
+                .await
+                .is_err(),
+            "answering A must not settle B's card"
+        );
+        assert!(state.turn_ask_sender(Some("req-b")).is_some());
+
+        // B can still be answered through its own route.
+        state
+            .turn_ask_sender(Some("req-b"))
+            .expect("B is live")
+            .send(AskAnswer {
+                request_id: "ask-b".into(),
+                reply: HermesAskReply::Approval {
+                    choice: "deny".into(),
+                },
+            })
+            .expect("answer B");
+        let response_b = next_text(&mut server_b).await;
+        assert_eq!(response_b["id"], "ask-b");
+        assert_eq!(response_b["result"]["choice"], "deny");
+
+        complete_turn(&mut server_a, "a done").await;
+        complete_turn(&mut server_b, "b done").await;
+        assert_eq!(task_a.await.unwrap().unwrap().text, "a done");
+        assert_eq!(task_b.await.unwrap().unwrap().text, "b done");
+    }
+
+    async fn complete_turn(
+        server: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+        text: &str,
+    ) {
+        server
+            .send(Message::Text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": {"type": "message.complete", "payload": {"text": text}}
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .expect("complete");
+    }
+
+    /// A stop names one live session; it must refuse only that turn's card and leave the
+    /// other turn answering normally.
+    #[tokio::test]
+    async fn stopping_one_turn_does_not_cancel_the_other_turn() {
+        use std::sync::Arc;
+
+        let (client_a, mut server_a) = ws_pair().await;
+        let (client_b, mut server_b) = ws_pair().await;
+        let state = Arc::new(HermesRuntimeState::default());
+        let policy = || AskPolicy {
+            ask_user: true,
+            full_control: false,
+            clarify_timeout: Some(CLARIFY_TIMEOUT),
+        };
+        let spawn = |mut client,
+                     input: HermesChatInput,
+                     live: &'static str,
+                     state: Arc<HermesRuntimeState>| {
+            tokio::spawn(async move {
+                stream_turn(
+                    &mut client,
+                    Path::new("/tmp"),
+                    &state,
+                    &input,
+                    None,
+                    None,
+                    live,
+                    live,
+                    policy(),
+                    Vec::new(),
+                    None,
+                    None,
+                    None,
+                )
+                .await
+            })
+        };
+        let task_a = spawn(
+            client_a,
+            parallel_turn_input("req-a"),
+            "live-shared",
+            state.clone(),
+        );
+        let task_b = spawn(
+            client_b,
+            parallel_turn_input("req-b"),
+            "live-shared",
+            state.clone(),
+        );
+
+        let opened_a = state.ask_opened.notified();
+        let opened_b = state.ask_opened.notified();
+        tokio::pin!(opened_a, opened_b);
+        opened_a.as_mut().enable();
+        opened_b.as_mut().enable();
+        open_parallel_cards(&mut server_a, "ask-a").await;
+        open_parallel_cards(&mut server_b, "ask-b").await;
+        tokio::join!(opened_a, opened_b);
+
+        // The interrupt path calls exactly this with the live session id.
+        state.cancel_turn_asks(Some("req-a"), Some("live-shared"), false);
+        let refused_a = next_text(&mut server_a).await;
+        assert_eq!(refused_a["id"], "ask-a");
+        assert!(
+            timeout(Duration::from_millis(100), next_text(&mut server_b))
+                .await
+                .is_err(),
+            "cancelling A must not refuse B's card"
+        );
+
+        state
+            .turn_ask_sender(Some("req-b"))
+            .expect("B is still live")
+            .send(AskAnswer {
+                request_id: "ask-b".into(),
+                reply: HermesAskReply::Approval {
+                    choice: "once".into(),
+                },
+            })
+            .expect("answer B");
+        let response_b = next_text(&mut server_b).await;
+        assert_eq!(response_b["id"], "ask-b");
+
+        complete_turn(&mut server_a, "a done").await;
+        complete_turn(&mut server_b, "b done").await;
+        assert_eq!(task_a.await.unwrap().unwrap().text, "a done");
+        assert_eq!(task_b.await.unwrap().unwrap().text, "b done");
     }
 
     /// A clarify question or a credential prompt is not a policy decision: it reaches the user even in
@@ -3659,50 +4823,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires HERMES_RUNTIME_BIN"]
-    async fn loads_the_official_model_catalog() {
-        let bin = std::env::var("HERMES_RUNTIME_BIN").expect("HERMES_RUNTIME_BIN");
-        let dir = tempfile::tempdir().unwrap();
-        let input = HermesChatInput {
-            prompt: String::new(),
-            request_id: "model-options-test".into(),
-            session_id: None,
-            provider: "copilot".into(),
-            model: "gpt-5.4".into(),
-            effort: "medium".into(),
-            fast: false,
-            cwd: None,
-            attachments: Vec::new(),
-            auxiliary: Vec::new(),
-            force_aux_vision: false,
-            gateway_url: None,
-            profile_id: None,
-            profile: None,
-            panel_auth: false,
-            api_key: None,
-            endpoint: None,
-            mac_enabled: false,
-            control_level: "open".into(),
-            mac_terminal: true,
-            mac_screen: true,
-            mac_files: true,
-            mac_cron: true,
-            confirm_writes: false,
-        };
-        let state = HermesRuntimeState::default();
-        let options = model_options(Path::new(&bin), dir.path(), &state, input, true, true)
-            .await
-            .unwrap();
-        assert!(!options.providers.is_empty());
-        assert!(
-            options
-                .providers
-                .iter()
-                .any(|provider| !provider.slug.is_empty())
-        );
-    }
-
-    #[tokio::test]
     #[ignore = "requires HERMES_RUNTIME_BIN, HERMES_TEST_ENDPOINT, HERMES_TEST_API_KEY and HERMES_TEST_MODEL"]
     async fn streams_real_hermes_gateway_chunks() {
         let bin = std::env::var("HERMES_RUNTIME_BIN").expect("HERMES_RUNTIME_BIN");
@@ -3843,11 +4963,13 @@ mod tests {
         );
         let state = HermesRuntimeState::default();
         let input = gateway_input(None);
+        let mut config = TurnConfig::prepare(dir.path(), &input);
         let started = Instant::now();
-        let error = match ensure_server(&bin, dir.path(), &state, &input, None).await {
-            Ok(_) => panic!("the refusing gateway must not be reported as ready"),
-            Err(error) => error,
-        };
+        let error =
+            match ensure_server(&bin, dir.path(), dir.path(), &state, &input, &mut config).await {
+                Ok(_) => panic!("the refusing gateway must not be reported as ready"),
+                Err(error) => error,
+            };
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "startup waited {:?} instead of failing fast",
@@ -3904,10 +5026,12 @@ mod tests {
         );
         let state = HermesRuntimeState::default();
         let input = gateway_input(None);
-        let error = match ensure_server(&bin, dir.path(), &state, &input, None).await {
-            Ok(_) => panic!("the exited gateway must not be reported as ready"),
-            Err(error) => error,
-        };
+        let mut config = TurnConfig::prepare(dir.path(), &input);
+        let error =
+            match ensure_server(&bin, dir.path(), dir.path(), &state, &input, &mut config).await {
+                Ok(_) => panic!("the exited gateway must not be reported as ready"),
+                Err(error) => error,
+            };
         assert_eq!(error.code, "E_HERMES_GATEWAY");
         let detail = error.detail.unwrap_or_default();
         assert!(
@@ -3981,7 +5105,8 @@ mod tests {
         let state = HermesRuntimeState::default();
         let input = gateway_input(None);
         let task = tokio::spawn(async move {
-            let _ = ensure_server(&bin, &home, &state, &input, None).await;
+            let mut config = TurnConfig::prepare(&home, &input);
+            let _ = ensure_server(&bin, &home, &home, &state, &input, &mut config).await;
         });
         let pid_file = dir.path().join("python").join("bin").join("python3.pid");
         let mut pid = None;
@@ -4021,8 +5146,11 @@ mod tests {
     async fn handing_the_child_off_keeps_the_server_lifecycle() {
         let child = Command::new("sleep").arg("30").spawn().unwrap();
         let pid = child.id().unwrap() as i32;
-        let mut starting = StartingGateway { child: Some(child) };
-        let child = starting.take().expect("the child");
+        let mut starting = StartingGateway {
+            child: Some(child),
+            lease: None,
+        };
+        let (child, _) = starting.take();
         drop(starting);
         assert!(
             process_alive(pid),
@@ -4034,13 +5162,72 @@ mod tests {
             token: String::new(),
             fingerprint: String::new(),
             pid: pid as u32,
+            pid_started: super::super::hygiene::process_identity(pid as u32).unwrap_or_default(),
+            stopped: std::sync::atomic::AtomicBool::new(false),
             _child: child,
+            _lease: None,
         };
         server.stop();
         drop(server);
         assert!(
             wait_until_gone(pid).await,
             "the handed-off gateway was not stopped"
+        );
+    }
+
+    /// `stop` is called explicitly and again from `Drop`; the backend must receive exactly
+    /// one signal, so a pid that was already stopped is never signalled a second time.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_a_gateway_twice_signals_it_once() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let hits = dir.path().join("hits");
+        let script = dir.path().join("gateway.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ntrap 'echo hit >> \"{}\"; exit 0' TERM\nwhile :; do sleep 1; done\n",
+                hits.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let child = Command::new(&script).spawn().unwrap();
+        let pid = child.id().unwrap() as i32;
+        let server = GatewayServer {
+            port: 0,
+            token: String::new(),
+            fingerprint: String::new(),
+            pid: pid as u32,
+            pid_started: super::super::hygiene::process_identity(pid as u32).unwrap_or_default(),
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            _child: child,
+            _lease: None,
+        };
+        // Let the shell install its TERM trap before the first signal.
+        sleep(Duration::from_millis(100)).await;
+        server.stop();
+        sleep(Duration::from_millis(200)).await;
+        // A second explicit stop and Drop must not signal the pid again.
+        server.stop();
+        drop(server);
+        assert!(
+            wait_until_gone(pid).await,
+            "the gateway ignored SIGTERM or was not reaped"
+        );
+        for _ in 0..50 {
+            if hits.exists() {
+                break;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+        let hits = std::fs::read_to_string(&hits).unwrap_or_default();
+        assert_eq!(
+            hits.lines().count(),
+            1,
+            "the backend received more than one stop signal: {hits:?}"
         );
     }
 }

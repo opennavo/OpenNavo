@@ -155,6 +155,55 @@ describe('Hermes profile manager', () => {
     expect(store.activeAgentProfileName).toBe('default');
   });
 
+  it('keeps a created profile SOUL write on the connection it started from', async () => {
+    const panel = (id: string) => ({
+      id,
+      name: id,
+      kind: 'panel',
+      endpoint: `http://${id}.tail1234.ts.net:9119`,
+      status: 'connected',
+      version: '0.23.3',
+      latency: 12,
+      models: 1
+    });
+    localStorage.setItem(
+      'ONV_HERMES_PROFILES_V1',
+      JSON.stringify({
+        version: 1,
+        activeProfileId: 'panel-a',
+        profiles: [panel('panel-a'), panel('panel-b')],
+        states: {}
+      })
+    );
+    let finishCreate: (value: unknown) => void = () => undefined;
+    const creation = new Promise(resolve => {
+      finishCreate = resolve;
+    });
+    const create = vi.spyOn(commands, 'hermesAgentProfileCreate').mockReturnValue(creation as never);
+    let stored = 'You are Hermes.';
+    const save = vi
+      .spyOn(commands, 'hermesAgentProfileSoulSave')
+      .mockImplementation(async (_connectionId, _url, _name, content) => {
+        stored = content;
+        return ok(null);
+      });
+    vi.spyOn(commands, 'hermesAgentProfileSoul').mockImplementation(async () => ok(stored));
+    const store = useHermesStore();
+
+    const pending = store.createAgentProfile('xdx', null, 'You are XDX.');
+    await vi.waitFor(() =>
+      expect(create).toHaveBeenCalledWith('panel-a', 'http://panel-a.tail1234.ts.net:9119', 'xdx', null, 'You are XDX.')
+    );
+    // The user switches host while the create is still running.
+    store.switchProfile('panel-b');
+    finishCreate(ok(null));
+    await pending;
+
+    // The read-back and the fallback write belong to panel-a, never to panel-b.
+    expect(save).toHaveBeenCalledWith('panel-a', 'http://panel-a.tail1234.ts.net:9119', 'xdx', 'You are XDX.');
+    expect(store.activeProfileId).toBe('panel-b');
+  });
+
   it('rejects a save the host does not actually store', async () => {
     vi.spyOn(commands, 'hermesAgentProfileSoulSave').mockResolvedValue(ok(null));
     vi.spyOn(commands, 'hermesAgentProfileSoul').mockResolvedValue(ok('You are Hermes.'));

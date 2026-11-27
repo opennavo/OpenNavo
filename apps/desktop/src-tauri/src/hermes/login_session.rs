@@ -22,6 +22,9 @@ pub struct HermesLoginState {
 }
 
 struct LoginHandle {
+    /// The one login request this PTY belongs to. Input/cancel and every event name it, so a
+    /// replacement login (same provider) never consumes an old window's action or output.
+    request_id: String,
     pid: u32,
     writer: Box<dyn Write + Send>,
     cancelled: Arc<AtomicBool>,
@@ -31,6 +34,7 @@ struct LoginHandle {
 #[serde(rename_all = "camelCase")]
 pub struct HermesLoginEvent {
     pub provider: String,
+    pub request_id: String,
     pub kind: String,
     pub line: Option<String>,
     pub url: Option<String>,
@@ -43,9 +47,10 @@ fn emit(app: &AppHandle, event: HermesLoginEvent) {
     let _ = app.emit("hermes-login", event);
 }
 
-fn event(provider: &str, kind: &str) -> HermesLoginEvent {
+fn event(provider: &str, request_id: &str, kind: &str) -> HermesLoginEvent {
     HermesLoginEvent {
         provider: provider.to_owned(),
+        request_id: request_id.to_owned(),
         kind: kind.to_owned(),
         line: None,
         url: None,
@@ -105,7 +110,8 @@ pub fn start(
     state: Arc<HermesLoginState>,
     provider: &str,
     profile: Option<&str>,
-) -> Result<(), AppError> {
+    request_id: &str,
+) -> Result<String, AppError> {
     let bin = runtime_bin(app).ok_or_else(|| {
         AppError::new(
             "E_HERMES_RUNTIME",
@@ -183,15 +189,28 @@ pub fn start(
     })?;
     let cancelled = Arc::new(AtomicBool::new(false));
     let failure = Arc::new(Mutex::new(None::<String>));
+    let request_id = request_id.trim().to_owned();
+    let request_id = if request_id.is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        request_id
+    };
     *guard = Some(LoginHandle {
+        request_id: request_id.clone(),
         pid,
         writer,
         cancelled: cancelled.clone(),
     });
     drop(guard);
 
-    emit(app, event(provider, "started"));
-    spawn_reader(app.clone(), provider.to_owned(), reader, failure.clone());
+    emit(app, event(provider, &request_id, "started"));
+    spawn_reader(
+        app.clone(),
+        provider.to_owned(),
+        request_id.clone(),
+        reader,
+        failure.clone(),
+    );
     spawn_waiter(
         app.clone(),
         state,
@@ -200,13 +219,18 @@ pub fn start(
         pid,
         cancelled,
         provider.to_owned(),
+        request_id.clone(),
         failure,
         profile.map(str::to_owned),
     );
-    Ok(())
+    Ok(request_id)
 }
 
-pub fn input(state: &HermesLoginState, value: &str) -> Result<(), AppError> {
+pub fn input(
+    state: &HermesLoginState,
+    request_id: Option<&str>,
+    value: &str,
+) -> Result<(), AppError> {
     let mut guard = state
         .inner
         .lock()
@@ -214,6 +238,12 @@ pub fn input(state: &HermesLoginState, value: &str) -> Result<(), AppError> {
     let handle = guard
         .as_mut()
         .ok_or_else(|| AppError::new("E_HERMES_LOGIN", "No login is running."))?;
+    if request_id.is_some_and(|request_id| handle.request_id != request_id) {
+        return Err(AppError::new(
+            "E_HERMES_LOGIN",
+            "That login request has been replaced by a newer one.",
+        ));
+    }
     handle
         .writer
         .write_all(value.as_bytes())
@@ -225,12 +255,20 @@ pub fn input(state: &HermesLoginState, value: &str) -> Result<(), AppError> {
         })
 }
 
-pub fn cancel(state: &HermesLoginState) {
-    if let Ok(mut guard) = state.inner.lock()
-        && let Some(handle) = guard.take()
-    {
-        handle.cancelled.store(true, Ordering::SeqCst);
-        kill(handle.pid);
+pub fn cancel(state: &HermesLoginState, request_id: Option<&str>) {
+    if let Ok(mut guard) = state.inner.lock() {
+        if let Some(request_id) = request_id
+            && guard
+                .as_ref()
+                .is_some_and(|handle| handle.request_id != request_id)
+        {
+            // An old window's cancel must not kill the login that replaced it.
+            return;
+        }
+        if let Some(handle) = guard.take() {
+            handle.cancelled.store(true, Ordering::SeqCst);
+            kill(handle.pid);
+        }
     }
 }
 
@@ -263,6 +301,7 @@ fn is_failure_line(line: &str) -> bool {
 fn spawn_reader(
     app: AppHandle,
     provider: String,
+    request_id: String,
     mut reader: Box<dyn Read + Send>,
     failure: Arc<Mutex<Option<String>>>,
 ) {
@@ -290,7 +329,7 @@ fn spawn_reader(
                 if line.is_empty() {
                     continue;
                 }
-                let mut line_event = event(&provider, "line");
+                let mut line_event = event(&provider, &request_id, "line");
                 line_event.line = Some(line.clone());
                 emit(&app, line_event);
                 if is_failure_line(&line)
@@ -310,7 +349,7 @@ fn spawn_reader(
                     if !opened.insert(url.clone()) {
                         continue;
                     }
-                    let mut url_event = event(&provider, "url");
+                    let mut url_event = event(&provider, &request_id, "url");
                     url_event.url = Some(url.clone());
                     emit(&app, url_event);
                     if matches!(provider.as_str(), "codex" | "claude-code" | "copilot")
@@ -321,7 +360,7 @@ fn spawn_reader(
                     }
                 }
                 if let Some(found) = codes.find(&line) {
-                    let mut code_event = event(&provider, "code");
+                    let mut code_event = event(&provider, &request_id, "code");
                     code_event.code = Some(found.as_str().to_owned());
                     emit(&app, code_event);
                 }
@@ -339,6 +378,7 @@ fn spawn_waiter(
     pid: u32,
     cancelled: Arc<AtomicBool>,
     provider: String,
+    request_id: String,
     failure: Arc<Mutex<Option<String>>>,
     profile: Option<String>,
 ) {
@@ -360,7 +400,11 @@ fn spawn_waiter(
             _ => false,
         };
         let ok = !was_cancelled && exit_ok && authenticated && failure_line.is_none();
-        let mut done = event(&provider, if was_cancelled { "cancelled" } else { "done" });
+        let mut done = event(
+            &provider,
+            &request_id,
+            if was_cancelled { "cancelled" } else { "done" },
+        );
         done.ok = Some(ok);
         done.message = Some(if was_cancelled {
             "登录已取消。".into()
@@ -419,5 +463,37 @@ mod tests {
         // A named profile is already re-homed by HERMES_HOME pointing inside `profiles/`.
         let named = login_command(&bin, "codex", false).unwrap();
         assert!(!named.contains(&"--profile".to_owned()));
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    fn handle(request_id: &str) -> LoginHandle {
+        LoginHandle {
+            request_id: request_id.to_owned(),
+            pid: 0,
+            writer: Box::new(Vec::new()),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Input and cancel name the request that owns the PTY: an old window's action cannot
+    /// type into or kill the login that replaced it.
+    #[test]
+    fn an_old_request_cannot_type_into_or_cancel_the_new_login() {
+        let state = HermesLoginState::default();
+        *state.inner.lock().unwrap() = Some(handle("new-login"));
+        assert!(input(&state, Some("old-login"), "secret").is_err());
+        assert!(input(&state, Some("new-login"), "secret").is_ok());
+        cancel(&state, Some("old-login"));
+        assert!(state.inner.lock().unwrap().is_some());
+        cancel(&state, Some("new-login"));
+        assert!(state.inner.lock().unwrap().is_none());
+        // A global cancel (window close) still clears any running login.
+        *state.inner.lock().unwrap() = Some(handle("other"));
+        cancel(&state, None);
+        assert!(state.inner.lock().unwrap().is_none());
     }
 }

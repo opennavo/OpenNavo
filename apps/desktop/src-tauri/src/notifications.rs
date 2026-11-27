@@ -28,6 +28,11 @@ struct HermesNotificationTarget {
 #[serde(rename_all = "camelCase")]
 struct HermesNotificationOpen {
     conversation_id: String,
+    /// The connection/profile that owned the turn when the notification was sent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_profile: Option<String>,
 }
 
 fn hermes_window_allowed(label: &str) -> bool {
@@ -233,7 +238,12 @@ impl NativeNotifications {
             let main_app = click_app.clone();
             if let Err(error) = click_app.run_on_main_thread(move || {
                 if let Some(window) = main_app.get_webview_window(&target.window) {
-                    focus_and_open_conversation(window, target.conversation_id);
+                    focus_and_open_conversation(
+                        window,
+                        target.conversation_id,
+                        target.connection_id,
+                        target.agent_profile,
+                    );
                     return;
                 }
                 if target
@@ -250,11 +260,21 @@ impl NativeNotifications {
                         Some(&target.conversation_id),
                     )
                 {
-                    focus_and_open_conversation(window, target.conversation_id);
+                    focus_and_open_conversation(
+                        window,
+                        target.conversation_id,
+                        target.connection_id,
+                        target.agent_profile,
+                    );
                     return;
                 }
                 if let Some(window) = main_app.get_webview_window("main") {
-                    focus_and_open_conversation(window, target.conversation_id);
+                    focus_and_open_conversation(
+                        window,
+                        target.conversation_id,
+                        target.connection_id,
+                        target.agent_profile,
+                    );
                 }
             }) {
                 log::warn!("Could not open the Hermes notification target: {error}");
@@ -310,6 +330,10 @@ impl NativeNotifications {
         &self,
         window: &tauri::WebviewWindow,
         conversation_id: &str,
+        // The turn's own connection/profile, captured by the renderer. The main window has no
+        // profile query, and by the time the user clicks it may show another connection.
+        target_connection_id: Option<&str>,
+        target_agent_profile: Option<&str>,
         title: String,
         body: String,
     ) -> Result<(), AppError> {
@@ -317,13 +341,21 @@ impl NativeNotifications {
         if !hermes_window_allowed(window.label()) || conversation_id.is_empty() {
             return Ok(());
         }
-        let (connection_id, mut agent_profile) = hermes_window_context(window);
-        if agent_profile.is_none() {
-            agent_profile = window
-                .label()
-                .strip_prefix(crate::hermes::window::PROFILE_WINDOW_PREFIX)
-                .map(str::to_owned);
-        }
+        let (window_connection_id, window_agent_profile) = hermes_window_context(window);
+        let connection_id = target_connection_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or(window_connection_id);
+        let agent_profile = target_agent_profile
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or(window_agent_profile)
+            .or_else(|| {
+                crate::hermes::window::profile_window_identity(window.label())
+                    .map(|(_, profile)| profile)
+            });
         let target = HermesNotificationTarget {
             window: window.label().to_owned(),
             conversation_id: conversation_id.to_owned(),
@@ -395,13 +427,22 @@ impl NativeNotifications {
     }
 }
 
-fn focus_and_open_conversation(window: tauri::WebviewWindow, conversation_id: String) {
+fn focus_and_open_conversation(
+    window: tauri::WebviewWindow,
+    conversation_id: String,
+    connection_id: Option<String>,
+    agent_profile: Option<String>,
+) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
     let _ = window.emit(
         "hermes-notification-open",
-        HermesNotificationOpen { conversation_id },
+        HermesNotificationOpen {
+            conversation_id,
+            connection_id,
+            agent_profile,
+        },
     );
 }
 

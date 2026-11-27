@@ -222,3 +222,42 @@ describe('Hermes MEDIA tags', () => {
     expect(isExternalMediaSrc('/tmp/a.png')).toBe(false);
   });
 });
+
+describe('Hermes message media workspace', () => {
+  it('uses the workspace recorded on the message, not the profile current directory', async () => {
+    const { shallowMount } = await import('@vue/test-utils');
+    const { setup } = await import('./helpers');
+    const { i18n } = await import('@/i18n');
+    const { useHermesStore } = await import('@/stores/hermes');
+    const HermesMessage = (await import('@/components/hermes/HermesMessage.vue')).default;
+    const { pinia, router } = await setup('/assistant');
+    const store = useHermesStore();
+    store.setWorkingDir('/tmp/current-b');
+
+    const wrapper = shallowMount(HermesMessage, {
+      props: {
+        message: {
+          id: 'm-1',
+          role: 'assistant',
+          text: 'MEDIA:same.png',
+          cwd: '/tmp/turn-a',
+          at: 1
+        }
+      },
+      global: { plugins: [pinia, router, i18n] }
+    });
+    const card = wrapper.findComponent({ name: 'HermesMediaCard' });
+    expect(card.exists()).toBe(true);
+    expect(card.props('cwd')).toBe('/tmp/turn-a');
+    wrapper.unmount();
+
+    // History written before the field existed falls back to the current directory.
+    const legacy = shallowMount(HermesMessage, {
+      props: { message: { id: 'm-2', role: 'assistant', text: 'MEDIA:same.png', at: 1 } },
+      global: { plugins: [pinia, router, i18n] }
+    });
+    const legacyCard = legacy.findComponent({ name: 'HermesMediaCard' });
+    expect(legacyCard.props('cwd')).toBe('/tmp/current-b');
+    legacy.unmount();
+  });
+});

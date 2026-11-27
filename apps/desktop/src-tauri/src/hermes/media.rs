@@ -219,6 +219,19 @@ fn is_protected_local_media_path(path: &Path, home: &Path, hermes_home: &Path) -
             }
         }
     }
+    // Desktop history lives beside the homes as `history.json` / `history-<profile>.json`.
+    // It is a transcript store, not generated media: a model-authored MEDIA tag must not
+    // open it as a file card.
+    for root in &homes {
+        let in_root = path.parent() == Some(root.as_path());
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if in_root && name.starts_with("history") && name.ends_with(".json") {
+            return true;
+        }
+    }
     if is_kanban_board_db_path(&path, &homes, &home) {
         return true;
     }
@@ -625,6 +638,8 @@ mod tests {
                 .join("alpha")
                 .join("kanban.db-wal"),
             profile.join(".env"),
+            hermes_home.join("history.json"),
+            hermes_home.join("history-work.json"),
             data_root.join(".opennavo").join("session.json"),
             data_root.join("audit.jsonl"),
         ] {
@@ -676,6 +691,8 @@ mod tests {
                 .join("alpha")
                 .join("kanban.db-wal"),
             profile.join(".env"),
+            hermes_home.join("history.json"),
+            hermes_home.join("history-work.json"),
             data_root.join(".opennavo").join("session.json"),
             data_root.join("audit.jsonl"),
         ] {

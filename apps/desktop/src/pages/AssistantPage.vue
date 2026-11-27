@@ -70,6 +70,9 @@ const attachments = ref<{ path: string; name: string; isImage: boolean; size?: n
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const REMOTE_ATTACHMENT_BYTES = 16 * 1024 * 1024;
 const attachmentPreviews = ref<Record<string, string>>({});
+/** Async paste/preview work is bound to this draft and this page instance. */
+let draftGeneration = 0;
+let pageAlive = true;
 const fileInput = ref<HTMLInputElement>();
 const scroll = ref<HTMLElement>();
 const composer = ref<HTMLElement | null>(null);
@@ -204,6 +207,15 @@ function followStreaming() {
   if (followTail.value) scrollToBottom();
 }
 
+// Sidebar connection/profile/conversation switches do not call this page's clearAttachments;
+// invalidate async paste/picker/preview work here as well.
+watch(
+  () => [store.activeProfileId, store.activeAgentProfileName, store.activeId],
+  () => {
+    draftGeneration += 1;
+  }
+);
+
 // A transcript remounted after the connection gate reopens starts pinned again, at its newest row.
 watch(scroll, element => {
   if (element) scrollToBottom();
@@ -276,6 +288,14 @@ function rejectOversizedAttachment(name: string) {
   });
 }
 
+function dropAttachmentPreviews(paths: string[]) {
+  if (!paths.length) return;
+  const dropped = new Set(paths);
+  attachmentPreviews.value = Object.fromEntries(
+    Object.entries(attachmentPreviews.value).filter(([path]) => !dropped.has(path))
+  );
+}
+
 function addAttachment(path: string, name?: string, size?: number, image?: boolean, label?: string): boolean {
   const displayName = name || path.split('/').filter(Boolean).at(-1) || path;
   if (attachments.value.some(item => item.path === path)) return true;
@@ -299,11 +319,14 @@ function attachmentIcon(path: string): string {
 
 async function addAttachmentPaths(paths: string[]) {
   if (!paths.length) return;
+  const generation = draftGeneration;
+  const current = () => pageAlive && generation === draftGeneration;
   try {
     const info = await commands.hermesAttachmentInfo(paths);
+    if (!current()) return;
     info.forEach(item => addAttachment(item.path, item.name, item.size, item.isImage));
   } catch {
-    paths.forEach(path => addAttachment(path));
+    if (current()) paths.forEach(path => addAttachment(path));
   }
 }
 
@@ -329,8 +352,11 @@ async function discardManagedAttachment(path: string) {
 /** Images from a paste hit the same attachment path as the picker, after a data-URL round trip. */
 async function attachPastedImages(blobs: Blob[]) {
   if (!desktopAvailable()) return;
+  const generation = draftGeneration;
+  const current = () => pageAlive && generation === draftGeneration;
   const limit = attachmentLimitBytes();
   for (const blob of blobs) {
+    if (!current()) return;
     const displayName = blob instanceof File && blob.name ? blob.name : content.value.composer.pastedContent;
     // Refuse before the IPC round trip; a remote attachment would be rejected host-side anyway.
     if (blob.size > limit) {
@@ -340,6 +366,12 @@ async function attachPastedImages(blobs: Blob[]) {
     try {
       const dataUrl = await blobToDataUrl(blob);
       const info = await unwrap(commands.hermesSaveAttachmentImage(dataUrl, blob instanceof File ? blob.name : null));
+      // The draft this paste belonged to is gone: delete the file this feature just wrote
+      // instead of putting the chip on the new draft.
+      if (!current()) {
+        await discardManagedAttachment(info.path);
+        return;
+      }
       if (!addAttachment(info.path, info.name, info.size, info.isImage)) {
         await discardManagedAttachment(info.path);
       }
@@ -358,6 +390,7 @@ async function attachPastedImages(blobs: Blob[]) {
  * write failure and must never fall back to inline text.
  */
 async function attachPastedText(text: string): Promise<PastedTextOutcome> {
+  const generation = draftGeneration;
   // The size gate comes before the IPC availability check: the inline fallback has the same
   // limit, so an oversized paste must be refused even when there is no host to save it.
   if (pastedTextBytes(text) > attachmentLimitBytes()) {
@@ -367,6 +400,10 @@ async function attachPastedText(text: string): Promise<PastedTextOutcome> {
   if (!desktopAvailable()) return 'failed';
   try {
     const info = await unwrap(commands.hermesSavePastedText(text));
+    if (!pageAlive || generation !== draftGeneration) {
+      await discardManagedAttachment(info.path);
+      return 'failed';
+    }
     const attached = addAttachment(
       info.path,
       info.name,
@@ -392,9 +429,15 @@ async function attachPastedText(text: string): Promise<PastedTextOutcome> {
 /** WKWebView can deliver a screenshot as an empty paste; the native reader is the fallback. */
 async function attachClipboardImage() {
   if (!desktopAvailable()) return false;
+  const generation = draftGeneration;
   try {
     const path = await unwrap(commands.hermesClipboardImage());
     if (!path) return false;
+    if (!pageAlive || generation !== draftGeneration) {
+      // The clipboard image is a managed file this feature wrote; do not leave it behind.
+      await discardManagedAttachment(path);
+      return false;
+    }
     await addAttachmentPaths([path]);
     return true;
   } catch {
@@ -404,9 +447,14 @@ async function attachClipboardImage() {
 
 async function loadAttachmentPreview(path: string) {
   if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) return;
+  const generation = draftGeneration;
   try {
     const preview = await unwrap(commands.hermesAttachmentPreview(path));
-    if (preview) attachmentPreviews.value = { ...attachmentPreviews.value, [path]: preview };
+    // The chip may have been removed, sent, or replaced by another draft while the read ran;
+    // a late preview must not refill that path's slot.
+    if (preview && pageAlive && generation === draftGeneration && attachments.value.some(item => item.path === path)) {
+      attachmentPreviews.value = { ...attachmentPreviews.value, [path]: preview };
+    }
   } catch {
     // Preview is optional; the attachment still sends.
   }
@@ -428,9 +476,12 @@ async function openAttachment(path: string) {
 
 async function pickFiles() {
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const generation = draftGeneration;
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({ multiple: true, directory: false });
+      // The dialog is modal but the draft/connection can still change underneath it.
+      if (!pageAlive || generation !== draftGeneration) return;
       const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
       await addAttachmentPaths(paths);
     } catch (error) {
@@ -475,22 +526,30 @@ function onFileInput(event: Event) {
 
 function removeAttachment(index: number) {
   const [removed] = attachments.value.splice(index, 1);
-  if (removed) void discardManagedAttachment(removed.path);
+  if (removed) {
+    dropAttachmentPreviews([removed.path]);
+    void discardManagedAttachment(removed.path);
+  }
 }
 
 /** Leaving this draft drops its chips; managed paste files go with them, sent files stay. */
 function clearAttachments() {
   const dropped = attachments.value;
   attachments.value = [];
+  dropAttachmentPreviews(dropped.map(item => item.path));
   for (const item of dropped) void discardManagedAttachment(item.path);
+  draftGeneration += 1;
 }
 
 async function pickDirectory() {
   if (store.remoteActive) return;
   if (!(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window)) return;
+  const generation = draftGeneration;
   try {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const selected = await open({ directory: true, multiple: false });
+    // The draft/connection this picker belonged to is gone; the directory belongs to it.
+    if (!pageAlive || generation !== draftGeneration) return;
     if (typeof selected === 'string') {
       const previous = store.workingDir;
       store.setWorkingDir(selected);
@@ -568,11 +627,13 @@ const composerHint = computed(() => {
 async function send() {
   if (sendInFlight) return;
   sendInFlight = true;
+  const generation = draftGeneration;
   try {
     // A paste may still be saving its attachment. Wait for it so the message carries everything
     // the paste produced instead of clearing the composer under a late save (and the next draft
     // inheriting it).
     await composerEditor.whenPasteSettled();
+    if (!pageAlive || generation !== draftGeneration) return;
     // Trim decides whether there is a message; it must not rewrite the prompt (a pasted block
     // keeps its leading indentation and an explicit trailing newline).
     const raw = composerEditor.getPlainText();
@@ -596,7 +657,10 @@ async function send() {
     store.send(raw, files);
     composerEditor.clear();
     // Sent files are the gateway's to read; only the chips go.
+    dropAttachmentPreviews(attachments.value.map(item => item.path));
     attachments.value = [];
+    // A dialog/paste started for this draft must not attach to the next one after send.
+    draftGeneration += 1;
     scrollToBottom();
   } finally {
     sendInFlight = false;
@@ -667,7 +731,24 @@ async function openBackgroundTurn(conversationId: string) {
 }
 
 async function openNotificationConversation(open: HermesNotificationOpen) {
+  // The notification names the connection/profile that owned the turn. If that connection is
+  // gone, or the user switches again while we wait, resolving the bare conversation id on the
+  // current host could hit an unrelated row with the same id.
+  const connection = open.connectionId;
+  if (connection && !store.profiles.some(profile => profile.id === connection)) return;
+  if (connection && connection !== store.activeProfileId) {
+    store.switchProfile(connection, open.agentProfile);
+    if (store.activeProfileId !== connection) return;
+  } else if (open.agentProfile && open.agentProfile !== store.activeAgentProfileName) {
+    await store.switchAgentProfile(open.agentProfile);
+    if (store.activeProfileId !== (connection ?? store.activeProfileId)) return;
+  }
+  if (connection && store.activeProfileId !== connection) return;
+  if (open.agentProfile && store.activeAgentProfileName !== open.agentProfile) return;
   if (!(await store.revealConversation(open.conversationId))) return;
+  // A switch during the history read makes the match belong to another connection.
+  if (connection && store.activeProfileId !== connection) return;
+  if (open.agentProfile && store.activeAgentProfileName !== open.agentProfile) return;
   clearAttachments();
   historyOpen.value = false;
   scrollToBottom();
@@ -761,11 +842,13 @@ onMounted(async () => {
   const requestedConnection = params.get('connection');
   const requestedProfile = params.get('profile');
   const requestedConversation = params.get('conversation');
+  if (!pageAlive) return;
   if (requestedConversation) queueHermesNotificationOpen({ conversationId: requestedConversation });
   if (requestedConnection && requestedConnection !== store.activeProfileId) {
     store.switchProfile(requestedConnection);
   }
   await store.loadAllAgentProfiles();
+  if (!pageAlive) return;
   void store.probeConnections();
   // Panel history lives on the host, so it is read once here instead of only after a switch.
   void store.loadPanelHistory();
@@ -776,6 +859,7 @@ onMounted(async () => {
   const history = store.loadHistory();
   await store.loadRuntime();
   await history;
+  if (!pageAlive) return;
   if (!store.runtimeReady && !store.remoteActive) installOpen.value = true;
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('paste', onPaste);
@@ -803,6 +887,13 @@ onMounted(async () => {
   void nextTick(() => composer.value?.focus());
 });
 onBeforeUnmount(() => {
+  pageAlive = false;
+  draftGeneration += 1;
+  // Drop only this feature's unsent managed files; a picker/drag path is the user's own.
+  const unsent = attachments.value.map(item => item.path);
+  attachments.value = [];
+  dropAttachmentPreviews(unsent);
+  for (const path of unsent) if (isManagedComposerPath(path)) void discardManagedAttachment(path);
   if (connectionProbeTimer) window.clearInterval(connectionProbeTimer);
   window.removeEventListener('focus', probeWhenVisible);
   document.removeEventListener('visibilitychange', probeWhenVisible);
@@ -1378,10 +1469,13 @@ onBeforeUnmount(() => {
         <OnButton variant="ghost" :disabled="store.installing" @click="closeInstall">{{
           content.install.later
         }}</OnButton>
-        <OnButton v-if="store.installing" variant="ghost" @click="store.cancelInstall">{{
-          content.install.cancelInstall
-        }}</OnButton>
-        <OnButton v-else variant="accent" icon="lucide:download" @click="installRuntime">
+        <OnButton
+          v-if="store.installing && store.installProgress?.phase !== 'finishing'"
+          variant="ghost"
+          @click="store.cancelInstall"
+          >{{ content.install.cancelInstall }}</OnButton
+        >
+        <OnButton v-if="!store.installing" variant="accent" icon="lucide:download" @click="installRuntime">
           {{ content.install.install }}
         </OnButton>
       </template>

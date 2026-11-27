@@ -270,39 +270,18 @@ async fn remote_request(
     path: &str,
     body: Option<Value>,
 ) -> Result<Value, AppError> {
-    if !super::panel::has_session(connection_id) {
-        return Err(super::panel::session_missing());
-    }
-    let url = panel_url(&super::panel::base_url_for(connection_id)?, path)?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(25))
-        .no_proxy()
-        .build()
-        .map_err(|error| {
-            AppError::new(
-                "E_HERMES_PROFILE_HTTP",
-                "Could not prepare the profile request.",
-            )
-            .with_detail(error.to_string())
-        })?;
-    let mut request = client.request(method, url).header(
-        reqwest::header::COOKIE,
-        super::panel::cookie_header_for(connection_id).await?,
-    );
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-    let response = request.send().await.map_err(|error| {
-        AppError::new(
-            "E_HERMES_PROFILE_HTTP",
-            "Could not reach the remote profile API.",
-        )
-        .with_detail(error.to_string())
-    })?;
-    let status = response.status();
-    let headers = response.headers().clone();
-    super::panel::persist_response_cookies(connection_id, &headers)?;
-    let value: Value = response.json().await.unwrap_or(Value::Null);
+    // The shared panel path reads one session snapshot for the URL and cookie, disables
+    // redirects, and only accepts rotated cookies from a successful response.
+    let reply = super::panel::request_raw(
+        connection_id,
+        method,
+        path,
+        body,
+        "Could not reach the remote profile API.",
+    )
+    .await?;
+    let status = reply.status;
+    let value = reply.value;
     if !status.is_success() {
         let detail = value
             .get("detail")
@@ -424,14 +403,22 @@ fn identity_status_error(status: reqwest::StatusCode, detail: Option<String>) ->
 
 async fn verify_session(
     connection_id: &str,
-    client: &reqwest::Client,
-    base_url: &str,
+    session: &super::panel::PanelSession,
 ) -> Result<(), AppError> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(12))
+        .no_proxy()
+        .build()
+        .map_err(|error| {
+            AppError::new("E_HERMES_PROBE", "Could not prepare the gateway probe.")
+                .with_detail(error.to_string())
+        })?;
     let response = client
-        .get(panel_url(base_url, "/api/auth/me")?)
+        .get(panel_url(&session.base_url, "/api/auth/me")?)
         .header(
             reqwest::header::COOKIE,
-            super::panel::cookie_header_for(connection_id).await?,
+            super::panel::cookie_header(session),
         )
         .send()
         .await
@@ -441,7 +428,11 @@ async fn verify_session(
         })?;
     let status = response.status();
     let headers = response.headers().clone();
-    let value: Value = response.json().await.unwrap_or(Value::Null);
+    let mut response = response;
+    let value: Value =
+        super::panel::read_json_limited(&mut response, super::panel::MAX_PANEL_JSON_BYTES)
+            .await
+            .unwrap_or(Value::Null);
     if let Some(error) = identity_status_error(
         status,
         value
@@ -455,7 +446,7 @@ async fn verify_session(
     // deletion Set-Cookie, which must never replace the stored tokens — a slow 401 from before
     // a re-login would otherwise erase the new session.
     if status.is_success() {
-        super::panel::persist_response_cookies(connection_id, &headers)?;
+        super::panel::persist_response_cookies(connection_id, session, &headers)?;
     }
     Ok(())
 }
@@ -502,7 +493,10 @@ async fn probe_once(connection_id: &str) -> Result<HermesConnectionProbe, AppErr
     if !super::panel::has_session(connection_id) {
         return Err(super::panel::session_missing());
     }
-    let base_url = super::panel::base_url_for(connection_id)?;
+    // URL, cookie and any rotation below belong to this one snapshot: a re-login during the
+    // probe must not mix the old base with the new tokens.
+    let session = super::panel_session(connection_id)?;
+    let base_url = session.base_url.clone();
     let url = panel_url(&base_url, "/api/status")?;
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -517,7 +511,7 @@ async fn probe_once(connection_id: &str) -> Result<HermesConnectionProbe, AppErr
         .get(url)
         .header(
             reqwest::header::COOKIE,
-            super::panel::cookie_header_for(connection_id).await?,
+            super::panel::cookie_header(&session),
         )
         .send()
         .await
@@ -527,14 +521,18 @@ async fn probe_once(connection_id: &str) -> Result<HermesConnectionProbe, AppErr
         })?;
     let status = response.status();
     let headers = response.headers().clone();
-    let value: Value = response.json().await.unwrap_or(Value::Null);
+    let mut response = response;
+    let value: Value =
+        super::panel::read_json_limited(&mut response, super::panel::MAX_PANEL_JSON_BYTES)
+            .await
+            .unwrap_or(Value::Null);
     if !status.is_success() {
         return Err(probe_status_error(status));
     }
-    super::panel::persist_response_cookies(connection_id, &headers)?;
+    super::panel::persist_response_cookies(connection_id, &session, &headers)?;
     // A public status answer is not proof of a live session; verify the cookies first so the
     // periodic probe cannot flip an expired panel back to "connected".
-    verify_session(connection_id, &client, &base_url).await?;
+    verify_session(connection_id, &session).await?;
     Ok(HermesConnectionProbe {
         ok: true,
         latency_ms: started.elapsed().as_millis() as u64,
@@ -686,6 +684,15 @@ pub async fn rename(
         return Ok(());
     }
     cli(app, &["rename", name, new_name]).await?;
+    // The desktop's history file is keyed by profile name, so it has to follow the profile.
+    // A rename that leaves it behind would hand the old chats to a later profile that reuses
+    // the old name. A target file that already exists is left untouched.
+    if let (Ok(from), Ok(to)) = (
+        super::history_path(app, Some(name)),
+        super::history_path(app, Some(new_name)),
+    ) {
+        let _ = super::move_profile_history(&from, &to);
+    }
     Ok(())
 }
 
@@ -721,6 +728,11 @@ pub async fn delete(
         return Ok(());
     }
     cli(app, &["delete", "-y", name]).await?;
+    // Deleting only the profile directory left `history-<name>.json` in the root home; a new
+    // profile with the same name then loaded the deleted one's conversations.
+    if let Ok(path) = super::history_path(app, Some(name)) {
+        super::remove_profile_history(&path);
+    }
     Ok(())
 }
 
@@ -1170,6 +1182,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires HERMES_PANEL_URL, HERMES_PANEL_USER and HERMES_PANEL_PASSWORD"]
     async fn panel_profile_list_uses_the_panel_cookie() {
+        // Isolated store root: this test may run alone, without another test priming it.
+        crate::hermes::use_panel_session_root();
         let url = std::env::var("HERMES_PANEL_URL").expect("HERMES_PANEL_URL");
         let user = std::env::var("HERMES_PANEL_USER").expect("HERMES_PANEL_USER");
         let password = std::env::var("HERMES_PANEL_PASSWORD").expect("HERMES_PANEL_PASSWORD");

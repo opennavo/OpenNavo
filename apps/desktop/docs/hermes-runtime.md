@@ -66,14 +66,31 @@ Users on an older Hermes runtime keep it until they explicitly update it:
    `outdated`; it no longer borrows the version from `~/.hermes`.
 3. The Hermes settings pane and the assistant rail show the pinned target and
    an **Update runtime** button. Nothing is replaced in the background.
-4. The installer downloads to `runtime.tmp`, verifies SHA-256, verifies that
-   the staged runtime reports `0.23.3`, then swaps `runtime/hermes`.
-5. Pinned plugin copies already owned by OpenNavo are staged from the new
+4. The installer downloads to a per-install `runtime.tmp-…` staging directory, verifies SHA-256, verifies that
+   the staged runtime reports `0.23.3`, then swaps `runtime/hermes`. Staged
+   trees are stripped of macOS AppleDouble `._*` entries first: Python's tool
+   discovery globs `tools/*.py` and decodes every match, so a copied-in
+   `._foo.py` would abort `hermes tools list` and agent turns with a
+   `UnicodeDecodeError`.
+5. After activation the installer stops the backends OpenNavo recorded in its own
+   backend ledger (`<data>/hermes/.opennavo/hermes-backends.json`). A `serve` process
+   left in memory by the previous version keeps the old Python code bound to this
+   host, and Hermes refuses to bind a second backend for the same `HERMES_HOME`
+   (exit 78). The ledger stores each backend's pid and kernel start time, so a
+   reused pid is never signalled. Children are snapshotted and written to the
+   ledger before the first signal (once the backend exits they are reparented),
+   get the same 10-second grace, and survivors stay in the ledger for the next
+   cleanup. A backend the
+   user started manually, or one left by a build that predates the ledger, is not
+   stopped; the installer scans the profiles after activation and reports it in
+   the returned status instead of claiming a clean update. A scan that fails is
+   reported as unverified, never as "no backend".
+6. Pinned plugin copies already owned by OpenNavo are staged from the new
    runtime and swapped in the same operation. A copy is considered managed
    only when its `.hermes-catalog.json` names the same `catalog_name` and
    repository as the pin. A plugin the user installed from another repository
    is left untouched.
-6. If activation, version verification or plugin activation fails, the
+7. If activation, version verification or plugin activation fails, the
    previous runtime and plugin copies are restored automatically.
 
 The update replaces `OpenNavoData/runtime/hermes` and refreshes only the
@@ -186,11 +203,31 @@ WebKit's own WebsiteData remains under
   OpenNavo-managed plugin copies, and restores the previous runtime and
   plugins on failure. `hermes_runtime_uninstall` removes the entire
   `OpenNavoData` root and deletes stored keys and panel sessions with it;
-  CuaDriver and macOS TCC grants are left alone.
+  it takes the same lifecycle slot as an install (so the two cannot interleave
+  and chats are refused while it runs), stops the managed gateway and every
+  recorded backend, and refuses to delete anything while a recorded backend
+  survives. CuaDriver and macOS TCC grants are left alone.
 - `hermes_chat` starts a local `hermes serve` gateway and streams
   `message.delta` frames from `/api/ws` as `hermes-chunk` Tauri events. The
   final `message.complete` frame becomes the persisted assistant message.
-- The desktop uses the gateway only. CLI fallback is intentionally disabled so
+  Before binding, the app reaps backends it recorded in its own ledger so a
+  backend left by a previous session (or a crashed app) cannot keep this host,
+  and a normal Quit stops the managed gateway instead of orphaning it. The
+  ledger stores pid and process start time: an unrecorded backend (including a
+  `serve`/`dashboard` the user started manually for the same home) is never
+  signalled, and a reused pid is never matched. Before the first signal the app
+  snapshots the backend's children; they get the same grace and any survivor
+  stays in the ledger for the next cleanup. Gateway starts are refused while
+  an install, update or uninstall is running; the profile config and `.env` are
+  written only after the gateway accepts the request, under the gateway lock.
+  A chat that needs a different gateway
+  fingerprint receives a busy status if another request holds the gateway.
+- Local model discovery runs the same Hermes inventory builder as
+  `GET /api/model/options` in a short-lived process scoped to the selected
+  profile. It can refresh during a reply. Draft endpoints and keys are supplied
+  for the catalog request without saving them to the profile. Panel connections
+  use the authenticated `model.options` RPC.
+- Chat uses the gateway only. CLI fallback is intentionally disabled so
   steering, approvals and tool events always share one transport contract.
 - A send while a turn is running follows the runtime's `display.busy_input_mode`
   (read with `config.get` key `busy` when the turn opens). The default

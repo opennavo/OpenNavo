@@ -38,7 +38,7 @@ export const HERMES_PROVIDERS: readonly HermesProviderInfo[] = [
   { id: 'google', models: ['Gemini 3 Pro', 'Gemini 3 Flash'], oauth: false },
   { id: 'openrouter', models: ['Hermes 4 · 405B', 'Claude Sonnet 4.5', 'GPT-5.6'], oauth: false },
   { id: 'local', models: ['Llama 4 · 405B', 'Qwen 3 · 235B'], oauth: false, endpoint: 'http://127.0.0.1:11434' },
-  { id: 'custom', models: ['Custom model'], oauth: false }
+  { id: 'custom', models: [], oauth: false }
 ];
 
 export const HERMES_PROVIDER_MAP = Object.fromEntries(

@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -229,4 +229,68 @@ export function applyHermesRelease(manifest, release) {
   next.release.asset = `runtime-${release.version}-macos-arm64.tar.gz`;
   next.release.sha256 = '';
   return validateRuntimeManifest(next);
+}
+
+/**
+ * The commit a release tag actually points at. GitHub's `target_commitish` is only a hint
+ * (often a branch name) and is not sent for releases whose tag existed first, so resolve the
+ * tag ref itself; an annotated tag needs one more hop to its commit object.
+ */
+export function resolveTagCommit(ref, annotatedTag) {
+  if (!ref || typeof ref !== 'object' || !COMMIT_RE.test(ref.sha ?? '')) {
+    throw new Error(`Release tag does not resolve to a commit: ${ref?.sha}`);
+  }
+  if (ref.type === 'tag') {
+    const target = annotatedTag?.object;
+    const sha = target?.sha;
+    if (target?.type !== 'commit' || !COMMIT_RE.test(sha ?? '')) {
+      throw new Error(`Annotated release tag ${ref.sha} does not point at a commit object: ${target?.type} ${sha}`);
+    }
+    return sha;
+  }
+  if (ref.type !== 'commit') {
+    throw new Error(`Release tag points at an unsupported object type: ${ref.type}`);
+  }
+  return ref.sha;
+}
+
+/**
+ * Decide what a prebuilt runtime source means for the output directory.
+ *
+ * Equal paths: validate in place. A source inside the output would be deleted before the
+ * copy; an output inside the source would make the recursive copy include its own target.
+ * Both are refused instead of silently removing the input.
+ */
+export function prebuiltCopyPlan(source, output) {
+  const canonical = path => {
+    // Canonicalize the nearest existing ancestor (so a symlinked /tmp still compares) and
+    // append the not-yet-created suffix. One-level canonicalization missed `root/inside`
+    // when `root` itself did not exist yet.
+    let current = resolve(path);
+    const suffix = [];
+    for (;;) {
+      try {
+        return join(realpathSync.native(current), ...suffix);
+      } catch {
+        const parent = dirname(current);
+        if (parent === current) return resolve(path);
+        suffix.unshift(basename(current));
+        current = parent;
+      }
+    }
+  };
+  const src = canonical(source);
+  const out = canonical(output);
+  if (src === out) return 'validate';
+  const inside = (child, parent) => {
+    const rel = relative(parent, child);
+    return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  };
+  if (inside(src, out)) {
+    throw new Error(`HERMES_RUNTIME_PREBUILT is inside the output directory: ${src}`);
+  }
+  if (inside(out, src)) {
+    throw new Error(`HERMES_RUNTIME_PREBUILT contains the output directory: ${src}`);
+  }
+  return 'copy';
 }

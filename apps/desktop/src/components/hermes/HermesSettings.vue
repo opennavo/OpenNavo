@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { OnButton, OnIcon, OnModal, OnToggle, runOnEnter } from '@opennavo/ui';
 import { commands, unwrap, IpcError } from '@/ipc/client';
 import { openExternal } from '@/utils/external';
@@ -12,6 +12,7 @@ import {
   HERMES_PROVIDERS,
   HERMES_PROVIDER_MAP,
   defaultProviderEndpoint,
+  modelId,
   pickOfficialProvider,
   HERMES_AUX_TASKS,
   type HermesAuxTask,
@@ -35,12 +36,18 @@ const draftModel = ref<HermesModelSettings>({ ...store.model });
 const draftMac = ref<HermesMacSettings>({ ...store.mac });
 const editProfileName = ref(store.activeAgentProfileName);
 const secret = ref('');
+/** A second click must not start another key write while the first is awaiting. */
+const saveInFlight = ref(false);
 /** Invalidates in-flight key-status reads when the provider or scope changes. */
 let secretSeq = 0;
 const uninstallOpen = ref(false);
 const modelOpen = ref(false);
+const modelSearch = ref('');
+const modelNeedsDefault = ref(!draftModel.value.model.trim());
 const auxOpen = ref(false);
 const testing = ref(false);
+/** Latest connection test; a reply for an older profile/provider must not paint. */
+let testRequestSeq = 0;
 const permissions = ref<HermesPermissions | null>(null);
 const auditOpen = ref(false);
 const auditEntries = ref<HermesAuditEntry[]>([]);
@@ -61,6 +68,9 @@ const mcpBusy = ref(false);
 const testMessage = ref('');
 const testOk = ref<boolean | null>(null);
 const modelPicker = ref<HTMLElement>();
+const modelField = ref<HTMLInputElement>();
+const modelSearchField = ref<HTMLInputElement>();
+const modelListToggle = ref<HTMLButtonElement>();
 const LEVELS = ['open', 'guarded', 'full'] as const;
 const MAC_CAPABILITIES = ['terminal', 'screen', 'files', 'cron'] as const;
 
@@ -82,6 +92,11 @@ const loginDetected = computed(() => {
   return key === 'claude-code' ? status.claudeCode : status[key];
 });
 const scopedModelOptions = computed(() => store.modelOptionsForScope(editProfileName.value, draftModel.value));
+const catalogState = computed(() => store.modelOptionsStatusForScope(editProfileName.value, draftModel.value));
+const needsEndpoint = computed(
+  () => !remoteCredentials.value && draftModel.value.provider === 'custom' && !draftModel.value.endpoint.trim()
+);
+const modelMissing = computed(() => !draftModel.value.model.trim());
 const officialProvider = computed(() => {
   // Annotated so the generic keeps the full catalog row type (`capabilities`, `pricing`).
   const providers: NonNullable<typeof store.modelOptions>['providers'] = scopedModelOptions.value?.providers ?? [];
@@ -91,6 +106,13 @@ const officialAuthenticated = computed(() => officialProvider.value?.authenticat
 const models = computed(() => {
   const official = officialProvider.value?.models ?? [];
   return official.length ? official : providerModels(draftModel.value.provider);
+});
+const filteredModels = computed(() => {
+  const query = modelSearch.value.trim().toLowerCase();
+  if (!query) return models.value;
+  return models.value.filter(
+    model => model.toLowerCase().includes(query) || modelId(model).toLowerCase().includes(query)
+  );
 });
 const needsImport = computed(() => loginDetected.value && !officialAuthenticated.value);
 const modelOptionsUpdated = computed(() => {
@@ -106,15 +128,18 @@ const runtimeUpdateLabel = computed(() =>
   content.value.install.updateAvailable.replace('{version}', store.runtime?.expectedVersion ?? '')
 );
 const officialWarning = computed(() => {
-  if (!officialProvider.value?.models?.length) return content.value.settings.model.fallbackModels;
+  if (!officialProvider.value?.models?.length) {
+    return models.value.length ? content.value.settings.model.fallbackModels : '';
+  }
   if (provider.value.login && needsImport.value) return '';
   if (provider.value.localAuth && (draftModel.value.keySet || localAuthDetected.value)) return '';
   return officialProvider.value?.warning ?? '';
 });
-const selectedCapability = computed(() => officialProvider.value?.capabilities?.[draftModel.value.model]);
+const selectedModelId = computed(() => modelId(draftModel.value.model.trim()));
+const selectedCapability = computed(() => officialProvider.value?.capabilities?.[selectedModelId.value]);
 const reasoningSupported = computed(() => selectedCapability.value?.reasoning !== false);
 const fastSupported = computed(() => selectedCapability.value?.fast === true);
-const selectedPricing = computed(() => officialProvider.value?.pricing?.[draftModel.value.model]);
+const selectedPricing = computed(() => officialProvider.value?.pricing?.[selectedModelId.value]);
 /** `loadModelOptions` no-ops until the runtime status is known, so make sure it is loaded. */
 async function ensureRuntime() {
   if (!store.runtime) await store.loadRuntime();
@@ -123,10 +148,29 @@ async function ensureRuntime() {
 async function refreshModels() {
   await ensureRuntime();
   await store.loadModelOptions(true, draftModel.value, secret.value, editProfileName.value);
+  alignOfficialModel();
 }
+
+async function toggleModelPicker() {
+  modelOpen.value = !modelOpen.value;
+  if (!modelOpen.value) return;
+  modelSearch.value = '';
+  await nextTick();
+  modelSearchField.value?.focus();
+}
+
 function selectModel(model: string) {
   draftModel.value.model = model;
+  modelNeedsDefault.value = false;
   modelOpen.value = false;
+  modelField.value?.focus();
+}
+
+function dismissModelPicker(event: KeyboardEvent) {
+  if (!modelOpen.value) return;
+  event.stopPropagation();
+  modelOpen.value = false;
+  modelListToggle.value?.focus();
 }
 
 function onModelPickerPointer(event: PointerEvent) {
@@ -137,11 +181,17 @@ function onModelPickerPointer(event: PointerEvent) {
 }
 
 function alignOfficialModel() {
-  // Static provider fallbacks are for the picker only. They must not replace a saved model,
-  // especially when the catalog request just failed and left the last good selection intact.
+  if (!modelNeedsDefault.value || needsEndpoint.value || catalogState.value.error) return;
   const official = officialProvider.value?.models ?? [];
-  if (store.modelOptionsError || !official.length || official.includes(draftModel.value.model)) return;
-  draftModel.value.model = official[0] ?? draftModel.value.model;
+  if (!official.length) return;
+  draftModel.value.model = official.find(model => model === selectedModelId.value) ?? official[0]!;
+  modelNeedsDefault.value = false;
+}
+
+function loadModelDraft(settings: HermesModelSettings) {
+  draftModel.value = { ...settings };
+  modelNeedsDefault.value = modelMissing.value;
+  modelOpen.value = false;
 }
 const warning = computed(() => {
   if (draftMac.value.level === 'open') {
@@ -205,6 +255,7 @@ async function refreshLogin() {
 
 interface HermesLoginEvent {
   provider: string;
+  requestId: string;
   kind: 'started' | 'line' | 'url' | 'code' | 'done' | 'cancelled';
   line?: string | null;
   url?: string | null;
@@ -221,6 +272,10 @@ const loginUrl = ref('');
 const loginCode = ref('');
 const loginInput = ref('');
 const loginUnlisten = ref<(() => void) | null>(null);
+/** The one login request this window started; other windows' events/inputs are ignored. */
+const loginRequestId = ref<string | null>(null);
+/** Profile the login was started for, so its completion does not paint another profile. */
+const loginProfileName = ref<string | null>(null);
 const loginName = computed(
   () => content.value.providers[loginProvider.value as HermesProvider]?.name ?? loginProvider.value
 );
@@ -243,20 +298,34 @@ async function ensureLoginListener() {
   loginUnlisten.value = await listen<HermesLoginEvent>('hermes-login', event => {
     const payload = event.payload;
     if (payload.provider !== loginProvider.value) return;
+    // Two windows can sign into the same provider; only the request this window started may
+    // drive its panel (URL, device code, done/cancelled).
+    if (!loginOpen.value || !loginRequestId.value || payload.requestId !== loginRequestId.value) {
+      return;
+    }
     if (payload.line) appendLoginLine(payload.line);
     if (payload.url) loginUrl.value = payload.url;
     if (payload.code) loginCode.value = payload.code;
     if (payload.kind === 'started') loginPhase.value = 'starting';
     if (payload.kind === 'line' || payload.kind === 'url' || payload.kind === 'code') loginPhase.value = 'waiting';
-    if (payload.kind === 'cancelled') loginPhase.value = 'cancelled';
+    if (payload.kind === 'cancelled') {
+      loginPhase.value = 'cancelled';
+      loginRequestId.value = null;
+    }
     if (payload.kind === 'done') {
+      const profileName = loginProfileName.value;
+      loginRequestId.value = null;
+      loginProfileName.value = null;
       if (payload.ok) {
         loginPhase.value = 'success';
         void refreshLogin();
-        store.resetSession();
-        store.invalidateModelOptionsCache(editProfileName.value);
+        if (profileName && profileName !== editProfileName.value) return;
+        // Only the active profile has a session to reset; editing another profile's login
+        // must not clear the running conversation.
+        if (profileName === store.activeAgentProfileName) store.resetSession();
+        store.invalidateModelOptionsCache(profileName ?? editProfileName.value);
         void store
-          .loadModelOptions(true, draftModel.value, secret.value, editProfileName.value)
+          .loadModelOptions(true, draftModel.value, secret.value, profileName ?? editProfileName.value)
           .then(alignOfficialModel);
       } else {
         loginPhase.value = 'error';
@@ -310,6 +379,7 @@ async function openLogin() {
   if (!key) return;
   if (loginOpen.value && (loginPhase.value === 'starting' || loginPhase.value === 'waiting')) return;
   loginProvider.value = key;
+  loginProfileName.value = editProfileName.value;
   loginOpen.value = true;
   loginPhase.value = 'starting';
   loginLines.value = [];
@@ -318,7 +388,20 @@ async function openLogin() {
   loginInput.value = '';
   try {
     await ensureLoginListener();
-    await unwrap(commands.hermesLoginStart(key, profileArg.value));
+    // Generate the id before the IPC: the backend emits `started` (and possibly early
+    // line/done) before it returns, and the listener must already know which request owns them.
+    const requestId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `login-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    loginRequestId.value = requestId;
+    const started = await unwrap(commands.hermesLoginStart(key, profileArg.value, requestId));
+    if (loginRequestId.value !== requestId) {
+      // The form was closed/switched while start was in flight; do not let the login linger.
+      await commands.hermesLoginCancel(requestId).catch(() => undefined);
+      return;
+    }
+    loginRequestId.value = started;
     if (loginPhase.value === 'starting') loginPhase.value = 'waiting';
   } catch (error) {
     loginPhase.value = 'error';
@@ -329,12 +412,19 @@ async function openLogin() {
 async function logout() {
   const key = provider.value.login;
   if (!key) return;
+  // Pin the profile this sign-out belongs to: a profile switch while the IPC is running
+  // must not clear the new draft or reset the active session for another profile.
+  const profileName = editProfileName.value;
+  const profile = profileArg.value;
+  const connectionId = store.activeProfileId;
   try {
-    await unwrap(commands.hermesLogout(key, profileArg.value));
+    await unwrap(commands.hermesLogout(key, profile));
+    if (store.activeProfileId !== connectionId || editProfileName.value !== profileName) return;
     await refreshLogin();
-    store.resetSession();
-    store.invalidateModelOptionsCache(editProfileName.value);
-    await store.loadModelOptions(true, draftModel.value, secret.value, editProfileName.value);
+    if (store.activeProfileId !== connectionId || editProfileName.value !== profileName) return;
+    if (profileName === store.activeAgentProfileName) store.resetSession();
+    store.invalidateModelOptionsCache(profileName);
+    await store.loadModelOptions(true, draftModel.value, secret.value, profileName);
     alignOfficialModel();
     toasts.push({ tone: 'success', title: content.value.settings.model.logout, description: providerCopy.value.name });
   } catch (error) {
@@ -345,7 +435,8 @@ async function logout() {
 
 async function cancelLogin() {
   try {
-    await unwrap(commands.hermesLoginCancel());
+    await unwrap(commands.hermesLoginCancel(loginRequestId.value));
+    loginRequestId.value = null;
   } catch {
     // The process may have already exited.
   }
@@ -357,7 +448,7 @@ async function sendLoginInput() {
   const value = loginInput.value;
   if (!value.trim()) return;
   try {
-    await unwrap(commands.hermesLoginInput(value));
+    await unwrap(commands.hermesLoginInput(loginRequestId.value, value));
     loginInput.value = '';
   } catch (error) {
     appendLoginLine(error instanceof IpcError ? (error.detail ?? error.message) : String(error));
@@ -412,7 +503,7 @@ async function refreshSecret() {
 function changeProfileScope(event: Event) {
   const target = event.target as HTMLSelectElement;
   editProfileName.value = target.value;
-  draftModel.value = store.agentProfileModel(target.value);
+  loadModelDraft(store.agentProfileModel(target.value));
   draftMac.value = store.agentProfileMac(target.value);
   secret.value = '';
   resetTest();
@@ -431,10 +522,9 @@ function changeProfileScope(event: Event) {
  */
 function loadSheetFromStore() {
   editProfileName.value = store.activeAgentProfileName;
-  draftModel.value = { ...store.model };
+  loadModelDraft(store.model);
   draftMac.value = { ...store.mac };
   secret.value = '';
-  modelOpen.value = false;
   auxOpen.value = false;
   resetTest();
   resetDiagnostics();
@@ -476,7 +566,8 @@ watch(
     if (loginOpen.value) {
       loginOpen.value = false;
       loginLines.value = [];
-      void commands.hermesLoginCancel().catch(() => undefined);
+      void commands.hermesLoginCancel(loginRequestId.value).catch(() => undefined);
+      loginRequestId.value = null;
     }
     loadSheetFromStore();
     if (activeTab.value === 'tools') void loadCli(cliKind.value);
@@ -484,16 +575,17 @@ watch(
 );
 
 async function selectProvider(id: HermesProvider) {
+  if (id === draftModel.value.provider) return;
   const info = HERMES_PROVIDER_MAP[id];
-  draftModel.value = {
+  loadModelDraft({
     ...draftModel.value,
     provider: id,
-    model: info.models[0] ?? draftModel.value.model,
+    model: info.models[0] ?? '',
     endpoint: defaultProviderEndpoint(id),
     keySet: false
-  };
+  });
+  modelNeedsDefault.value = true;
   secret.value = '';
-  modelOpen.value = false;
   resetTest();
   await refreshSecret();
   // The cache is scoped to the connection, profile and endpoint, not to a provider card, so
@@ -521,80 +613,121 @@ function selectLevel(level: HermesMacSettings['level']) {
 }
 
 async function save() {
-  // A panel connection authenticates on its own host; never write this Mac's `.env` for it.
-  const entered = remoteCredentials.value ? '' : secret.value.trim();
-  let keyWritten = false;
-  if (entered) {
-    try {
-      await unwrap(commands.hermesSecretSet(draftModel.value.provider, entered, profileArg.value));
-      keyWritten = true;
-    } catch (error) {
-      const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-      toasts.push({ tone: 'warning', title: content.value.settings.model.keyError, description: detail });
+  if (saveInFlight.value) return;
+  if (activeTab.value === 'model' && modelMissing.value) return;
+  saveInFlight.value = true;
+  try {
+    // Pin every input and scope this save writes: a key write or status read may take long
+    // enough for the user to switch profile/connection or edit the draft.
+    const connectionId = store.activeProfileId;
+    const profileName = editProfileName.value;
+    const profile = profileArg.value;
+    const providerId = draftModel.value.provider;
+    const endpoint = draftModel.value.endpoint;
+    const draft = { ...draftModel.value, model: draftModel.value.model.trim() };
+    const macDraft = { ...draftMac.value };
+    const remote = remoteCredentials.value;
+    const editingActiveAtStart = profileName === store.activeAgentProfileName;
+    const entered = remote ? '' : secret.value.trim();
+    draftModel.value.model = draft.model;
+    let keyWritten = false;
+    if (entered) {
+      try {
+        await unwrap(commands.hermesSecretSet(providerId, entered, profile));
+        keyWritten = true;
+      } catch (error) {
+        const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
+        toasts.push({ tone: 'warning', title: content.value.settings.model.keyError, description: detail });
+        return;
+      }
     }
-  }
-  // `keySet` must record what the runtime actually stores. Deriving it from "the user
-  // typed something" marked a failed write as saved, and the sheet then claimed a key
-  // existed for the rest of the profile's life.
-  if (entered || draftModel.value.keySet) {
-    try {
-      draftModel.value.keySet = await unwrap(commands.hermesSecretStatus(draftModel.value.provider, profileArg.value));
-    } catch {
-      // Keep the last known value when the store cannot be read.
+    // `keySet` must record what the runtime actually stores, not "the user typed something".
+    if (entered || draft.keySet) {
+      try {
+        draft.keySet = await unwrap(commands.hermesSecretStatus(providerId, profile));
+      } catch {
+        // Keep the last known value when the store cannot be read.
+      }
+      if (entered && !draft.keySet) {
+        toasts.push({
+          tone: 'warning',
+          title: content.value.settings.model.keyError,
+          description: content.value.settings.model.keyError
+        });
+        return;
+      }
     }
+    const sameConnection = store.activeProfileId === connectionId;
+    const stillEditing = sameConnection && profileName === editProfileName.value;
+    const stillActive = sameConnection && profileName === store.activeAgentProfileName;
+    // The draft itself may have moved while the key round-trip ran. The write still belongs
+    // to the captured snapshot, but it must not overwrite the newer draft in the store.
+    const sameDraft =
+      draftModel.value.provider === providerId &&
+      draftModel.value.endpoint === endpoint &&
+      draftModel.value.model === draft.model;
+    if (keyWritten) store.invalidateModelOptionsCache(profileName);
+    // `chat` reads the saved key from the profile's `.env` (H1). Keeping it in the global
+    // store re-sends it on every later chat and would write it back after removal.
+    if (entered && stillActive) store.setApiKey('');
+    const previous = store.model;
+    const sessionWillReset =
+      !modelMissing.value &&
+      editingActiveAtStart &&
+      stillActive &&
+      sameDraft &&
+      Boolean(store.activeId) &&
+      (previous.provider !== draft.provider ||
+        previous.model !== draft.model ||
+        previous.effort !== draft.effort ||
+        previous.fast !== draft.fast ||
+        previous.endpoint !== draft.endpoint ||
+        Boolean(entered));
+    if (stillEditing && sameDraft) {
+      if (stillActive) {
+        if (entered) store.resetSession();
+        if (!modelMissing.value) store.saveModel({ ...draft });
+        store.saveMac({ ...macDraft });
+      } else {
+        if (!modelMissing.value) store.setAgentProfileModel(profileName, { ...draft });
+        store.setAgentProfileMac(profileName, { ...macDraft });
+      }
+      toasts.push({
+        tone: 'success',
+        title: content.value.common.settingsSaved,
+        description: modelMissing.value ? undefined : `${draft.model} · ${content.value.effort[draft.effort]}`
+      });
+      if (sessionWillReset) {
+        toasts.push({
+          tone: 'info',
+          title: content.value.settings.model.modelLabel,
+          description: content.value.settings.model.sessionReset
+        });
+      }
+      emit('close');
+    }
+  } finally {
+    saveInFlight.value = false;
   }
-  // The key was already written to the edited profile's own `.env` above, which is where the
-  // runtime reads it from. Keeping a copy in the store for a profile that is not active made
-  // the next `write_config` in a different profile copy it into that profile's `.env`.
-  const editingActive = editProfileName.value === store.activeAgentProfileName;
-  if (keyWritten) store.invalidateModelOptionsCache(editProfileName.value);
-  store.setApiKey(editingActive && !remoteCredentials.value ? secret.value : '');
-  const previous = store.model;
-  const sessionWillReset =
-    editingActive &&
-    Boolean(store.activeId) &&
-    (previous.provider !== draftModel.value.provider ||
-      previous.model !== draftModel.value.model ||
-      previous.effort !== draftModel.value.effort ||
-      previous.fast !== draftModel.value.fast ||
-      previous.endpoint !== draftModel.value.endpoint ||
-      Boolean(entered));
-  if (editingActive) {
-    if (entered) store.resetSession();
-    store.saveModel({ ...draftModel.value });
-    store.saveMac({ ...draftMac.value });
-  } else {
-    store.setAgentProfileModel(editProfileName.value, {
-      ...draftModel.value
-    });
-    store.setAgentProfileMac(editProfileName.value, { ...draftMac.value });
-  }
-  toasts.push({
-    tone: 'success',
-    title: content.value.common.settingsSaved,
-    description: `${draftModel.value.model} · ${content.value.effort[draftModel.value.effort]}`
-  });
-  if (sessionWillReset) {
-    toasts.push({
-      tone: 'info',
-      title: content.value.settings.model.modelLabel,
-      description: content.value.settings.model.sessionReset
-    });
-  }
-  emit('close');
 }
 
 async function removeApiKey() {
+  const connectionId = store.activeProfileId;
+  const profileName = editProfileName.value;
+  const profile = profileArg.value;
+  const providerId = draftModel.value.provider;
   try {
-    await unwrap(commands.hermesSecretDelete(draftModel.value.provider, profileArg.value));
-    store.invalidateModelOptionsCache(editProfileName.value);
-    draftModel.value.keySet = false;
-    secret.value = '';
-    // Drop the in-memory copy too: `write_config` persists whatever key the request carries,
-    // so a stale one would put the deleted credential back into `.env` on the next turn.
-    if (editProfileName.value === store.activeAgentProfileName) store.setApiKey('');
-    resetTest();
-    void store.loadModelOptions(true, draftModel.value, secret.value, editProfileName.value);
+    await unwrap(commands.hermesSecretDelete(providerId, profile));
+    store.invalidateModelOptionsCache(profileName);
+    if (store.activeProfileId === connectionId && editProfileName.value === profileName) {
+      draftModel.value.keySet = false;
+      secret.value = '';
+      // Drop the in-memory copy too: `write_config` persists whatever key the request carries,
+      // so a stale one would put the deleted credential back into `.env` on the next turn.
+      if (profileName === store.activeAgentProfileName) store.setApiKey('');
+      resetTest();
+      void store.loadModelOptions(true, draftModel.value, secret.value, profileName);
+    }
     toasts.push({ tone: 'success', title: content.value.settings.model.keyRemoved });
   } catch (error) {
     const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
@@ -604,25 +737,48 @@ async function removeApiKey() {
 
 async function testConnection() {
   if (testing.value) return;
+  const connectionId = store.activeProfileId;
+  const profileName = editProfileName.value;
+  const providerId = draftModel.value.provider;
+  const endpoint = draftModel.value.endpoint;
+  const draftKey = secret.value;
+  const request = ++testRequestSeq;
   testing.value = true;
   testMessage.value = '';
   testOk.value = null;
   try {
     const result = await unwrap(
       commands.hermesTestConnection({
-        provider: draftModel.value.provider,
-        apiKey: secret.value.trim() || null,
-        endpoint: draftModel.value.endpoint.trim() || null,
+        provider: providerId,
+        apiKey: draftKey.trim() || null,
+        endpoint: endpoint.trim() || null,
         profile: profileArg.value
       })
     );
+    if (
+      request !== testRequestSeq ||
+      store.activeProfileId !== connectionId ||
+      editProfileName.value !== profileName ||
+      draftModel.value.provider !== providerId ||
+      draftModel.value.endpoint !== endpoint
+    ) {
+      return;
+    }
     testOk.value = result.ok;
     testMessage.value = result.message;
   } catch (error) {
+    if (
+      request !== testRequestSeq ||
+      store.activeProfileId !== connectionId ||
+      editProfileName.value !== profileName ||
+      draftModel.value.provider !== providerId
+    ) {
+      return;
+    }
     testOk.value = false;
     testMessage.value = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
   } finally {
-    testing.value = false;
+    if (request === testRequestSeq) testing.value = false;
   }
 }
 
@@ -678,7 +834,9 @@ function checkPermissions() {
 
 async function updateRuntime() {
   const ok = await store.installRuntime();
-  if (ok) {
+  // The store reports a post-install backend warning itself; a success toast next to it
+  // would claim everything is clean.
+  if (ok && !store.runtime?.message) {
     toasts.push({ tone: 'success', title: content.value.install.complete, description: store.runtime?.version ?? '' });
   }
 }
@@ -687,6 +845,16 @@ async function uninstallHermes() {
   const ok = await store.uninstallRuntime();
   uninstallOpen.value = false;
   if (ok) emit('close');
+}
+
+/** Toast copy stays short: a raw stderr traceback belongs in the diagnostics output pane. */
+function failureCopy(error: unknown): string {
+  return error instanceof IpcError ? error.message : String(error);
+}
+
+/** Pane copy keeps the runtime's own reason (stderr tail), even when the toast is generic. */
+function failureDetail(error: unknown): string {
+  return error instanceof IpcError ? (error.detail ?? error.message) : String(error);
 }
 
 async function loadCli(kind: string) {
@@ -702,9 +870,8 @@ async function loadCli(kind: string) {
     cliOutput.value = output;
   } catch (error) {
     if (seq !== cliRequestSeq) return;
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    cliOutput.value = detail;
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.title, description: detail });
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.title, description: failureCopy(error) });
   } finally {
     if (seq === cliRequestSeq) cliLoading.value = false;
   }
@@ -714,15 +881,24 @@ async function runCronAction(action: 'pause' | 'resume' | 'remove') {
   if (!cronJobId.value.trim() || cronBusy.value) return;
   if (action === 'remove' && !window.confirm(content.value.settings.diagnostics.cronConfirm)) return;
   cronBusy.value = true;
+  // Writing a failure into the pane must not paint it over a newer profile/read.
+  const seq = ++cliRequestSeq;
   try {
     const scope = diagnosticsScope();
     await unwrap(
       commands.hermesCronAction(action, cronJobId.value.trim(), scope.profile, scope.connectionId, scope.gatewayUrl)
     );
+    // A profile/connection switch (or a newer kind read) superseded this action: its
+    // late success must not reset the kind back to cron or paint over the new pane.
+    if (seq !== cliRequestSeq) return;
     await loadCli('cron');
   } catch (error) {
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.cron, description: detail });
+    if (seq !== cliRequestSeq) return;
+    // This action invalidated the loadCli whose `finally` would have stopped the
+    // spinner; the pane would otherwise stay on "loading".
+    cliLoading.value = false;
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.cron, description: failureCopy(error) });
   } finally {
     cronBusy.value = false;
   }
@@ -762,8 +938,8 @@ async function runMcp(action: 'list' | 'add' | 'remove') {
     if (seq !== cliRequestSeq) return;
     // The invalidated loadCli cannot clear the spinner; this request owns it now.
     cliLoading.value = false;
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: 'MCP', description: detail });
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: 'MCP', description: failureCopy(error) });
   } finally {
     mcpBusy.value = false;
   }
@@ -774,11 +950,16 @@ async function runSkillAction(action: 'install' | 'uninstall') {
   if (action === 'install' && !window.confirm(content.value.settings.diagnostics.installConfirm)) return;
   if (action === 'uninstall' && !window.confirm(content.value.settings.diagnostics.uninstallConfirm)) return;
   actionBusy.value = true;
+  // Writing a failure into the pane must not paint it over a newer profile/read.
+  const seq = ++cliRequestSeq;
   try {
     const scope = diagnosticsScope();
     const output = await unwrap(
       commands.hermesSkillAction(action, skillName.value.trim(), scope.profile, scope.connectionId, scope.gatewayUrl)
     );
+    // A superseded action must not show its receipt for a profile the sheet no longer edits,
+    // nor reload the list over the pane the switch already fetched.
+    if (seq !== cliRequestSeq) return;
     // A remote hub action spawns a background install/uninstall; the list will not
     // change until it finishes, so keep the spawn receipt visible to the user.
     if (scope.connectionId && output.trim()) {
@@ -786,8 +967,10 @@ async function runSkillAction(action: 'install' | 'uninstall') {
     }
     await loadCli('skills');
   } catch (error) {
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.skills, description: detail });
+    if (seq !== cliRequestSeq) return;
+    cliLoading.value = false;
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.skills, description: failureCopy(error) });
   } finally {
     actionBusy.value = false;
   }
@@ -797,15 +980,22 @@ async function runToolAction(action: 'enable' | 'disable') {
   if (!toolName.value.trim() || actionBusy.value) return;
   if (action === 'disable' && !window.confirm(content.value.settings.diagnostics.disableConfirm)) return;
   actionBusy.value = true;
+  // Writing a failure into the pane must not paint it over a newer profile/read.
+  const seq = ++cliRequestSeq;
   try {
     const scope = diagnosticsScope();
     await unwrap(
       commands.hermesToolAction(action, toolName.value.trim(), scope.profile, scope.connectionId, scope.gatewayUrl)
     );
+    // A profile/connection switch superseded this action; reloading now would replace the
+    // newer profile's pane (and its spinner) with this action's list.
+    if (seq !== cliRequestSeq) return;
     await loadCli('tools');
   } catch (error) {
-    const detail = error instanceof IpcError ? (error.detail ?? error.message) : String(error);
-    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.tools, description: detail });
+    if (seq !== cliRequestSeq) return;
+    cliLoading.value = false;
+    cliOutput.value = failureDetail(error);
+    toasts.push({ tone: 'warning', title: content.value.settings.diagnostics.tools, description: failureCopy(error) });
   } finally {
     actionBusy.value = false;
   }
@@ -993,75 +1183,98 @@ onBeforeUnmount(() => {
                 <label class="text-11px text-ink-tertiary" for="hermes-model">{{
                   content.settings.model.modelLabel
                 }}</label>
-                <div ref="modelPicker" class="relative">
+                <div ref="modelPicker" class="relative" @keydown.esc="dismissModelPicker">
                   <div class="flex items-center gap-4px">
                     <input
                       id="hermes-model"
+                      ref="modelField"
                       v-model="draftModel.model"
                       class="h-34px min-w-0 flex-1 rounded-small border border-solid border-line-default bg-surface-inset px-10px font-sans text-12px text-ink-primary outline-none placeholder:text-ink-tertiary focus-visible:shadow-focus-ring"
+                      :placeholder="content.settings.model.modelPlaceholder"
                       autocomplete="off"
-                      @focus="modelOpen = true"
-                      @click="modelOpen = true"
+                      @input="modelNeedsDefault = false"
                     />
                     <button
+                      ref="modelListToggle"
                       type="button"
                       class="flex h-34px w-30px shrink-0 items-center justify-center rounded-small border border-solid border-line-default bg-surface-inset text-ink-tertiary outline-none hover:text-ink-primary focus-visible:shadow-focus-ring"
-                      :aria-label="content.settings.model.modelLabel"
+                      :aria-label="content.settings.model.openModelList"
                       :aria-expanded="modelOpen"
-                      @click="modelOpen = !modelOpen"
+                      :aria-controls="modelOpen ? 'hermes-model-options' : undefined"
+                      @click="toggleModelPicker"
                     >
                       <OnIcon name="lucide:chevron-down" :size="13" />
                     </button>
                   </div>
                   <div
                     v-if="modelOpen"
-                    class="absolute left-0 right-0 top-[38px] z-10 max-h-220px overflow-y-auto rounded-small border border-solid border-line-default bg-component-modal-bg p-4px shadow-modal"
+                    id="hermes-model-options"
+                    class="absolute left-0 right-0 top-[38px] z-10 rounded-small border border-solid border-line-default bg-component-modal-bg p-4px shadow-modal"
                   >
-                    <button
-                      v-for="model in models"
-                      :key="model"
-                      type="button"
-                      class="flex w-full items-center gap-8px rounded-tiny px-8px py-7px text-left font-sans text-12px outline-none hover:bg-surface-raised focus-visible:shadow-focus-ring"
-                      :class="
-                        model === draftModel.model
-                          ? 'bg-surface-raised font-600 text-ink-primary'
-                          : 'text-ink-secondary'
-                      "
-                      @click="selectModel(model)"
-                    >
-                      <span class="min-w-0 flex-1 truncate">{{ model }}</span>
-                      <OnIcon
-                        v-if="model === draftModel.model"
-                        name="lucide:check"
-                        :size="13"
-                        class="text-ink-accent"
-                      />
-                    </button>
-                    <p v-if="!models.length" class="m-0 px-8px py-7px text-11px text-ink-tertiary">
-                      {{ content.settings.model.noModels }}
-                    </p>
+                    <input
+                      v-if="models.length"
+                      ref="modelSearchField"
+                      v-model="modelSearch"
+                      type="search"
+                      class="mb-4px h-28px w-full rounded-tiny border border-solid border-line-default bg-surface-inset px-8px text-11px text-ink-primary outline-none placeholder:text-ink-tertiary focus-visible:shadow-focus-ring"
+                      :aria-label="content.settings.model.searchModels"
+                      :placeholder="content.settings.model.searchModels"
+                      autocomplete="off"
+                    />
+                    <div class="max-h-182px overflow-y-auto">
+                      <button
+                        v-for="model in filteredModels"
+                        :key="model"
+                        type="button"
+                        class="flex w-full items-center gap-8px rounded-tiny px-8px py-7px text-left font-sans text-12px outline-none hover:bg-surface-raised focus-visible:shadow-focus-ring"
+                        :class="
+                          modelId(model) === selectedModelId
+                            ? 'bg-surface-raised font-600 text-ink-primary'
+                            : 'text-ink-secondary'
+                        "
+                        @click="selectModel(model)"
+                      >
+                        <span class="min-w-0 flex-1 truncate">{{ model }}</span>
+                        <OnIcon
+                          v-if="modelId(model) === selectedModelId"
+                          name="lucide:check"
+                          :size="13"
+                          class="text-ink-accent"
+                        />
+                      </button>
+                      <p v-if="!filteredModels.length" class="m-0 px-8px py-7px text-11px text-ink-tertiary">
+                        {{ models.length ? content.settings.model.noModelMatches : content.settings.model.noModels }}
+                      </p>
+                    </div>
                   </div>
                 </div>
                 <span class="text-11px leading-[1.45] text-ink-tertiary">{{ content.settings.model.modelHint }}</span>
-                <div class="flex flex-wrap items-center gap-7px text-11px leading-[1.45] text-ink-tertiary">
+                <span v-if="needsEndpoint" class="text-11px leading-[1.45] text-ink-tertiary">{{
+                  content.settings.model.catalogEndpoint
+                }}</span>
+                <div v-else class="flex flex-wrap items-center gap-7px text-11px leading-[1.45] text-ink-tertiary">
                   <span>{{ content.settings.model.official }}</span>
                   <button
                     type="button"
                     class="cursor-pointer border-0 bg-transparent p-0 font-sans text-11px text-ink-tertiary underline underline-offset-2 hover:text-ink-secondary disabled:cursor-default disabled:no-underline"
-                    :disabled="store.modelOptionsLoading"
+                    :disabled="catalogState.loading"
                     @click="refreshModels"
                   >
                     {{
-                      store.modelOptionsLoading
-                        ? content.settings.model.loadingModels
-                        : content.settings.model.refreshModels
+                      catalogState.loading ? content.settings.model.loadingModels : content.settings.model.refreshModels
                     }}
                   </button>
-                  <span v-if="store.modelOptionsError" class="break-words text-status-danger">{{
-                    store.modelOptionsError
-                  }}</span>
-                  <span v-else-if="officialWarning" class="break-words text-status-warning">{{ officialWarning }}</span>
-                  <span v-else-if="modelOptionsUpdated" class="text-ink-tertiary">{{ modelOptionsUpdated }}</span>
+                  <span v-if="!catalogState.loading" role="status" class="min-w-0 break-words">
+                    <span
+                      v-if="catalogState.error"
+                      class="text-status-warning"
+                      :title="officialProvider?.models?.length ? catalogState.error : undefined"
+                    >
+                      {{ officialProvider?.models?.length ? content.settings.model.catalogStale : catalogState.error }}
+                    </span>
+                    <span v-else-if="officialWarning" class="text-status-warning">{{ officialWarning }}</span>
+                    <span v-else>{{ models.length ? modelOptionsUpdated : content.settings.model.noModels }}</span>
+                  </span>
                 </div>
                 <div
                   v-if="selectedCapability || selectedPricing"
@@ -1673,7 +1886,9 @@ onBeforeUnmount(() => {
         <footer class="flex shrink-0 items-center gap-8px border-t border-t-solid border-line-subtle px-24px py-14px">
           <span class="min-w-0 flex-1 text-11px leading-[1.45] text-ink-tertiary">{{ content.settings.footer }}</span>
           <OnButton variant="ghost" @click="emit('close')">{{ content.common.cancel }}</OnButton>
-          <OnButton variant="accent" @click="save">{{ content.common.save }}</OnButton>
+          <OnButton variant="accent" :disabled="activeTab === 'model' && modelMissing" @click="save">{{
+            content.common.save
+          }}</OnButton>
         </footer>
       </div>
     </div>

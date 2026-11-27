@@ -4,6 +4,7 @@ import { OnButton, OnIcon, OnModal } from '@opennavo/ui';
 import { useHermesStore } from '@/stores/hermes';
 import { useHermesContent } from '@/composables/useHermesContent';
 import { IpcError } from '@/ipc/client';
+import { validatePanelBaseUrl } from '@/hermes/panelUrl';
 
 const props = defineProps<{
   open: boolean;
@@ -21,11 +22,16 @@ const username = ref('');
 const password = ref('');
 const saving = ref(false);
 const error = ref('');
+/** Bumped on every open; a submit that was in flight for an older form must not close this one. */
+let formSeq = 0;
 
 watch(
   () => props.open,
   open => {
     if (!open) return;
+    formSeq += 1;
+    // A reopened form is a new submission even if the old login is still running.
+    saving.value = false;
     name.value = props.reloginId ? (props.initialName ?? '') : '';
     url.value = props.reloginId ? (props.initialUrl ?? '') : '';
     username.value = '';
@@ -38,26 +44,21 @@ function validate(): string {
   if (!name.value.trim() || !url.value.trim() || !username.value.trim() || !password.value) {
     return content.value.profiles.required;
   }
-  try {
-    const parsed = new URL(url.value.trim());
-    if (!['http:', 'https:'].includes(parsed.protocol)) return content.value.profiles.invalidUrl;
-    if (parsed.protocol === 'http:') {
-      const host = parsed.hostname;
-      const octets = host.split('.').map(Number);
-      const tailnet =
-        octets.length === 4 && (octets[0] ?? 0) === 100 && (octets[1] ?? 0) >= 64 && (octets[1] ?? 0) <= 127;
-      const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-      if (!tailnet && !loopback && !host.endsWith('.ts.net')) return content.value.profiles.panelInsecure;
-    }
-  } catch {
-    return content.value.profiles.invalidUrl;
+  switch (validatePanelBaseUrl(url.value)) {
+    case 'invalid':
+      return content.value.profiles.invalidUrl;
+    case 'insecure':
+      return content.value.profiles.panelInsecure;
+    default:
+      return '';
   }
-  return '';
 }
-
 async function save() {
+  // A double submit while the first login is in flight would create a second panel session.
+  if (saving.value) return;
   error.value = validate();
   if (error.value) return;
+  const request = ++formSeq;
   saving.value = true;
   try {
     if (props.reloginId) {
@@ -65,12 +66,17 @@ async function save() {
     } else {
       await store.addPanelProfile(name.value, url.value, username.value, password.value);
     }
+    // The modal was closed/reopened for another connection while this login ran: its receipt
+    // must not close the form now on screen.
+    if (request !== formSeq || !props.open) return;
     emit('saved');
     emit('close');
   } catch (cause) {
-    error.value = cause instanceof IpcError ? (cause.detail ?? cause.message) : String(cause);
+    if (request === formSeq && props.open) {
+      error.value = cause instanceof IpcError ? (cause.detail ?? cause.message) : String(cause);
+    }
   } finally {
-    saving.value = false;
+    if (request === formSeq) saving.value = false;
   }
 }
 </script>

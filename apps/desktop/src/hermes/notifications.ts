@@ -43,7 +43,9 @@ function notificationCopy() {
 export async function notifyHermesReply(
   kind: HermesNotificationKind,
   conversationId: string,
-  text: string | null | undefined
+  text: string | null | undefined,
+  connectionId?: string | null,
+  agentProfile?: string | null
 ): Promise<boolean> {
   const id = conversationId.trim();
   if (!id) return false;
@@ -57,7 +59,13 @@ export async function notifyHermesReply(
   const body = clipHermesNotificationBody(text, fallback);
 
   try {
-    const result = await commands.hermesNotifyReply(id, title, body);
+    const result = await commands.hermesNotifyReply(
+      id,
+      title,
+      body,
+      connectionId?.trim() || null,
+      agentProfile?.trim() || null
+    );
     return result.status === 'ok';
   } catch {
     return false;

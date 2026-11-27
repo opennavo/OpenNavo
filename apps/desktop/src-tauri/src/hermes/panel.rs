@@ -18,50 +18,73 @@ pub struct PanelLoginResult {
     pub provider: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PanelSession {
     pub base_url: String,
     pub provider: String,
     pub access_token: String,
     pub refresh_token: String,
+    /// Stable identity of this login. Cookie rotation preserves it; a new sign-in gets a new
+    /// one. Old sessions on disk deserialize as empty and fall back to full equality.
+    #[serde(default)]
+    pub login_id: String,
 }
 
 fn base_url(raw: &str) -> Result<String, AppError> {
-    let mut value = raw.trim().trim_end_matches('/').to_owned();
-    if value.ends_with("/login") {
-        value.truncate(value.len() - "/login".len());
-        value = value.trim_end_matches('/').to_owned();
-    }
-    let value = value.as_str();
-    if !(value.starts_with("http://") || value.starts_with("https://")) {
+    let mut parsed = reqwest::Url::parse(raw.trim())
+        .map_err(|_| AppError::new("E_HERMES_PANEL_URL", "Invalid Hermes panel URL."))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
         return Err(AppError::new(
             "E_HERMES_PANEL_URL",
             "Panel URL must start with http:// or https://.",
         ));
     }
-    if value.starts_with("http://") {
-        let parsed = reqwest::Url::parse(value)
-            .map_err(|_| AppError::new("E_HERMES_PANEL_URL", "Invalid Hermes panel URL."))?;
-        let host = parsed.host_str().unwrap_or_default();
-        let tailnet = host
-            .parse::<std::net::Ipv4Addr>()
-            .map(|ip| {
+    // A base URL is joined with panel routes; credentials, a query or a fragment cannot be
+    // carried forward and would silently change the origin/route of every request.
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(AppError::new(
+            "E_HERMES_PANEL_URL",
+            "Panel URL must not contain credentials, a query or a fragment.",
+        ));
+    }
+    // The typed host is what distinguishes a bracketed IPv6 literal from a domain; comparing
+    // `host_str()` to "::1" rejected `http://[::1]:9119`.
+    if parsed.scheme() == "http" {
+        let host = parsed
+            .host_str()
+            .unwrap_or_default()
+            .trim_start_matches('[')
+            .trim_end_matches(']');
+        let allowed = match host.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V4(ip)) => {
                 let octets = ip.octets();
-                octets[0] == 100 && (64..=127).contains(&octets[1])
-            })
-            .unwrap_or(false);
-        let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
-        if !tailnet && !loopback && !host.ends_with(".ts.net") {
+                let tailnet = octets[0] == 100 && (64..=127).contains(&octets[1]);
+                tailnet || ip.is_loopback()
+            }
+            Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback(),
+            Err(_) => host == "localhost" || host.ends_with(".ts.net"),
+        };
+
+        if !allowed {
             return Err(AppError::new(
                 "E_HERMES_PANEL_URL",
                 "Use HTTPS for a non-Tailscale Hermes panel.",
             ));
         }
     }
-    Ok(value.to_owned())
+    let mut path = parsed.path().trim_end_matches('/').to_owned();
+    if path.ends_with("/login") {
+        path.truncate(path.len() - "/login".len());
+        path = path.trim_end_matches('/').to_owned();
+    }
+    parsed.set_path(&path);
+    Ok(parsed.as_str().trim_end_matches('/').to_owned())
 }
-
 fn client_with_timeout(timeout: Duration) -> Result<reqwest::Client, AppError> {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -110,6 +133,32 @@ fn cookie_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<Stri
     None
 }
 
+/// Upper bound for one panel JSON body. Transcripts can be large, but an unbounded `.json()`
+/// lets a broken or hostile host buffer until the process dies.
+pub(crate) const MAX_PANEL_JSON_BYTES: usize = 32 * 1024 * 1024;
+
+/// Read a JSON body through a byte cap. The error is diagnostic text, never the body itself.
+pub(crate) async fn read_json_limited(
+    response: &mut reqwest::Response,
+    limit: usize,
+) -> Result<serde_json::Value, String> {
+    let mut body = Vec::new();
+    while body.len() <= limit {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let room = limit.saturating_add(1).saturating_sub(body.len());
+                body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+            }
+            Ok(None) => break,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    if body.len() > limit {
+        return Err(format!("panel response exceeded {limit} bytes"));
+    }
+    serde_json::from_slice(&body).map_err(|error| error.to_string())
+}
+
 pub async fn login(base: &str, username: &str, password: &str) -> Result<PanelSession, AppError> {
     if username.trim().is_empty() || password.is_empty() {
         return Err(AppError::new(
@@ -119,17 +168,18 @@ pub async fn login(base: &str, username: &str, password: &str) -> Result<PanelSe
     }
     let base = base_url(base)?;
     let client = client()?;
-    let providers: serde_json::Value = client
+    let mut providers_response = client
         .get(format!("{base}/api/auth/providers"))
         .send()
         .await
         .map_err(|error| {
             AppError::new("E_HERMES_PANEL", "Could not reach the Hermes panel.")
                 .with_detail(error.to_string())
-        })?
-        .json()
-        .await
-        .unwrap_or(serde_json::Value::Null);
+        })?;
+    let providers: serde_json::Value =
+        read_json_limited(&mut providers_response, MAX_PANEL_JSON_BYTES)
+            .await
+            .unwrap_or(serde_json::Value::Null);
     let provider = providers
         .get("providers")
         .and_then(serde_json::Value::as_array)
@@ -183,10 +233,11 @@ pub async fn login(base: &str, username: &str, password: &str) -> Result<PanelSe
         provider,
         access_token,
         refresh_token,
+        login_id: uuid::Uuid::new_v4().to_string(),
     })
 }
 
-fn cookie_header(session: &PanelSession) -> String {
+pub(crate) fn cookie_header(session: &PanelSession) -> String {
     format!(
         "hermes_session_at={}; hermes_session_rt={}",
         session.access_token, session.refresh_token
@@ -209,16 +260,20 @@ fn refreshed_session(
         provider: session.provider.clone(),
         access_token: access,
         refresh_token: refresh,
+        login_id: session.login_id.clone(),
     })
 }
 
+/// Persist cookies rotated by a response, but only if the request still owns the stored
+/// session. A response that lands after a newer login at the same profile id is stale and
+/// must not replace the new cookies.
 pub fn persist_response_cookies(
     profile_id: &str,
+    used: &PanelSession,
     headers: &reqwest::header::HeaderMap,
 ) -> Result<(), AppError> {
-    let session = super::panel_session(profile_id)?;
-    if let Some(refreshed) = refreshed_session(&session, headers) {
-        super::panel_session_set(profile_id, &refreshed)?;
+    if let Some(refreshed) = refreshed_session(used, headers) {
+        super::panel_session_update_if(profile_id, used, &refreshed)?;
     }
     Ok(())
 }
@@ -231,7 +286,7 @@ async fn ticket_with_refresh(
     session: &PanelSession,
 ) -> Result<(String, Option<PanelSession>), AppError> {
     let client = client()?;
-    let response = client
+    let mut response = client
         .post(format!("{}/api/auth/ws-ticket", session.base_url))
         .header(COOKIE, cookie_header(session))
         .send()
@@ -242,7 +297,9 @@ async fn ticket_with_refresh(
         })?;
     let status = response.status();
     let headers = response.headers().clone();
-    let value: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+    let value = read_json_limited(&mut response, MAX_PANEL_JSON_BYTES)
+        .await
+        .unwrap_or(serde_json::Value::Null);
     if !status.is_success() {
         return Err(AppError::new(
             "E_HERMES_PANEL_AUTH",
@@ -259,7 +316,7 @@ async fn ticket_with_refresh(
 
 pub async fn ticket(session: &PanelSession) -> Result<String, AppError> {
     let client = client()?;
-    let response = client
+    let mut response = client
         .post(format!("{}/api/auth/ws-ticket", session.base_url))
         .header(COOKIE, cookie_header(session))
         .send()
@@ -269,7 +326,9 @@ pub async fn ticket(session: &PanelSession) -> Result<String, AppError> {
                 .with_detail(error.to_string())
         })?;
     let status = response.status();
-    let value: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+    let value = read_json_limited(&mut response, MAX_PANEL_JSON_BYTES)
+        .await
+        .unwrap_or(serde_json::Value::Null);
     if !status.is_success() {
         return Err(AppError::new(
             "E_HERMES_PANEL_AUTH",
@@ -319,11 +378,24 @@ pub(crate) async fn request_raw(
     failure: &str,
 ) -> Result<PanelReply, AppError> {
     let session = super::panel_session(profile_id)?;
+    request_raw_with_session(profile_id, &session, method, path, body, failure).await
+}
+
+/// One authenticated request built from a caller-held snapshot. The URL, cookie and the
+/// cookie rotation all belong to the same session even if a relogin lands mid-flight.
+pub(crate) async fn request_raw_with_session(
+    profile_id: &str,
+    session: &PanelSession,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+    failure: &str,
+) -> Result<PanelReply, AppError> {
     let client = client()?;
     let url = endpoint_url(&session.base_url, path)?;
     let mut request = client
         .request(method, url)
-        .header(COOKIE, cookie_header(&session));
+        .header(COOKIE, cookie_header(session));
     if let Some(body) = body {
         request = request.json(&body);
     }
@@ -333,8 +405,24 @@ pub(crate) async fn request_raw(
         .map_err(|error| AppError::new("E_HERMES_PANEL", failure).with_detail(error.to_string()))?;
     let status = response.status();
     let headers = response.headers().clone();
-    persist_response_cookies(profile_id, &headers)?;
-    let value = response.json().await.unwrap_or(serde_json::Value::Null);
+    let mut response = response;
+    let value = match read_json_limited(&mut response, MAX_PANEL_JSON_BYTES).await {
+        Ok(value) => value,
+        // A rejected body is only diagnostic; a successful one must be a complete JSON
+        // document or the caller would silently act on an empty list.
+        Err(detail) if status.is_success() => {
+            return Err(AppError::new(
+                "E_HERMES_PANEL",
+                "The Hermes panel returned an unreadable response.",
+            )
+            .with_detail(detail));
+        }
+        Err(_) => serde_json::Value::Null,
+    };
+    // A rejected response may carry a deletion cookie; only a success can rotate the session.
+    if status.is_success() {
+        persist_response_cookies(profile_id, session, &headers)?;
+    }
     Ok(PanelReply { status, value })
 }
 
@@ -345,7 +433,19 @@ async fn send(
     body: Option<serde_json::Value>,
     failure: &str,
 ) -> Result<serde_json::Value, AppError> {
-    let reply = request_raw(profile_id, method, path, body, failure).await?;
+    let session = super::panel_session(profile_id)?;
+    send_with_session(profile_id, &session, method, path, body, failure).await
+}
+
+async fn send_with_session(
+    profile_id: &str,
+    session: &PanelSession,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<serde_json::Value>,
+    failure: &str,
+) -> Result<serde_json::Value, AppError> {
+    let reply = request_raw_with_session(profile_id, session, method, path, body, failure).await?;
     if !reply.status.is_success() {
         return Err(status_error(reply.status, failure));
     }
@@ -531,7 +631,9 @@ async fn get_image_json(profile_id: &str, path: &str) -> Result<serde_json::Valu
         })?;
     let status = response.status();
     let headers = response.headers().clone();
-    persist_response_cookies(profile_id, &headers)?;
+    if status.is_success() {
+        persist_response_cookies(profile_id, &session, &headers)?;
+    }
     if !status.is_success() {
         return Err(status_error(status, "Could not read this Hermes image."));
     }
@@ -584,6 +686,7 @@ pub async fn read_data_url(
 /// Mint the path-bound ticket the panel's stream/download routes accept without a cookie.
 async fn file_ticket(
     profile_id: &str,
+    session: &PanelSession,
     route: &str,
     path: &str,
     profile: Option<&str>,
@@ -595,8 +698,9 @@ async fn file_ticket(
         "profile": named_profile(profile),
         "session_id": non_empty(session_id),
     });
-    let value = send(
+    let value = send_with_session(
         profile_id,
+        session,
         reqwest::Method::POST,
         "/api/files/ticket",
         Some(body),
@@ -629,8 +733,11 @@ pub(crate) async fn file_stream_request(
     profile: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<PanelStreamRequest, AppError> {
-    let base = base_url_for(profile_id)?;
-    match file_ticket(profile_id, "stream", path, profile, session_id).await {
+    // One snapshot for the URL, the ticket request and the fallback cookie: a relogin that
+    // lands while the ticket is minted must not pair the old base with the new cookies.
+    let session = super::panel_session(profile_id)?;
+    let base = session.base_url.clone();
+    match file_ticket(profile_id, &session, "stream", path, profile, session_id).await {
         Ok(ticket) => Ok(PanelStreamRequest {
             url: build_file_url(
                 &base,
@@ -644,7 +751,7 @@ pub(crate) async fn file_stream_request(
         }),
         Err(error) if error.code == "E_HERMES_PANEL_UNSUPPORTED" => Ok(PanelStreamRequest {
             url: build_file_url(&base, "/api/files/stream", path, profile, session_id, None)?,
-            cookie: Some(cookie_header(&super::panel_session(profile_id)?)),
+            cookie: Some(cookie_header(&session)),
         }),
         Err(error) => Err(error),
     }
@@ -656,8 +763,9 @@ pub async fn file_download_url(
     profile: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<String, AppError> {
-    let base = base_url_for(profile_id)?;
-    match file_ticket(profile_id, "download", path, profile, session_id).await {
+    let session = super::panel_session(profile_id)?;
+    let base = session.base_url.clone();
+    match file_ticket(profile_id, &session, "download", path, profile, session_id).await {
         Ok(ticket) => build_file_url(
             &base,
             "/api/fs/download",
@@ -669,7 +777,7 @@ pub async fn file_download_url(
         // The browser that opens this URL has no panel cookie. A dashboard cannot mint a ticket,
         // so the file is saved here and opened as a local path.
         Err(error) if error.code == "E_HERMES_PANEL_UNSUPPORTED" => {
-            download_for_open(profile_id, &base, path, profile, session_id).await
+            download_for_open(profile_id, &session, path, profile, session_id).await
         }
         Err(error) => Err(error),
     }
@@ -717,16 +825,22 @@ async fn cleanup_stale_downloads(dir: &std::path::Path) {
 
 async fn download_for_open(
     profile_id: &str,
-    base: &str,
+    session: &PanelSession,
     path: &str,
     profile: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<String, AppError> {
-    let url = build_file_url(base, "/api/fs/download", path, profile, session_id, None)?;
-    let session = super::panel_session(profile_id)?;
+    let url = build_file_url(
+        &session.base_url,
+        "/api/fs/download",
+        path,
+        profile,
+        session_id,
+        None,
+    )?;
     let mut response = transfer_client()?
         .get(url)
-        .header(COOKIE, cookie_header(&session))
+        .header(COOKIE, cookie_header(session))
         .send()
         .await
         .map_err(|error| {
@@ -735,7 +849,9 @@ async fn download_for_open(
         })?;
     let status = response.status();
     let headers = response.headers().clone();
-    persist_response_cookies(profile_id, &headers)?;
+    if status.is_success() {
+        persist_response_cookies(profile_id, session, &headers)?;
+    }
     if !status.is_success() {
         return Err(status_error(status, "Could not download this Hermes file."));
     }
@@ -764,20 +880,49 @@ async fn download_for_open(
         uuid::Uuid::new_v4().simple(),
         download_file_name(path)
     ));
-    let mut file = tokio::fs::File::create(&file_path).await.map_err(|error| {
+    stream_download_to(&mut response, &file_path).await?;
+    Ok(file_path.to_string_lossy().into_owned())
+}
+
+/// Removes a partially written download unless the caller keeps it. A dropped future (window
+/// closed, request superseded) runs this too, so retries cannot accumulate half files.
+struct PendingDownload {
+    path: Option<std::path::PathBuf>,
+}
+
+impl PendingDownload {
+    fn new(path: &std::path::Path) -> Self {
+        Self {
+            path: Some(path.to_path_buf()),
+        }
+    }
+}
+
+impl Drop for PendingDownload {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+async fn stream_download_to(
+    response: &mut reqwest::Response,
+    file_path: &std::path::Path,
+) -> Result<(), AppError> {
+    use tokio::io::AsyncWriteExt;
+    let mut pending = PendingDownload::new(file_path);
+    let mut file = tokio::fs::File::create(file_path).await.map_err(|error| {
         AppError::new("E_HERMES_MEDIA", "Could not download this Hermes file.")
             .with_detail(error.to_string())
     })?;
     let mut written = 0u64;
-    use tokio::io::AsyncWriteExt;
     while let Some(chunk) = response.chunk().await.map_err(|error| {
         AppError::new("E_HERMES_MEDIA", "Could not download this Hermes file.")
             .with_detail(error.to_string())
     })? {
         written = written.saturating_add(chunk.len() as u64);
         if written > MAX_DOWNLOAD_BYTES {
-            drop(file);
-            let _ = tokio::fs::remove_file(&file_path).await;
             return Err(AppError::new(
                 "E_HERMES_MEDIA",
                 "This Hermes file is too large to download.",
@@ -792,7 +937,9 @@ async fn download_for_open(
         AppError::new("E_HERMES_MEDIA", "Could not download this Hermes file.")
             .with_detail(error.to_string())
     })?;
-    Ok(file_path.to_string_lossy().into_owned())
+    // Only a complete, flushed file is kept.
+    pending.path = None;
+    Ok(())
 }
 
 /// `GET /api/sessions` path. Each Hermes profile keeps its own session store on the host,
@@ -1232,13 +1379,61 @@ pub async fn cookie_header_for(profile_id: &str) -> Result<String, AppError> {
     Ok(cookie_header(&session))
 }
 
-pub async fn ticket_for(profile_id: &str) -> Result<String, AppError> {
+/// URL and ticket from one session snapshot. Callers that pair `base_url_for` with
+/// `ticket_for` could mix two logins (or two hosts on the same id) across the await.
+#[derive(Debug)]
+pub(crate) struct PanelTicketRequest {
+    pub base_url: String,
+    pub ticket: String,
+}
+
+pub(crate) fn session_changed() -> AppError {
+    AppError::new(
+        "E_HERMES_PANEL",
+        "The Hermes Panel login changed while this request was being prepared. Try again.",
+    )
+}
+
+pub(crate) fn session_login_id(profile_id: &str) -> Result<String, AppError> {
+    Ok(super::panel_session(profile_id)?.login_id)
+}
+
+pub(crate) async fn ticket_request(profile_id: &str) -> Result<PanelTicketRequest, AppError> {
     let session = super::panel_session(profile_id)?;
-    let (ticket, refreshed) = ticket_with_refresh(&session).await?;
-    if let Some(refreshed) = refreshed {
-        super::panel_session_set(profile_id, &refreshed)?;
+    ticket_for_login(profile_id, &session.login_id).await
+}
+
+/// Mint for the same login captured before an attachment read. The latest cookies of that
+/// login are used (a legal rotation may have landed), and the login identity is checked again
+/// after the network call. A different login is rejected even if the response has no
+/// Set-Cookie. Rotation CAS still uses the full snapshot that produced the response.
+pub(crate) async fn ticket_for_login(
+    profile_id: &str,
+    expected_login: &str,
+) -> Result<PanelTicketRequest, AppError> {
+    let latest = super::panel_session(profile_id)?;
+    if latest.login_id != expected_login {
+        return Err(session_changed());
     }
-    Ok(ticket)
+    let (ticket, refreshed) = ticket_with_refresh(&latest).await?;
+    // The response may have taken long enough for a re-login to land. Its login id decides;
+    // a normal response with no Set-Cookie must not keep using a replaced login.
+    let after = super::panel_session(profile_id)?;
+    if after.login_id != latest.login_id {
+        return Err(session_changed());
+    }
+    if let Some(refreshed) = refreshed {
+        // Failure means a newer rotation won; never overwrite it. The ticket itself is valid.
+        let _ = super::panel_session_update_if(profile_id, &latest, &refreshed)?;
+    }
+    Ok(PanelTicketRequest {
+        base_url: latest.base_url,
+        ticket,
+    })
+}
+
+pub async fn ticket_for(profile_id: &str) -> Result<String, AppError> {
+    Ok(ticket_request(profile_id).await?.ticket)
 }
 
 pub fn has_session(profile_id: &str) -> bool {
@@ -1577,6 +1772,7 @@ mod tests {
             provider: "basic".to_owned(),
             access_token: "access-token".to_owned(),
             refresh_token: "refresh-token".to_owned(),
+            login_id: "smoke-login".to_owned(),
         };
         let cleared = set_cookies(&[
             "hermes_session_at=\"\"; HttpOnly; Max-Age=0",
@@ -1621,15 +1817,14 @@ mod tests {
         let refresh = std::env::var("HERMES_PANEL_RT").expect("HERMES_PANEL_RT");
         let profile =
             std::env::var("HERMES_PANEL_PROFILE").unwrap_or_else(|_| "default".to_owned());
-        let dir = std::env::temp_dir().join(format!("opennavo-panel-smoke-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        // The app's own store is never touched: this uses a throwaway data root.
-        let _ = super::super::DATA_ROOT.set(dir);
+        // Isolated, process-lived store root even when this test runs alone.
+        super::super::use_panel_session_root();
         let session = PanelSession {
             base_url: base_url(&url).unwrap(),
             provider: "basic".to_owned(),
             access_token: access,
             refresh_token: refresh,
+            login_id: "smoke-login".to_owned(),
         };
         super::super::panel_session_set("smoke", &session).unwrap();
 
@@ -1829,5 +2024,139 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(!options.providers.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_json_body_is_read_through_a_hard_cap() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = b"{\"value\":\"0123456789\"}";
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(body).await.unwrap();
+            let _ = socket.shutdown().await;
+        });
+        let mut response = reqwest::get(format!("http://{addr}/json")).await.unwrap();
+        let error = read_json_limited(&mut response, 8).await.unwrap_err();
+        assert!(error.contains("exceeded"), "{error}");
+        let _ = server.await;
+
+        // A second response within the cap parses normally.
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = b"{\"ok\":true}";
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(body).await.unwrap();
+            let _ = socket.shutdown().await;
+        });
+        let mut response = reqwest::get(format!("http://{addr}/json")).await.unwrap();
+        let value = read_json_limited(&mut response, 1024).await.unwrap();
+        assert_eq!(value["ok"], true);
+        let _ = server.await;
+    }
+
+    #[test]
+    fn a_dropped_download_guard_removes_its_partial_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial");
+        std::fs::write(&path, b"partial").unwrap();
+        {
+            let _guard = PendingDownload::new(&path);
+        }
+        assert!(!path.exists());
+    }
+
+    /// An interrupted body is an error, and the guard removes the bytes written so far.
+    #[tokio::test]
+    async fn an_interrupted_body_leaves_no_file() {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            use tokio::io::AsyncReadExt;
+            let mut buffer = [0_u8; 1024];
+            let _ = socket.read(&mut buffer).await;
+            // Promise more than is sent, then close: reqwest surfaces a body error.
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\nfirst")
+                .await
+                .unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial");
+        let mut response = reqwest::get(format!("http://{addr}/file")).await.unwrap();
+        let result = stream_download_to(&mut response, &path).await;
+        assert!(result.is_err());
+        assert!(
+            !path.exists(),
+            "an interrupted download left a partial file"
+        );
+        let _ = server.await;
+    }
+}
+
+#[cfg(test)]
+mod base_url_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_loopback_and_tailnet_and_keeps_a_path_prefix() {
+        assert_eq!(base_url("http://[::1]:9119").unwrap(), "http://[::1]:9119");
+        assert_eq!(
+            base_url("http://127.0.0.1:9119/").unwrap(),
+            "http://127.0.0.1:9119"
+        );
+        assert_eq!(
+            base_url("http://100.64.1.2:9119").unwrap(),
+            "http://100.64.1.2:9119"
+        );
+        assert_eq!(
+            base_url("https://panel.tail1234.ts.net:9119/hermes/login").unwrap(),
+            "https://panel.tail1234.ts.net:9119/hermes"
+        );
+    }
+
+    #[test]
+    fn rejects_insecure_non_tailnet_and_non_base_url_parts() {
+        assert!(base_url("http://8.8.8.8:9119").is_err());
+        assert!(base_url("https://user:pass@panel.example").is_err());
+        assert!(base_url("https://panel.example/?token=1").is_err());
+        assert!(base_url("https://panel.example/#frag").is_err());
+        assert!(base_url("ftp://panel.example").is_err());
     }
 }

@@ -197,6 +197,68 @@ describe('Hermes settings credentials', () => {
     vi.spyOn(commands, 'hermesPermissionsStatus').mockResolvedValue(ok({} as never));
   });
 
+  it('Writes a delayed key save to the profile the sheet was editing', async () => {
+    seedConnection('local');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    let finishSet!: (value: unknown) => void;
+    const saving = new Promise(resolve => {
+      finishSet = resolve;
+    });
+    const secretSet = vi.spyOn(commands, 'hermesSecretSet').mockReturnValue(saving as never);
+    vi.spyOn(commands, 'hermesSecretStatus').mockResolvedValue(ok(true));
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    store.saveModel({ ...store.model, provider: 'custom', model: 'grok-4.7', endpoint: 'https://api.example.test/v1' });
+    wrapper = await mountSheet();
+
+    const key = document.body.querySelector<HTMLInputElement>('#hermes-key');
+    expect(key).not.toBeNull();
+    key!.value = 'sk-still-default';
+    key!.dispatchEvent(new Event('input'));
+    const save = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.common.save
+    );
+    save!.click();
+    await vi.waitFor(() => expect(secretSet).toHaveBeenCalledWith('custom', 'sk-still-default', null));
+
+    // The user moves the sheet to another profile while the key write is still running.
+    const select = profileScopeSelect();
+    select!.value = 'research';
+    select!.dispatchEvent(new Event('change'));
+    finishSet(ok(null));
+    await vi.waitFor(() => expect(secretSet).toHaveBeenCalledTimes(1));
+
+    // The write stayed on the original profile; the new one's draft never inherited the key.
+    expect(secretSet).toHaveBeenCalledWith('custom', 'sk-still-default', null);
+    expect(store.apiKey).toBe('');
+    expect(store.agentProfileModel('research').provider).not.toBe('custom');
+  });
+
+  it('Does not claim a failed key write was saved', async () => {
+    seedConnection('local');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    vi.spyOn(commands, 'hermesSecretSet').mockResolvedValue({
+      status: 'error',
+      error: { code: 'E_HERMES_CREDENTIAL', message: 'Could not store the key.', detail: null }
+    });
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    store.saveModel({ ...store.model, provider: 'custom', model: 'grok-4.7', endpoint: 'https://api.example.test/v1' });
+    wrapper = await mountSheet();
+    const key = document.body.querySelector<HTMLInputElement>('#hermes-key');
+    key!.value = 'sk-fails';
+    key!.dispatchEvent(new Event('input'));
+    const save = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.common.save
+    );
+    save!.click();
+    await vi.waitFor(() => expect(commands.hermesSecretSet).toHaveBeenCalledWith('custom', 'sk-fails', null));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // The failure keeps the sheet open and never copies the key into the next turn.
+    expect(document.body.querySelector('#hermes-key')).not.toBeNull();
+    expect(store.apiKey).toBe('');
+  });
+
   it('Hides this Mac’s credential fields on a panel connection and points at the host', async () => {
     seedConnection('panel');
     useHermesStore().useProvider('custom');
@@ -231,6 +293,70 @@ describe('Hermes settings credentials', () => {
 
     expect(hasAuthField()).toBe(true);
     expect(sheetText()).not.toContain('panel host');
+  });
+
+  it('Shows an empty model field and the Base URL hint for an unconfigured custom provider', async () => {
+    localStorage.setItem(
+      'ONV_HERMES_STATE_V2',
+      JSON.stringify({ model: { provider: 'custom', model: 'Custom model', endpoint: '' } })
+    );
+    wrapper = await mountSheet();
+
+    const field = document.body.querySelector<HTMLInputElement>('#hermes-model');
+    expect(field?.value).toBe('');
+    expect(field?.placeholder).toBe(en.settings.model.modelPlaceholder);
+    expect(sheetText()).toContain(en.settings.model.catalogEndpoint);
+    expect(sheetText()).not.toContain('Custom model');
+    const save = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.common.save
+    );
+    expect(save?.disabled).toBe(true);
+  });
+
+  it('Keeps a hand-entered model while refreshing and retains cached choices on a failed read', async () => {
+    vi.mocked(commands.hermesModelOptions).mockResolvedValue(ok(SAVED_CATALOG));
+    const store = useHermesStore();
+    store.saveModel({
+      ...store.model,
+      provider: 'custom',
+      model: 'saved-model',
+      endpoint: 'https://api.example.test/v1'
+    });
+    wrapper = await mountSheet();
+    const refresh = () =>
+      Array.from(document.body.querySelectorAll('button')).find(
+        button => button.textContent?.trim() === en.settings.model.refreshModels
+      );
+    const field = document.body.querySelector<HTMLInputElement>('#hermes-model')!;
+    field.value = 'private/model-id';
+    field.dispatchEvent(new Event('input'));
+
+    vi.mocked(commands.hermesModelOptions).mockResolvedValueOnce({
+      status: 'error',
+      error: { code: 'E_HERMES_MODEL_OPTIONS', message: 'Catalog offline', detail: null }
+    });
+    refresh()!.click();
+    await vi.waitFor(() => expect(sheetText()).toContain(en.settings.model.catalogStale));
+    document.body.querySelector<HTMLButtonElement>(`button[aria-label="${en.settings.model.openModelList}"]`)!.click();
+    await vi.waitFor(() => expect(sheetText()).toContain('grok-default'));
+    const search = document.body.querySelector<HTMLInputElement>('#hermes-model-options input')!;
+    search.value = 'grok';
+    search.dispatchEvent(new Event('input'));
+    await vi.waitFor(() =>
+      expect(document.body.querySelector('#hermes-model-options')?.textContent).not.toContain('saved-model')
+    );
+    expect(field.value).toBe('private/model-id');
+
+    vi.mocked(commands.hermesModelOptions).mockResolvedValueOnce(ok(RESEARCH_CATALOG));
+    refresh()!.click();
+    await vi.waitFor(() => expect(sheetText()).toContain('grok-research'));
+    expect(field.value).toBe('private/model-id');
+    expect(sheetText()).not.toContain(en.settings.model.catalogStale);
+    const save = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.common.save
+    );
+    save!.click();
+    expect(store.model.model).toBe('private/model-id');
   });
 
   it('Does not carry a key saved for another agent profile into the active one', async () => {
@@ -523,6 +649,127 @@ describe('Hermes settings credentials', () => {
     resolveTools(ok('tools output'));
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(document.body.querySelector('pre')?.textContent).toContain('mcp servers: none');
+  });
+
+  it('Stops the diagnostics spinner when a cron action fails', async () => {
+    seedConnection('local');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    type CliReadResult = Awaited<ReturnType<typeof commands.hermesCliRead>>;
+    let resolveTools!: (value: CliReadResult) => void;
+    const toolsRead = new Promise<CliReadResult>(resolve => {
+      resolveTools = resolve;
+    });
+    vi.spyOn(commands, 'hermesCliRead').mockReturnValue(toolsRead);
+    vi.spyOn(commands, 'hermesCronAction').mockResolvedValue({
+      status: 'error',
+      error: { code: 'E_HERMES_RUNTIME', message: 'Hermes cron action failed.', detail: 'cron stopped: boom' }
+    });
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    wrapper = mount(HermesSettings, {
+      props: { open: false, tab: 'tools' },
+      attachTo: document.body,
+      global: { plugins: [i18n] }
+    });
+    await wrapper.setProps({ open: true });
+    await vi.waitFor(() => expect(commands.hermesModelOptions).toHaveBeenCalled());
+
+    // Start a tools read and leave it pending: the pane is on "Loading…".
+    const select = profileScopeSelect();
+    expect(select).not.toBeNull();
+    select!.value = 'research';
+    select!.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(commands.hermesCliRead).toHaveBeenCalledTimes(1));
+    expect(document.body.querySelector('pre')?.textContent).toContain(en.common.loading);
+
+    // The action supersedes that read. Its failure must clear the spinner it orphaned and
+    // leave the runtime's own reason in the pane.
+    const cronInput = document.body.querySelector<HTMLInputElement>('input[placeholder="Cron job ID"]');
+    expect(cronInput).not.toBeNull();
+    cronInput!.value = 'job-from-failure';
+    cronInput!.dispatchEvent(new Event('input'));
+    // Let the disabled binding re-render now that the id is non-empty.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const pause = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.settings.diagnostics.pause
+    );
+    expect(pause).not.toBeUndefined();
+    pause!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    await vi.waitFor(() => expect(document.body.querySelector('pre')?.textContent).toContain('cron stopped: boom'));
+    expect(document.body.querySelector('pre')?.textContent).not.toContain(en.common.loading);
+
+    // The superseded tools read still must not paint over the error.
+    resolveTools(ok('tools output'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(document.body.querySelector('pre')?.textContent).toContain('cron stopped: boom');
+  });
+
+  it('Drops a cron action that succeeds after the profile and kind switched', async () => {
+    seedConnection('local');
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue(ok(AGENT_PROFILES));
+    const cliRead = vi
+      .spyOn(commands, 'hermesCliRead')
+      .mockImplementation((kind, profile) => Promise.resolve(ok(`${kind}:${profile ?? 'default'}`)));
+    type CronResult = Awaited<ReturnType<typeof commands.hermesCronAction>>;
+    let resolveCron!: (value: CronResult) => void;
+    const cron = new Promise<CronResult>(resolve => {
+      resolveCron = resolve;
+    });
+    const cronAction = vi.spyOn(commands, 'hermesCronAction').mockReturnValue(cron);
+    const store = useHermesStore();
+    await store.loadAgentProfiles();
+    wrapper = mount(HermesSettings, {
+      props: { open: false, tab: 'tools' },
+      attachTo: document.body,
+      global: { plugins: [i18n] }
+    });
+    await wrapper.setProps({ open: true });
+    await vi.waitFor(() => expect(commands.hermesModelOptions).toHaveBeenCalled());
+
+    const pane = () => document.body.querySelector('pre')?.textContent ?? '';
+    const select = profileScopeSelect();
+    expect(select).not.toBeNull();
+    select!.value = 'research';
+    select!.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(pane()).toContain('tools:research'));
+
+    // Start a cron action and leave it pending.
+    const cronInput = document.body.querySelector<HTMLInputElement>(
+      `input[placeholder="${en.settings.diagnostics.cronJobId}"]`
+    );
+    expect(cronInput).not.toBeNull();
+    cronInput!.value = 'job-after-switch';
+    cronInput!.dispatchEvent(new Event('input'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const pause = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.settings.diagnostics.pause
+    );
+    expect(pause).not.toBeUndefined();
+    pause!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(cronAction).toHaveBeenCalledTimes(1));
+
+    // The user picks another diagnostic kind, then another profile. Both start their own
+    // reads and invalidate the cron action's sequence.
+    const skills = Array.from(document.body.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === en.settings.diagnostics.skills
+    );
+    expect(skills).not.toBeUndefined();
+    skills!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(pane()).toContain('skills:research'));
+
+    select!.value = 'default';
+    select!.dispatchEvent(new Event('change'));
+    await vi.waitFor(() => expect(pane()).toContain('skills:default'));
+
+    // The action succeeds only now. Reloading `cron` here would flip the selected kind and
+    // paint the old action's list over the new profile's pane.
+    resolveCron(ok('paused'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(cliRead.mock.calls.map(([kind]) => kind)).not.toContain('cron');
+    expect(pane()).toContain('skills:default');
   });
 
   it('Drops a key status that lands after the profile switched', async () => {

@@ -124,7 +124,7 @@ describe('Hermes notification copy and focus gate', () => {
     const notify = vi.spyOn(commands, 'hermesNotifyReply').mockResolvedValue({ status: 'ok', data: null });
 
     await expect(notifyHermesReply('turnDone', 'empty-chat', '   ')).resolves.toBe(true);
-    expect(notify).toHaveBeenCalledWith('empty-chat', 'Hermes finished', 'Message complete.');
+    expect(notify).toHaveBeenCalledWith('empty-chat', 'Hermes finished', 'Message complete.', null, null);
   });
 
   it('throttles a repeated kind and conversation for one second', async () => {
@@ -170,7 +170,15 @@ describe('Hermes reply notifications', () => {
 
     await store.send('finish this');
 
-    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(store.activeId, 'Hermes finished', 'Remote reply'));
+    await vi.waitFor(() =>
+      expect(notify).toHaveBeenCalledWith(
+        store.activeId,
+        'Hermes finished',
+        'Remote reply',
+        expect.anything(),
+        expect.anything()
+      )
+    );
   });
 
   it('notifies the active conversation after a failed background turn', async () => {
@@ -187,7 +195,13 @@ describe('Hermes reply notifications', () => {
     await store.send('fail this');
 
     await vi.waitFor(() =>
-      expect(notify).toHaveBeenCalledWith(store.activeId, 'Turn failed', 'Provider returned an error')
+      expect(notify).toHaveBeenCalledWith(
+        store.activeId,
+        'Turn failed',
+        'Provider returned an error',
+        expect.anything(),
+        expect.anything()
+      )
     );
   });
 
