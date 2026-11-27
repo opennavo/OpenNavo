@@ -30,6 +30,7 @@ beforeEach(async () => {
     return state.get(key);
   });
   vi.stubGlobal('useSiteSettings', () => settings);
+  vi.stubGlobal('useRuntimeConfig', () => ({ public: { pvuvSiteId: '' } }));
   vi.stubGlobal('$fetch', vi.fn());
   analytics = await import('../app/utils/analytics');
   ({ useAnalyticsConsent } = await import('../app/composables/useAnalyticsConsent'));

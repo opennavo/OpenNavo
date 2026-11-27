@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 let analytics: typeof import('../app/utils/analytics');
 let useAnalyticsConsent: typeof import('../app/composables/useAnalyticsConsent').useAnalyticsConsent;
 let settings: ReturnType<typeof ref>;
+let pvuvSiteId = '';
 
 const calls = () => (window.dataLayer ?? []).map(entry => [...(entry as IArguments)]);
 const scripts = () => document.querySelectorAll('script[src^="https://www.googletagmanager.com/gtag/js"]');
@@ -19,6 +20,7 @@ beforeEach(async () => {
   delete window.gtag;
   delete window.dataLayer;
   delete (window as unknown as Record<string, unknown>)['ga-disable-G-TEST'];
+  pvuvSiteId = '';
   settings = ref({ analytics: { ga4Enabled: true, ga4MeasurementId: 'G-TEST' } });
   const state = new Map();
   vi.stubGlobal('computed', computed);
@@ -27,6 +29,7 @@ beforeEach(async () => {
     return state.get(key);
   });
   vi.stubGlobal('useSiteSettings', () => settings);
+  vi.stubGlobal('useRuntimeConfig', () => ({ public: { pvuvSiteId } }));
   vi.stubGlobal('$fetch', vi.fn());
   analytics = await import('../app/utils/analytics');
   ({ useAnalyticsConsent } = await import('../app/composables/useAnalyticsConsent'));
@@ -141,6 +144,43 @@ it('stops GA4, clears its cookies and resumes without a second script when accep
   analytics.trackEvent('download_client');
   expect(calls().at(-1)).toEqual(['event', 'download_client', { page_type: 'app', content_language: 'en-US' }]);
   expect(calls().filter(call => call[1] === 'page_view')).toHaveLength(2);
+});
+
+it('loads pvuv under the same consent decision and removes it with its identifiers on opt-out', async () => {
+  settings.value.analytics = { ga4Enabled: false, ga4MeasurementId: '' };
+  pvuvSiteId = 'NqrTDmAQ';
+  const consent = useAnalyticsConsent();
+  expect(consent.enabled.value).toBe(true);
+  await consent.start();
+  expect(consent.active.value).toBe(true);
+  const tag = document.getElementById('pvuv-analytics') as HTMLScriptElement | null;
+  expect(tag).not.toBeNull();
+  expect(tag!.src).toBe('https://www.pvuv.ai/f.js');
+  expect(tag!.getAttribute('data-site')).toBe('NqrTDmAQ');
+  expect(tag!.getAttribute('data-api')).toBe('https://in.pvuv.ai');
+  expect(tag!.getAttribute('data-spa')).toBe('true');
+  expect(tag!.getAttribute('data-exclude')).toBe('/search*,/feedback*');
+
+  document.cookie = '_pv_id=visitor; path=/';
+  document.cookie = '_pv_sid=session; path=/';
+  document.cookie = 'theme=dark; path=/';
+  consent.decline();
+  expect(document.getElementById('pvuv-analytics')).toBeNull();
+  expect(document.cookie).toBe('theme=dark');
+
+  // Accepting again re-inserts exactly one loader.
+  consent.accept();
+  expect(document.querySelectorAll('#pvuv-analytics')).toHaveLength(1);
+});
+
+it.each(['', 'Nqr TDmAQ', 'x'])('does not enable analytics for an unusable pvuv site id %j', async id => {
+  settings.value.analytics = { ga4Enabled: false, ga4MeasurementId: '' };
+  pvuvSiteId = id;
+  const consent = useAnalyticsConsent();
+  expect(consent.enabled.value).toBe(false);
+  await consent.start();
+  expect(consent.active.value).toBe(false);
+  expect(document.getElementById('pvuv-analytics')).toBeNull();
 });
 
 it('keeps GA4 and footer controls working when storage is unavailable', async () => {
