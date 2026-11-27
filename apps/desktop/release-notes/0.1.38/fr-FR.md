@@ -1,6 +1,7 @@
 ## Nouveautés
 
 - Collez du texte, des liens, des chemins de fichiers et des images dans le champ Hermes. Les liens et les chemins restent sous forme de puces de référence, les longs textes et les images du presse-papiers deviennent des pièces jointes, et les collages trop volumineux sont refusés avant toute insertion.
+- Le sélecteur de modèles Hermes est désormais doté d’une recherche, et la découverte des modèles locaux s’exécute dans un processus séparé : parcourir les modèles n’écrit plus dans le profil actif et ne bloque plus le chat.
 
 ## Corrections
 
@@ -10,3 +11,6 @@
 - Un tour arrêté affiche désormais un libellé clair de tour arrêté, et les réponses interrompues restent vides ; l’interface anglaise n’affiche plus de texte d’arrêt en chinois.
 - L’envoi pendant qu’une réponse est en cours suit la politique d’entrée occupée : le message est redirigé, guidé ou mis en file au lieu de lancer un second tour, et Arrêter reste disponible.
 - Les mises à jour de streaming et de réflexion ne font plus défiler la transcription vers le bas pendant que vous lisez des messages plus anciens. Elle ne suit le contenu le plus récent que si vous êtes déjà en bas.
+- L’installation, la mise à jour et la désinstallation du runtime Hermes partagent désormais un même cycle de vie : chaque installation est préparée dans un répertoire distinct, une activation échouée est annulée, seuls les processus lancés par OpenNavo sont nettoyés, et une passerelle qui ne démarre pas échoue immédiatement au lieu de laisser le chat à moitié démarré.
+- L’historique reste cohérent entre les clients et suit les renommages et suppressions de profils ; l’état des panneaux et des modèles reste propre à chaque fenêtre, et les actions de tour sont liées à leur propre tour, afin qu’un tour en arrière-plan ne puisse pas arrêter ou terminer une autre conversation.
+- Un fournisseur personnalisé ne bascule plus silencieusement vers les modèles intégrés lorsque son catalogue est inaccessible.
