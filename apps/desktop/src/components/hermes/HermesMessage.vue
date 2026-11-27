@@ -71,7 +71,11 @@ const mediaRemote = computed(() => hermes.panelActive);
 const mediaProfileId = computed(() => (mediaRemote.value ? hermes.gatewayProfileId : null));
 const mediaProfile = computed(() => hermes.active?.panelProfile?.trim() || hermes.activeAgentProfileName || null);
 const mediaSessionId = computed(() => hermes.mediaSessionId);
-const mediaCwd = computed(() => (mediaRemote.value ? null : hermes.workingDir.trim() || null));
+// The message's own turn workspace wins; history written before this field existed falls back
+// to the profile's current directory.
+const mediaCwd = computed(() =>
+  mediaRemote.value ? null : props.message.cwd?.trim() || hermes.workingDir.trim() || null
+);
 const foot = computed(() => messageText(props.message.footKey));
 const time = computed(() =>
   new Date(props.message.at).toLocaleTimeString(appLocale.value, { hour: '2-digit', minute: '2-digit' })

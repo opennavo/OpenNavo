@@ -237,6 +237,38 @@ describe('Hermes composer paste', () => {
     expect(composerPlainText(editor.element)).toBe(text);
   });
 
+  it('discards a pasted file that settles after the page unmounts', async () => {
+    const { wrapper, editor } = await composer();
+    type SaveResult = Awaited<ReturnType<typeof commands.hermesSavePastedText>>;
+    let releaseSave!: (value: SaveResult) => void;
+    const save = vi.spyOn(commands, 'hermesSavePastedText').mockImplementation(
+      () =>
+        new Promise<SaveResult>(resolve => {
+          releaseSave = resolve;
+        })
+    );
+    const discard = vi.spyOn(commands, 'hermesDiscardAttachment').mockResolvedValue({ status: 'ok', data: null });
+
+    paste(editor, clipboard({ text: 'a'.repeat(3_001) }));
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    const index = wrappers.indexOf(wrapper);
+    if (index >= 0) wrappers.splice(index, 1);
+    wrapper.unmount();
+
+    // The save finishes after the draft/page is gone: the file this feature wrote is deleted
+    // instead of being attached to whatever draft exists next.
+    releaseSave({
+      status: 'ok',
+      data: {
+        path: '/tmp/state/composer-pastes/late.txt',
+        name: 'late.txt',
+        size: 3_001,
+        isImage: false
+      }
+    });
+    await vi.waitFor(() => expect(discard).toHaveBeenCalledWith('/tmp/state/composer-pastes/late.txt'));
+  });
+
   it('waits for a pasted attachment save before sending', async () => {
     const { send, editor } = await composer();
     type SaveResult = Awaited<ReturnType<typeof commands.hermesSavePastedText>>;

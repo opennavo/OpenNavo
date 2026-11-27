@@ -107,12 +107,19 @@ if (location.hash.startsWith('#/tray-monitor')) {
   if (isTauri()) {
     const { listen } = await import('@tauri-apps/api/event');
     navigationCleanups.push(
-      await listen<{ conversationId: string }>('hermes-notification-open', event => {
-        const conversationId = String(event.payload?.conversationId ?? '').trim();
-        if (!conversationId) return;
-        queueHermesNotificationOpen({ conversationId });
-        void router.push('/assistant').catch(() => undefined);
-      })
+      await listen<{ conversationId: string; connectionId?: string; agentProfile?: string }>(
+        'hermes-notification-open',
+        event => {
+          const conversationId = String(event.payload?.conversationId ?? '').trim();
+          if (!conversationId) return;
+          queueHermesNotificationOpen({
+            conversationId,
+            connectionId: event.payload?.connectionId,
+            agentProfile: event.payload?.agentProfile
+          });
+          void router.push('/assistant').catch(() => undefined);
+        }
+      )
     );
   }
   if (!profileWindow) {

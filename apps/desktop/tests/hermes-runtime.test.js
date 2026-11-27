@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyHermesRelease,
   assertRuntimeVersionOutput,
+  prebuiltCopyPlan,
+  resolveTagCommit,
   normalizeHermesVersion,
   readRuntimeManifest,
   requireReleaseChecksum,
@@ -55,6 +57,31 @@ describe('Hermes runtime manifest', () => {
     expect(() => assertRuntimeVersionOutput('Hermes Agent vunknown (2026.9.24)', manifest)).toThrow(
       /reports an unknown version/
     );
+  });
+
+  it('resolves the release tag ref instead of target_commitish', () => {
+    // `label`/`target_commitish` may name a branch or a different commit; the tag ref is
+    // the immutable identity, and annotated tags need one peel to the commit object.
+    const commit = 'c'.repeat(40);
+    expect(resolveTagCommit({ type: 'commit', sha: commit }, null)).toBe(commit);
+    expect(resolveTagCommit({ type: 'tag', sha: 'd'.repeat(40) }, { object: { type: 'commit', sha: commit } })).toBe(
+      commit
+    );
+    expect(() => resolveTagCommit({ type: 'tag', sha: 'd'.repeat(40) }, null)).toThrow(/commit/);
+    expect(() =>
+      resolveTagCommit({ type: 'tag', sha: 'd'.repeat(40) }, { object: { type: 'tree', sha: commit } })
+    ).toThrow(/commit object/);
+    expect(() => resolveTagCommit({ type: 'tree', sha: commit }, null)).toThrow(/unsupported/);
+  });
+
+  it('refuses prebuilt sources that overlap the output directory', () => {
+    const root = '/tmp/opennavo-runtime';
+    expect(prebuiltCopyPlan('/tmp/prebuilt', root)).toBe('copy');
+    expect(prebuiltCopyPlan(root, root)).toBe('validate');
+    expect(() => prebuiltCopyPlan(`${root}/inside`, root)).toThrow(/inside the output/);
+    expect(() => prebuiltCopyPlan('/tmp', root)).toThrow(/contains the output/);
+    // A real child whose name starts with dots is not a parent reference.
+    expect(() => prebuiltCopyPlan(`${root}/..cache`, root)).toThrow(/inside the output/);
   });
 
   it('moves all release-derived fields together when bumping', () => {

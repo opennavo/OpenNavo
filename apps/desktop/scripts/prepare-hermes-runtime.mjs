@@ -13,13 +13,24 @@
  * resources/hermes directory to skip the download, but the same checks run.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   RUNTIME_ROOT,
   assertCuaDriverVersion,
   assertPreparedRuntime,
+  prebuiltCopyPlan,
   readRuntimeManifest,
   runtimeSourceUrl
 } from './hermes-runtime-lib.mjs';
@@ -30,6 +41,7 @@ const siteDir = join(resources, 'site');
 const binDir = join(resources, 'bin');
 const force = process.argv.includes('--force');
 const prebuilt = process.env.HERMES_RUNTIME_PREBUILT;
+let validatedInPlace = false;
 const manifest = readRuntimeManifest();
 const { version, tag, commit, commitTimestamp } = manifest.hermes;
 const pythonVersion = manifest.python;
@@ -61,9 +73,50 @@ function installRuntime() {
     if (!existsSync(join(source, 'bin', 'hermes'))) {
       throw new Error(`HERMES_RUNTIME_PREBUILT is not a Hermes runtime: ${source}`);
     }
-    rmSync(resources, { recursive: true, force: true });
+    switch (prebuiltCopyPlan(source, resources)) {
+      case 'validate':
+        // The prebuilt path is the output itself: never delete and re-copy it.
+        console.log(`Hermes runtime is already the prebuilt directory: ${source}`);
+        return;
+      case 'copy':
+        break;
+    }
+    // Stage beside the output, then swap, so a failed copy never leaves a half-removed runtime.
+    const staging = `${resources}.tmp-${process.pid}`;
+    const backup = `${resources}.old-${process.pid}`;
+    rmSync(staging, { recursive: true, force: true });
+    rmSync(backup, { recursive: true, force: true });
     mkdirSync(dirname(resources), { recursive: true });
-    cpSync(source, resources, { recursive: true, dereference: true });
+    try {
+      cpSync(source, staging, { recursive: true, dereference: true });
+      if (!existsSync(join(staging, 'bin', 'hermes'))) {
+        throw new Error(`Prebuilt copy is missing bin/hermes: ${source}`);
+      }
+      // Validate the complete staged runtime before touching the old output.
+      assertPreparedRuntime(staging, manifest);
+      // Swap with a backup: a failed rename restores the previous output.
+      if (existsSync(resources)) renameSync(resources, backup);
+      try {
+        renameSync(staging, resources);
+      } catch (error) {
+        if (existsSync(backup) && !existsSync(resources)) renameSync(backup, resources);
+        throw error;
+      }
+      try {
+        // Validate the final path too: a wrapper can work from staging and fail after the
+        // move. The backup stays until this passes.
+        assertPreparedRuntime(resources, manifest);
+        validatedInPlace = true;
+      } catch (error) {
+        rmSync(resources, { recursive: true, force: true });
+        if (existsSync(backup)) renameSync(backup, resources);
+        throw error;
+      }
+      rmSync(backup, { recursive: true, force: true });
+    } catch (error) {
+      rmSync(staging, { recursive: true, force: true });
+      throw error;
+    }
     console.log(`Copied prebuilt Hermes runtime from ${source}`);
     return;
   }
@@ -237,7 +290,9 @@ exec "$DIR/python/bin/python${pythonVersion}" -c 'from hermes_cli.main import ma
 try {
   assertBuildHost();
   installRuntime();
-  const runtimeVersion = assertPreparedRuntime(resources, manifest);
+  // Prebuilt already passed final-path validation before its backup was removed; do not run
+  // a second un-rollbackable check over it.
+  const runtimeVersion = validatedInPlace ? manifest.hermes.version : assertPreparedRuntime(resources, manifest);
   console.log(`\nVerified Hermes runtime ${runtimeVersion} in an isolated HERMES_HOME.`);
 } catch (error) {
   console.error(`Hermes runtime preparation failed: ${error.message}`);

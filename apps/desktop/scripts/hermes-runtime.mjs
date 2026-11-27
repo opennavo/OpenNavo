@@ -5,6 +5,7 @@ import {
   RUNTIME_MANIFEST_PATH,
   applyHermesRelease,
   readRuntimeManifest,
+  resolveTagCommit,
   runtimeReleaseUrl,
   writeRuntimeManifest
 } from './hermes-runtime-lib.mjs';
@@ -33,10 +34,19 @@ async function releaseFor(version) {
   if (release.draft || release.prerelease) throw new Error(`Hermes ${release.tag_name} is not a stable release`);
   const resolved = /^v(\d+\.\d+\.\d+)$/.exec(release.tag_name ?? '');
   if (!resolved) throw new Error(`Hermes release tag is not stable SemVer: ${release.tag_name}`);
-  const commit = release.target_commitish;
-  if (!/^[a-f0-9]{40}$/.test(commit ?? '')) {
-    throw new Error(`Hermes ${release.tag_name} does not point at an immutable commit: ${commit}`);
-  }
+  // `target_commitish` is not the tag's commit: GitHub omits it for a release whose tag
+  // existed first, and otherwise it may name a branch or a different commit. The tag ref
+  // (peeled once for an annotated tag) is the immutable identity the release was cut from.
+  const ref = await getJson(
+    `https://api.github.com/repos/NousResearch/hermes-agent/git/ref/tags/${encodeURIComponent(release.tag_name)}`
+  );
+  const annotated =
+    ref.object?.type === 'tag'
+      ? await getJson(
+          `https://api.github.com/repos/NousResearch/hermes-agent/git/tags/${encodeURIComponent(ref.object.sha)}`
+        )
+      : null;
+  const commit = resolveTagCommit(ref.object, annotated);
   const detail = await getJson(`https://api.github.com/repos/NousResearch/hermes-agent/commits/${commit}`);
   const commitTimestamp = Math.floor(new Date(detail.commit.committer.date).getTime() / 1000);
   if (!Number.isSafeInteger(commitTimestamp) || commitTimestamp <= 0) {
@@ -58,6 +68,11 @@ async function check() {
   describe(manifest);
   console.log(`Latest stable Hermes: ${latest.version} (${latest.commit.slice(0, 12)})`);
   if (latest.version === manifest.hermes.version) {
+    if (latest.commit !== manifest.hermes.commit) {
+      throw new Error(
+        `Runtime pin v${latest.version} names commit ${manifest.hermes.commit}, but the release tag points at ${latest.commit}`
+      );
+    }
     console.log('Runtime pin is current.');
     return;
   }

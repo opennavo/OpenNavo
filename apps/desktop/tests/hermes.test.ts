@@ -226,7 +226,7 @@ describe('Hermes conversation store', () => {
 
     store.stopThinking();
 
-    expect(interrupt).toHaveBeenCalledWith('live-1', 'wss://remote.test/api/ws', 'remote-test');
+    expect(interrupt).toHaveBeenCalledWith('live-1', 'wss://remote.test/api/ws', 'remote-test', null);
     expect(store.active?.liveSessionId).toBeUndefined();
   });
 
@@ -296,6 +296,176 @@ describe('Hermes conversation store', () => {
     await first;
     expect(store.conversations.map(item => item.id)).toEqual(['work-chat']);
     expect(store.activeId).toBe('work-chat');
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('Keeps saving a healthy profile after another profile history is unreadable', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesHistoryLoad').mockImplementation(profile =>
+      profile === 'broken'
+        ? Promise.resolve({
+            status: 'error',
+            error: { code: 'E_HERMES_HISTORY', message: 'history.json is unreadable', detail: null }
+          } as never)
+        : Promise.resolve({ status: 'ok', data: null } as never)
+    );
+    const save = vi.spyOn(commands, 'hermesHistorySave').mockResolvedValue({ status: 'ok', data: null } as never);
+    const store = useHermesStore();
+
+    await store.loadHistory('broken');
+    // The broken file keeps its local copy untouched...
+    expect(save).not.toHaveBeenCalled();
+    await store.loadHistory('healthy');
+    // ...but the healthy profile is still allowed to persist its own history.
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(save).toHaveBeenCalledWith(expect.any(String), 'healthy');
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('Does not reuse a Panel profile read for a same-named local profile', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    seedPanelProfile();
+    const load = vi.spyOn(commands, 'hermesHistoryLoad').mockResolvedValue({ status: 'ok', data: null } as never);
+    vi.spyOn(commands, 'hermesHistorySave').mockResolvedValue({ status: 'ok', data: null } as never);
+    const store = useHermesStore();
+
+    store.switchProfile('panel-1');
+    await store.loadHistory('default');
+    expect(load).not.toHaveBeenCalled();
+
+    // Same agent-profile name, different connection: the local file must still be read.
+    store.switchProfile('local');
+    await store.loadHistory('default');
+    expect(load.mock.calls.some(([profile]) => profile === null)).toBe(true);
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('Keeps another window independent profile updates when this window persists', () => {
+    const piniaA = createPinia();
+    setActivePinia(piniaA);
+    const first = useHermesStore();
+    const piniaB = createPinia();
+    setActivePinia(piniaB);
+    useHermesStore();
+
+    setActivePinia(piniaA);
+    first.setAgentProfileColor('work', '#abc123');
+    setActivePinia(piniaB);
+    // The second window started from the old snapshot and now writes an unrelated field.
+    useHermesStore().setAgentProfileDefault('work');
+
+    const raw = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}') as {
+      profileColors?: Record<string, string>;
+      defaultAgentProfiles?: Record<string, string>;
+    };
+    expect(raw.profileColors?.work).toBe('#abc123');
+    expect(raw.defaultAgentProfiles?.local).toBe('work');
+  });
+
+  it('binds each turn media workspace to the directory it was sent from', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesRuntimeStatus').mockResolvedValue({
+      status: 'ok',
+      data: {
+        ready: true,
+        installed: true,
+        version: 'Hermes Agent v0.19.0',
+        expectedVersion: '0.19.0',
+        path: '/tmp/hermes',
+        dataPath: '/tmp/OpenNavoData',
+        computerUse: false,
+        outdated: false,
+        message: null
+      }
+    });
+    vi.spyOn(commands, 'hermesModelOptions').mockResolvedValue({
+      status: 'ok',
+      data: { providers: [], model: null, provider: null }
+    });
+    const chat = vi.spyOn(commands, 'hermesChat').mockResolvedValue({
+      status: 'ok',
+      data: { text: 'reply', sessionId: 's', liveSessionId: 'l', usage: null, interrupted: false }
+    } as never);
+    const store = useHermesStore();
+    await store.loadRuntime();
+    store.newChat();
+    store.setWorkingDir('/tmp/turn-a');
+    await store.send('first');
+    await vi.waitFor(() => expect(store.thinking).toBe(false));
+
+    store.setWorkingDir('/tmp/turn-b');
+    await store.send('second');
+    await vi.waitFor(() => expect(store.thinking).toBe(false));
+
+    expect(chat.mock.calls.map(([input]) => input.cwd)).toEqual(['/tmp/turn-a', '/tmp/turn-b']);
+    const messages = store.conversations.flatMap(conversation => conversation.messages);
+    const userCwds = messages.filter(message => message.role === 'user').map(message => message.cwd);
+    const assistantCwds = messages.filter(message => message.role === 'assistant').map(message => message.cwd);
+    expect(userCwds).toEqual(['/tmp/turn-a', '/tmp/turn-b']);
+    expect(assistantCwds).toEqual(['/tmp/turn-a', '/tmp/turn-b']);
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('computes a queued history delete against the baseline the prior save advanced', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    vi.spyOn(commands, 'hermesHistoryLoad').mockResolvedValue({ status: 'ok', data: null } as never);
+    type SaveResult = Awaited<ReturnType<typeof commands.hermesHistorySave>>;
+    let finishFirst!: (value: SaveResult) => void;
+    const firstSave = new Promise<SaveResult>(resolve => {
+      finishFirst = resolve;
+    });
+    const save = vi
+      .spyOn(commands, 'hermesHistorySave')
+      .mockReturnValueOnce(firstSave as never)
+      .mockResolvedValue({ status: 'ok', data: null } as never);
+    const store = useHermesStore();
+    await store.loadHistory('default');
+
+    store.conversations.push({ id: 'a', messages: [], updatedAt: 1 });
+    const first = store.flushHistorySave('default');
+    store.conversations = store.conversations.filter(item => item.id !== 'a');
+    const second = store.flushHistorySave('default');
+
+    finishFirst({ status: 'ok', data: null });
+    await Promise.all([first, second]);
+    const payloads = save.mock.calls.map(([json]) => JSON.parse(json) as { deletes: string[]; upserts: unknown[] });
+    expect(payloads[0]?.upserts).toHaveLength(1);
+    expect(payloads[1]?.deletes).toEqual(['a']);
+    expect(payloads[1]?.upserts).toHaveLength(0);
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('treats valid disk history as canonical when a local cache has stale rows', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 3,
+        conversations: [
+          { id: 'local-stale', messages: [], updatedAt: 1 },
+          { id: 'shared', messages: [], updatedAt: 2 }
+        ],
+        activeId: 'local-stale'
+      })
+    );
+    vi.spyOn(commands, 'hermesHistoryLoad').mockResolvedValue({
+      status: 'ok',
+      data: JSON.stringify({
+        conversations: [
+          { id: 'file-row', messages: [], updatedAt: 2 },
+          { id: 'shared', messages: [], updatedAt: 2 }
+        ],
+        activeId: 'file-row'
+      })
+    } as never);
+    const save = vi.spyOn(commands, 'hermesHistorySave').mockResolvedValue({ status: 'ok', data: null } as never);
+    const store = useHermesStore();
+    await store.loadHistory('default');
+    await new Promise(resolve => setTimeout(resolve, 350));
+
+    expect(store.conversations.map(item => item.id).sort()).toEqual(['file-row', 'shared']);
+    const payloads = save.mock.calls.map(([json]) => JSON.parse(json) as { deletes: string[] });
+    expect(payloads.every(payload => payload.deletes.length === 0)).toBe(true);
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
   });
 
@@ -996,6 +1166,159 @@ describe('Hermes conversation store', () => {
     expect(store.panelSlices['panel-1::default']?.recents?.loaded).toBe(false);
   });
 
+  it('Keeps another panel connection row when a same-id delete succeeds late', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    const profile = (id: string) => ({
+      id,
+      name: id,
+      kind: 'panel',
+      endpoint: `http://${id}.tail1234.ts.net:9119`,
+      status: 'connected',
+      version: '0.23.0',
+      latency: 10,
+      models: 1
+    });
+    const state = (id: string) => ({
+      model: {
+        provider: 'nous',
+        model: 'Hermes 4 · 405B',
+        effort: 'medium',
+        fast: false,
+        endpoint: '',
+        keySet: false
+      },
+      conversations: [
+        {
+          id: 'same-session',
+          panel: true,
+          panelProfile: null,
+          panelSlice: 'recents',
+          panelRevision: 1,
+          panelGeneration: 0,
+          messages: [{ id: `${id}-row`, role: 'user', text: id, at: 1 }],
+          messagesLoaded: true,
+          updatedAt: 1
+        }
+      ],
+      activeId: 'same-session',
+      workingDir: '',
+      auxiliary: {},
+      forceAuxVision: false
+    });
+    localStorage.setItem(
+      PROFILES_KEY,
+      JSON.stringify({
+        version: 1,
+        activeProfileId: 'panel-a',
+        profiles: [profile('panel-a'), profile('panel-b')],
+        states: { 'panel-a::default': state('panel-a'), 'panel-b::default': state('panel-b') }
+      })
+    );
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue({ status: 'ok', data: PANEL_AGENT_PROFILES });
+    vi.spyOn(commands, 'hermesPanelHistory').mockImplementation(connectionId =>
+      Promise.resolve({
+        status: 'ok',
+        data: JSON.stringify({
+          sessions:
+            connectionId === 'panel-b'
+              ? [
+                  {
+                    id: 'same-session',
+                    display_name: null,
+                    title: 'B row',
+                    preview: 'B row',
+                    message_count: 1,
+                    runtime_revision: 1,
+                    runtime_generation: 0,
+                    started_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_100,
+                    last_active: 1_700_000_100
+                  }
+                ]
+              : [],
+          total: connectionId === 'panel-b' ? 1 : 0,
+          hasMore: false,
+          degraded: false
+        })
+      } as never)
+    );
+    let resolveDelete: (value: unknown) => void = () => undefined;
+    const deleting = new Promise(resolve => {
+      resolveDelete = resolve;
+    });
+    const remove = vi.spyOn(commands, 'hermesPanelSessionDelete').mockReturnValue(deleting as never);
+    const store = useHermesStore();
+
+    const pending = store.deleteConversation('same-session');
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledWith('panel-a', 'same-session', 1, 0, null));
+
+    // The user moves to another host whose list happens to use the same session id.
+    store.switchProfile('panel-b');
+    resolveDelete({ status: 'ok', data: null });
+    await pending;
+
+    expect(store.profiles.find(item => item.id === 'panel-a')?.id).toBe('panel-a');
+    expect(store.conversations.some(item => item.id === 'same-session')).toBe(true);
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('Does not mark the current panel connection expired for another connection’s late 401', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    const profile = (id: string) => ({
+      id,
+      name: id,
+      kind: 'panel',
+      endpoint: `http://${id}.tail1234.ts.net:9119`,
+      status: 'connected',
+      version: '0.23.0',
+      latency: 10,
+      models: 1
+    });
+    localStorage.setItem(
+      PROFILES_KEY,
+      JSON.stringify({
+        version: 1,
+        activeProfileId: 'panel-a',
+        profiles: [profile('panel-a'), profile('panel-b')],
+        states: {}
+      })
+    );
+    vi.spyOn(commands, 'hermesAgentProfiles').mockResolvedValue({ status: 'ok', data: PANEL_AGENT_PROFILES });
+    vi.spyOn(commands, 'hermesPanelHistory').mockResolvedValue({
+      status: 'ok',
+      data: JSON.stringify({ sessions: [], total: 0, hasMore: false, degraded: false })
+    } as never);
+    let resolveArchive: (value: unknown) => void = () => undefined;
+    const archiving = new Promise(resolve => {
+      resolveArchive = resolve;
+    });
+    vi.spyOn(commands, 'hermesPanelSessionArchive').mockReturnValue(archiving as never);
+    const store = useHermesStore();
+    store.conversations.push({
+      id: 'same-session',
+      panel: true,
+      panelSlice: 'recents',
+      panelRevision: 1,
+      panelGeneration: 0,
+      messages: [],
+      updatedAt: 1
+    });
+    store.activeId = 'same-session';
+
+    const pending = store.setConversationArchived('same-session', true);
+    await vi.waitFor(() => expect(commands.hermesPanelSessionArchive).toHaveBeenCalled());
+    store.switchProfile('panel-b');
+    resolveArchive({
+      status: 'error',
+      error: { code: 'E_HERMES_PANEL_AUTH', message: 'session expired', detail: '401' }
+    });
+    await pending;
+
+    expect(store.panelAuthExpired).not.toBe('panel-b');
+    expect(store.profiles.find(item => item.id === 'panel-b')?.status).toBe('connected');
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
   it('Starts with an empty desktop history', () => {
     const store = useHermesStore();
     expect(store.conversations).toHaveLength(0);
@@ -1361,7 +1684,7 @@ describe('Hermes conversation store', () => {
     expect(store.clarifyRequest).toBeNull();
 
     await store.respondApproval('once');
-    expect(respond).toHaveBeenCalledWith('srq-1', { kind: 'approval', choice: 'once' });
+    expect(respond).toHaveBeenCalledWith(turnRequestId, 'srq-1', { kind: 'approval', choice: 'once' });
     await nextTick();
     // Answering discloses the next card instead of leaving the queue stuck.
     expect(store.approvalRequest).toBeNull();
@@ -1418,7 +1741,7 @@ describe('Hermes conversation store', () => {
       site: 'example.com'
     });
     await store.respondVaultSaveLogin('user@example.com', 'hunter2');
-    expect(respond).toHaveBeenCalledWith('srq-3', {
+    expect(respond).toHaveBeenCalledWith(turnRequestId, 'srq-3', {
       kind: 'vaultSaveLogin',
       identifier: 'user@example.com',
       password: 'hunter2'
@@ -1436,7 +1759,7 @@ describe('Hermes conversation store', () => {
     await nextTick();
     expect(store.vaultCodeRequest?.hint).toBe('Authenticator');
     await store.respondVaultCode('123456');
-    expect(respond).toHaveBeenCalledWith('srq-4', { kind: 'secret', value: '123456' });
+    expect(respond).toHaveBeenCalledWith(turnRequestId, 'srq-4', { kind: 'secret', value: '123456' });
   });
 
   it('Does not let an earlier stop fallback kill the next turn', async () => {
@@ -1577,7 +1900,7 @@ describe('Hermes conversation store', () => {
 
     await store.send('steer this');
 
-    expect(steer).toHaveBeenCalledWith('live-1', 7, 'steer this', null, null);
+    expect(steer).toHaveBeenCalledWith('live-1', 7, 'steer this', null, null, expect.any(String));
     expect(interrupt).not.toHaveBeenCalled();
     expect(store.stopping).toBe(false);
     expect(store.messages.some(entry => entry.text === 'steer this' && entry.steering)).toBe(true);
@@ -1616,7 +1939,7 @@ describe('Hermes conversation store', () => {
 
     await store.send('use the api');
 
-    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null);
+    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null, expect.any(String));
     expect(steer).not.toHaveBeenCalled();
     expect(store.thinking).toBe(true);
     expect(store.messages.some(entry => entry.text === 'use the api' && !entry.steering)).toBe(true);
@@ -1758,8 +2081,8 @@ describe('Hermes conversation store', () => {
 
     await store.send('use the api');
 
-    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null);
-    expect(steer).toHaveBeenCalledWith('live-1', 7, 'use the api', null, null);
+    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null, expect.any(String));
+    expect(steer).toHaveBeenCalledWith('live-1', 7, 'use the api', null, null, expect.any(String));
     expect(store.messages.some(entry => entry.text === 'use the api' && entry.steering)).toBe(true);
   });
 
@@ -1811,7 +2134,9 @@ describe('Hermes conversation store', () => {
       }
     });
 
-    await vi.waitFor(() => expect(redirect).toHaveBeenCalledWith('new-live', 'use the api', null, null));
+    await vi.waitFor(() =>
+      expect(redirect).toHaveBeenCalledWith('new-live', 'use the api', null, null, expect.any(String))
+    );
     expect(redirect).not.toHaveBeenCalledWith('old-live', 'use the api', null, null);
   });
 
@@ -1867,7 +2192,9 @@ describe('Hermes conversation store', () => {
       }
     });
 
-    await vi.waitFor(() => expect(steer).toHaveBeenCalledWith('live-1', 7, 'use the api', null, null));
+    await vi.waitFor(() =>
+      expect(steer).toHaveBeenCalledWith('live-1', 7, 'use the api', null, null, expect.any(String))
+    );
     expect(redirect).not.toHaveBeenCalled();
     expect(store.messages.some(entry => entry.text === 'use the api' && entry.steering)).toBe(true);
   });
@@ -1999,7 +2326,9 @@ describe('Hermes conversation store', () => {
       }
     });
 
-    await vi.waitFor(() => expect(redirect).toHaveBeenCalledWith('live-2', 'correction', null, null));
+    await vi.waitFor(() =>
+      expect(redirect).toHaveBeenCalledWith('live-2', 'correction', null, null, expect.any(String))
+    );
     expect(steer).not.toHaveBeenCalled();
   });
 
@@ -2125,7 +2454,7 @@ describe('Hermes conversation store', () => {
 
     await store.send('use the api');
 
-    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null);
+    expect(redirect).toHaveBeenCalledWith('live-1', 'use the api', null, null, expect.any(String));
     expect(store.messages.some(entry => entry.text === 'use the api')).toBe(false);
 
     finishTurn({
@@ -2354,7 +2683,9 @@ describe('Hermes conversation store', () => {
       }
     });
 
-    await vi.waitFor(() => expect(steer).toHaveBeenCalledWith('live-1', 7, 'steer this', null, null));
+    await vi.waitFor(() =>
+      expect(steer).toHaveBeenCalledWith('live-1', 7, 'steer this', null, null, expect.any(String))
+    );
   });
 
   it('Keeps a steer that is still waiting for a generation across a session reset', async () => {
@@ -2469,7 +2800,7 @@ describe('Hermes conversation store', () => {
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
     // Stop retires the local turn through its own session; the failed steer still becomes the
     // next queued row instead of being dropped with the interrupt.
-    expect(interrupt).toHaveBeenCalledWith('live-1', null, null);
+    expect(interrupt).toHaveBeenCalledWith('live-1', null, null, expect.any(String));
     expect(store.messages.some(entry => entry.text === 'steer this' && entry.steering)).toBe(false);
     expect(chat.mock.calls[1]?.[0]).toMatchObject({ prompt: 'steer this' });
   });
@@ -2533,7 +2864,7 @@ describe('Hermes conversation store', () => {
 
     expect(chat).toHaveBeenCalledTimes(1);
     // Stopping the turn uses the local session interrupt, not the gateway-killing hard stop.
-    expect(interrupt).toHaveBeenCalledWith('live-1', null, null);
+    expect(interrupt).toHaveBeenCalledWith('live-1', null, null, expect.any(String));
 
     store.select(original.id);
     await vi.waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
@@ -2740,7 +3071,7 @@ describe('Hermes conversation store', () => {
 
     // The session interrupt keeps the local gateway (and its warm session) alive; killing it
     // would also lose `message.complete`, the event that preserves the streamed reply.
-    expect(interrupt).toHaveBeenCalledWith('live-local', null, null);
+    expect(interrupt).toHaveBeenCalledWith('live-local', null, null, expect.any(String));
     expect(stop).not.toHaveBeenCalled();
   });
 
@@ -2796,7 +3127,8 @@ describe('Hermes conversation store', () => {
     void store.send('second turn');
     await vi.waitFor(() => expect(requestIds).toHaveLength(2));
     await store.stop();
-    expect(interrupt).not.toHaveBeenCalled();
+    // The no-session first Stop cancels by request id; no session RPC is sent.
+    expect(interrupt).toHaveBeenCalledWith('', null, null, requestIds[1]);
     expect(hardStop).not.toHaveBeenCalled();
 
     // The id arrives after Stop: the interrupt targets this turn, never `old-live`.
@@ -2804,7 +3136,7 @@ describe('Hermes conversation store', () => {
       .filter(listener => listener.event === 'hermes-session')
       .at(-1)!
       .handler({ payload: { requestId: requestIds[1], liveSessionId: 'new-live' } });
-    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledWith('new-live', null, null));
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledWith('new-live', null, null, expect.any(String)));
     expect(interrupt).not.toHaveBeenCalledWith('old-live', null, null);
     expect(hardStop).not.toHaveBeenCalled();
   });
@@ -2829,19 +3161,24 @@ describe('Hermes conversation store', () => {
     // Stop retires the turn before the gateway has announced a session. Nothing can be
     // interrupted yet, and the turn is no longer in `liveTurns`.
     store.stopThinking();
-    expect(interrupt).not.toHaveBeenCalled();
+    expect(interrupt).toHaveBeenCalledWith('', 'http://panel.tail1234.ts.net:9119', 'panel-1', requestId);
 
     // The listener is still registered until `hermesChat` settles: the late id gets the
     // interrupt the retirement could not send.
     const session = eventMock.listeners.filter(listener => listener.event === 'hermes-session').at(-1)!;
     session.handler({ payload: { requestId, liveSessionId: 'late-live' } });
     await vi.waitFor(() =>
-      expect(interrupt).toHaveBeenCalledWith('late-live', 'http://panel.tail1234.ts.net:9119', 'panel-1')
+      expect(interrupt).toHaveBeenCalledWith(
+        'late-live',
+        'http://panel.tail1234.ts.net:9119',
+        'panel-1',
+        expect.any(String)
+      )
     );
 
     // The parked request is consumed: a repeated event must not interrupt twice.
     session.handler({ payload: { requestId, liveSessionId: 'late-live' } });
-    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(interrupt).toHaveBeenCalledTimes(2);
   });
 
   it('Interrupts a late local session when the hard stop fails', async () => {
@@ -2890,14 +3227,15 @@ describe('Hermes conversation store', () => {
       .filter(listener => listener.event === 'hermes-session')
       .at(-1)!
       .handler({ payload: { requestId, liveSessionId: 'late-local' } });
-    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledWith('late-local', null, null));
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledWith('late-local', null, null, expect.any(String)));
 
     // The hard stop failing keeps the gateway and its session alive; the parked request was
     // consumed, so a repeated event cannot interrupt twice.
     failStop(new Error('stop failed'));
     await Promise.resolve();
     expect(stop).toHaveBeenCalledTimes(1);
-    expect(interrupt).toHaveBeenCalledTimes(1);
+    // One early cancel by turn id, one late interrupt once the session is known.
+    expect(interrupt).toHaveBeenCalledTimes(2);
   });
 
   it('Keeps the stop marker when a stopped turn never streamed a token', async () => {
@@ -2994,7 +3332,7 @@ describe('Hermes conversation store', () => {
 
     await store.deleteConversation(conversationId);
 
-    expect(interrupt).toHaveBeenCalledWith('live-bg', null, null);
+    expect(interrupt).toHaveBeenCalledWith('live-bg', null, null, expect.any(String));
     expect(store.conversations.some(item => item.id === conversationId)).toBe(false);
 
     // The late completion must not insert the deleted conversation back into the list.
@@ -3629,7 +3967,7 @@ describe('Hermes conversation store', () => {
     store.active!.executionGeneration = 7;
     await store.send('steer this');
 
-    expect(steer).toHaveBeenCalledWith('live-1', 7, 'steer this', null, null);
+    expect(steer).toHaveBeenCalledWith('live-1', 7, 'steer this', null, null, expect.any(String));
     expect(interrupt).not.toHaveBeenCalled();
     expect(store.stopping).toBe(false);
     expect(store.messages.some(entry => entry.text === 'steer this')).toBe(false);
@@ -3677,8 +4015,8 @@ describe('Hermes conversation store', () => {
 
     await store.send('steer this');
 
-    expect(steer).toHaveBeenNthCalledWith(1, 'live-1', 7, 'steer this', null, null);
-    expect(steer).toHaveBeenNthCalledWith(2, 'live-1', 8, 'steer this', null, null);
+    expect(steer).toHaveBeenNthCalledWith(1, 'live-1', 7, 'steer this', null, null, expect.any(String));
+    expect(steer).toHaveBeenNthCalledWith(2, 'live-1', 8, 'steer this', null, null, expect.any(String));
     expect(interrupt).not.toHaveBeenCalled();
     expect(store.stopping).toBe(false);
     expect(store.thinking).toBe(true);

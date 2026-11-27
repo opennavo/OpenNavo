@@ -102,11 +102,13 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Serialize a `.env` read-modify-write cycle against other processes.
+/// Serialize a read-modify-write cycle of `<home>/.env` and `config.yaml`.
 ///
-/// Upstream takes the same lock file (`<env>.lock`) through `_env_write_lock()`, so a
-/// running gateway, the CLI and this app cannot silently drop each other's keys.
-fn with_env_lock<T>(
+/// Upstream takes the same lock file (`.env.lock`) through `_env_write_lock()`, so a
+/// running gateway, the CLI and this app cannot silently drop each other's keys. Holding
+/// the one lock for both files keeps a key and the `key_env`/provider block that names it
+/// in step, and makes every read see a complete file because the write is a rename.
+pub(crate) fn with_home_lock<T>(
     home: &Path,
     body: impl FnOnce() -> Result<T, AppError>,
 ) -> Result<T, AppError> {
@@ -299,6 +301,13 @@ pub fn env_has(home: &Path, key: &str) -> bool {
 
 /// Write `key=value` into `<HERMES_HOME>/.env`, replacing any existing assignment.
 pub fn set_env_value(home: &Path, key: &str, value: &str) -> Result<(), AppError> {
+    with_home_lock(home, || set_env_value_locked(home, key, value))
+}
+
+/// [`set_env_value`] for a caller that already holds [`with_home_lock`]. Taking the lock
+/// again here would deadlock: `flock` locks belong to the open file description, so the
+/// same process blocks on its own second handle.
+pub(crate) fn set_env_value_locked(home: &Path, key: &str, value: &str) -> Result<(), AppError> {
     let value = value.replace(['\n', '\r'], "");
     if value.len() > MAX_VALUE_BYTES {
         return Err(AppError::new(
@@ -307,32 +316,55 @@ pub fn set_env_value(home: &Path, key: &str, value: &str) -> Result<(), AppError
         ));
     }
     let serialized = format!("{key}={}\n", quote_env_value(&value));
-    with_env_lock(home, || {
-        let mut lines: Vec<String> = match read_env_text(home) {
-            Some(text) => text.split('\n').map(str::to_owned).collect(),
-            None => Vec::new(),
-        };
-        if lines.last().is_some_and(|line| line.is_empty()) {
-            lines.pop();
-        }
-        // `env_value` applies the last assignment, so replacing only the first would leave a
-        // later duplicate in force. Keep one assignment at the first position instead.
-        let mut replaced = false;
-        let mut next = Vec::with_capacity(lines.len() + 1);
-        for line in lines {
-            if !env_line_defines_key(&line, key) {
-                next.push(line);
-            } else if !replaced {
-                next.push(serialized.trim_end().to_owned());
-                replaced = true;
-            }
-        }
-        if !replaced {
+    let mut lines: Vec<String> = match read_env_text(home) {
+        Some(text) => text.split('\n').map(str::to_owned).collect(),
+        None => Vec::new(),
+    };
+    if lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    // `env_value` applies the last assignment, so replacing only the first would leave a
+    // later duplicate in force. Keep one assignment at the first position instead.
+    let mut replaced = false;
+    let mut next = Vec::with_capacity(lines.len() + 1);
+    for line in lines {
+        if !env_line_defines_key(&line, key) {
+            next.push(line);
+        } else if !replaced {
             next.push(serialized.trim_end().to_owned());
+            replaced = true;
         }
-        let mut body = next.join("\n");
-        body.push('\n');
-        atomic_write(&home.join(".env"), body.as_bytes())
+    }
+    if !replaced {
+        next.push(serialized.trim_end().to_owned());
+    }
+    let mut body = next.join("\n");
+    body.push('\n');
+    atomic_write(&home.join(".env"), body.as_bytes())
+}
+
+/// Write `key=value` only if no assignment exists, under the same lock as every other
+/// credential write. A manual save that landed while a slow Keychain read was running wins;
+/// the caller learns whether it inserted (`true`) or left the file alone (`false`).
+///
+/// `paused` is checked inside the lock as well, so a migration cannot recreate a home after
+/// an uninstall started removing it.
+pub(crate) fn set_env_value_if_absent(
+    home: &Path,
+    key: &str,
+    value: &str,
+    paused: impl Fn() -> bool,
+) -> Result<bool, AppError> {
+    // Check before `with_home_lock` because that helper creates the home directory.
+    if paused() {
+        return Ok(false);
+    }
+    with_home_lock(home, || {
+        if paused() || env_value(home, key).is_some() {
+            return Ok(false);
+        }
+        set_env_value_locked(home, key, value)?;
+        Ok(true)
     })
 }
 
@@ -343,7 +375,7 @@ pub fn remove_env_value(home: &Path, key: &str) -> Result<bool, AppError> {
     if !path.exists() {
         return Ok(false);
     }
-    with_env_lock(home, || {
+    with_home_lock(home, || {
         let Some(text) = read_env_text(home) else {
             return Ok(false);
         };
@@ -466,9 +498,21 @@ pub fn session_delete(data_root: &Path, profile_id: &str) -> Result<(), AppError
     }
     if panel.is_empty() {
         let path = session_path(data_root);
-        let _ = std::fs::remove_file(&path);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         if let Some(dir) = path.parent() {
-            let _ = std::fs::remove_dir(dir);
+            match std::fs::remove_dir(dir) {
+                Ok(()) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                Err(error) => return Err(error.into()),
+            }
         }
         return Ok(());
     }

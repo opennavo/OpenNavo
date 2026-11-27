@@ -24,12 +24,14 @@ use crate::AppError;
 pub(crate) mod diagnostics;
 pub(crate) mod env_store;
 pub(crate) mod gateway;
+pub(crate) mod hygiene;
 pub(crate) mod install;
 pub(crate) mod legacy_migration;
 pub(crate) mod login;
 pub(crate) mod login_session;
 pub(crate) mod media;
 mod media_proxy;
+pub(crate) mod model_catalog;
 pub mod panel;
 pub(crate) mod permissions;
 pub mod profiles;
@@ -312,20 +314,241 @@ pub(crate) struct AskAnswer {
     pub reply: HermesAskReply,
 }
 
+/// One live turn's card channel. Answers are routed by the chat request id the turn was
+/// started with, so two windows (or a Panel and a local turn) never consume each other's
+/// cards, and a stop only cancels the turn it names.
+pub(crate) struct TurnAskChannel {
+    pub(crate) sender: UnboundedSender<AskAnswer>,
+    pub(crate) cancel: std::sync::Arc<TurnCancel>,
+    /// The live gateway session this turn owns; older callers name this id.
+    pub(crate) live_session_id: String,
+    /// A Panel turn's card wait lives here but its gateway is not this process's to stop.
+    pub(crate) remote: bool,
+    /// Panel login this turn was prepared under. Late interrupt/steer/model reads use it to
+    /// prove they still act on the same sign-in.
+    pub(crate) panel_login: Option<String>,
+}
+
+/// A cancellation that is also a stored state: `notify_waiters` alone loses the signal if
+/// it fires before the stream reaches its select or while it is handling another frame.
+pub(crate) struct TurnCancel {
+    cancelled: AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+impl TurnCancel {
+    fn new() -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Race-free wait: a cancel that lands between the flag check and the waiter registration
+    /// is caught by the second check after `enable()`, and the loop covers repeated waits.
+    pub(crate) async fn cancelled(&self) {
+        loop {
+            if self.is_cancelled() {
+                return;
+            }
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+            if self.is_cancelled() {
+                return;
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct HermesRuntimeState {
     pid: Mutex<Option<u32>>,
     gateway: tokio::sync::Mutex<Option<std::sync::Arc<GatewayServer>>>,
-    /// Answers from the renderer for the requests the running turn is parked on. One channel per turn:
-    /// the id inside the answer picks the request, so a clarify and an approval can be open together.
-    pub(crate) asks: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<AskAnswer>>>,
-    pub(crate) approval_cancel: tokio::sync::Notify,
+    /// Serializes install, uninstall and anything else that owns the runtime directory.
+    /// `installing` stays the fast rejection flag chat reads, while this mutex keeps the
+    /// operations from interleaving with each other.
+    pub(crate) lifecycle: tokio::sync::Mutex<()>,
+    /// Answers from the renderer for the requests each running turn is parked on, keyed by
+    /// that turn's chat request id. One channel per turn: answering or stopping one turn
+    /// must not reach the cards another window is waiting on.
+    pub(crate) asks: Mutex<std::collections::HashMap<String, TurnAskChannel>>,
     /// Test seam: fires when a live server request becomes an open card, so the stalled-turn
     /// regression test can wait for registration instead of guessing with yields.
     #[cfg(test)]
     pub(crate) ask_opened: tokio::sync::Notify,
     installing: AtomicBool,
     pub(crate) install_cancel: AtomicBool,
+}
+
+fn ask_lock(
+    state: &HermesRuntimeState,
+) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, TurnAskChannel>> {
+    state
+        .asks
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl HermesRuntimeState {
+    /// Register this turn's answer channel before its first card can be shown.
+    pub(crate) fn register_turn_asks(
+        &self,
+        turn: &str,
+        live_session_id: &str,
+        remote: bool,
+        sender: UnboundedSender<AskAnswer>,
+    ) -> std::sync::Arc<TurnCancel> {
+        let cancel = std::sync::Arc::new(TurnCancel::new());
+        ask_lock(self).insert(
+            turn.to_owned(),
+            TurnAskChannel {
+                sender,
+                cancel: cancel.clone(),
+                live_session_id: live_session_id.to_owned(),
+                remote,
+                panel_login: None,
+            },
+        );
+        cancel
+    }
+
+    /// Remove only the registration this turn created. The cancel handle identifies it, so
+    /// a guard for a superseded turn cannot drop a newer registration that reused the id.
+    pub(crate) fn unregister_turn_asks(&self, turn: &str, cancel: &std::sync::Arc<TurnCancel>) {
+        let mut asks = ask_lock(self);
+        if asks
+            .get(turn)
+            .is_some_and(|channel| std::sync::Arc::ptr_eq(&channel.cancel, cancel))
+        {
+            asks.remove(turn);
+        }
+    }
+
+    /// Bind the live session and Panel login as soon as the async setup learns them. The
+    /// cancellation identity exists before this, so a stop during session creation is not lost.
+    pub(crate) fn bind_turn_scope(
+        &self,
+        turn: &str,
+        cancel: &std::sync::Arc<TurnCancel>,
+        live_session_id: &str,
+        panel_login: Option<&str>,
+    ) {
+        let mut asks = ask_lock(self);
+        if let Some(channel) = asks.get_mut(turn)
+            && std::sync::Arc::ptr_eq(&channel.cancel, cancel)
+        {
+            channel.live_session_id = live_session_id.to_owned();
+            if let Some(login) = panel_login {
+                channel.panel_login = Some(login.to_owned());
+            }
+        }
+    }
+
+    /// Panel login a running turn was prepared under, if any.
+    pub(crate) fn turn_panel_login(&self, turn: Option<&str>) -> Option<String> {
+        let turn = turn.map(str::trim).filter(|value| !value.is_empty())?;
+        ask_lock(self)
+            .get(turn)
+            .and_then(|channel| channel.panel_login.clone())
+    }
+
+    /// Whether a **local** turn id is currently registered. A Panel turn id must never
+    /// authorize taking/stopping this process's gateway slot.
+    pub(crate) fn is_local_turn_registered(&self, turn: &str) -> bool {
+        ask_lock(self)
+            .get(turn)
+            .is_some_and(|channel| !channel.remote)
+    }
+
+    /// Whether a local turn other than `except` is still registered. A late hard stop for one
+    /// turn must not kill a gateway another local turn is using.
+    pub(crate) fn has_other_local_turns(&self, except: Option<&str>) -> bool {
+        ask_lock(self)
+            .iter()
+            .any(|(turn, channel)| !channel.remote && except != Some(turn.as_str()))
+    }
+
+    /// The sender for a turn. `None` keeps the old single-turn callers working only while
+    /// exactly one turn is live; with several live turns the answer has to name its turn.
+    pub(crate) fn turn_ask_sender(&self, turn: Option<&str>) -> Option<UnboundedSender<AskAnswer>> {
+        let asks = ask_lock(self);
+        match turn {
+            Some(turn) => asks.get(turn).map(|channel| channel.sender.clone()),
+            None if asks.len() == 1 => asks.values().next().map(|channel| channel.sender.clone()),
+            None => None,
+        }
+    }
+
+    /// Cancel one turn: by its request id when known, else by live session. `local_only`
+    /// keeps a local gateway stop from refusing cards owned by a Panel host. Two Panel hosts
+    /// can reuse a session id, which is why the request id wins when supplied.
+    pub(crate) fn cancel_turn_asks(
+        &self,
+        turn: Option<&str>,
+        live_session_id: Option<&str>,
+        local_only: bool,
+    ) {
+        let turn = turn.map(str::trim).filter(|value| !value.is_empty());
+        let session = live_session_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if turn.is_none() && session.is_none() {
+            return;
+        }
+        for (registered, channel) in ask_lock(self).iter() {
+            if local_only && channel.remote {
+                continue;
+            }
+            let matches = match turn {
+                Some(turn) => registered == turn,
+                None => session.is_some_and(|session| channel.live_session_id == session),
+            };
+            if matches {
+                channel.cancel.cancel();
+            }
+        }
+    }
+
+    /// Install/uninstall stops every local card wait, leaving Panel turns untouched.
+    pub(crate) fn cancel_local_turn_asks(&self) {
+        for channel in ask_lock(self).values() {
+            if !channel.remote {
+                channel.cancel.cancel();
+            }
+        }
+    }
+
+    /// Shutdown cancels every parked card: the runtime is going away, so no turn can settle
+    /// its card on the socket.
+    pub(crate) fn cancel_all_turn_asks(&self) {
+        let mut asks = ask_lock(self);
+        for channel in asks.values() {
+            channel.cancel.cancel();
+        }
+        asks.clear();
+    }
+}
+
+fn installing_error() -> AppError {
+    AppError::new(
+        "E_HERMES_INSTALLING",
+        "Hermes is being updated. Try again when it finishes.",
+    )
 }
 
 fn data_root(app: &AppHandle) -> Result<PathBuf, AppError> {
@@ -527,12 +750,21 @@ fn history_path(app: &AppHandle, profile: Option<&str>) -> Result<PathBuf, AppEr
 }
 
 pub fn history_load(app: &AppHandle, profile: Option<&str>) -> Result<Option<String>, AppError> {
+    const MAX_HISTORY_BYTES: u64 = 20 * 1024 * 1024;
     let path = history_path(app, profile)?;
     if !path.is_file() {
         return Ok(None);
     }
-    let raw = std::fs::read_to_string(&path)?;
-    if raw.len() > 20 * 1024 * 1024 {
+    // Bound the read itself: checking the length after `read_to_string` had already buffered
+    // an arbitrarily large file.
+    let mut file = std::fs::File::open(&path)?;
+    let mut raw = String::new();
+    use std::io::Read;
+    if (&mut file)
+        .take(MAX_HISTORY_BYTES + 1)
+        .read_to_string(&mut raw)?
+        > MAX_HISTORY_BYTES as usize
+    {
         return Err(AppError::new(
             "E_HERMES_HISTORY",
             "Hermes history is too large.",
@@ -541,27 +773,161 @@ pub fn history_load(app: &AppHandle, profile: Option<&str>) -> Result<Option<Str
     Ok(Some(raw))
 }
 
-pub fn history_save(app: &AppHandle, json: &str, profile: Option<&str>) -> Result<(), AppError> {
-    if json.len() > 20 * 1024 * 1024 {
+fn read_history_limited(path: &Path) -> Result<Option<String>, AppError> {
+    const MAX_HISTORY_BYTES: u64 = 20 * 1024 * 1024;
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let mut file = std::fs::File::open(path)?;
+    let mut raw = String::new();
+    use std::io::Read;
+    if (&mut file)
+        .take(MAX_HISTORY_BYTES + 1)
+        .read_to_string(&mut raw)?
+        > MAX_HISTORY_BYTES as usize
+    {
         return Err(AppError::new(
             "E_HERMES_HISTORY",
             "Hermes history is too large.",
         ));
     }
-    serde_json::from_str::<serde_json::Value>(json).map_err(|error| {
+    Ok(Some(raw))
+}
+
+fn merge_history_ops(path: &Path, incoming: &serde_json::Value) -> Result<(), AppError> {
+    let home = path
+        .parent()
+        .ok_or_else(|| AppError::new("E_HERMES_HISTORY", "Hermes history path is invalid."))?;
+    env_store::with_home_lock(home, || {
+        let mut document = match read_history_limited(path)? {
+            Some(raw) => serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| {
+                AppError::new("E_HERMES_HISTORY", "Hermes history is unreadable.")
+                    .with_detail(error.to_string())
+            })?,
+            None => serde_json::json!({"version": 3, "conversations": []}),
+        };
+        let root = document
+            .as_object_mut()
+            .ok_or_else(|| AppError::new("E_HERMES_HISTORY", "Hermes history is not an object."))?;
+        let conversations = root
+            .entry("conversations")
+            .or_insert_with(|| serde_json::json!([]));
+        let Some(rows) = conversations.as_array_mut() else {
+            return Err(AppError::new(
+                "E_HERMES_HISTORY",
+                "Hermes history conversations are not a list.",
+            ));
+        };
+        let deleted: std::collections::HashSet<&str> = incoming
+            .get("deletes")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        if !deleted.is_empty() {
+            rows.retain(|row| {
+                row.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|id| !deleted.contains(id))
+            });
+        }
+        for row in incoming
+            .get("upserts")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(id) = row.get("id").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            rows.retain(|existing| {
+                existing.get("id").and_then(serde_json::Value::as_str) != Some(id)
+            });
+            rows.push(row.clone());
+        }
+        if let Some(active) = incoming.get("activeId") {
+            root.insert("activeId".to_owned(), active.clone());
+        }
+        root.insert("version".to_owned(), serde_json::json!(3));
+        let body = serde_json::to_vec(&document).map_err(|error| {
+            AppError::new("E_HERMES_HISTORY", "Could not encode history.")
+                .with_detail(error.to_string())
+        })?;
+        if body.len() > 20 * 1024 * 1024 {
+            return Err(AppError::new(
+                "E_HERMES_HISTORY",
+                "Hermes history is too large.",
+            ));
+        }
+        env_store::atomic_write(path, &body)
+    })
+}
+
+pub fn history_save(app: &AppHandle, json: &str, profile: Option<&str>) -> Result<(), AppError> {
+    const MAX_HISTORY_BYTES: usize = 20 * 1024 * 1024;
+    if json.len() > MAX_HISTORY_BYTES {
+        return Err(AppError::new(
+            "E_HERMES_HISTORY",
+            "Hermes history is too large.",
+        ));
+    }
+    let value = serde_json::from_str::<serde_json::Value>(json).map_err(|error| {
         AppError::new("E_HERMES_HISTORY", "Hermes history is not valid JSON.")
             .with_detail(error.to_string())
     })?;
     let path = history_path(app, profile)?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
-    #[cfg(unix)]
+    // New writers send explicit upserts/deletes derived from their loaded baseline. Merging
+    // them under the file lock keeps two windows from overwriting each other's conversations
+    // and prevents a stale snapshot from resurrecting a deleted row.
+    if value
+        .get("upserts")
+        .and_then(serde_json::Value::as_array)
+        .is_some()
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        return merge_history_ops(&path, &value);
     }
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
+    // Two windows can save the same profile at once. A fixed `.json.tmp` lets one write the
+    // other's rename source; a per-write name keeps each rename pair private.
+    let tmp = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default(),
+        uuid::Uuid::new_v4()
+    ));
+    let result = (|| -> Result<(), AppError> {
+        std::fs::write(&tmp, json)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        }
+        std::fs::rename(&tmp, &path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Move one profile's history with the profile itself. A local rename used to leave
+/// `history-<old>.json` behind, and recreating that name later resurrected the old chat list.
+fn move_profile_history(from: &Path, to: &Path) -> Result<bool, AppError> {
+    if !from.is_file() {
+        return Ok(false);
+    }
+    if to.exists() {
+        // Never overwrite history a profile with the target name already owns.
+        return Ok(false);
+    }
+    std::fs::rename(from, to)?;
+    Ok(true)
+}
+
+fn remove_profile_history(path: &Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 pub fn attachment_preview(path: &str) -> Result<Option<String>, AppError> {
@@ -859,6 +1225,20 @@ pub fn discard_attachment(app: &AppHandle, path: &str) -> Result<(), AppError> {
     discard_managed_file(Path::new(path), &pastes_dir, &images_dir)
 }
 
+/// Only stable local classifications reach the durable audit. Upstream error text can carry
+/// prompts, provider bodies or credentials; it stays in the transient AppError, not this file.
+const AUDIT_DETAIL_CODES: &[&str] = &[
+    "gateway_error",
+    "gateway_timeout",
+    "runtime_error",
+    "provider_error",
+    "stream_error",
+];
+
+fn audit_detail(detail: Option<&str>) -> Option<&str> {
+    detail.filter(|value| AUDIT_DETAIL_CODES.contains(value))
+}
+
 fn append_audit(
     home: &Path,
     input: &HermesChatInput,
@@ -876,13 +1256,22 @@ fn append_audit(
         "promptChars": input.prompt.chars().count(),
         "outcome": outcome,
         "sessionId": session,
-        "detail": detail
+        "detail": audit_detail(detail)
     });
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(home.join(AUDIT_FILE))
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt;
+        // New files are owner-only from creation; existing files are tightened below.
+        options.mode(0o600);
+    }
+    if let Ok(mut file) = options.open(home.join(AUDIT_FILE)) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
         let _ = writeln!(file, "{entry}");
     }
 }
@@ -996,10 +1385,7 @@ pub async fn mcp_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes MCP action failed.").with_detail(detail),
         );
@@ -1056,10 +1442,7 @@ pub async fn skill_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes skill action failed.").with_detail(detail),
         );
@@ -1115,10 +1498,7 @@ pub async fn tool_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes tool action failed.").with_detail(detail),
         );
@@ -1174,15 +1554,27 @@ pub async fn cron_action(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes cron action failed.").with_detail(detail),
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Keep the tail of a failed CLI's stderr for the diagnostics pane. Python prints the
+/// exception last, and the toast carries the short `message`, so truncating from the
+/// front (as the action errors do) would drop the one line the pane exists to show.
+fn diagnostics_failure_detail(stderr: &[u8]) -> String {
+    const MAX_CHARS: usize = 4000;
+    let text = String::from_utf8_lossy(stderr);
+    let text = text.trim();
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= MAX_CHARS {
+        return text.to_owned();
+    }
+    let tail: String = chars[chars.len() - MAX_CHARS..].iter().collect();
+    format!("…{tail}")
 }
 
 pub async fn cli_read(
@@ -1233,10 +1625,7 @@ pub async fn cli_read(
                 .with_detail(error.to_string())
         })?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(400)
-            .collect::<String>();
+        let detail = diagnostics_failure_detail(&output.stderr);
         return Err(
             AppError::new("E_HERMES_RUNTIME", "Hermes diagnostics failed.").with_detail(detail),
         );
@@ -1410,6 +1799,10 @@ fn apply_runtime_environment(command: &mut Command) {
 /// No credential is injected here: provider keys live in `<HERMES_HOME>/.env`, which
 /// the runtime loads itself (see [`env_store`]).
 fn runtime_command(bin: &Path) -> Result<Command, AppError> {
+    runtime_command_with_entrypoint(bin, HERMES_ENTRYPOINT)
+}
+
+fn runtime_command_with_entrypoint(bin: &Path, entrypoint: &str) -> Result<Command, AppError> {
     let python = runtime_python(bin).ok_or_else(|| {
         AppError::new(
             "E_HERMES_RUNTIME",
@@ -1431,7 +1824,7 @@ fn runtime_command(bin: &Path) -> Result<Command, AppError> {
     apply_runtime_environment(&mut command);
     command
         .arg("-c")
-        .arg(HERMES_ENTRYPOINT)
+        .arg(entrypoint)
         .env("PYTHONPATH", pythonpath);
     Ok(command)
 }
@@ -1455,91 +1848,113 @@ fn resolve_provider_secret(home: &Path, input: &HermesChatInput) -> Option<Strin
     None
 }
 
-/// Which part of `config.yaml` a write owns.
+/// The `.env`/`config.yaml` state one chat turn needs, computed before the gateway decides
+/// whether to accept it.
 ///
-/// A chat turn applies the whole desktop projection: the model, the agent/display/terminal
-/// switches and the auxiliary slots the GUI shows. Reading the model catalog must not. The
-/// settings sheet asks for a profile's catalog just by selecting it, and the draft it passes
-/// is that profile's *saved* state — or the built-in default when this window never opened the
-/// profile — so writing it back replaced the profile's own model with the default one. A
-/// catalog read therefore only maintains the user-defined provider block it needs in order to
-/// discover models from a custom endpoint.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ConfigScope {
-    Turn,
-    Catalog,
+/// [`TurnConfig::prepare`] only reads: a request the gateway rejects as installing or busy
+/// must leave the profile's files byte-for-byte untouched. [`TurnConfig::apply`] is the only
+/// writer, and it takes the credential-store lock so a concurrent turn cannot lose its keys or
+/// read a half-written file.
+struct TurnConfig {
+    /// The key the runtime will authenticate with once this plan is applied. Used for the
+    /// gateway fingerprint, so a supplied key counts before it reaches `.env`.
+    api_key: Option<String>,
+    /// The key supplied with the request, which has to be persisted to `.env`.
+    key_write: Option<String>,
 }
 
-/// Write the runtime's `config.yaml`.
+impl TurnConfig {
+    fn prepare(home: &Path, input: &HermesChatInput) -> Self {
+        let key_write = input
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(str::to_owned);
+        let api_key = match key_write {
+            // A key sent with the request wins over the one already stored, exactly as the
+            // sequential write-then-resolve did.
+            Some(ref key) => Some(key.clone()),
+            None => resolve_provider_secret(home, input),
+        };
+        Self { api_key, key_write }
+    }
+
+    fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
+    }
+
+    /// Re-read the stored credential once the gateway lock is held. A chat can queue behind
+    /// another turn or a settings-page save while it prepares; using that earlier snapshot
+    /// would fingerprint a key the spawned runtime no longer reads. A key supplied with the
+    /// request is still authoritative.
+    fn refresh_api_key(&mut self, home: &Path, input: &HermesChatInput) {
+        if self.key_write.is_some() {
+            return;
+        }
+        self.api_key = resolve_provider_secret(home, input);
+    }
+
+    /// Write the turn's `.env` key and merge its settings into `config.yaml`.
+    ///
+    /// Both files are re-read under the same lock as the write, so a concurrent turn (or the
+    /// CLI) cannot have its keys dropped, and readers only ever see a complete file because
+    /// the replacement is an atomic rename.
+    fn apply(&self, home: &Path, input: &HermesChatInput) -> Result<(), AppError> {
+        env_store::with_home_lock(home, || {
+            let config_path = home.join("config.yaml");
+            // The decision (fingerprint/reuse) used `self.api_key`. If a settings save changed
+            // the stored key after that decision, applying now would start a runtime with a
+            // different credential than the one the gateway decision was made for. Fail
+            // without writing; the caller can retry with a fresh snapshot.
+            if self.key_write.is_none() && resolve_provider_secret(home, input) != self.api_key {
+                return Err(AppError::new(
+                    "E_HERMES_CREDENTIAL_CHANGED",
+                    "Hermes credentials changed while the request was waiting. Try again.",
+                ));
+            }
+            // Read and render before touching either file: an unreadable or unparseable
+            // config must fail the turn, never be replaced by a document built from an empty
+            // base that would drop everything the user put there.
+            let existing = read_config_for_update(&config_path)?;
+            let mut doc = config_doc_for_update(existing.as_deref())?;
+            let before = doc.clone();
+            apply_turn_config(&mut doc, input);
+            apply_custom_provider(&mut doc, input, self.api_key.is_some());
+            let body = if doc == before {
+                None
+            } else {
+                let body = render_config(&doc)?;
+                (existing.as_deref() != Some(body.as_str())).then_some(body)
+            };
+            if let Some(key) = self.key_write.as_deref() {
+                env_store::set_env_value_locked(home, provider_key_env(&input.provider), key)?;
+            }
+            if let Some(body) = body {
+                // A named profile's home may not exist yet; `with_home_lock` created it, which
+                // is what makes the directory a live `--profile` target for the gateway.
+                env_store::atomic_write(&config_path, body.as_bytes())?;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Apply the desktop's settings to the runtime's `config.yaml` for a chat turn.
 ///
 /// A key supplied with the request is persisted to `<HERMES_HOME>/.env`; otherwise the
 /// value already in `.env` is used as-is. That is the same store the official CLI and
 /// dashboard read and write, so both see one set of credentials.
 ///
 /// The document is merged, not replaced: keys this app does not own (tools, skills, browser,
-/// cron, other providers, anything the user added by hand) survive the write. Only the keys
-/// listed in [`ConfigScope`] are removed and rewritten. The runtime's own `save_config` rewrites
-/// the file the same way, so YAML comments in it were never durable.
+/// cron, other providers, anything the user added by hand) survive the write. The runtime's own
+/// `save_config` rewrites the file the same way, so YAML comments in it were never durable.
 ///
 /// Returns the key the runtime will authenticate with, so the caller can fingerprint it.
 fn write_config(home: &Path, input: &HermesChatInput) -> Result<Option<String>, AppError> {
-    write_config_scoped(home, input, ConfigScope::Turn)
-}
-
-/// Catalog-only write; see [`ConfigScope`].
-fn write_catalog_config(home: &Path, input: &HermesChatInput) -> Result<Option<String>, AppError> {
-    write_config_scoped(home, input, ConfigScope::Catalog)
-}
-
-fn write_config_scoped(
-    home: &Path,
-    input: &HermesChatInput,
-    scope: ConfigScope,
-) -> Result<Option<String>, AppError> {
-    // Read before anything is written: saving a key creates `.env`, which is itself enough for the
-    // runtime to accept `--profile <name>`.
-    let was_live = profiles::has_identity(home);
-    if let Some(key) = input
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-    {
-        env_store::set_env_value(home, provider_key_env(&input.provider), key)?;
-    }
-    let api_key = resolve_provider_secret(home, input);
-    let config_path = home.join("config.yaml");
-    let existing = std::fs::read_to_string(&config_path).ok();
-    let mut doc = config_doc(existing.as_deref());
-    let before = doc.clone();
-    // A catalog read of a profile directory that holds none of the markers the runtime uses to
-    // recognise a profile would leave `--profile <name>` unresolvable, so that case still gets
-    // the full projection. A profile that merely lost its `config.yaml` stays live through its
-    // `.env` or `auth.json` and keeps the runtime's own defaults.
-    let bootstrap = scope == ConfigScope::Catalog && !was_live;
-    if scope == ConfigScope::Turn || bootstrap {
-        apply_turn_config(&mut doc, input);
-    }
-    apply_custom_provider(&mut doc, input, api_key.is_some());
-    // Nothing this write owns changed, so leave the file byte-for-byte alone. That keeps a
-    // catalog read from reformatting a profile's hand-written `config.yaml`.
-    if doc == before {
-        return Ok(api_key);
-    }
-    let body = render_config(&doc)?;
-    if existing.as_deref() == Some(body.as_str()) {
-        return Ok(api_key);
-    }
-    // A named profile's home may not exist yet; creating it here is what makes the directory a
-    // live `--profile` target for the gateway.
-    env_store::ensure_dir(home)?;
-    std::fs::write(&config_path, body)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(api_key)
+    let config = TurnConfig::prepare(home, input);
+    config.apply(home, input)?;
+    Ok(config.api_key)
 }
 
 fn endpoint_of(input: &HermesChatInput) -> Option<&str> {
@@ -1548,6 +1963,14 @@ fn endpoint_of(input: &HermesChatInput) -> Option<&str> {
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn custom_provider_endpoint<'a>(provider: &str, endpoint: Option<&'a str>) -> Option<&'a str> {
+    match provider {
+        "local" => endpoint.or(Some("http://127.0.0.1:11434/v1")),
+        "custom" => endpoint,
+        _ => None,
+    }
 }
 
 /// Apply the keys a chat turn owns.
@@ -1624,16 +2047,9 @@ fn apply_turn_config(doc: &mut Yaml, input: &HermesChatInput) {
 /// Apply the user-defined provider block the custom and local cards are served by.
 fn apply_custom_provider(doc: &mut Yaml, input: &HermesChatInput, has_key: bool) {
     remove_path(doc, &["providers", "openavoo-custom"]);
-    if !matches!(input.provider.as_str(), "custom" | "local") {
+    let Some(endpoint) = custom_provider_endpoint(&input.provider, endpoint_of(input)) else {
         return;
-    }
-    // `local` means an Ollama-style server on this Mac, so an empty URL has an obvious
-    // default. `custom` means "some OpenAI-compatible endpoint the user names" —
-    // defaulting it to 127.0.0.1:11434 would silently probe Ollama and hide the fact
-    // that no endpoint is configured, so that block is simply omitted until a URL exists.
-    let endpoint = endpoint_of(input)
-        .or_else(|| (input.provider == "local").then_some("http://127.0.0.1:11434/v1"));
-    let Some(endpoint) = endpoint else { return };
+    };
     set_path(
         doc,
         &["providers", "openavoo-custom", "api"],
@@ -1687,6 +2103,57 @@ fn config_doc(raw: Option<&str>) -> Yaml {
     match docs.into_iter().next() {
         Some(doc @ Yaml::Hash(_)) if !has_alias(&doc) => doc,
         _ => Yaml::Hash(Hash::new()),
+    }
+}
+
+/// Read `config.yaml` for a merge write.
+///
+/// Only a missing file counts as empty. Any other read failure is a real error: treating it as
+/// absent would replace a file the user may still recover with a document built from scratch.
+fn read_config_for_update(path: &Path) -> Result<Option<String>, AppError> {
+    match std::fs::read(path) {
+        Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|error| {
+            AppError::new(
+                "E_HERMES_CONFIG",
+                "The Hermes configuration is not valid UTF-8.",
+            )
+            .with_detail(error.to_string())
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AppError::new(
+            "E_HERMES_CONFIG",
+            "Could not read the Hermes configuration.",
+        )
+        .with_detail(error.to_string())),
+    }
+}
+
+/// Parse `config.yaml` into the document a write merges onto.
+///
+/// Unlike [`config_doc`], which is a best-effort read for timeouts, a document this crate
+/// cannot merge onto is an error. Writing from an empty base would silently drop every setting
+/// the user put in a file we failed to parse.
+fn config_doc_for_update(raw: Option<&str>) -> Result<Yaml, AppError> {
+    let Some(raw) = raw else {
+        return Ok(Yaml::Hash(Hash::new()));
+    };
+    if raw.trim().is_empty() {
+        return Ok(Yaml::Hash(Hash::new()));
+    }
+    let unreadable = |detail: String| {
+        AppError::new(
+            "E_HERMES_CONFIG",
+            "The Hermes configuration could not be parsed.",
+        )
+        .with_detail(detail)
+    };
+    let docs = YamlLoader::load_from_str(raw).map_err(|error| unreadable(error.to_string()))?;
+    match docs.into_iter().next() {
+        Some(doc @ Yaml::Hash(_)) if !has_alias(&doc) => Ok(doc),
+        Some(_) => Err(unreadable(
+            "The file does not contain a mapping this app can merge onto.".into(),
+        )),
+        None => Ok(Yaml::Hash(Hash::new())),
     }
 }
 
@@ -1922,10 +2389,24 @@ pub fn remote_auth_required() -> AppError {
 
 /// App data root, for the stores that are not part of `HERMES_HOME`.
 fn session_root() -> Result<&'static Path, AppError> {
+    #[cfg(test)]
+    if let Some(root) = PANEL_TEST_ROOT.get() {
+        return Ok(root.path());
+    }
     DATA_ROOT
         .get()
         .map(PathBuf::as_path)
         .ok_or_else(|| AppError::new("E_HERMES_HOME", "The app data directory is unavailable."))
+}
+
+/// Tests share one session root for the whole process. A per-test TempDir was dropped while
+/// other parallel tests still used its path (EINVAL on rename). Profile keys stay unique.
+#[cfg(test)]
+static PANEL_TEST_ROOT: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn use_panel_session_root() {
+    let _ = PANEL_TEST_ROOT.get_or_init(|| tempfile::tempdir().expect("panel session temp root"));
 }
 
 fn panel_cache() -> &'static Mutex<std::collections::HashMap<String, panel::PanelSession>> {
@@ -1935,57 +2416,143 @@ fn panel_cache() -> &'static Mutex<std::collections::HashMap<String, panel::Pane
     CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+/// Serializes disk and cache changes together. Without one boundary a set and a concurrent
+/// get/delete can leave the cache and `session.json` disagreeing (old cookies resurrected,
+/// or a fresh login overwritten by a slower response).
+fn panel_store_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn cache_guard() -> Result<
+    std::sync::MutexGuard<'static, std::collections::HashMap<String, panel::PanelSession>>,
+    AppError,
+> {
+    panel_cache()
+        .lock()
+        .map_err(|_| AppError::new("E_HERMES_CREDENTIAL", "Panel session cache is poisoned."))
+}
+
+/// Whether two snapshots describe the same sign-in. Rotation keeps `login_id`; a re-login
+/// gets a new one, so a logout/refresh from the old sign-in must not touch it. Legacy
+/// sessions (written before the field) fall back to full equality.
+fn same_panel_login(current: &panel::PanelSession, used: &panel::PanelSession) -> bool {
+    if current.login_id.is_empty() || used.login_id.is_empty() {
+        return current == used;
+    }
+    current.login_id == used.login_id && current.base_url == used.base_url
+}
+
 fn missing_panel_session() -> AppError {
     panel::session_missing()
 }
 
-/// Persist a panel session and prime the in-process cache.
-pub fn panel_session_set(profile_id: &str, session: &panel::PanelSession) -> Result<(), AppError> {
-    let value = serde_json::to_value(session).map_err(|error| {
-        AppError::new("E_HERMES_CREDENTIAL", "Could not encode the panel session.")
-            .with_detail(error.to_string())
-    })?;
-    env_store::session_set(session_root()?, profile_id, value)?;
-    panel_cache()
-        .lock()
-        .map_err(|_| AppError::new("E_HERMES_CREDENTIAL", "Panel session cache is poisoned."))?
-        .insert(profile_id.to_owned(), session.clone());
-    Ok(())
-}
-
-pub fn panel_session(profile_id: &str) -> Result<panel::PanelSession, AppError> {
-    if let Some(session) = panel_cache()
-        .lock()
-        .map_err(|_| AppError::new("E_HERMES_CREDENTIAL", "Panel session cache is poisoned."))?
-        .get(profile_id)
-        .cloned()
-    {
-        return Ok(session);
+/// Current session from cache or disk. Caller holds [`panel_store_lock`].
+fn current_session_locked(profile_id: &str) -> Result<Option<panel::PanelSession>, AppError> {
+    let cached = cache_guard()?.get(profile_id).cloned();
+    if cached.is_some() {
+        return Ok(cached);
     }
-    let value =
-        env_store::session_get(session_root()?, profile_id).ok_or_else(missing_panel_session)?;
+    let Some(value) = env_store::session_get(session_root()?, profile_id) else {
+        return Ok(None);
+    };
     let session: panel::PanelSession = serde_json::from_value(value).map_err(|error| {
         AppError::new("E_HERMES_CREDENTIAL", "The panel session is corrupt.")
             .with_detail(error.to_string())
     })?;
-    panel_cache()
-        .lock()
-        .map_err(|_| AppError::new("E_HERMES_CREDENTIAL", "Panel session cache is poisoned."))?
-        .insert(profile_id.to_owned(), session.clone());
-    Ok(session)
+    cache_guard()?.insert(profile_id.to_owned(), session.clone());
+    Ok(Some(session))
+}
+
+fn encode_session(session: &panel::PanelSession) -> Result<serde_json::Value, AppError> {
+    serde_json::to_value(session).map_err(|error| {
+        AppError::new("E_HERMES_CREDENTIAL", "Could not encode the panel session.")
+            .with_detail(error.to_string())
+    })
+}
+
+/// Persist a panel session and prime the in-process cache as one transaction.
+pub fn panel_session_set(profile_id: &str, session: &panel::PanelSession) -> Result<(), AppError> {
+    let value = encode_session(session)?;
+    let _store = panel_store_lock();
+    env_store::session_set(session_root()?, profile_id, value)?;
+    cache_guard()?.insert(profile_id.to_owned(), session.clone());
+    Ok(())
+}
+
+pub fn panel_session(profile_id: &str) -> Result<panel::PanelSession, AppError> {
+    let _store = panel_store_lock();
+    current_session_locked(profile_id)?.ok_or_else(missing_panel_session)
 }
 
 pub fn panel_session_delete(profile_id: &str) -> Result<(), AppError> {
-    if let Ok(mut cache) = panel_cache().lock() {
-        cache.remove(profile_id);
+    let _store = panel_store_lock();
+    // Delete the durable copy first: if it fails, the cache must keep describing the file.
+    env_store::session_delete(session_root()?, profile_id)?;
+    cache_guard()?.remove(profile_id);
+    Ok(())
+}
+
+/// Store a rotated session only when the stored one is still the snapshot the request used.
+///
+/// A login can replace the same profile id while an older request is still in flight. That
+/// request's rotated cookies belong to the old session and must not overwrite the new one.
+pub fn panel_session_update_if(
+    profile_id: &str,
+    used: &panel::PanelSession,
+    next: &panel::PanelSession,
+) -> Result<bool, AppError> {
+    let value = encode_session(next)?;
+    let _store = panel_store_lock();
+    let Some(current) = current_session_locked(profile_id)? else {
+        return Ok(false);
+    };
+    // A rotation belongs to the exact cookie snapshot the response was produced from. A
+    // newer rotation that landed first must win; this response then fails CAS.
+    if current != *used {
+        return Ok(false);
     }
-    env_store::session_delete(session_root()?, profile_id)
+    env_store::session_set(session_root()?, profile_id, value)?;
+    cache_guard()?.insert(profile_id.to_owned(), next.clone());
+    Ok(true)
+}
+
+/// Delete a session only when it is still the one the caller acted on. A logout that raced a
+/// fresh login must leave the newer session in place.
+pub fn panel_session_delete_if(
+    profile_id: &str,
+    used: &panel::PanelSession,
+) -> Result<bool, AppError> {
+    let _store = panel_store_lock();
+    let Some(current) = current_session_locked(profile_id)? else {
+        return Ok(false);
+    };
+    if !same_panel_login(&current, used) {
+        return Ok(false);
+    }
+    env_store::session_delete(session_root()?, profile_id)?;
+    cache_guard()?.remove(profile_id);
+    Ok(true)
+}
+
+/// Logout's "nothing was stored" branch: a login that landed after that read must survive, so
+/// delete only if the store is still empty.
+pub fn panel_session_delete_if_absent(profile_id: &str) -> Result<bool, AppError> {
+    let _store = panel_store_lock();
+    if current_session_locked(profile_id)?.is_some() {
+        return Ok(false);
+    }
+    env_store::session_delete(session_root()?, profile_id)?;
+    cache_guard()?.remove(profile_id);
+    Ok(true)
 }
 
 /// Drop every cached panel session. The stored copies live under the data root, so an
 /// uninstall removes them; this keeps the running process from holding them too.
 pub fn panel_sessions_forget() {
-    if let Ok(mut cache) = panel_cache().lock() {
+    let _store = panel_store_lock();
+    if let Ok(mut cache) = cache_guard() {
         cache.clear();
     }
 }
@@ -2147,6 +2714,7 @@ async fn verify_runtime_bin(bin: &Path, expected: &str) -> Result<(), AppError> 
 
 pub async fn status(app: AppHandle) -> Result<HermesRuntimeStatus, AppError> {
     migrate_legacy_credentials(&app);
+    hygiene::repair_runtime_tree_once(&app).await;
     let expected_version = expected_runtime_version()?;
     let Some(bin) = runtime_bin(&app) else {
         log::warn!("Hermes runtime status: no runtime binary found");
@@ -2396,7 +2964,7 @@ async fn chat_with_bin(
             &input,
             "failed",
             session_id(&stderr).as_deref(),
-            Some(&detail),
+            Some("runtime_error"),
         );
         return Err(
             AppError::new("E_HERMES_CHAT", "Hermes could not complete this request.")
@@ -2526,8 +3094,45 @@ async fn consume_stdout<R: AsyncRead + Unpin>(
 }
 
 pub async fn stop(state: &HermesRuntimeState) -> Result<(), AppError> {
-    state.approval_cancel.notify_waiters();
-    let _ = state.asks.lock().await.take();
+    // Shutdown is global: every parked card is refused and every turn registration goes
+    // away, because the process is going away with them.
+    state.cancel_all_turn_asks();
+    stop_local_gateway(state).await
+}
+
+/// Stop the local gateway (and the turn that asked, when named) without touching cards a
+/// Panel host owns. A runtime update or the UI's hard stop uses this; app exit uses [`stop`].
+pub async fn stop_local(state: &HermesRuntimeState, turn: Option<&str>) -> Result<(), AppError> {
+    let Some(turn) = turn else {
+        // Install/uninstall: wake every local card wait, leave Panel cards alone.
+        state.cancel_local_turn_asks();
+        return stop_local_gateway(state).await;
+    };
+    // A late hard stop for a turn that already finished is idempotent: nothing to cancel and
+    // no reason to touch a gateway another window may now own.
+    if !state.is_local_turn_registered(turn) {
+        return Ok(());
+    }
+    state.cancel_turn_asks(Some(turn), None, true);
+    // Re-check under the gateway slot: a turn can finish or another local turn can start
+    // while this waited for the mutex. Only then is it safe to stop the local gateway.
+    let mut guard = state.gateway.lock().await;
+    if !state.is_local_turn_registered(turn) || state.has_other_local_turns(Some(turn)) {
+        return Ok(());
+    }
+    let pid = state.pid.lock().ok().and_then(|current| *current);
+    if let Some(pid) = pid {
+        kill_pid(pid);
+    }
+    // Take the slot as the old stop path did: a server that received SIGTERM is still
+    // `process_alive` for a short window and must not be reused by the next turn.
+    if let Some(server) = guard.take() {
+        server.stop();
+    }
+    Ok(())
+}
+
+async fn stop_local_gateway(state: &HermesRuntimeState) -> Result<(), AppError> {
     let pid = state.pid.lock().ok().and_then(|current| *current);
     if let Some(pid) = pid {
         kill_pid(pid);
@@ -2554,6 +3159,20 @@ mod tests {
         assert!(!info[1].is_image);
         assert!(info[2].is_image);
         assert!(!info[3].is_image);
+    }
+
+    #[test]
+    fn diagnostics_detail_keeps_the_tail_of_a_traceback() {
+        let stderr = format!("{}\nUnicodeDecodeError: boom", "x".repeat(5000));
+        let detail = diagnostics_failure_detail(stderr.as_bytes());
+        assert!(detail.starts_with('…'));
+        assert!(detail.ends_with("UnicodeDecodeError: boom"));
+        assert_eq!(detail.chars().count(), 4001);
+    }
+
+    #[test]
+    fn diagnostics_detail_keeps_short_stderr_verbatim() {
+        assert_eq!(diagnostics_failure_detail(b"  boom \n"), "boom");
     }
 
     #[test]
@@ -2913,65 +3532,6 @@ mod tests {
         assert!(!config.contains("hermes-4"), "{config}");
     }
 
-    /// Selecting a profile in the settings sheet loads its catalog. That read used to write the
-    /// draft back, replacing the profile's own model with the built-in default.
-    #[test]
-    fn a_catalog_read_leaves_the_profile_model_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("config.yaml"),
-            "model:\n  provider: nous\n  default: hermes-4\nagent:\n  reasoning_effort: high\n",
-        )
-        .unwrap();
-        let mut input = test_input();
-        input.provider = "nous".into();
-        input.model = "Hermes 4 · 405B".into();
-        write_catalog_config(dir.path(), &input).unwrap();
-
-        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-        assert_eq!(
-            config,
-            "model:\n  provider: nous\n  default: hermes-4\nagent:\n  reasoning_effort: high\n"
-        );
-    }
-
-    /// A catalog read of a fresh profile still has to bootstrap the file, otherwise the runtime
-    /// refuses the `--profile` target it was started with.
-    #[test]
-    fn a_catalog_read_bootstraps_a_profile_without_a_config() {
-        let dir = tempfile::tempdir().unwrap();
-        let input = test_input();
-        write_catalog_config(dir.path(), &input).unwrap();
-        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-        assert!(config.contains("provider: openai-api"), "{config}");
-        assert!(config.contains("default: gpt-test"), "{config}");
-    }
-
-    /// A profile that is already live through another marker keeps the runtime's own defaults;
-    /// a catalog read must not invent a model for it.
-    #[test]
-    fn a_catalog_read_does_not_invent_a_config_for_a_live_profile() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(".env"), "OPENAI_API_KEY=sk-stored\n").unwrap();
-        let mut input = test_input();
-        input.api_key = None;
-        write_catalog_config(dir.path(), &input).unwrap();
-        assert!(!dir.path().join("config.yaml").exists());
-    }
-
-    #[test]
-    fn a_catalog_read_still_registers_the_custom_endpoint() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut input = test_input();
-        input.provider = "custom".into();
-        input.model = "my-model".into();
-        input.endpoint = Some("https://example.test/v1".into());
-        write_catalog_config(dir.path(), &input).unwrap();
-        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-        assert!(config.contains("openavoo-custom:"), "{config}");
-        assert!(config.contains("https://example.test/v1"), "{config}");
-    }
-
     /// Putting an auxiliary slot back on `auto` has to remove its override, or the runtime keeps
     /// using the model the user just cleared.
     #[test]
@@ -3041,16 +3601,47 @@ mod tests {
         );
     }
 
-    /// An unreadable file is written from scratch rather than merging onto a half-parsed doc.
+    /// A config this crate cannot parse must fail the turn, not be replaced by a document
+    /// built from an empty base that drops everything the user wrote.
     #[test]
-    fn rewrites_a_config_it_cannot_parse() {
+    fn refuses_to_overwrite_a_config_it_cannot_parse() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("config.yaml"), "model: [unclosed\n").unwrap();
+        let original = b"model: [unclosed\n";
+        std::fs::write(dir.path().join("config.yaml"), original).unwrap();
         let input = test_input();
-        write_config(dir.path(), &input).unwrap();
-        let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
-        assert!(config.contains("provider: openai-api"), "{config}");
-        assert!(!config.contains("unclosed"), "{config}");
+        let error = write_config(dir.path(), &input).unwrap_err();
+        assert_eq!(error.code, "E_HERMES_CONFIG");
+        assert_eq!(
+            std::fs::read(dir.path().join("config.yaml")).unwrap(),
+            original
+        );
+        assert!(!dir.path().join(".env").exists());
+    }
+
+    /// A file that is not a mapping has no keys to merge onto. Rewriting it from scratch is
+    /// the same data loss as an unparseable one.
+    #[test]
+    fn refuses_to_merge_onto_a_non_mapping_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = b"- just\n- a\n- list\n";
+        std::fs::write(dir.path().join("config.yaml"), original).unwrap();
+        let error = write_config(dir.path(), &test_input()).unwrap_err();
+        assert_eq!(error.code, "E_HERMES_CONFIG");
+        assert_eq!(
+            std::fs::read(dir.path().join("config.yaml")).unwrap(),
+            original
+        );
+    }
+
+    /// A genuine read error is not "no file": overwriting here could destroy a config that is
+    /// temporarily unreadable (permissions, a mounted volume).
+    #[test]
+    fn a_config_read_error_does_not_become_an_empty_document() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("config.yaml")).unwrap();
+        let error = write_config(dir.path(), &test_input()).unwrap_err();
+        assert_eq!(error.code, "E_HERMES_CONFIG");
+        assert!(dir.path().join("config.yaml").is_dir());
     }
 
     #[test]
@@ -3064,6 +3655,436 @@ mod tests {
         assert!(env_store::remove_env_value(dir.path(), "OPENAI_API_KEY").unwrap());
         let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
         assert_eq!(env, "ANTHROPIC_API_KEY=sk-y\n");
+    }
+
+    /// A refresh or logout that started before a re-login must not overwrite or delete the
+    /// newer session that now owns the same profile id.
+    #[test]
+    fn a_stale_panel_rotation_or_logout_leaves_the_newer_session_alone() {
+        use_panel_session_root();
+        let profile = format!("cas-{}", uuid::Uuid::new_v4());
+        let old = panel::PanelSession {
+            base_url: "https://panel.example.test".into(),
+            provider: "basic".into(),
+            access_token: "old-access".into(),
+            refresh_token: "old-refresh".into(),
+            login_id: "login-old".into(),
+        };
+        let newer = panel::PanelSession {
+            access_token: "new-access".into(),
+            refresh_token: "new-refresh".into(),
+            login_id: "login-new".into(),
+            ..old.clone()
+        };
+        let rotated_old = panel::PanelSession {
+            access_token: "rotated-old-access".into(),
+            refresh_token: "rotated-old-refresh".into(),
+            ..old.clone()
+        };
+        // Cookie rotation keeps the login identity: a logout from the pre-rotation snapshot
+        // must still delete it, or a successful logout would leave the local login behind.
+        let rotated_newer = panel::PanelSession {
+            access_token: "rotated-new-access".into(),
+            refresh_token: "rotated-new-refresh".into(),
+            ..newer.clone()
+        };
+
+        panel_session_set(&profile, &old).unwrap();
+        // A fresh login lands while the old request is still in flight.
+        panel_session_set(&profile, &newer).unwrap();
+
+        assert!(
+            !panel_session_update_if(&profile, &old, &rotated_old).unwrap(),
+            "a stale rotation must not replace the newer login"
+        );
+        assert_eq!(panel_session(&profile).unwrap(), newer);
+
+        assert!(
+            !panel_session_delete_if(&profile, &old).unwrap(),
+            "a stale logout must not delete the newer login"
+        );
+        assert_eq!(panel_session(&profile).unwrap(), newer);
+
+        // A newer login rotates its cookies: the old login's logout/rotation still loses.
+        assert!(panel_session_update_if(&profile, &newer, &rotated_newer).unwrap());
+        assert_eq!(panel_session(&profile).unwrap(), rotated_newer);
+        assert!(!panel_session_delete_if(&profile, &old).unwrap());
+        assert_eq!(panel_session(&profile).unwrap(), rotated_newer);
+
+        // The same login's logout works even from its pre-rotation snapshot.
+        assert!(panel_session_delete_if(&profile, &newer).unwrap());
+        assert!(panel_session(&profile).is_err());
+    }
+
+    /// Rename moves the desktop history with the profile; delete removes it; an existing
+    /// target is never overwritten.
+    #[test]
+    fn profile_history_follows_rename_and_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("history-old.json");
+        let to = dir.path().join("history-new.json");
+        std::fs::write(&from, r#"{"conversations":[]}"#).unwrap();
+        assert!(move_profile_history(&from, &to).unwrap());
+        assert!(!from.exists());
+        assert_eq!(
+            std::fs::read_to_string(&to).unwrap(),
+            r#"{"conversations":[]}"#
+        );
+
+        // A target that already has history keeps it; the source is not silently lost.
+        std::fs::write(&from, "old").unwrap();
+        std::fs::write(&to, "new").unwrap();
+        assert!(!move_profile_history(&from, &to).unwrap());
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(&from).unwrap(), "old");
+
+        remove_profile_history(&to);
+        assert!(!to.exists());
+    }
+
+    /// A rotation response is applied only from the exact cookie snapshot it was produced
+    /// from; a newer rotation that landed first wins.
+    #[test]
+    fn a_stale_rotation_does_not_overwrite_a_newer_one() {
+        use_panel_session_root();
+        let profile = format!("rotate-{}", uuid::Uuid::new_v4());
+        let base = panel::PanelSession {
+            base_url: "https://panel.example.test".into(),
+            provider: "basic".into(),
+            access_token: "a0".into(),
+            refresh_token: "r0".into(),
+            login_id: "login-rotate".into(),
+        };
+        let first = panel::PanelSession {
+            access_token: "a1".into(),
+            refresh_token: "r1".into(),
+            ..base.clone()
+        };
+        let second = panel::PanelSession {
+            access_token: "a2".into(),
+            refresh_token: "r2".into(),
+            ..base.clone()
+        };
+        panel_session_set(&profile, &base).unwrap();
+        assert!(panel_session_update_if(&profile, &base, &first).unwrap());
+        assert!(
+            !panel_session_update_if(&profile, &base, &second).unwrap(),
+            "a response built from the replaced cookies must fail CAS"
+        );
+        assert_eq!(panel_session(&profile).unwrap(), first);
+    }
+
+    async fn ticket_fixture() -> (
+        String,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (seen_tx, seen_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let Ok(Ok((mut socket, _))) =
+                tokio::time::timeout(std::time::Duration::from_secs(2), listener.accept()).await
+            else {
+                return;
+            };
+            let mut buffer = [0_u8; 2048];
+            let _ = socket.read(&mut buffer).await;
+            // The request headers are in; only now let the test mutate the login state.
+            let _ = seen_tx.send(());
+            if tokio::time::timeout(std::time::Duration::from_secs(5), release_rx)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let body = b"{\"ticket\":\"ticket-1\"}";
+            let _ = socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+            let _ = socket.write_all(body).await;
+            let _ = socket.shutdown().await;
+        });
+        (format!("http://{addr}"), seen_rx, release_tx, task)
+    }
+
+    #[tokio::test]
+    async fn a_normal_ticket_response_does_not_keep_a_replaced_login() {
+        use_panel_session_root();
+        let profile = format!("ticket-live-{}", uuid::Uuid::new_v4());
+        let (base, seen, release, server) = ticket_fixture().await;
+        let old = panel::PanelSession {
+            base_url: base.clone(),
+            provider: "basic".into(),
+            access_token: "old-a".into(),
+            refresh_token: "old-r".into(),
+            login_id: "login-old".into(),
+        };
+        panel_session_set(&profile, &old).unwrap();
+        let task = tokio::spawn({
+            let profile = profile.clone();
+            async move { panel::ticket_for_login(&profile, "login-old").await }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), seen)
+            .await
+            .expect("ticket request never reached the server")
+            .expect("ticket fixture dropped");
+        let new_login = panel::PanelSession {
+            base_url: base,
+            provider: "basic".into(),
+            access_token: "new-a".into(),
+            refresh_token: "new-r".into(),
+            login_id: "login-new".into(),
+        };
+        panel_session_set(&profile, &new_login).unwrap();
+        release.send(()).unwrap();
+        let error = task.await.unwrap().unwrap_err();
+        assert_eq!(error.code, "E_HERMES_PANEL");
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn a_same_login_rotation_keeps_the_ticket_valid() {
+        use_panel_session_root();
+        let profile = format!("ticket-rotate-{}", uuid::Uuid::new_v4());
+        let (base, seen, release, server) = ticket_fixture().await;
+        let base_session = panel::PanelSession {
+            base_url: base,
+            provider: "basic".into(),
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            login_id: "login-same".into(),
+        };
+        panel_session_set(&profile, &base_session).unwrap();
+        let task = tokio::spawn({
+            let profile = profile.clone();
+            async move { panel::ticket_for_login(&profile, "login-same").await }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), seen)
+            .await
+            .expect("ticket request never reached the server")
+            .expect("ticket fixture dropped");
+        let rotated = panel::PanelSession {
+            access_token: "a2".into(),
+            refresh_token: "r2".into(),
+            ..base_session.clone()
+        };
+        panel_session_set(&profile, &rotated).unwrap();
+        release.send(()).unwrap();
+        let request = task.await.unwrap().unwrap();
+        assert_eq!(request.ticket, "ticket-1");
+        let _ = server.await;
+    }
+
+    /// A ticket request bound to the old login is rejected before any network call once the
+    /// profile belongs to a different sign-in (including a response with no Set-Cookie).
+    #[tokio::test]
+    async fn a_ticket_for_replaced_login_is_rejected() {
+        use_panel_session_root();
+        let profile = format!("ticket-{}", uuid::Uuid::new_v4());
+        let session = panel::PanelSession {
+            base_url: "http://127.0.0.1:9".into(),
+            provider: "basic".into(),
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            login_id: "login-new".into(),
+        };
+        panel_session_set(&profile, &session).unwrap();
+        let error = panel::ticket_for_login(&profile, "login-old")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "E_HERMES_PANEL");
+    }
+
+    /// A hard stop that names an unregistered turn is a no-op; it must not touch a gateway
+    /// another window may have started.
+    #[tokio::test]
+    async fn a_late_hard_stop_for_an_unknown_turn_is_a_noop() {
+        let state = HermesRuntimeState::default();
+        stop_local(&state, Some("req-already-finished"))
+            .await
+            .unwrap();
+    }
+
+    /// Old session.json files have no loginId; they keep working with full-snapshot CAS.
+    #[test]
+    fn a_legacy_panel_session_without_login_id_still_parses() {
+        let value = serde_json::json!({
+            "baseUrl": "https://panel.example.test",
+            "provider": "basic",
+            "accessToken": "a",
+            "refreshToken": "r"
+        });
+        let session: panel::PanelSession = serde_json::from_value(value).unwrap();
+        assert!(session.login_id.is_empty());
+        assert!(same_panel_login(&session, &session));
+    }
+
+    /// Rotation and logout from the same login share one disk/cache boundary: a delete
+    /// cannot be undone by a slower rotation, and no stale cache entry survives.
+    #[test]
+    fn concurrent_rotation_and_logout_do_not_resurrect_a_session() {
+        use_panel_session_root();
+        let old = panel::PanelSession {
+            base_url: "https://panel.example.test".into(),
+            provider: "basic".into(),
+            access_token: "old-a".into(),
+            refresh_token: "old-r".into(),
+            login_id: "login-race".into(),
+        };
+        let rotated = panel::PanelSession {
+            access_token: "new-a".into(),
+            refresh_token: "new-r".into(),
+            ..old.clone()
+        };
+        for sequence in 0..20 {
+            let profile = format!("race-{sequence}");
+            panel_session_set(&profile, &old).unwrap();
+            std::thread::scope(|scope| {
+                let profile_update = profile.clone();
+                let profile_delete = profile.clone();
+                let old_update = old.clone();
+                let old_delete = old.clone();
+                let rotated = rotated.clone();
+                let update = scope.spawn(move || {
+                    let _ = panel_session_update_if(&profile_update, &old_update, &rotated);
+                });
+                let delete = scope.spawn(move || {
+                    let _ = panel_session_delete_if(&profile_delete, &old_delete);
+                });
+                update.join().unwrap();
+                delete.join().unwrap();
+            });
+            assert!(
+                panel_session(&profile).is_err(),
+                "a logout or the rotation after it must leave no session"
+            );
+        }
+    }
+
+    /// Upstream error bodies must not enter the durable audit file; only local codes do.
+    #[test]
+    fn audit_records_a_local_classification_not_upstream_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = test_input();
+        let secret = "Authorization: Bearer sk-audit-SECRET prompt text";
+        append_audit(
+            dir.path(),
+            &input,
+            "failed",
+            Some("session-1"),
+            Some(secret),
+        );
+        append_audit(
+            dir.path(),
+            &input,
+            "failed",
+            Some("session-2"),
+            Some("gateway_error"),
+        );
+        let raw = std::fs::read_to_string(dir.path().join(AUDIT_FILE)).unwrap();
+        assert!(!raw.contains("sk-audit-SECRET"), "{raw}");
+        assert!(!raw.contains("prompt text"), "{raw}");
+        let lines: Vec<serde_json::Value> = raw
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert!(lines[0]["detail"].is_null());
+        assert_eq!(lines[1]["detail"], "gateway_error");
+        assert_eq!(lines[0]["provider"], input.provider);
+        assert_eq!(lines[0]["promptChars"], input.prompt.chars().count() as u64);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.path().join(AUDIT_FILE))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    /// Two windows' explicit upserts/deletes merge under the file lock; a stale window's
+    /// write cannot resurrect a row the other deleted.
+    #[test]
+    fn history_ops_merge_independent_windows_without_resurrection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "version": 3,
+                "conversations": [
+                    {"id": "shared", "messages": [], "updatedAt": 1},
+                    {"id": "deleted", "messages": [], "updatedAt": 2}
+                ],
+                "activeId": "shared"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        // Window A deletes one row and adds its own.
+        merge_history_ops(
+            &path,
+            &serde_json::json!({
+                "upserts": [{"id": "a", "messages": [], "updatedAt": 3}],
+                "deletes": ["deleted"],
+                "activeId": "a"
+            }),
+        )
+        .unwrap();
+        // Window B, still holding the old baseline, only writes its own new row.
+        merge_history_ops(
+            &path,
+            &serde_json::json!({
+                "upserts": [{"id": "b", "messages": [], "updatedAt": 4}],
+                "deletes": [],
+                "activeId": "b"
+            }),
+        )
+        .unwrap();
+
+        let merged: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let ids: Vec<&str> = merged["conversations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|row| row["id"].as_str())
+            .collect();
+        assert!(ids.contains(&"shared"), "{ids:?}");
+        assert!(ids.contains(&"a"), "{ids:?}");
+        assert!(ids.contains(&"b"), "{ids:?}");
+        assert!(
+            !ids.contains(&"deleted"),
+            "a stale window resurrected it: {ids:?}"
+        );
+        assert_eq!(merged["activeId"], "b");
+    }
+
+    #[test]
+    fn history_merge_refuses_to_overwrite_a_corrupt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let original = b"not json";
+        std::fs::write(&path, original).unwrap();
+        let error = merge_history_ops(&path, &serde_json::json!({"upserts": [], "deletes": []}))
+            .unwrap_err();
+        assert_eq!(error.code, "E_HERMES_HISTORY");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
     }
 
     #[test]

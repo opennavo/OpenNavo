@@ -18,7 +18,7 @@ use tokio::io::AsyncWriteExt;
 
 use super::{
     AppError, HermesRuntimeState, HermesRuntimeStatus, RuntimePluginPin, data_root, hermes_home,
-    panel_sessions_forget, runtime_manifest, runtime_root, status, stop, verify_runtime_bin,
+    panel_sessions_forget, runtime_manifest, runtime_root, status, stop_local, verify_runtime_bin,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,20 +126,91 @@ fn emit(app: &AppHandle, phase: &str, downloaded: u64, total: Option<u64>, perce
     );
 }
 
-pub async fn install(
-    app: AppHandle,
-    state: &HermesRuntimeState,
-) -> Result<HermesRuntimeStatus, AppError> {
+/// Holds the runtime lifecycle slot and the `installing` fast-rejection flag for the whole
+/// operation. Dropping it (normal return, error, or a cancelled command future) restores the
+/// state, so an interrupted install cannot leave every later chat rejected.
+struct RuntimeLifecycle<'a> {
+    state: &'a HermesRuntimeState,
+    _guard: tokio::sync::MutexGuard<'a, ()>,
+}
+
+impl Drop for RuntimeLifecycle<'_> {
+    fn drop(&mut self) {
+        self.state.installing.store(false, Ordering::SeqCst);
+    }
+}
+
+fn begin_lifecycle(state: &HermesRuntimeState) -> Result<RuntimeLifecycle<'_>, AppError> {
+    let guard = state.lifecycle.try_lock().map_err(|_| {
+        AppError::new(
+            "E_HERMES_INSTALLING",
+            "Hermes is already being installed or removed.",
+        )
+    })?;
     if state.installing.swap(true, Ordering::SeqCst) {
         return Err(AppError::new(
             "E_HERMES_INSTALLING",
             "Hermes is already being installed.",
         ));
     }
+    Ok(RuntimeLifecycle {
+        state,
+        _guard: guard,
+    })
+}
+
+/// One install's private staging directory. The abort signal fires as soon as the command
+/// future is dropped; the directory is removed when the last detached worker releases it.
+struct StagingInner {
+    root: PathBuf,
+    cancelled: std::sync::Arc<AtomicBool>,
+}
+
+impl Drop for StagingInner {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+struct InstallStaging {
+    inner: std::sync::Arc<StagingInner>,
+    cancelled: std::sync::Arc<AtomicBool>,
+}
+
+impl InstallStaging {
+    fn new(root: PathBuf) -> Self {
+        let cancelled = std::sync::Arc::new(AtomicBool::new(false));
+        Self {
+            inner: std::sync::Arc::new(StagingInner {
+                root,
+                cancelled: cancelled.clone(),
+            }),
+            cancelled,
+        }
+    }
+
+    fn root(&self) -> &Path {
+        &self.inner.root
+    }
+
+    fn worker(&self) -> std::sync::Arc<StagingInner> {
+        self.inner.clone()
+    }
+}
+
+impl Drop for InstallStaging {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+}
+
+pub async fn install(
+    app: AppHandle,
+    state: &HermesRuntimeState,
+) -> Result<HermesRuntimeStatus, AppError> {
+    let _lifecycle = begin_lifecycle(state)?;
     state.install_cancel.store(false, Ordering::SeqCst);
-    let result = install_inner(&app, state).await;
-    state.installing.store(false, Ordering::SeqCst);
-    result
+    install_inner(&app, state).await
 }
 
 async fn install_inner(
@@ -152,13 +223,17 @@ async fn install_inner(
             "This Hermes runtime build is for Apple Silicon (arm64).",
         ));
     }
-    let _ = stop(state).await;
+    // An update replaces the local runtime only; Panel turns keep their own cards.
+    let _ = stop_local(state, None).await;
     let pinned = runtime_manifest()?;
     let expected_version = pinned.hermes.version.clone();
     let root = data_root(app)?;
     let runtime = runtime_root(app)?;
-    let temp = root.join("runtime.tmp");
-    let _ = std::fs::remove_dir_all(&temp);
+    // A unique staging directory: if this command's future is dropped, a detached extract /
+    // AppleDouble worker keeps writing here instead of a path a retry or uninstall reuses.
+    let staging =
+        InstallStaging::new(root.join(format!("runtime.tmp-{}", uuid::Uuid::new_v4().simple())));
+    let temp = staging.root().to_path_buf();
     std::fs::create_dir_all(&temp)?;
     emit(app, "preparing", 0, None, 1);
 
@@ -169,7 +244,7 @@ async fn install_inner(
             copy_directory(&source, &temp)?;
         } else if source.is_file() {
             emit(app, "extracting", 0, None, 35);
-            extract_tar(&source, &temp).await?;
+            extract_tar(&source, staging.worker()).await?;
         } else {
             return Err(AppError::new(
                 "E_HERMES_INSTALL",
@@ -182,8 +257,8 @@ async fn install_inner(
             pinned.release.repository, pinned.release.tag, pinned.release.asset
         );
         let url = std::env::var("HERMES_RUNTIME_URL").unwrap_or(default_url);
-        let archive = root.join("runtime.tar.gz");
-        download(app, &url, &archive, &state.install_cancel).await?;
+        let archive = temp.join("runtime.tar.gz");
+        download(Some(app), &url, &archive, &state.install_cancel).await?;
         emit(app, "verifying", 0, None, 80);
         let expected = std::env::var("HERMES_RUNTIME_SHA256")
             .unwrap_or_else(|_| pinned.release.sha256.clone());
@@ -204,16 +279,27 @@ async fn install_inner(
             ));
         }
         emit(app, "extracting", 0, None, 85);
-        extract_tar(&archive, &temp).await?;
+        extract_tar(&archive, staging.worker()).await?;
         let _ = std::fs::remove_file(&archive);
     }
 
-    if state.install_cancel.load(Ordering::SeqCst) {
+    // A runtime copied from a legacy archive/Finder round-trip can carry `._*` AppleDouble
+    // stubs. Python's tool discovery globs `tools/*.py` and decodes every match, so those
+    // stubs make the CLI (and agent turns) fail before the runtime ever runs. The tree is
+    // ours: strip them once, here, whichever source produced it.
+    let repair_root = temp.clone();
+    match tokio::task::spawn_blocking(move || super::hygiene::strip_apple_double(&repair_root))
+        .await
+    {
+        Ok(Ok(0)) => {}
+        Ok(Ok(removed)) => log::warn!("Hermes install: removed {removed} AppleDouble entries"),
+        Ok(Err(error)) => log::warn!("Hermes install: AppleDouble cleanup failed: {error}"),
+        Err(error) => log::warn!("Hermes install: AppleDouble cleanup task failed: {error}"),
+    }
+
+    if let Err(error) = cancel_checkpoint(state) {
         let _ = std::fs::remove_dir_all(&temp);
-        return Err(AppError::new(
-            "E_HERMES_INSTALL_CANCELLED",
-            "Hermes install cancelled.",
-        ));
+        return Err(error);
     }
 
     let wrapper = temp.join("bin").join("hermes");
@@ -223,6 +309,10 @@ async fn install_inner(
             "E_HERMES_INSTALL",
             "The Hermes package does not contain bin/hermes.",
         ));
+    }
+    if let Err(error) = cancel_checkpoint(state) {
+        let _ = std::fs::remove_dir_all(&temp);
+        return Err(error);
     }
     #[cfg(unix)]
     {
@@ -241,6 +331,10 @@ async fn install_inner(
 
     let home = hermes_home(app)?;
     std::fs::create_dir_all(home.join("plugins"))?;
+    if let Err(error) = cancel_checkpoint(state) {
+        let _ = std::fs::remove_dir_all(&temp);
+        return Err(error);
+    }
     let plugin_updates = match stage_managed_plugins(&temp, &home, &pinned.plugins, &root) {
         Ok(updates) => updates,
         Err(error) => {
@@ -250,6 +344,11 @@ async fn install_inner(
         }
     };
 
+    if let Err(error) = cancel_checkpoint(state) {
+        let _ = std::fs::remove_dir_all(&temp);
+        cleanup_plugin_staging(&root);
+        return Err(error);
+    }
     let activation = match activate_runtime(
         &temp,
         &runtime,
@@ -265,6 +364,11 @@ async fn install_inner(
         }
     };
 
+    // Activation has swapped directories but not committed: cancelling here restores the
+    // previous runtime instead of leaving an unverified one in place.
+    if state.install_cancel.load(Ordering::SeqCst) {
+        return Err(cancel_after_activation(&activation, &root));
+    }
     if let Err(error) = apply_plugin_updates(&plugin_updates) {
         let rollback = activation.rollback();
         cleanup_plugin_staging(&root);
@@ -287,11 +391,142 @@ async fn install_inner(
             .with_detail(error.detail.unwrap_or(error.message)));
     }
 
+    // The plugin swap is part of the same transaction; a cancel here must undo both.
+    if state.install_cancel.load(Ordering::SeqCst) {
+        rollback_plugin_updates(&plugin_updates);
+        return Err(cancel_after_activation(&activation, &root));
+    }
+    // Past this point the new runtime is committed; a late cancel is ignored. The phase
+    // tells the UI to retire the cancel button instead of pretending it still works.
+    emit(app, "finishing", 0, None, 95);
     activation.commit();
     finish_plugin_sync(&root);
+    // A backend from an earlier app session keeps the old runtime code bound to this host,
+    // and Hermes refuses to bind a second one for the same home (exit 78). `ensure_server`
+    // is blocked while `installing` is set, but a request that passed that check just
+    // before the flag was set may still be spawning. Hold the same gateway slot, stop the
+    // backend it uses, and reap the backends this app recorded in earlier sessions. A
+    // user-started backend is not in that ledger and is never touched.
+    let mut gateway = state.gateway.lock().await;
+    if let Some(server) = gateway.take() {
+        server.stop();
+    }
+    let report = super::hygiene::reap_owned_backends(&home, None, true).await;
+    drop(gateway);
+    // A backend that is not in OpenNavo's ledger (an older build's orphan, or one the user
+    // started manually) is never stopped automatically. Report it: otherwise the upgrade
+    // claims success and the first message is where the occupied profile surfaces.
+    let failed_pids: std::collections::HashSet<u32> =
+        report.failed.iter().map(|(_, pid, _)| *pid).collect();
+    let mut occupied: Vec<(String, Vec<u32>)> = Vec::new();
+    let mut unverified: Vec<String> = Vec::new();
+    if let Some(bin) = super::runtime_bin(app) {
+        for (profile, path) in super::hygiene::profile_homes(&home) {
+            match super::hygiene::scan_backend_pids(&bin, &path).await {
+                super::hygiene::BackendScan::Pids(pids) => {
+                    let pids: Vec<u32> = pids
+                        .into_iter()
+                        .filter(|pid| !failed_pids.contains(pid))
+                        .collect();
+                    if !pids.is_empty() {
+                        occupied.push((profile, pids));
+                    }
+                }
+                // A probe that failed is not evidence that the profile is free.
+                super::hygiene::BackendScan::Unavailable => unverified.push(profile),
+            }
+        }
+    }
     emit(app, "done", 0, None, 100);
-    let _ = state;
-    status(app.clone()).await
+    let mut updated = status(app.clone()).await?;
+    let mut warnings = Vec::new();
+    if !report.failed.is_empty() {
+        let failures = report
+            .failed
+            .iter()
+            .map(|(profile, pid, reason)| format!("{profile} (PID {pid}: {reason})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        warnings.push(format!("could not stop {failures}"));
+    }
+    if !occupied.is_empty() {
+        let names = occupied
+            .iter()
+            .map(|(profile, pids)| {
+                let pids = pids
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{profile} (PID {pids})")
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        warnings.push(format!("another Hermes backend still owns {names}"));
+    }
+    if !unverified.is_empty() {
+        warnings.push(format!(
+            "could not verify whether these profiles are free: {}",
+            unverified.join(", ")
+        ));
+    }
+    if !warnings.is_empty() {
+        updated.message = Some(format!(
+            "Hermes was updated, but {}. Stop any backend that still owns a profile before the next message (use `hermes --profile <name> serve --stop` with the same HERMES_HOME, or close the dashboard that owns it).",
+            warnings.join("; ")
+        ));
+    }
+    Ok(updated)
+}
+
+/// Roll back a provisional activation and report honestly when the previous runtime could
+/// not be restored (the backup directory is kept for manual recovery).
+fn cancel_after_activation(activation: &ActivatedRuntime, root: &Path) -> AppError {
+    let outcome = activation.rollback();
+    cleanup_plugin_staging(root);
+    match outcome {
+        Ok(RollbackOutcome::Restored) | Ok(RollbackOutcome::Removed) => install_cancelled(),
+        Ok(RollbackOutcome::NotRestored) => AppError::new(
+            "E_HERMES_INSTALL",
+            "Hermes install was cancelled, but the previous runtime could not be restored.",
+        ),
+        Err(error) => AppError::new(
+            "E_HERMES_INSTALL",
+            "Hermes install was cancelled, and restoring the previous runtime failed.",
+        )
+        .with_detail(error.detail.unwrap_or(error.message)),
+    }
+}
+
+/// Restores the previous runtime if activation is abandoned (future dropped) before the
+/// verification await returns.
+struct ActivationGuard {
+    runtime: PathBuf,
+    backup: PathBuf,
+    had_previous: bool,
+    stale: Vec<PathBuf>,
+    active: bool,
+}
+
+impl Drop for ActivationGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let _ = std::fs::remove_dir_all(&self.runtime);
+        if self.had_previous
+            && self.backup.exists()
+            && let Err(error) = std::fs::rename(&self.backup, &self.runtime)
+        {
+            log::warn!(
+                "Hermes activation was abandoned and the previous runtime could not be restored from {}: {error}",
+                self.backup.display()
+            );
+        }
+        for path in &self.stale {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
 }
 
 async fn activate_runtime(
@@ -338,6 +573,15 @@ async fn activate_runtime(
         );
     }
 
+    // Until verification finishes the swap is provisional. A dropped command future during
+    // the await must not leave an unverified runtime in place: the guard restores the backup.
+    let mut activation_guard = ActivationGuard {
+        runtime: runtime.to_path_buf(),
+        backup: backup.to_path_buf(),
+        had_previous,
+        stale: stale.clone(),
+        active: true,
+    };
     if let Err(error) =
         verify_runtime_bin(&runtime.join("bin").join("hermes"), expected_version).await
     {
@@ -349,6 +593,7 @@ async fn activate_runtime(
                 let _ = std::fs::remove_dir_all(preserved);
             }
         }
+        activation_guard.active = false;
         return Err(AppError::new(
             "E_HERMES_INSTALL",
             if restored {
@@ -362,6 +607,7 @@ async fn activate_runtime(
         .with_detail(error.detail.unwrap_or(error.message)));
     }
 
+    activation_guard.active = false;
     Ok(ActivatedRuntime {
         runtime: runtime.to_path_buf(),
         backup: backup.to_path_buf(),
@@ -522,16 +768,67 @@ fn finish_plugin_sync(root: &Path) {
     let _ = std::fs::remove_dir_all(root.join("plugins.old"));
 }
 
+/// How often a network wait re-checks the cancel flag. A chunk that never arrives would
+/// otherwise keep the install alive until the socket itself times out.
+const DOWNLOAD_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+/// A single connect/read/write step that makes no progress this long is treated as stalled.
+const DOWNLOAD_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn install_cancelled() -> AppError {
+    AppError::new("E_HERMES_INSTALL_CANCELLED", "Hermes install cancelled.")
+}
+
+/// Cancellation is honored until the commit boundary. Every awaited phase checks it so the
+/// button remains effective through verification and activation, not only the download.
+fn cancel_checkpoint(state: &HermesRuntimeState) -> Result<(), AppError> {
+    if state.install_cancel.load(Ordering::SeqCst) {
+        Err(install_cancelled())
+    } else {
+        Ok(())
+    }
+}
+
+/// Await one download step while watching the cancel flag and an idle deadline. `tokio`'s
+/// own socket timeout only fires per request, so a stuck body would still ignore a cancel
+/// until the next chunk; polling here revokes promptly and bounds each wait.
+async fn step_or_cancel<T>(
+    cancel: &AtomicBool,
+    future: impl std::future::Future<Output = T>,
+) -> Result<T, AppError> {
+    tokio::pin!(future);
+    let deadline = tokio::time::Instant::now() + DOWNLOAD_STEP_TIMEOUT;
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(install_cancelled());
+        }
+        tokio::select! {
+            value = &mut future => return Ok(value),
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err(AppError::new(
+                    "E_HERMES_INSTALL",
+                    "The Hermes runtime download stalled.",
+                ));
+            }
+            _ = tokio::time::sleep(DOWNLOAD_POLL) => {}
+        }
+    }
+}
+
 async fn download(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     url: &str,
     archive: &Path,
     cancel: &AtomicBool,
 ) -> Result<(), AppError> {
-    let response = reqwest::Client::new()
-        .get(url)
-        .send()
-        .await
+    let client = reqwest::Client::builder()
+        .connect_timeout(DOWNLOAD_STEP_TIMEOUT)
+        .build()
+        .map_err(|error| {
+            AppError::new("E_HERMES_INSTALL", "Could not prepare the Hermes download.")
+                .with_detail(error.to_string())
+        })?;
+    let response = step_or_cancel(cancel, client.get(url).send())
+        .await?
         .map_err(|error| {
             AppError::new("E_HERMES_INSTALL", "Could not download the Hermes runtime.")
                 .with_detail(error.to_string())
@@ -549,39 +846,72 @@ async fn download(
     let mut file = tokio::fs::File::create(archive).await?;
     let mut stream = response.bytes_stream();
     let mut downloaded = 0_u64;
-    while let Some(chunk) = stream.next().await {
+    loop {
         if cancel.load(Ordering::SeqCst) {
             let _ = file.flush().await;
             let _ = std::fs::remove_file(archive);
-            return Err(AppError::new(
-                "E_HERMES_INSTALL_CANCELLED",
-                "Hermes install cancelled.",
-            ));
+            return Err(install_cancelled());
         }
+        // A cancelled stream must also drop its half-written archive; every early return
+        // below therefore removes the file before reporting.
+        let next = step_or_cancel(cancel, stream.next())
+            .await
+            .inspect_err(|_| {
+                let _ = std::fs::remove_file(archive);
+            })?;
+        let Some(chunk) = next else {
+            break;
+        };
         let chunk = chunk.map_err(|error| {
+            let _ = std::fs::remove_file(archive);
             AppError::new("E_HERMES_INSTALL", "Hermes download interrupted.")
                 .with_detail(error.to_string())
         })?;
-        file.write_all(&chunk).await?;
+        step_or_cancel(cancel, file.write_all(&chunk))
+            .await
+            .inspect_err(|_| {
+                let _ = std::fs::remove_file(archive);
+            })?
+            .map_err(|error| {
+                let _ = std::fs::remove_file(archive);
+                AppError::from(error)
+            })?;
         downloaded += chunk.len() as u64;
         let percent = total
             .filter(|total| *total > 0)
             .map(|total| ((downloaded.saturating_mul(100) / total).min(79)) as u8)
             .unwrap_or(20);
-        emit(app, "downloading", downloaded, total, percent);
+        if let Some(app) = app {
+            emit(app, "downloading", downloaded, total, percent);
+        }
     }
     file.flush().await?;
     Ok(())
 }
 
-async fn extract_tar(archive: &Path, destination: &Path) -> Result<(), AppError> {
+async fn extract_tar(
+    archive: &Path,
+    staging: std::sync::Arc<StagingInner>,
+) -> Result<(), AppError> {
     let archive = archive.to_path_buf();
-    let destination = destination.to_path_buf();
     tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        // The closure owns the Arc, so a dropped install future cannot remove the staging
+        // directory while this worker is still writing into it.
+        let staging = staging;
         let file = std::fs::File::open(&archive)?;
         let decoder = GzDecoder::new(file);
         let mut tar = tar::Archive::new(decoder);
-        tar.unpack(&destination)?;
+        // Per-entry loop instead of one `unpack`: a cancelled install stops writing promptly,
+        // and a staging directory removed by uninstall is not recreated wholesale.
+        for entry in tar.entries()? {
+            // A dropped install or an uninstall that removed the root must not be recreated
+            // by the next tar entry.
+            if staging.cancelled.load(Ordering::SeqCst) || !staging.root.exists() {
+                return Err(install_cancelled());
+            }
+            let mut entry = entry?;
+            entry.unpack_in(&staging.root)?;
+        }
         Ok(())
     })
     .await
@@ -590,7 +920,6 @@ async fn extract_tar(archive: &Path, destination: &Path) -> Result<(), AppError>
             .with_detail(error.to_string())
     })?
 }
-
 async fn sha256_file(path: &Path) -> Result<String, AppError> {
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || -> Result<String, AppError> {
@@ -620,7 +949,31 @@ pub async fn uninstall(
     app: AppHandle,
     state: &HermesRuntimeState,
 ) -> Result<HermesRuntimeStatus, AppError> {
-    stop(state).await?;
+    // The same slot install takes: chat/model reads are rejected while the runtime directory
+    // is being removed, and an install cannot start swapping files halfway through a delete.
+    let _lifecycle = begin_lifecycle(state)?;
+    // The startup credential migration runs on a detached thread; it must not recreate the
+    // data root while this uninstall removes it.
+    super::legacy_migration::suspend();
+    // Removing the local runtime must not cancel cards a Panel host is waiting on.
+    stop_local(state, None).await?;
+    // The gateway slot may be empty while a recorded backend this app started earlier still
+    // owns the directory. Stop those too, and refuse to delete files a live runtime holds.
+    let home = hermes_home(&app)?;
+    let report = super::hygiene::reap_owned_backends(&home, None, true).await;
+    if !report.failed.is_empty() {
+        let failures = report
+            .failed
+            .iter()
+            .map(|(profile, pid, _)| format!("{profile} (PID {pid})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppError::new(
+            "E_HERMES_INSTALL",
+            "A running Hermes backend could not be stopped; nothing was removed.",
+        )
+        .with_detail(format!("Still running: {failures}")));
+    }
     let root = data_root(&app)?;
     if root.exists() {
         std::fs::remove_dir_all(&root)?;
@@ -659,7 +1012,8 @@ mod tests {
             builder.finish().unwrap();
         }
         let destination = tempfile::tempdir().unwrap();
-        extract_tar(&archive, destination.path()).await.unwrap();
+        let staging = InstallStaging::new(destination.path().to_path_buf());
+        extract_tar(&archive, staging.worker()).await.unwrap();
         assert!(destination.path().join("bin").join("hermes").is_file());
     }
 
@@ -910,5 +1264,117 @@ mod tests {
             .unwrap(),
             "user"
         );
+    }
+
+    #[test]
+    fn abandoning_activation_restores_the_previous_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = dir.path().join("runtime");
+        let backup = dir.path().join("runtime.old");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::write(runtime.join("new"), b"new").unwrap();
+        std::fs::write(backup.join("old"), b"old").unwrap();
+        {
+            let _guard = ActivationGuard {
+                runtime: runtime.clone(),
+                backup: backup.clone(),
+                had_previous: true,
+                stale: Vec::new(),
+                active: true,
+            };
+        }
+        assert!(runtime.join("old").exists(), "the previous runtime is back");
+        assert!(!runtime.join("new").exists());
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn a_dropped_install_staging_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("runtime.tmp-test");
+        {
+            let staging = InstallStaging::new(root.clone());
+            std::fs::create_dir_all(staging.root()).unwrap();
+            std::fs::write(staging.root().join("partial"), b"x").unwrap();
+        }
+        assert!(
+            !root.exists(),
+            "staging must not leak after an error/cancel"
+        );
+    }
+
+    /// The lifecycle slot is reentrant-safe: a second install/uninstall is refused while one
+    /// runs, and a dropped future (command cancellation) restores the flag that chat checks.
+    #[tokio::test]
+    async fn a_cancelled_lifecycle_owner_restores_the_installing_flag() {
+        let state = HermesRuntimeState::default();
+        let guard = begin_lifecycle(&state).unwrap();
+        assert!(state.installing.load(Ordering::SeqCst));
+        let error = match begin_lifecycle(&state) {
+            Ok(_) => panic!("a second lifecycle owner must be refused"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "E_HERMES_INSTALLING");
+        drop(guard);
+        assert!(!state.installing.load(Ordering::SeqCst));
+
+        // Polling this future once acquires the slot; the timeout then drops it, exactly like
+        // a cancelled Tauri command, and the Drop restores the flag.
+        let cancelled = tokio::time::timeout(std::time::Duration::from_millis(20), async {
+            let _guard = begin_lifecycle(&state).unwrap();
+            std::future::pending::<()>().await;
+        })
+        .await;
+        assert!(cancelled.is_err());
+        assert!(!state.installing.load(Ordering::SeqCst));
+        assert!(begin_lifecycle(&state).is_ok());
+    }
+
+    /// A body that stalls after its headers must not hold the install forever: the poll loop
+    /// sees the cancel flag, returns the cancellation error and removes the partial archive.
+    #[tokio::test]
+    async fn cancelling_a_stalled_download_removes_the_partial_archive() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 1024];
+            let _ = socket.read(&mut buffer).await;
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\nfirst")
+                .await
+                .unwrap();
+            std::future::pending::<()>().await;
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("runtime.tgz");
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let task_cancel = cancel.clone();
+        let task_archive = archive.clone();
+        let download = tokio::spawn(async move {
+            download(
+                None,
+                &format!("http://{addr}/runtime.tgz"),
+                &task_archive,
+                &task_cancel,
+            )
+            .await
+        });
+
+        // Give the request a chance to receive the headers and first chunk, then revoke it.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        cancel.store(true, Ordering::SeqCst);
+        let error = download.await.unwrap().unwrap_err();
+        assert_eq!(error.code, "E_HERMES_INSTALL_CANCELLED");
+        assert!(
+            !archive.exists(),
+            "the interrupted download must not leave a partial archive"
+        );
+        server.abort();
     }
 }

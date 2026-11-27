@@ -31,33 +31,66 @@ pub fn hermes_notify_reply(
     conversation_id: String,
     title: String,
     body: String,
+    connection_id: Option<String>,
+    agent_profile: Option<String>,
 ) -> Result<(), AppError> {
     let notifications = app
         .try_state::<Arc<crate::notifications::NativeNotifications>>()
         .ok_or_else(|| AppError::new("E_UNKNOWN", "notification_unavailable"))?;
-    notifications.hermes_reply(&window, &conversation_id, title, body)
+    notifications.hermes_reply(
+        &window,
+        &conversation_id,
+        connection_id.as_deref(),
+        agent_profile.as_deref(),
+        title,
+        body,
+    )
 }
 
+/// Mint a ticket for the login a running turn started under. A turn id from the renderer
+/// proves which connection/login the late interrupt/steer belongs to; without it we fall
+/// back to the current login for older callers.
+async fn panel_ticket_for_turn(
+    state: &crate::hermes::HermesRuntimeState,
+    profile_id: &str,
+    turn_request_id: Option<&str>,
+) -> Result<crate::hermes::panel::PanelTicketRequest, AppError> {
+    match turn_request_id.map(str::trim).filter(|id| !id.is_empty()) {
+        // A named but expired turn must not silently follow the current login.
+        Some(turn) => match state.turn_panel_login(Some(turn)) {
+            Some(login) => crate::hermes::panel::ticket_for_login(profile_id, &login).await,
+            None => Err(AppError::new(
+                "E_HERMES_PANEL",
+                "That Hermes turn is no longer running.",
+            )),
+        },
+        // Older callers without a turn id keep the current-login behavior.
+        None => crate::hermes::panel::ticket_request(profile_id).await,
+    }
+}
 #[tauri::command]
 #[specta::specta]
-pub async fn hermes_stop(state: State<'_, Arc<HermesRuntimeState>>) -> Result<(), AppError> {
-    hermes::stop(state.inner()).await
+pub async fn hermes_stop(
+    state: State<'_, Arc<HermesRuntimeState>>,
+    turn_request_id: Option<String>,
+) -> Result<(), AppError> {
+    // The UI's hard stop belongs to one local turn; app quit calls the global stop directly.
+    hermes::stop_local(state.inner(), turn_request_id.as_deref()).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn hermes_ask_respond(
     state: State<'_, Arc<HermesRuntimeState>>,
+    turn_request_id: Option<String>,
     request_id: String,
     reply: HermesAskReply,
 ) -> Result<(), AppError> {
-    let sender = state.asks.lock().await.clone();
-    let Some(sender) = sender else {
-        return Err(AppError::new(
-            "E_HERMES_ASK",
-            "No Hermes request is waiting on an answer.",
-        ));
-    };
+    let sender = state
+        .turn_ask_sender(turn_request_id.as_deref())
+        .ok_or_else(|| {
+            AppError::new("E_HERMES_ASK", "No Hermes request is waiting on an answer.")
+        })?;
     sender.send(AskAnswer { request_id, reply }).map_err(|_| {
         AppError::new(
             "E_HERMES_ASK",
@@ -73,22 +106,30 @@ pub async fn hermes_interrupt(
     live_session_id: String,
     gateway_url: Option<String>,
     profile_id: Option<String>,
+    turn_request_id: Option<String>,
 ) -> Result<(), AppError> {
     if gateway_url
         .as_deref()
         .is_some_and(|value| !value.trim().is_empty())
     {
+        // The card wait lives in this process even for a Panel turn: cancel only the turn
+        // that owns this request. Two hosts may reuse the same live session id.
+        state.cancel_turn_asks(turn_request_id.as_deref(), Some(&live_session_id), false);
+        if live_session_id.trim().is_empty() {
+            return Ok(());
+        }
         let id = profile_id.as_deref().unwrap_or_default();
         if hermes::panel::has_session(id) {
-            let ticket = hermes::panel::ticket_for(id).await?;
-            let query = format!("ticket={}", urlencoding::encode(&ticket));
-            let panel_url = hermes::panel::base_url_for(id)?;
+            let request =
+                panel_ticket_for_turn(state.inner(), id, turn_request_id.as_deref()).await?;
+            let query = format!("ticket={}", urlencoding::encode(&request.ticket));
+            let panel_url = request.base_url;
             return hermes::gateway::interrupt_remote_auth(&panel_url, &query, &live_session_id)
                 .await;
         }
         return Err(hermes::remote_auth_required());
     }
-    hermes::gateway::interrupt(state.inner(), &live_session_id).await
+    hermes::gateway::interrupt(state.inner(), &live_session_id, turn_request_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -100,6 +141,7 @@ pub async fn hermes_steer(
     text: String,
     gateway_url: Option<String>,
     profile_id: Option<String>,
+    turn_request_id: Option<String>,
 ) -> Result<HermesSteerResult, AppError> {
     if gateway_url
         .as_deref()
@@ -107,9 +149,10 @@ pub async fn hermes_steer(
     {
         let id = profile_id.as_deref().unwrap_or_default();
         if hermes::panel::has_session(id) {
-            let ticket = hermes::panel::ticket_for(id).await?;
-            let query = format!("ticket={}", urlencoding::encode(&ticket));
-            let panel_url = hermes::panel::base_url_for(id)?;
+            let request =
+                panel_ticket_for_turn(state.inner(), id, turn_request_id.as_deref()).await?;
+            let query = format!("ticket={}", urlencoding::encode(&request.ticket));
+            let panel_url = request.base_url;
             return hermes::gateway::steer_remote_auth(
                 &panel_url,
                 &query,
@@ -132,6 +175,7 @@ pub async fn hermes_redirect(
     text: String,
     gateway_url: Option<String>,
     profile_id: Option<String>,
+    turn_request_id: Option<String>,
 ) -> Result<HermesSteerResult, AppError> {
     if gateway_url
         .as_deref()
@@ -139,9 +183,10 @@ pub async fn hermes_redirect(
     {
         let id = profile_id.as_deref().unwrap_or_default();
         if hermes::panel::has_session(id) {
-            let ticket = hermes::panel::ticket_for(id).await?;
-            let query = format!("ticket={}", urlencoding::encode(&ticket));
-            let panel_url = hermes::panel::base_url_for(id)?;
+            let request =
+                panel_ticket_for_turn(state.inner(), id, turn_request_id.as_deref()).await?;
+            let query = format!("ticket={}", urlencoding::encode(&request.ticket));
+            let panel_url = request.base_url;
             return hermes::gateway::redirect_remote_auth(
                 &panel_url,
                 &query,
@@ -631,10 +676,20 @@ pub async fn hermes_panel_login(
 #[tauri::command]
 #[specta::specta]
 pub async fn hermes_panel_logout(profile_id: String) -> Result<(), AppError> {
-    if let Ok(session) = crate::hermes::panel_session(&profile_id) {
-        crate::hermes::panel::logout(&session).await?;
+    match crate::hermes::panel_session(&profile_id) {
+        Ok(session) => {
+            crate::hermes::panel::logout(&session).await?;
+            // A login that landed while logout was awaiting owns the profile id now; deleting
+            // unconditionally would sign the user back out of the new session.
+            crate::hermes::panel_session_delete_if(&profile_id, &session)?;
+        }
+        // Nothing was stored when the call started, but a login may have landed since.
+        // Delete only if the store is still empty.
+        Err(_) => {
+            crate::hermes::panel_session_delete_if_absent(&profile_id)?;
+        }
     }
-    crate::hermes::panel_session_delete(&profile_id)
+    Ok(())
 }
 
 #[tauri::command]
@@ -759,17 +814,20 @@ pub async fn hermes_model_options(
     {
         let profile_id = input.profile_id.as_deref().unwrap_or_default().to_owned();
         if input.panel_auth {
-            let panel_url = crate::hermes::panel::base_url_for(&profile_id)?;
+            let expected_login = crate::hermes::panel::session_login_id(&profile_id)?;
             let agent_profile = input.profile.clone();
             let refresh = input.refresh;
             let include_unconfigured = input.include_unconfigured;
             // Each attempt needs its own ticket: the first handshake consumes it, including
             // when the gateway then closes with 1012.
             let read = || async {
-                let ticket = crate::hermes::panel::ticket_for(&profile_id).await?;
-                let query = format!("ticket={}", urlencoding::encode(&ticket));
+                // A retry is a new request: re-read the session so a re-login or host change
+                // gives this attempt its own URL and ticket.
+                let request =
+                    crate::hermes::panel::ticket_for_login(&profile_id, &expected_login).await?;
+                let query = format!("ticket={}", urlencoding::encode(&request.ticket));
                 crate::hermes::gateway::model_options_remote_auth(
-                    &panel_url,
+                    &request.base_url,
                     &query,
                     agent_profile.as_deref(),
                     refresh,
@@ -784,51 +842,14 @@ pub async fn hermes_model_options(
         }
         return Err(crate::hermes::remote_auth_required());
     }
-    let bin = {
-        let home = crate::hermes::hermes_home(&app)?;
-        (crate::hermes::runtime_bin(&app), home)
-    };
-    let (Some(bin), home) = bin else {
+    let Some(bin) = crate::hermes::runtime_bin(&app) else {
         return Err(AppError::new(
             "E_HERMES_RUNTIME",
             "Install the Hermes runtime to load the model catalog.",
         ));
     };
-    let chat = crate::hermes::HermesChatInput {
-        prompt: String::new(),
-        request_id: "model-options".into(),
-        session_id: None,
-        provider: input.provider,
-        model: input.model,
-        effort: input.effort,
-        fast: input.fast,
-        cwd: None,
-        attachments: Vec::new(),
-        auxiliary: Vec::new(),
-        force_aux_vision: false,
-        gateway_url: input.gateway_url,
-        profile_id: input.profile_id,
-        profile: input.profile,
-        panel_auth: input.panel_auth,
-        api_key: input.api_key,
-        endpoint: input.endpoint,
-        mac_enabled: false,
-        control_level: "open".into(),
-        mac_terminal: false,
-        mac_screen: false,
-        mac_files: false,
-        mac_cron: false,
-        confirm_writes: false,
-    };
-    crate::hermes::gateway::model_options(
-        &bin,
-        &home,
-        state.inner(),
-        chat,
-        input.refresh,
-        input.include_unconfigured,
-    )
-    .await
+    let home = crate::hermes::hermes_home(&app)?;
+    crate::hermes::model_catalog::read(&bin, &home, state.inner(), &input).await
 }
 
 #[tauri::command]
@@ -847,24 +868,33 @@ pub fn hermes_login_start(
     state: State<'_, std::sync::Arc<crate::hermes::login_session::HermesLoginState>>,
     provider: String,
     profile: Option<String>,
-) -> Result<(), AppError> {
-    crate::hermes::login_session::start(&app, state.inner().clone(), &provider, profile.as_deref())
+    request_id: String,
+) -> Result<String, AppError> {
+    crate::hermes::login_session::start(
+        &app,
+        state.inner().clone(),
+        &provider,
+        profile.as_deref(),
+        &request_id,
+    )
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn hermes_login_input(
     state: State<'_, std::sync::Arc<crate::hermes::login_session::HermesLoginState>>,
+    request_id: Option<String>,
     text: String,
 ) -> Result<(), AppError> {
-    crate::hermes::login_session::input(state.inner(), &text)
+    crate::hermes::login_session::input(state.inner(), request_id.as_deref(), &text)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn hermes_login_cancel(
     state: State<'_, std::sync::Arc<crate::hermes::login_session::HermesLoginState>>,
+    request_id: Option<String>,
 ) -> Result<(), AppError> {
-    crate::hermes::login_session::cancel(state.inner());
+    crate::hermes::login_session::cancel(state.inner(), request_id.as_deref());
     Ok(())
 }

@@ -278,7 +278,11 @@ async fn serve_one(
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
-            log::debug!("Hermes media proxy upstream failed: {error}");
+            // The URL may carry a short-lived file ticket; log the transport class only.
+            log::debug!(
+                "Hermes media proxy upstream failed: {}",
+                error.without_url()
+            );
             return write_fixed(&mut socket, 502, "Bad Gateway", b"upstream").await;
         }
     };

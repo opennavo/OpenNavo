@@ -25,6 +25,8 @@ const soul = ref('');
 const soulOriginal = ref('');
 const soulLoading = ref(false);
 const soulSaving = ref(false);
+/** Latest SOUL read/save; a reply for an older connection/profile must not paint. */
+let soulRequestSeq = 0;
 const renameOpen = ref(false);
 const renameName = ref('');
 
@@ -58,15 +60,26 @@ async function refresh(select?: string) {
 
 async function loadSoul() {
   if (!selected.value) return;
+  // Pin the connection and profile this read belongs to. A slow read may not overwrite the
+  // editor after the user selected another profile (same name on another host included).
+  const connection = store.activeProfileId;
+  const name = selected.value.name;
+  const request = ++soulRequestSeq;
   soulLoading.value = true;
   error.value = '';
   try {
-    soul.value = await store.loadAgentProfileSoul(selected.value.name);
-    soulOriginal.value = soul.value;
+    const loaded = await store.loadAgentProfileSoul(name);
+    if (request !== soulRequestSeq || store.activeProfileId !== connection || selected.value?.name !== name) {
+      return;
+    }
+    soul.value = loaded;
+    soulOriginal.value = loaded;
   } catch (cause) {
-    error.value = details(cause);
+    if (request === soulRequestSeq && store.activeProfileId === connection && selected.value?.name === name) {
+      error.value = details(cause);
+    }
   } finally {
-    soulLoading.value = false;
+    if (request === soulRequestSeq) soulLoading.value = false;
   }
 }
 
@@ -145,21 +158,27 @@ async function saveSoul(openNewChat = false) {
   // the wrong profile.
   const name = profile.name;
   const nextSoul = soul.value;
+  const connection = store.activeProfileId;
+  const request = ++soulRequestSeq;
   soulSaving.value = true;
   error.value = '';
   try {
     await store.saveAgentProfileSoul(name, nextSoul);
-    if (selected.value?.name === name) soulOriginal.value = nextSoul;
-    if (openNewChat && store.activeAgentProfileName === name) {
+    // A selection or connection change while the save was in flight still wrote the file to
+    // the original profile, but must not move this editor's saved baseline or open a chat
+    // in whichever profile is on screen now.
+    const stillHere = request === soulRequestSeq && store.activeProfileId === connection;
+    if (stillHere && selected.value?.name === name) soulOriginal.value = nextSoul;
+    if (stillHere && openNewChat && store.activeAgentProfileName === name) {
       // The runtime freezes a session's system prompt, so a new SOUL is only read by the next
       // session. Starting one here is what makes the save visible immediately.
       store.newChat();
       emit('close');
     }
   } catch (cause) {
-    error.value = details(cause);
+    if (request === soulRequestSeq && store.activeProfileId === connection) error.value = details(cause);
   } finally {
-    soulSaving.value = false;
+    if (request === soulRequestSeq) soulSaving.value = false;
   }
 }
 

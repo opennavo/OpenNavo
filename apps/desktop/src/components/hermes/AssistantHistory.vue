@@ -5,6 +5,7 @@ import { useHermesStore } from '@/stores/hermes';
 import { useHermesContent } from '@/composables/useHermesContent';
 import type { HermesConversation, HermesMessage, PanelHistorySlice } from '@/stores/hermes';
 import { isMessagingSource, platformBadge, platformLabel } from '@/hermes/platforms';
+import { historyDay } from '@/hermes/historyDays';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: []; select: [id: string] }>();
@@ -77,20 +78,9 @@ function previewOf(conversation: HermesConversation): string {
   return textOf(lastAssistant) || textOf(conversation.messages[0]) || '';
 }
 
-function startOfDay(value: number): number {
-  const date = new Date(value);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-}
-
 function dayOf(value: number): 'today' | 'yesterday' | 'earlier' {
-  const today = startOfDay(Date.now());
-  const day = startOfDay(value);
-  if (day === today) return 'today';
-  if (day === today - 86_400_000) return 'yesterday';
-  return 'earlier';
+  return historyDay(value);
 }
-
 interface HistoryRow {
   conversation: HermesConversation;
   title: string;
@@ -335,6 +325,16 @@ watch(
     revealed.value = {};
   },
   { immediate: true }
+);
+
+watch(
+  () => [store.activeProfileId, store.activeAgentProfileName],
+  () => {
+    // A rename draft belongs to one row on one connection/profile. A same-id row on another
+    // host must never receive text typed here.
+    editingId.value = '';
+    editTitle.value = '';
+  }
 );
 
 watch(

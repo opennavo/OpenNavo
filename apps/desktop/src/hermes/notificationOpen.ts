@@ -2,6 +2,9 @@ import { ref, watch } from 'vue';
 
 export interface HermesNotificationOpen {
   conversationId: string;
+  /** Connection/profile that owned the turn when the notification was sent. */
+  connectionId?: string;
+  agentProfile?: string;
 }
 
 const pending = ref<HermesNotificationOpen | null>(null);
