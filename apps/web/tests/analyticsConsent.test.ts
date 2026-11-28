@@ -173,6 +173,51 @@ it('loads pvuv under the same consent decision and removes it with its identifie
   expect(document.querySelectorAll('#pvuv-analytics')).toHaveLength(1);
 });
 
+it('forwards the key events to pvuv as custom events when GA4 is off', async () => {
+  settings.value.analytics = { ga4Enabled: false, ga4MeasurementId: '' };
+  pvuvSiteId = 'NqrTDmAQ';
+  const consent = useAnalyticsConsent();
+  await consent.start();
+  analytics.trackEvent('get_app', { feature: 'install' });
+  analytics.trackEvent('copy_install_command');
+  analytics.trackEvent('open_in_app', { feature: 'handoff' });
+  analytics.trackEvent('download_client');
+  analytics.trackEvent('github_outbound_click', { link_url: 'https://github.com/opennavo' });
+  const queued = (window.pvuv as { q?: unknown[][] }).q ?? [];
+  expect(queued.map(call => call[1])).toEqual([
+    'get_app',
+    'copy_install_command',
+    'open_in_app',
+    'download_client',
+    'github_outbound_click'
+  ]);
+  expect(queued[0]).toEqual(['event', 'get_app', expect.objectContaining({ feature: 'install', page_type: 'app' })]);
+  // GA4 stays off: nothing reached its dataLayer.
+  expect(calls()).toEqual([]);
+});
+
+it('forwards the AI referral landing event to pvuv', async () => {
+  settings.value.analytics = { ga4Enabled: false, ga4MeasurementId: '' };
+  pvuvSiteId = 'NqrTDmAQ';
+  Object.defineProperty(document, 'referrer', {
+    configurable: true,
+    get: () => 'https://chatgpt.com/c/abc'
+  });
+  try {
+    const consent = useAnalyticsConsent();
+    await consent.start();
+    const queued = (window.pvuv as { q?: unknown[][] }).q ?? [];
+    const landing = queued.find(call => call[1] === 'ai_referral_landing');
+    expect(landing).toBeDefined();
+    expect(landing![2]).toMatchObject({
+      ai_source: 'chatgpt.com',
+      landing_path: '/apps/visual-studio-code'
+    });
+  } finally {
+    delete (document as unknown as Record<string, unknown>).referrer;
+  }
+});
+
 it.each(['', 'Nqr TDmAQ', 'x'])('does not enable analytics for an unusable pvuv site id %j', async id => {
   settings.value.analytics = { ga4Enabled: false, ga4MeasurementId: '' };
   pvuvSiteId = id;
