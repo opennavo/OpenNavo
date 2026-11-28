@@ -1289,6 +1289,10 @@ class Deployment:
             'deploy': {'resources': {'limits': {'memory': '512M'}}},
             'healthcheck': {'test': ['CMD', 'redis-cli', 'ping'], 'interval': '10s', 'timeout': '3s', 'retries': 3}})
         overlay['services'][self.services['web']].setdefault('environment', {})['NUXT_IMAGE_REDIS_URL'] = 'redis://image-cache:6379/0'
+        # Optional pvuv.ai crawler reporting. The token is host configuration, so it is interpolated
+        # from the env file at compose time; an unset token leaves the reporting plugin disabled.
+        overlay['services'][self.services['web']]['environment'].setdefault(
+            'NUXT_PVUV_INGEST_TOKEN', '${PVUV_INGEST_TOKEN:-}')
         # Usage stats read CF-IPCountry only from these peers. The new API copies the previous release's
         # service, so an overlay that predates the setting gets the base compose value; a host value, even
         # an empty one, is kept.
