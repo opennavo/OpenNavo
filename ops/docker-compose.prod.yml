@@ -188,6 +188,8 @@ services:
       # Internal port: crawler counters for Prometheus and page-cache invalidation for the worker.
       NUXT_METRICS_PORT: '9091'
       NUXT_INTERNAL_SECRET: ${WEB_INTERNAL_SECRET:-}
+      # Ingest-only pvuv.ai token for server-side AI-crawler reporting; empty disables it.
+      NUXT_PVUV_INGEST_TOKEN: ${PVUV_INGEST_TOKEN:-}
     deploy:
       replicas: 2
       resources:
