@@ -291,6 +291,7 @@ class DeployTests(unittest.TestCase):
                     obj.prepare(archive())
                 candidate = json.loads((obj.directory / 'rolling.compose.json').read_text())
                 self.assertEqual(candidate['services'][obj.services['web']]['environment']['NUXT_IMAGE_REDIS_URL'], 'redis://image-cache:6379/0')
+                self.assertEqual(candidate['services'][obj.services['web']]['environment']['NUXT_PVUV_INGEST_TOKEN'], '${PVUV_INGEST_TOKEN:-}')
                 self.assertNotIn('volumes', candidate['services']['image-cache'])
                 self.assertNotIn('ports', candidate['services']['image-cache'])
                 expected_host = 'web-default-' + obj.release if use_alias else obj.services['web']
