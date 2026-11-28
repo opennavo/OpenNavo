@@ -102,6 +102,9 @@ export default defineNuxtConfig({
     metricsPort: '',
     // Shared with the Go worker (WEB_INTERNAL_SECRET) to authenticate cache invalidation; empty refuses all.
     internalSecret: '',
+    // Ingest-only pvuv.ai token for server-side crawler reporting (NUXT_PVUV_INGEST_TOKEN). It can
+    // submit crawler hits and read nothing; empty disables the reporting middleware.
+    pvuvIngestToken: '',
     // NUXT_PROBE_CONCURRENCY limits all internal warmup callers together.
     probeConcurrency: 1,
     // NUXT_PROBE_MAX_RETRY_AFTER_SECONDS caps server-provided cooldowns.
