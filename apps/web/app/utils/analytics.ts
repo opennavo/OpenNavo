@@ -64,10 +64,20 @@ const PVUV_SCRIPT_ID = 'pvuv-analytics';
 const PVUV_COOKIES = ['_pv_id', '_pv_sid', '_pv_ft', '_pv_v'];
 const PVUV_STORAGE_KEYS = ['_pv_id'];
 
+// Whether the pvuv loader is allowed to report, whether the tag was inserted, and the queue stub we
+// installed. The SDK has no unload: once it executed, inserting the tag again would run it twice and
+// double-count every event, so a re-accept only resumes reporting through the running instance.
+let pvuvActive = false;
+let pvuvLoaded = false;
+let pvuvStub: ((...args: unknown[]) => void) | null = null;
+
 declare global {
   interface Window {
     dataLayer?: unknown[];
     gtag?: (...args: unknown[]) => void;
+    // The pvuv loader replaces this with its own function and replays `.q`, so calls made between
+    // consent and the script executing are not lost.
+    pvuv?: ((...args: unknown[]) => void) & { q?: unknown[][] };
   }
 }
 
@@ -226,17 +236,20 @@ export function setAiUserProperties(result: ReturnType<typeof captureAiReferral>
  * first touch is attached to later key events instead.
  */
 export function trackAiReferral(result: ReturnType<typeof captureAiReferral>) {
-  if (!result || !activeId || !window.gtag) return;
+  if (!result) return;
   const { firstTouch, created } = result;
   if (!created || aiReferralSent) return;
+  if (!activeId && !pvuvActive) return;
   aiReferralSent = true;
-  window.gtag('event', 'ai_referral_landing', {
+  const payload = {
     page_location: pageLocation(firstTouch.landing_path, initialSearch ?? ''),
     page_title: initialTitle || document.title,
     ...params(firstTouch.landing_path, initialLanguage || document.documentElement.lang),
     ai_source: firstTouch.source,
     landing_path: firstTouch.landing_path
-  });
+  };
+  if (activeId && window.gtag) window.gtag('event', 'ai_referral_landing', payload);
+  if (pvuvActive) window.pvuv?.('event', 'ai_referral_landing', payload);
 }
 
 /** Whether a link points at the OpenNavo GitHub organization or one of its repositories. */
@@ -310,9 +323,22 @@ function clearCookies(matches: (name: string) => boolean) {
   }
 }
 
-/** Inject the pvuv loader once; accepting consent again must not add a second tag. */
+/** Inject the pvuv loader once; accepting consent again must not add a second, double-counting tag. */
 export function loadPvuv(siteId: string) {
-  if (!siteId || document.getElementById(PVUV_SCRIPT_ID)) return;
+  if (!siteId) return;
+  pvuvActive = true;
+  // The loader replaces window.pvuv when it executes. Still our stub means it never ran (removed
+  // before it could), so the tag may be inserted again; otherwise the running SDK is reused.
+  if (pvuvLoaded && window.pvuv !== pvuvStub) return;
+  if (!window.pvuv) {
+    // Custom events can fire before the loader executes; the SDK reads this queue at startup and
+    // replays it, so events raised between consent and execution are not lost.
+    const queue: unknown[][] = [];
+    pvuvStub = Object.assign((...args: unknown[]) => void queue.push(args), { q: queue });
+    window.pvuv = pvuvStub;
+  }
+  pvuvLoaded = true;
+  document.getElementById(PVUV_SCRIPT_ID)?.remove();
   const script = document.createElement('script');
   script.id = PVUV_SCRIPT_ID;
   script.defer = true;
@@ -329,6 +355,7 @@ export function loadPvuv(siteId: string) {
  * loads from re-inserting it, and deleting its identifiers makes a new visit start from nothing.
  */
 export function stopPvuv() {
+  pvuvActive = false;
   document.getElementById(PVUV_SCRIPT_ID)?.remove();
   clearCookies(name => PVUV_COOKIES.includes(name));
   try {
@@ -393,11 +420,13 @@ export function trackPageView() {
 
 /** Key events (marked in GA4) and install-intent events. A no-op until analytics is active. */
 export function trackEvent(event: AnalyticsEvent, eventParams: AnalyticsParams = {}) {
-  if (!activeId || !window.gtag) return;
+  if (!activeId && !pvuvActive) return;
   const touch = readAiFirstTouch();
-  window.gtag('event', event, {
+  const payload = {
     ...params(),
     ...(touch ? { ai_source: touch.source } : {}),
     ...eventParams
-  });
+  };
+  if (activeId && window.gtag) window.gtag('event', event, payload);
+  if (pvuvActive) window.pvuv?.('event', event, payload);
 }
